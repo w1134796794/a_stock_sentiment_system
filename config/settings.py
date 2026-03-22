@@ -12,7 +12,7 @@ CACHE_DIR = DATA_DIR / "cache"
 OUTPUT_DIR = BASE_DIR / "output"
 
 # API配置
-TUSHARE_TOKEN = "9cb1d6a7b3a5cabf27023a45b0996e1f8e0c1e2676228278aed56cc7"  # 请替换为您的token
+TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN")  # 请替换为您的token
 AKSHARE_ENABLE = True
 
 # 数据获取配置
