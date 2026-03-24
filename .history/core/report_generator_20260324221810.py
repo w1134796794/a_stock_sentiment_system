@@ -78,24 +78,11 @@ class ReportGenerator:
                         lambda row: row['L2_Industry'] if row.get('Is_New', False) else row['L3_Industry'],
                         axis=1
                     )
-
                 mainline_df.to_excel(writer, sheet_name='主线板块Top5', index=False)
                 worksheet = writer.sheets['主线板块Top5']
-                worksheet.set_column('A:G', 15)
+                worksheet.set_column('A:F', 15)
 
-            # Sheet 3: 板块热度分析（新增）
-            if not data_dict.get('sector_heat_df', pd.DataFrame()).empty:
-                sector_heat_df = data_dict['sector_heat_df'].copy()
-                # 只保留关键列
-                display_cols = ['L1_Industry', 'L2_Industry', 'L3_Industry', 
-                               '3日涨停数', '5日涨停数', '20日涨停数',
-                               '原始热度', '动量加速度', '持续性得分', '综合得分', '板块分类']
-                sector_heat_display = sector_heat_df[display_cols] if all(col in sector_heat_df.columns for col in display_cols) else sector_heat_df
-                sector_heat_display.to_excel(writer, sheet_name='板块热度分析', index=False)
-                worksheet = writer.sheets['板块热度分析']
-                worksheet.set_column('A:K', 15)
-
-            # Sheet 4: 梯队追踪
+            # Sheet 3: 梯队追踪
             self._write_gradient_sheet(writer, data_dict.get('gradient', {}), header_format, cell_format)
 
             # Sheet 4: 模式信号
@@ -221,15 +208,6 @@ class ReportGenerator:
                 if df_patterns.iloc[row_num - 1]['置信度'] >= 0.8:
                     worksheet.write(row_num, 3, df_patterns.iloc[row_num - 1]['置信度'], strong_fmt)
 
-    def _format_time(self, time_val):
-        """格式化时间字符串"""
-        time_str = str(time_val)
-        if time_str.isdigit():
-            time_str = time_str.zfill(6)
-        if len(time_str) == 6:
-            time_str = f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:]}"
-        return time_str
-
     def _write_core_stocks(self, writer, hierarchy_df: pd.DataFrame,
                            header_fmt, cell_fmt, highlight_fmt, new_flag_fmt):
         """写入核心标的（筛选10点半前封板的标的，标记炸板）"""
@@ -241,8 +219,12 @@ class ReportGenerator:
 
         for _, row in hierarchy_df.iterrows():
             # 检查涨停时间
-            limit_up_time = self._format_time(row.get('LimitUpTime', ''))
-            last_limit_up_time = self._format_time(row.get('LastLimitUpTime', ''))
+            limit_up_time = str(row.get('LimitUpTime', ''))
+            # 转换时间格式
+            if limit_up_time.isdigit():
+                limit_up_time = limit_up_time.zfill(6)
+            if len(limit_up_time) == 6:
+                limit_up_time = f"{limit_up_time[:2]}:{limit_up_time[2:4]}:{limit_up_time[4:]}"
 
             # 只保留10:30前封板的
             if limit_up_time and limit_up_time <= '10:30:00':
@@ -264,8 +246,7 @@ class ReportGenerator:
                     '名称': row['Name'],
                     '连板数': row.get('BoardHeight', 1),
                     '涨幅%': row['ChangePct'],
-                    '首次涨停时间': limit_up_time,
-                    '最后涨停时间': last_limit_up_time if last_limit_up_time else limit_up_time,
+                    '涨停时间': limit_up_time,
                     '炸板次数': open_times,
                     '是否炸板': '是' if open_times > 0 else '否',
                     '概念': row.get('Concept', '')
@@ -283,8 +264,11 @@ class ReportGenerator:
                 if l3 == '其他' or l2 == '其他' or l1 == '其他':
                     continue
 
-                limit_up_time = self._format_time(row.get('LimitUpTime', ''))
-                last_limit_up_time = self._format_time(row.get('LastLimitUpTime', ''))
+                limit_up_time = str(row.get('LimitUpTime', ''))
+                if limit_up_time.isdigit():
+                    limit_up_time = limit_up_time.zfill(6)
+                if len(limit_up_time) == 6:
+                    limit_up_time = f"{limit_up_time[:2]}:{limit_up_time[2:4]}:{limit_up_time[4:]}"
 
                 open_times = row.get('OpenTimes', 0)
 
@@ -296,8 +280,7 @@ class ReportGenerator:
                     '名称': row['Name'],
                     '连板数': row.get('BoardHeight', 1),
                     '涨幅%': row['ChangePct'],
-                    '首次涨停时间': limit_up_time,
-                    '最后涨停时间': last_limit_up_time if last_limit_up_time else limit_up_time,
+                    '涨停时间': limit_up_time,
                     '炸板次数': open_times,
                     '是否炸板': '是' if open_times > 0 else '否',
                     '概念': row.get('Concept', '')
@@ -311,15 +294,15 @@ class ReportGenerator:
 
             df_core.to_excel(writer, sheet_name='核心标的', index=False)
             worksheet = writer.sheets['核心标的']
-            worksheet.set_column('A:L', 15)
+            worksheet.set_column('A:K', 15)
 
             # 炸板次数>0的行高亮
             for row_num in range(1, len(df_core) + 1):
                 if df_core.iloc[row_num - 1]['炸板次数'] > 0:
                     # 高亮炸板次数列
-                    worksheet.write(row_num, 9, df_core.iloc[row_num - 1]['炸板次数'], highlight_fmt)
+                    worksheet.write(row_num, 8, df_core.iloc[row_num - 1]['炸板次数'], highlight_fmt)
                     # 高亮是否炸板列
-                    worksheet.write(row_num, 10, df_core.iloc[row_num - 1]['是否炸板'], highlight_fmt)
+                    worksheet.write(row_num, 9, df_core.iloc[row_num - 1]['是否炸板'], highlight_fmt)
 
     def generate_chart_image(self, stock_code: str, hist_data: pd.DataFrame) -> Optional[bytes]:
         """

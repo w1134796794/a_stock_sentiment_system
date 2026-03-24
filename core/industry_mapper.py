@@ -164,6 +164,20 @@ class IndustryMapper:
             l2_industry = self.get_l2_by_l3(l3_industry)
             l1_industry = self.get_l1_by_l2(l2_industry)
             
+            # 如果找不到映射（返回"其他"），可能是L2被当作L3的情况
+            # 例如："电力"在映射中是L2，但数据中可能是L3
+            if l2_industry == '其他' and l1_industry == '其他':
+                # 尝试将输入当作L2来查找
+                l1_from_l2 = self.get_l1_by_l2(l3_industry)
+                if l1_from_l2 != '其他':
+                    # 输入实际上是L2，需要找到对应的L3
+                    # 使用L2下的第一个L3作为代表
+                    l3_list = self.get_l3_by_l2(l3_industry)
+                    if l3_list:
+                        l2_industry = l3_industry
+                        l1_industry = l1_from_l2
+                        l3_industry = l3_list[0]  # 使用第一个L3
+            
             result.append({
                 'L1_Industry': l1_industry,  # 一级行业
                 'L2_Industry': l2_industry,  # 二级行业

@@ -83,19 +83,7 @@ class ReportGenerator:
                 worksheet = writer.sheets['主线板块Top5']
                 worksheet.set_column('A:G', 15)
 
-            # Sheet 3: 板块热度分析（新增）
-            if not data_dict.get('sector_heat_df', pd.DataFrame()).empty:
-                sector_heat_df = data_dict['sector_heat_df'].copy()
-                # 只保留关键列
-                display_cols = ['L1_Industry', 'L2_Industry', 'L3_Industry', 
-                               '3日涨停数', '5日涨停数', '20日涨停数',
-                               '原始热度', '动量加速度', '持续性得分', '综合得分', '板块分类']
-                sector_heat_display = sector_heat_df[display_cols] if all(col in sector_heat_df.columns for col in display_cols) else sector_heat_df
-                sector_heat_display.to_excel(writer, sheet_name='板块热度分析', index=False)
-                worksheet = writer.sheets['板块热度分析']
-                worksheet.set_column('A:K', 15)
-
-            # Sheet 4: 梯队追踪
+            # Sheet 3: 梯队追踪
             self._write_gradient_sheet(writer, data_dict.get('gradient', {}), header_format, cell_format)
 
             # Sheet 4: 模式信号

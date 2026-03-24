@@ -78,24 +78,32 @@ class ReportGenerator:
                         lambda row: row['L2_Industry'] if row.get('Is_New', False) else row['L3_Industry'],
                         axis=1
                     )
-
+                
+                # 添加板块代码列（从hierarchy_df中获取该板块下的股票代码列表）
+                hierarchy_df = data_dict.get('hierarchy_df', pd.DataFrame())
+                if not hierarchy_df.empty:
+                    # 为每个L3行业获取股票代码列表
+                    def get_sector_codes(row):
+                        l3 = row['L3_Industry']
+                        codes = hierarchy_df[hierarchy_df['L3_Industry'] == l3]['Code'].tolist()
+                        return ','.join(codes[:5]) if codes else ''  # 最多显示5个代码
+                    
+                    mainline_df['板块代码'] = mainline_df.apply(get_sector_codes, axis=1)
+                
+                # 调整列顺序，将板块代码放在前面
+                cols = mainline_df.columns.tolist()
+                if '板块代码' in cols:
+                    # 将板块代码移到L3_Industry后面
+                    cols.remove('板块代码')
+                    l3_idx = cols.index('L3_Industry') if 'L3_Industry' in cols else 2
+                    cols.insert(l3_idx + 1, '板块代码')
+                    mainline_df = mainline_df[cols]
+                
                 mainline_df.to_excel(writer, sheet_name='主线板块Top5', index=False)
                 worksheet = writer.sheets['主线板块Top5']
                 worksheet.set_column('A:G', 15)
 
-            # Sheet 3: 板块热度分析（新增）
-            if not data_dict.get('sector_heat_df', pd.DataFrame()).empty:
-                sector_heat_df = data_dict['sector_heat_df'].copy()
-                # 只保留关键列
-                display_cols = ['L1_Industry', 'L2_Industry', 'L3_Industry', 
-                               '3日涨停数', '5日涨停数', '20日涨停数',
-                               '原始热度', '动量加速度', '持续性得分', '综合得分', '板块分类']
-                sector_heat_display = sector_heat_df[display_cols] if all(col in sector_heat_df.columns for col in display_cols) else sector_heat_df
-                sector_heat_display.to_excel(writer, sheet_name='板块热度分析', index=False)
-                worksheet = writer.sheets['板块热度分析']
-                worksheet.set_column('A:K', 15)
-
-            # Sheet 4: 梯队追踪
+            # Sheet 3: 梯队追踪
             self._write_gradient_sheet(writer, data_dict.get('gradient', {}), header_format, cell_format)
 
             # Sheet 4: 模式信号

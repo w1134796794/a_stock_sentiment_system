@@ -127,8 +127,7 @@ class SentimentSystem:
             'gradient': gradient,
             'sentiment': sentiment,
             'patterns': patterns,
-            'hierarchy_df': hierarchy_df,
-            'sector_heat_df': sector_heat_df  # 新增板块热度数据
+            'hierarchy_df': hierarchy_df
         }
         
         # 使用带时间戳的文件名避免文件被占用
@@ -311,30 +310,6 @@ class SentimentSystem:
                 logger.info(f"  {row['L3_Industry']}: 强度{row['Strength_Score']:.1f} (20日{row['LimitUp_Count_20d']}, 当日{row['LimitUp_Count_Today']}){new_flag}")
         
         return result_df
-    
-    def _calculate_sector_heat(self, calculator, date: str) -> pd.DataFrame:
-        """
-        计算多维度板块热度（3日/5日/20日）
-        """
-        # 获取最近20个交易日的涨停数据
-        limit_up_history = {}
-        
-        for i in range(20):
-            check_date = (datetime.strptime(date, "%Y%m%d") - timedelta(days=i)).strftime("%Y%m%d")
-            
-            # 验证是否为交易日
-            is_valid, actual_date, _ = self.dm.validate_trade_date(check_date)
-            if actual_date not in limit_up_history:
-                zt_pool = self.dm.get_limit_up_pool(actual_date)
-                if not zt_pool.empty:
-                    # 构建层级数据
-                    hierarchy = self.mapper.build_hierarchy_dataframe(zt_pool)
-                    limit_up_history[actual_date] = hierarchy
-        
-        # 使用计算器分析板块热度
-        sector_heat_df = calculator.analyze_from_limit_up_data(limit_up_history, self.mapper)
-        
-        return sector_heat_df
     
     def update_industry_mapping(self):
         """手动更新行业映射"""

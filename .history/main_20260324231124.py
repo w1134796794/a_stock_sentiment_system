@@ -127,8 +127,7 @@ class SentimentSystem:
             'gradient': gradient,
             'sentiment': sentiment,
             'patterns': patterns,
-            'hierarchy_df': hierarchy_df,
-            'sector_heat_df': sector_heat_df  # 新增板块热度数据
+            'hierarchy_df': hierarchy_df
         }
         
         # 使用带时间戳的文件名避免文件被占用

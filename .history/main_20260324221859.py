@@ -21,7 +21,6 @@ from core.industry_mapper import IndustryMapper
 from core.sentiment_engine import SentimentEngine
 from core.pattern_recognition import PatternRecognition
 from core.report_generator import ReportGenerator
-from core.sector_heat_calculator import SectorHeatCalculator
 
 logger = loguru.logger
 
@@ -94,47 +93,17 @@ class SentimentSystem:
         logger.info("[5/5] 计算综合板块权重（当日+20日）...")
         display_mainline_df = self._calculate_combined_mainline(mainline_df, hierarchy_df)
         
-        # 6. 多维度板块热度计算（3日/5日/20日）
-        logger.info("[6/6] 计算多维度板块热度（3日/5日/20日）...")
-        heat_calculator = SectorHeatCalculator()
-        sector_heat_df = self._calculate_sector_heat(heat_calculator, date)
-        
-        # 输出板块分类结果
-        if not sector_heat_df.empty:
-            new_mainlines = sector_heat_df[sector_heat_df['板块分类'] == '新主线候选']
-            old_mainlines = sector_heat_df[sector_heat_df['板块分类'] == '老主线确认']
-            decline_warnings = sector_heat_df[sector_heat_df['板块分类'] == '退潮预警']
-            
-            if not new_mainlines.empty:
-                logger.info(f"🚀 新主线候选: {len(new_mainlines)}个")
-                for _, row in new_mainlines.head(3).iterrows():
-                    logger.info(f"   {row['L3_Industry']}: 动量{row['动量加速度']:.1%}, 综合得分{row['综合得分']:.1f}")
-            
-            if not old_mainlines.empty:
-                logger.info(f"📈 老主线确认: {len(old_mainlines)}个")
-                for _, row in old_mainlines.head(3).iterrows():
-                    logger.info(f"   {row['L3_Industry']}: 20日{row['20日涨停数']}家, 综合得分{row['综合得分']:.1f}")
-            
-            if not decline_warnings.empty:
-                logger.info(f"⚠️  退潮预警: {len(decline_warnings)}个")
-                for _, row in decline_warnings.head(3).iterrows():
-                    logger.info(f"   {row['L3_Industry']}: 动量{row['动量加速度']:.1%}, 3日{row['3日涨停数']}家")
-        
-        # 7. 生成报告
-        logger.info("[7/7] 生成分析报告...")
+        # 6. 生成报告
+        logger.info("[6/6] 生成分析报告...")
         report_data = {
             'mainline_df': display_mainline_df,
             'gradient': gradient,
             'sentiment': sentiment,
             'patterns': patterns,
-            'hierarchy_df': hierarchy_df,
-            'sector_heat_df': sector_heat_df  # 新增板块热度数据
+            'hierarchy_df': hierarchy_df
         }
         
-        # 使用带时间戳的文件名避免文件被占用
-        timestamp = datetime.now().strftime("%H%M%S")
-        report_file_name = f"A股情绪分析报告_{date}_{timestamp}.xlsx"
-        report_path = self.reporter.create_daily_report(report_data, file_name=report_file_name)
+        report_path = self.reporter.create_daily_report(report_data)
         logger.info(f"✅ 分析完成，报告保存至: {report_path}")
         
         # 7. 输出交易建议
@@ -311,30 +280,6 @@ class SentimentSystem:
                 logger.info(f"  {row['L3_Industry']}: 强度{row['Strength_Score']:.1f} (20日{row['LimitUp_Count_20d']}, 当日{row['LimitUp_Count_Today']}){new_flag}")
         
         return result_df
-    
-    def _calculate_sector_heat(self, calculator, date: str) -> pd.DataFrame:
-        """
-        计算多维度板块热度（3日/5日/20日）
-        """
-        # 获取最近20个交易日的涨停数据
-        limit_up_history = {}
-        
-        for i in range(20):
-            check_date = (datetime.strptime(date, "%Y%m%d") - timedelta(days=i)).strftime("%Y%m%d")
-            
-            # 验证是否为交易日
-            is_valid, actual_date, _ = self.dm.validate_trade_date(check_date)
-            if actual_date not in limit_up_history:
-                zt_pool = self.dm.get_limit_up_pool(actual_date)
-                if not zt_pool.empty:
-                    # 构建层级数据
-                    hierarchy = self.mapper.build_hierarchy_dataframe(zt_pool)
-                    limit_up_history[actual_date] = hierarchy
-        
-        # 使用计算器分析板块热度
-        sector_heat_df = calculator.analyze_from_limit_up_data(limit_up_history, self.mapper)
-        
-        return sector_heat_df
     
     def update_industry_mapping(self):
         """手动更新行业映射"""
