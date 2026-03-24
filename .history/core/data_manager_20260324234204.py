@@ -251,19 +251,17 @@ class DataManager:
         
         if cache_file.exists():
             df = pd.read_csv(cache_file)
-            # kpl_concept_cons返回的概念名称在'name'列
-            if 'name' in df.columns and not df.empty:
-                concepts = df['name'].dropna().unique()
+            if not df.empty and 'concept_name' in df.columns:
+                concepts = df['concept_name'].dropna().unique()
                 return ','.join(concepts)
             return ''
         
         try:
             # 使用tushare kpl_concept_cons接口获取概念
             df = self.ts_pro.kpl_concept_cons(con_code=code)
-            # kpl_concept_cons返回的概念名称在'name'列
-            if 'name' in df.columns and not df.empty:
+            if not df.empty and 'concept_name' in df.columns:
                 df.to_csv(cache_file, index=False)
-                concepts = df['name'].dropna().unique()
+                concepts = df['concept_name'].dropna().unique()
                 # 去重并用逗号分隔
                 return ','.join(concepts)
         except Exception as e:

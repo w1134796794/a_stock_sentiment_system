@@ -131,7 +131,7 @@ class SentimentSystem:
                 # 获取概念数据
                 core_stocks_df = self.dm.enrich_core_stocks_concepts(core_stocks_df)
                 # 更新hierarchy_df中的概念数据
-                hierarchy_df.loc[core_stocks_df.index, 'Concept'] = core_stocks_df['Concept']
+                hierarchy_df.loc[core_stocks_df.index, 'Concept'] = core_stocks_df['概念']
                 logger.info(f"已获取{len(core_stocks_df)}只核心标的的概念数据")
         
         # 8. 生成报告
@@ -349,29 +349,6 @@ class SentimentSystem:
         sector_heat_df = calculator.analyze_from_limit_up_data(limit_up_history, self.mapper)
         
         return sector_heat_df
-    
-    def _is_core_stock(self, row) -> bool:
-        """
-        判断是否为10点半前封板的核心标的
-        """
-        # 检查涨停时间
-        limit_up_time = str(row.get('LimitUpTime', ''))
-        if limit_up_time.isdigit():
-            limit_up_time = limit_up_time.zfill(6)
-        if len(limit_up_time) == 6:
-            limit_up_time = f"{limit_up_time[:2]}:{limit_up_time[2:4]}:{limit_up_time[4:]}"
-        
-        # 只保留10:30前封板的
-        if limit_up_time and limit_up_time <= '10:30:00':
-            l1 = row.get('L1_Industry', '')
-            l2 = row.get('L2_Industry', '')
-            l3 = row.get('L3_Industry', '')
-            
-            # 跳过"其他"行业
-            if l3 != '其他' and l2 != '其他' and l1 != '其他':
-                return True
-        
-        return False
     
     def update_industry_mapping(self):
         """手动更新行业映射"""

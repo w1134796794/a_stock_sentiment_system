@@ -131,7 +131,7 @@ class SentimentSystem:
                 # 获取概念数据
                 core_stocks_df = self.dm.enrich_core_stocks_concepts(core_stocks_df)
                 # 更新hierarchy_df中的概念数据
-                hierarchy_df.loc[core_stocks_df.index, 'Concept'] = core_stocks_df['Concept']
+                hierarchy_df.loc[core_stocks_df.index, 'Concept'] = core_stocks_df['概念']
                 logger.info(f"已获取{len(core_stocks_df)}只核心标的的概念数据")
         
         # 8. 生成报告

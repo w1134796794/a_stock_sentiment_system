@@ -251,19 +251,17 @@ class DataManager:
         
         if cache_file.exists():
             df = pd.read_csv(cache_file)
-            # kpl_concept_cons返回的概念名称在'name'列
-            if 'name' in df.columns and not df.empty:
-                concepts = df['name'].dropna().unique()
+            if not df.empty and 'concept_name' in df.columns:
+                concepts = df['concept_name'].dropna().unique()
                 return ','.join(concepts)
             return ''
         
         try:
             # 使用tushare kpl_concept_cons接口获取概念
             df = self.ts_pro.kpl_concept_cons(con_code=code)
-            # kpl_concept_cons返回的概念名称在'name'列
-            if 'name' in df.columns and not df.empty:
+            if not df.empty and 'concept_name' in df.columns:
                 df.to_csv(cache_file, index=False)
-                concepts = df['name'].dropna().unique()
+                concepts = df['concept_name'].dropna().unique()
                 # 去重并用逗号分隔
                 return ','.join(concepts)
         except Exception as e:
@@ -276,29 +274,23 @@ class DataManager:
         为核心标的DataFrame添加概念数据
         
         Args:
-            core_stocks_df: 核心标的DataFrame，包含'Code'或'代码'列
+            core_stocks_df: 核心标的DataFrame，包含'代码'列
         
         Returns:
             添加了概念列的DataFrame
         """
-        if core_stocks_df.empty:
-            return core_stocks_df
-        
-        # 确定代码列名
-        code_col = 'Code' if 'Code' in core_stocks_df.columns else ('代码' if '代码' in core_stocks_df.columns else None)
-        if not code_col:
-            logger.warning("DataFrame中没有找到代码列(Code或代码)")
+        if core_stocks_df.empty or '代码' not in core_stocks_df.columns:
             return core_stocks_df
         
         logger.info(f"正在获取{len(core_stocks_df)}只核心标的的概念数据...")
         
         concepts_list = []
         for _, row in core_stocks_df.iterrows():
-            code = row[code_col]
+            code = row['代码']
             concept = self.get_stock_concepts(code)
             concepts_list.append(concept)
         
-        core_stocks_df['Concept'] = concepts_list
+        core_stocks_df['概念'] = concepts_list
         logger.info(f"概念数据获取完成")
         
         return core_stocks_df
