@@ -196,9 +196,29 @@ class SentimentSystem:
     
     def _calculate_combined_mainline(self, mainline_df: pd.DataFrame, hierarchy_df: pd.DataFrame) -> pd.DataFrame:
         """
-        计算综合板块权重（当日数据 + 20日统计数据）
-        权重公式: 综合强度 = 20日涨停数×0.4 + 当日涨停数×0.4 + 最高连板×0.2
+        计算综合板块权重（当日数据 + 20日统计数据 + 东财行业板块因子）
+        权重公式: 综合强度 = 20日涨停数×0.35 + 当日涨停数×0.35 + 最高连板×0.15 + 东财综合强度×0.15
         """
+        # 0. 获取东财行业板块数据
+        sector_data = self.dm.get_industry_sector_data()
+        sector_dict = {}
+        if not sector_data.empty:
+            # 构建行业名称到因子数据的映射
+            for _, row in sector_data.iterrows():
+                sector_dict[row['name']] = {
+                    'pct_change': row['pct_change'],
+                    'up_down_ratio': row['up_down_ratio'],
+                    'up_down_diff': row['up_down_diff'],
+                    'leading_pct': row['leading_pct'],
+                    'leading_strength': row['leading_strength'],
+                    'turnover_rate': row['turnover_rate'],
+                    'activity_score': row['activity_score'],
+                    'composite_strength': row['composite_strength'],
+                    'up_num': row['up_num'],
+                    'down_num': row['down_num']
+                }
+            logger.info(f"✓ 获取东财行业板块数据: {len(sector_dict)}个板块")
+        
         # 1. 统计当日各板块涨停数
         today_stats = {}
         if not hierarchy_df.empty:
@@ -257,12 +277,19 @@ class SentimentSystem:
                     today_data.get('max_board', 1)
                 )
                 
+                # 获取东财行业板块因子
+                sector_factor = sector_dict.get(l3_name, {})
+                dc_composite = sector_factor.get('composite_strength', 0)
+                dc_up_down_ratio = sector_factor.get('up_down_ratio', 0)
+                dc_leading_strength = sector_factor.get('leading_strength', 0)
+                
                 # 计算综合强度分
-                # 权重: 20日涨停数×0.4 + 当日涨停数×0.4 + 最高连板×0.2
+                # 权重: 20日涨停数×0.35 + 当日涨停数×0.35 + 最高连板×0.15 + 东财综合强度×0.15
                 strength_score = (
-                    count_20d * 0.4 +
-                    today_count * 0.4 * 3 +  # 当日涨停权重放大3倍（当日重要性更高）
-                    max_board * 0.2 * 5      # 连板权重放大5倍
+                    count_20d * 0.35 +
+                    today_count * 0.35 * 3 +  # 当日涨停权重放大3倍（当日重要性更高）
+                    max_board * 0.15 * 5 +     # 连板权重放大5倍
+                    dc_composite * 0.15        # 东财综合强度因子
                 )
                 
                 combined_data.append({
@@ -273,14 +300,31 @@ class SentimentSystem:
                     'LimitUp_Count_20d': count_20d,
                     'LimitUp_Count_Today': today_count,
                     'Max_BoardHeight': max_board,
-                    'Strength_Score': round(strength_score, 2)
+                    'Strength_Score': round(strength_score, 2),
+                    # 东财因子字段
+                    'DC_Composite': round(dc_composite, 2),
+                    'DC_UpDownRatio': round(dc_up_down_ratio, 2),
+                    'DC_LeadingStrength': round(dc_leading_strength, 2),
+                    'DC_PctChange': round(sector_factor.get('pct_change', 0), 2),
+                    'DC_UpNum': sector_factor.get('up_num', 0),
+                    'DC_DownNum': sector_factor.get('down_num', 0)
                 })
             
             # 4. 检查当日新出现的强势板块（不在20日统计中但当日有多只涨停）
             for l3_name, data in today_stats.items():
                 if l3_name not in mainline_20d_df['L3_Industry'].values and data['today_count'] >= 2:
-                    # 新出现的强势板块 - 使用L2作为显示名称，但保留L3用于关联
-                    strength_score = data['today_count'] * 0.4 * 3 + data['max_board'] * 0.2 * 5
+                    # 获取东财行业板块因子
+                    sector_factor = sector_dict.get(l3_name, {})
+                    dc_composite = sector_factor.get('composite_strength', 0)
+                    dc_up_down_ratio = sector_factor.get('up_down_ratio', 0)
+                    dc_leading_strength = sector_factor.get('leading_strength', 0)
+                    
+                    # 新出现的强势板块 - 融入东财因子
+                    strength_score = (
+                        data['today_count'] * 0.35 * 3 + 
+                        data['max_board'] * 0.15 * 5 +
+                        dc_composite * 0.15  # 东财综合强度因子
+                    )
                     
                     # 获取正确的L1和L2
                     l1 = data['l1']
@@ -306,7 +350,14 @@ class SentimentSystem:
                         'LimitUp_Count_Today': data['today_count'],
                         'Max_BoardHeight': data['max_board'],
                         'Strength_Score': round(strength_score, 2),
-                        'Is_New': True  # 标记为新板块
+                        'Is_New': True,  # 标记为新板块
+                        # 东财因子字段
+                        'DC_Composite': round(dc_composite, 2),
+                        'DC_UpDownRatio': round(dc_up_down_ratio, 2),
+                        'DC_LeadingStrength': round(dc_leading_strength, 2),
+                        'DC_PctChange': round(sector_factor.get('pct_change', 0), 2),
+                        'DC_UpNum': sector_factor.get('up_num', 0),
+                        'DC_DownNum': sector_factor.get('down_num', 0)
                     })
                     logger.info(f"发现新强势板块: {l3_name} (当日{data['today_count']}只涨停)")
         else:

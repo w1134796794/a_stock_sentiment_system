@@ -302,6 +302,116 @@ class DataManager:
         logger.info(f"概念数据获取完成")
         
         return core_stocks_df
+    
+    def get_industry_sector_data(self, trade_date: str = None) -> pd.DataFrame:
+        """
+        获取东财行业板块数据（使用tushare dc_index接口）
+        
+        Args:
+            trade_date: 交易日期，格式YYYYMMDD，默认使用当前日期
+        
+        Returns:
+            行业板块数据DataFrame，包含涨跌比、领涨强度等因子
+        """
+        if not self.ts_pro:
+            return pd.DataFrame()
+        
+        if not trade_date:
+            trade_date = datetime.now().strftime("%Y%m%d")
+        
+        cache_file = self.today_dir / f"industry_sector_{trade_date}.csv"
+        
+        if cache_file.exists():
+            return pd.read_csv(cache_file)
+        
+        try:
+            # 使用dc_index接口获取行业板块数据
+            df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=trade_date)
+            
+            # 如果当日数据为空，尝试获取上一交易日数据
+            if df.empty:
+                from datetime import timedelta
+                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+                logger.warning(f"{trade_date}行业板块数据为空，尝试获取上一交易日{prev_date}数据")
+                df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=prev_date)
+                if not df.empty:
+                    trade_date = prev_date
+                    cache_file = self.today_dir / f"industry_sector_{trade_date}.csv"
+            
+            if df.empty:
+                return df
+            
+            # 计算衍生因子
+            # 1. 涨跌比 = 上涨家数 / (上涨家数 + 下跌家数)
+            total_stocks = df['up_num'] + df['down_num']
+            df['up_down_ratio'] = df.apply(
+                lambda row: row['up_num'] / (row['up_num'] + row['down_num']) 
+                if (row['up_num'] + row['down_num']) > 0 else 0, axis=1
+            )
+            
+            # 2. 涨跌差 = 上涨家数 - 下跌家数
+            df['up_down_diff'] = df['up_num'] - df['down_num']
+            
+            # 3. 领涨强度 = 领涨股涨幅 * 涨跌比（综合指标）
+            df['leading_strength'] = df['leading_pct'] * df['up_down_ratio']
+            
+            # 4. 活跃度得分 = 换手率 * 涨跌比
+            df['activity_score'] = df['turnover_rate'] * df['up_down_ratio']
+            
+            # 5. 综合强度 = 涨跌幅 * 0.3 + 涨跌比 * 30 + 领涨强度 * 0.2 + 活跃度 * 0.2
+            df['composite_strength'] = (
+                df['pct_change'] * 0.3 + 
+                df['up_down_ratio'] * 30 + 
+                df['leading_strength'] * 0.2 + 
+                df['activity_score'] * 0.2
+            )
+            
+            # 缓存数据
+            df.to_csv(cache_file, index=False)
+            logger.info(f"获取行业板块数据: {len(df)}个板块")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"获取行业板块数据失败: {e}")
+            return pd.DataFrame()
+    
+    def get_sector_factors(self, industry_name: str, trade_date: str = None) -> dict:
+        """
+        获取指定行业的因子数据
+        
+        Args:
+            industry_name: 行业名称（如'火力发电'）
+            trade_date: 交易日期
+        
+        Returns:
+            因子字典
+        """
+        df = self.get_industry_sector_data(trade_date)
+        if df.empty:
+            return {}
+        
+        # 模糊匹配行业名称
+        matched = df[df['name'].str.contains(industry_name, na=False, regex=False)]
+        if matched.empty:
+            return {}
+        
+        row = matched.iloc[0]
+        return {
+            'industry_name': row['name'],
+            'pct_change': row['pct_change'],
+            'up_num': row['up_num'],
+            'down_num': row['down_num'],
+            'up_down_ratio': row['up_down_ratio'],
+            'up_down_diff': row['up_down_diff'],
+            'leading': row['leading'],
+            'leading_pct': row['leading_pct'],
+            'leading_strength': row['leading_strength'],
+            'turnover_rate': row['turnover_rate'],
+            'activity_score': row['activity_score'],
+            'composite_strength': row['composite_strength'],
+            'total_mv': row['total_mv']
+        }
 
 if __name__ == "__main__":
     # 测试
