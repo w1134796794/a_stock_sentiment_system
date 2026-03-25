@@ -273,7 +273,7 @@ class DataManager:
     
     def enrich_core_stocks_concepts(self, core_stocks_df: pd.DataFrame) -> pd.DataFrame:
         """
-        为核心标的DataFrame添加概念数据
+        为核心标的DataFrame添加概念数据（使用dc_member接口获取）
         
         Args:
             core_stocks_df: 核心标的DataFrame，包含'Code'或'代码'列
@@ -292,16 +292,66 @@ class DataManager:
         
         logger.info(f"正在获取{len(core_stocks_df)}只核心标的的概念数据...")
         
+        # 预加载概念成分股数据（避免重复调用API）
+        members_df = self.get_concept_members()
+        if members_df.empty:
+            logger.warning("概念成分股数据为空，尝试使用kpl_concept_cons接口")
+            # 回退到旧方法
+            concepts_list = []
+            for _, row in core_stocks_df.iterrows():
+                code = row[code_col]
+                concept = self.get_stock_concepts(code)
+                concepts_list.append(concept)
+            core_stocks_df['Concept'] = concepts_list
+            return core_stocks_df
+        
+        logger.info(f"使用概念成分股数据为核心标的匹配概念...")
+        
         concepts_list = []
         for _, row in core_stocks_df.iterrows():
             code = row[code_col]
-            concept = self.get_stock_concepts(code)
+            concept = self._get_concepts_from_preloaded_data(code, members_df)
             concepts_list.append(concept)
         
         core_stocks_df['Concept'] = concepts_list
         logger.info(f"概念数据获取完成")
         
         return core_stocks_df
+    
+    def _get_concepts_from_preloaded_data(self, stock_code: str, members_df: pd.DataFrame) -> str:
+        """
+        从预加载的概念成分股数据中获取个股所属概念
+        
+        Args:
+            stock_code: 股票代码
+            members_df: 概念成分股DataFrame
+        
+        Returns:
+            概念字符串，用逗号分隔
+        """
+        # 标准化股票代码
+        code = str(stock_code).strip()
+        if '.' in code:
+            code_short = code.split('.')[0]
+        else:
+            code_short = code.zfill(6)
+            if code_short.startswith('6'):
+                code = f"{code_short}.SH"
+            else:
+                code = f"{code_short}.SZ"
+        
+        # 匹配股票代码
+        matched = members_df[members_df['con_code'] == code]
+        if matched.empty:
+            # 尝试用纯数字代码匹配
+            matched = members_df[members_df['con_code'].str.contains(code_short, na=False)]
+        
+        if matched.empty:
+            return ''
+        
+        # 获取所有概念名称并去重
+        concepts = matched['concept_name'].dropna().unique()
+        return ','.join(concepts)
     
     def get_industry_sector_data(self, trade_date: str = None) -> pd.DataFrame:
         """
@@ -412,6 +462,122 @@ class DataManager:
             'composite_strength': row['composite_strength'],
             'total_mv': row['total_mv']
         }
+    
+    def get_concept_members(self, trade_date: str = None) -> pd.DataFrame:
+        """
+        获取所有概念板块的成分股数据（使用tushare dc_member接口）
+        
+        Args:
+            trade_date: 交易日期，格式YYYYMMDD，默认使用当前日期
+        
+        Returns:
+            概念成分股DataFrame，包含股票代码和所属概念
+        """
+        if not self.ts_pro:
+            return pd.DataFrame()
+        
+        if not trade_date:
+            trade_date = datetime.now().strftime("%Y%m%d")
+        
+        cache_file = self.today_dir / f"concept_members_{trade_date}.csv"
+        
+        if cache_file.exists():
+            return pd.read_csv(cache_file)
+        
+        try:
+            # 1. 获取所有概念板块
+            concepts_df = self.ts_pro.dc_index(idx_type='概念板块', trade_date=trade_date)
+            
+            if concepts_df.empty:
+                # 尝试获取上一交易日数据
+                from datetime import timedelta
+                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+                logger.warning(f"{trade_date}概念板块数据为空，尝试获取上一交易日{prev_date}数据")
+                concepts_df = self.ts_pro.dc_index(idx_type='概念板块', trade_date=prev_date)
+                if not concepts_df.empty:
+                    trade_date = prev_date
+                    cache_file = self.today_dir / f"concept_members_{trade_date}.csv"
+            
+            if concepts_df.empty:
+                logger.warning("无法获取概念板块数据")
+                return pd.DataFrame()
+            
+            logger.info(f"获取到{len(concepts_df)}个概念板块，开始获取成分股...")
+            
+            # 2. 获取每个概念板块的成分股
+            all_members = []
+            for _, concept_row in concepts_df.iterrows():
+                concept_code = concept_row['ts_code']
+                concept_name = concept_row['name']
+                
+                try:
+                    members_df = self.ts_pro.dc_member(ts_code=concept_code, trade_date=trade_date)
+                    if not members_df.empty:
+                        # 添加概念名称列
+                        members_df['concept_name'] = concept_name
+                        all_members.append(members_df[['con_code', 'name', 'concept_name']])
+                except Exception as e:
+                    logger.warning(f"获取概念{concept_name}成分股失败: {e}")
+                    continue
+            
+            if not all_members:
+                logger.warning("未获取到任何概念成分股数据")
+                return pd.DataFrame()
+            
+            # 3. 合并所有成分股数据
+            result_df = pd.concat(all_members, ignore_index=True)
+            
+            # 4. 缓存数据
+            result_df.to_csv(cache_file, index=False)
+            logger.info(f"获取概念成分股完成: {len(result_df)}条记录，涉及{len(concepts_df)}个概念")
+            
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"获取概念成分股数据失败: {e}")
+            return pd.DataFrame()
+    
+    def get_stock_concepts_from_members(self, stock_code: str, trade_date: str = None) -> str:
+        """
+        从概念成分股数据中获取个股所属概念
+        
+        Args:
+            stock_code: 股票代码（如 002218.SZ 或 002218）
+            trade_date: 交易日期
+        
+        Returns:
+            概念字符串，用逗号分隔
+        """
+        # 标准化股票代码
+        code = str(stock_code).strip()
+        if '.' in code:
+            # 提取纯数字代码用于匹配
+            code_short = code.split('.')[0]
+        else:
+            code_short = code.zfill(6)
+            # 添加后缀用于匹配
+            if code_short.startswith('6'):
+                code = f"{code_short}.SH"
+            else:
+                code = f"{code_short}.SZ"
+        
+        # 获取概念成分股数据
+        members_df = self.get_concept_members(trade_date)
+        if members_df.empty:
+            return ''
+        
+        # 匹配股票代码（支持带后缀和不带后缀的匹配）
+        matched = members_df[members_df['con_code'] == code]
+        if matched.empty:
+            # 尝试用纯数字代码匹配
+            matched = members_df[members_df['con_code'].str.contains(code_short, na=False)]
+        
+        if matched.empty:
+            return ''
+        
+        # 获取所有概念名称并去重
+        concepts = matched['concept_name'].dropna().unique()
+        return ','.join(concepts)
 
 if __name__ == "__main__":
     # 测试
