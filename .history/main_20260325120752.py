@@ -6,7 +6,6 @@ import sys
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict
 import pandas as pd
 import loguru
 
@@ -23,7 +22,6 @@ from core.sentiment_engine import SentimentEngine
 from core.pattern_recognition import PatternRecognition
 from core.report_generator import ReportGenerator
 from core.sector_heat_calculator import SectorHeatCalculator
-from core.execution_engine import UnifiedExecutionEngine
 
 logger = loguru.logger
 
@@ -33,7 +31,6 @@ class SentimentSystem:
         self.mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
         self.engine = SentimentEngine()
         self.reporter = ReportGenerator(OUTPUT_DIR)
-        self.execution_engine = None  # 延迟初始化
         self.today = datetime.now().strftime("%Y%m%d")
         self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
         
@@ -154,51 +151,8 @@ class SentimentSystem:
         report_path = self.reporter.create_daily_report(report_data, file_name=report_file_name)
         logger.info(f"✅ 分析完成，报告保存至: {report_path}")
         
-        # 9. 生成交易计划（复盘后生成次日计划）
-        logger.info("[9/9] 生成次日交易计划...")
-        self._generate_trade_plans(date, patterns)
-        
-        # 10. 输出交易建议
+        # 7. 输出交易建议
         self._print_trading_advice(display_mainline_df, patterns, sentiment)
-    
-    def _generate_trade_plans(self, date: str, patterns: Dict):
-        """
-        生成次日交易计划
-        整合所有模式信号，生成可执行的交易计划
-        """
-        try:
-            # 初始化执行引擎
-            if self.execution_engine is None:
-                self.execution_engine = UnifiedExecutionEngine(self.dm, None)
-            
-            # 生成并保存交易计划
-            plans_df, report = self.execution_engine.generate_and_save_plans(
-                analysis_date=date,
-                all_signals=patterns,
-                output_dir=OUTPUT_DIR
-            )
-            
-            if not plans_df.empty:
-                logger.info(f"✅ 交易计划生成完成: {len(plans_df)} 条计划")
-                # 打印交易报告摘要
-                print("\n" + "="*60)
-                print("【次日交易计划摘要】")
-                print("="*60)
-                # 按介入时机分组显示
-                for timing in plans_df['介入时机'].unique():
-                    group = plans_df[plans_df['介入时机'] == timing]
-                    print(f"\n【{timing}】{len(group)}只")
-                    for _, row in group.head(2).iterrows():
-                        print(f"  • {row['名称']}({row['代码']}) - {row['模式']}")
-                        print(f"    目标价:{row['目标价']:.2f} 止损:{row['止损价']:.2f} 仓位:{row['仓位']}")
-                print("="*60)
-            else:
-                logger.info("当日无交易计划生成")
-                
-        except Exception as e:
-            logger.error(f"生成交易计划失败: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
     
     def _print_trading_advice(self, mainline_df, patterns, sentiment):
         """输出简明的交易建议"""

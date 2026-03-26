@@ -6,7 +6,6 @@ import sys
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict
 import pandas as pd
 import loguru
 

@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from enum import Enum
-from pathlib import Path
 import json
 import loguru
 
@@ -572,6 +571,8 @@ class UnifiedExecutionEngine:
         Returns:
             str: 保存的文件路径
         """
+        from pathlib import Path
+        
         if plans_df.empty:
             logger.warning(f"{date} 无交易计划，跳过保存")
             return ""

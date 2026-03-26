@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from enum import Enum
-from pathlib import Path
 import json
 import loguru
 
@@ -165,7 +164,7 @@ class UnifiedExecutionEngine:
         # 按介入时间排序
         plans_df = pd.DataFrame([self._plan_to_dict(p) for p in plans])
         if not plans_df.empty:
-            plans_df = plans_df.sort_values(['介入时机', '置信度'], ascending=[True, False])
+            plans_df = plans_df.sort_values(['entry_timing', 'confidence'], ascending=[True, False])
         
         return plans_df
     
@@ -221,7 +220,7 @@ class UnifiedExecutionEngine:
                 "同板块已有2只二板"
             ],
             confidence=signal.confidence,
-            reason=signal.description,
+            reason=signal.reason,
             add_to_watchlist=True
         )
     
@@ -248,7 +247,7 @@ class UnifiedExecutionEngine:
                 "15分钟未上板"
             ],
             confidence=signal.confidence,
-            reason=signal.description,
+            reason=signal.reason,
             add_to_watchlist=True
         )
     
@@ -275,7 +274,7 @@ class UnifiedExecutionEngine:
                 "10分钟未上板"
             ],
             confidence=signal.confidence,
-            reason=signal.description,
+            reason=signal.reason,
             add_to_watchlist=True
         )
     
@@ -302,7 +301,7 @@ class UnifiedExecutionEngine:
                 "板块跟风不足"
             ],
             confidence=signal.confidence,
-            reason=signal.description,
+            reason=signal.reason,
             add_to_watchlist=True
         )
     
@@ -329,7 +328,7 @@ class UnifiedExecutionEngine:
                 "开盘无量"
             ],
             confidence=signal.confidence,
-            reason=signal.description,
+            reason=signal.reason,
             add_to_watchlist=True
         )
     
@@ -356,7 +355,7 @@ class UnifiedExecutionEngine:
                 "10分钟未翻红"
             ],
             confidence=signal.confidence,
-            reason=f"前日炸板回封，次日观察弱转强: {signal.description}",
+            reason=f"前日炸板回封，次日观察弱转强: {signal.reason}",
             add_to_watchlist=True
         )
     
@@ -383,14 +382,14 @@ class UnifiedExecutionEngine:
                 "板块整体走弱"
             ],
             confidence=signal.confidence,
-            reason=signal.description,
+            reason=signal.reason,
             add_to_watchlist=True
         )
     
     def _plan_second_wave(self, signal, timing, date) -> TradePlan:
         """龙二波计划"""
         # 判断是启动日还是次日
-        if "今日首板" in signal.description:
+        if "今日首板" in signal.reason:
             entry = timing["primary"]  # 早盘打板
         else:
             entry = timing["secondary"]  # 次日竞价
@@ -415,7 +414,7 @@ class UnifiedExecutionEngine:
                 "无板块支持"
             ],
             confidence=signal.confidence,
-            reason=signal.description,
+            reason=signal.reason,
             add_to_watchlist=True
         )
     
@@ -442,7 +441,7 @@ class UnifiedExecutionEngine:
                 "板块退潮"
             ],
             confidence=signal.confidence,
-            reason=signal.description,
+            reason=signal.reason,
             add_to_watchlist=True
         )
     
@@ -572,6 +571,8 @@ class UnifiedExecutionEngine:
         Returns:
             str: 保存的文件路径
         """
+        from pathlib import Path
+        
         if plans_df.empty:
             logger.warning(f"{date} 无交易计划，跳过保存")
             return ""
