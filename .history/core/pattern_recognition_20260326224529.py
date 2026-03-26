@@ -105,8 +105,8 @@ class PatternRecognition:
         
         try:
             # 龙二波策略
-            from core.pattern.dragon_second_wave import DragonSecondWaveStrategyV2
-            self.dragon_second_wave = DragonSecondWaveStrategyV2(self.dm, self.se)
+            from core.pattern.dragon_second_wave import DragonSecondWaveStrategy
+            self.dragon_second_wave = DragonSecondWaveStrategy(self.dm)
             logger.info("✓ 龙二波策略加载成功")
         except Exception as e:
             logger.warning(f"✗ 龙二波策略加载失败: {e}")
@@ -450,7 +450,7 @@ class PatternRecognition:
             logger.info(f"  二板定龙: {len(results['二板定龙'])}个")
         
         # 3. 检测首板突破
-        results["首板突破"] = self.detect_first_board_breakout(today_zt, yesterday_zt)
+        results["首板突破"] = self.detect_first_board_breakout(today_zt)
         logger.info(f"  首板突破: {len(results['首板突破'])}个")
         
         # 4. 检测分歧转一致
@@ -610,42 +610,6 @@ class PatternRecognition:
         date = datetime.strptime(date_str, "%Y%m%d")
         new_date = date + timedelta(days=offset_days)
         return new_date.strftime("%Y%m%d")
-    
-    def _is_fast_limit_up(self, limit_up_time: str, max_minutes: int = 40) -> bool:
-        """
-        判断是否为早盘秒封
-        
-        Args:
-            limit_up_time: 首次封板时间 (格式: "HH:MM:SS" 或 "HH:MM")
-            max_minutes: 最大分钟数（默认9:40前）
-        
-        Returns:
-            bool: 是否在指定时间前封板
-        """
-        if not limit_up_time or limit_up_time in ['', 'nan', 'None']:
-            return False
-        
-        try:
-            # 处理时间字符串
-            time_str = str(limit_up_time).strip()
-            parts = time_str.split(':')
-            
-            if len(parts) >= 2:
-                hour = int(parts[0])
-                minute = int(parts[1])
-                
-                # 计算从9:30开始的分钟数
-                if hour < 9:
-                    return True  # 9:30前（集合竞价）算秒封
-                elif hour == 9:
-                    minutes_from_open = minute - 30
-                    return minutes_from_open <= max_minutes
-                else:
-                    return False  # 10:00后不算秒封
-        except (ValueError, IndexError):
-            pass
-        
-        return False
 
 
 if __name__ == "__main__":

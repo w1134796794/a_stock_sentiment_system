@@ -12,6 +12,28 @@ import loguru
 
 logger = loguru.logger
 
+
+class PatternType(Enum):
+    BLAST_RESEAL = "炸板回封"
+
+
+@dataclass
+class TradeSignal:
+    pattern_type: str
+    stock_code: str
+    stock_name: str
+    trigger_time: str
+    confidence: float
+    entry_price: float
+    stop_loss: float
+    take_profit: float
+    position_size: str
+    reason: str
+    key_metrics: Dict
+    validation_rules: List[str]
+    buy_timing: str = ""
+
+
 class BlastResealType(Enum):
     WASH_SUCCESS = "洗盘成功"      # 优质回封，次日观察
     WASH_UNCERTAIN = "洗盘待定"    # 一般回封，次日谨慎

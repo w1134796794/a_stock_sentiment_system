@@ -105,8 +105,8 @@ class PatternRecognition:
         
         try:
             # 龙二波策略
-            from core.pattern.dragon_second_wave import DragonSecondWaveStrategyV2
-            self.dragon_second_wave = DragonSecondWaveStrategyV2(self.dm, self.se)
+            from core.pattern.dragon_second_wave import DragonSecondWaveStrategy
+            self.dragon_second_wave = DragonSecondWaveStrategy(self.dm)
             logger.info("✓ 龙二波策略加载成功")
         except Exception as e:
             logger.warning(f"✗ 龙二波策略加载失败: {e}")

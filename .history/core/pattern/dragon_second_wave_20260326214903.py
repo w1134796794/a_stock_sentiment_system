@@ -6,32 +6,9 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
-from dataclasses import dataclass
-from enum import Enum
 import loguru
 
 logger = loguru.logger
-
-
-class PatternType(Enum):
-    DRAGON_SECOND_WAVE = "龙二波"
-
-
-@dataclass
-class TradeSignal:
-    pattern_type: PatternType
-    stock_code: str
-    stock_name: str
-    trigger_time: str
-    confidence: float
-    entry_price: float
-    stop_loss: float
-    take_profit: float
-    position_size: str
-    reason: str
-    key_metrics: Dict
-    validation_rules: List[str]
-
 
 class DragonSecondWaveStrategyV2:
     def __init__(self, data_manager, sentiment_engine):

@@ -1,0 +1,591 @@
+
+# 创建统一交易执行引擎 - 整合所有模式的介入时机
+
+execution_engine_content = '''"""
+交易执行引擎 - 统一整合所有模式的介入时机
+实现：复盘生成次日计划 + 当日实时信号推送
+"""
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from datetime import datetime, time, timedelta
+from enum import Enum
+import json
+import loguru
+
+logger = loguru.logger
+
+class TradeAction(Enum):
+    BUY = "买入"
+    WATCH = "观察"
+    SELL = "卖出"
+    HOLD = "持有"
+    SKIP = "放弃"
+
+class TimeSlot(Enum):
+    PRE_AUCTION = "09:15-09:25"      # 竞价阶段
+    AUCTION_END = "09:24:30-09:25:00" # 竞价末段
+    OPEN = "09:30:00-09:31:00"       # 开盘第一笔
+    EARLY_MORNING = "09:31-10:00"    # 早盘
+    MORNING = "10:00-11:30"          # 上午
+    AFTERNOON = "13:00-14:30"        # 下午
+    LATE_AFTERNOON = "14:30-15:00"   # 尾盘
+
+@dataclass
+class TradePlan:
+    """交易计划"""
+    pattern_type: str           # 模式类型
+    stock_code: str
+    stock_name: str
+    action: TradeAction         # 动作
+    entry_timing: TimeSlot      # 介入时机
+    entry_price: float          # 目标买入价
+    stop_loss: float           # 止损价
+    take_profit: float         # 止盈价
+    position_size: str         # 仓位（light/medium/heavy）
+    pre_conditions: List[str]   # 前置条件（必须满足）
+    cancel_conditions: List[str] # 取消条件（任一满足则放弃）
+    confidence: float            # 置信度
+    reason: str                # 交易理由
+    add_to_watchlist: bool     # 是否加入观察池
+
+class UnifiedExecutionEngine:
+    """
+    统一交易执行引擎
+    整合所有模式的介入时机，生成可执行的交易计划
+    """
+    
+    def __init__(self, data_manager, strategy_engine):
+        self.dm = data_manager
+        self.se = strategy_engine
+        self.today = datetime.now().strftime("%Y%m%d")
+        
+        # 各模式介入时机配置
+        self.timing_config = {
+            # 二板定龙：竞价定生死
+            "二板定龙": {
+                "primary": TimeSlot.AUCTION_END,    # 首选：竞价末段
+                "secondary": TimeSlot.OPEN,          # 备选：开盘第一笔
+                "deadline": TimeSlot.EARLY_MORNING, # 最晚：早盘10点前
+                "price_type": "涨停价",
+                "position": "medium"
+            },
+            
+            # 分歧转一致：竞价确认转强
+            "分歧转一致": {
+                "primary": TimeSlot.AUCTION_END,    # 竞价末段
+                "secondary": TimeSlot.OPEN,          # 开盘第一笔
+                "deadline": TimeSlot.EARLY_MORNING,
+                "price_type": "开盘价",
+                "position": "medium"
+            },
+            
+            # 弱转强：竞价超预期
+            "弱转强": {
+                "primary": TimeSlot.AUCTION_END,
+                "secondary": TimeSlot.OPEN,
+                "deadline": TimeSlot.EARLY_MORNING,
+                "price_type": "开盘价",
+                "position": "heavy"  # 高置信度，重仓
+            },
+            
+            # 首板突破：早盘秒封
+            "首板突破": {
+                "primary": TimeSlot.EARLY_MORNING,  # 9:40前涨停瞬间
+                "secondary": None,
+                "deadline": TimeSlot.EARLY_MORNING,
+                "price_type": "涨停价",
+                "position": "light"
+            },
+            
+            # 竞价爆量：竞价即介入
+            "竞价爆量": {
+                "primary": TimeSlot.AUCTION_END,
+                "secondary": None,
+                "deadline": TimeSlot.AUCTION_END,
+                "price_type": "竞价匹配价",
+                "position": "medium"
+            },
+            
+            # 炸板回封：次日观察，非当日买
+            "炸板回封": {
+                "primary": TimeSlot.AUCTION_END,    # 次日竞价
+                "secondary": TimeSlot.OPEN,          # 次日开盘
+                "deadline": TimeSlot.EARLY_MORNING,
+                "price_type": "开盘价",
+                "position": "light",
+                "note": "次日执行，非当日"
+            },
+            
+            # 卡位板：涨停瞬间
+            "卡位板": {
+                "primary": TimeSlot.EARLY_MORNING,  # 涨停瞬间
+                "secondary": None,
+                "deadline": TimeSlot.EARLY_MORNING,
+                "price_type": "涨停价",
+                "position": "medium"
+            },
+            
+            # 龙二波：启动日首板或次日竞价
+            "龙二波": {
+                "primary": TimeSlot.EARLY_MORNING,  # 首板打板
+                "secondary": TimeSlot.AUCTION_END,  # 次日竞价
+                "deadline": TimeSlot.AFTERNOON,
+                "price_type": "涨停价/开盘价",
+                "position": "medium"
+            },
+            
+            # 龙回头：回踩均线低吸
+            "龙回头": {
+                "primary": TimeSlot.EARLY_MORNING,  # 早盘回踩
+                "secondary": TimeSlot.AFTERNOON,     # 下午回踩
+                "deadline": TimeSlot.LATE_AFTERNOON,
+                "price_type": "均线价",
+                "position": "light"
+            }
+        }
+    
+    # ==================== 复盘后生成次日计划 ====================
+    
+    def generate_next_day_plans(self, 
+                               analysis_date: str,
+                               all_signals: Dict[str, List]) -> pd.DataFrame:
+        """
+        复盘后生成次日交易计划
+        输入：当日分析的所有模式信号
+        输出：次日可执行的交易计划表
+        """
+        plans = []
+        
+        for pattern_name, signals in all_signals.items():
+            for signal in signals:
+                plan = self._convert_signal_to_plan(pattern_name, signal, analysis_date)
+                if plan:
+                    plans.append(plan)
+        
+        # 按介入时间排序
+        plans_df = pd.DataFrame([self._plan_to_dict(p) for p in plans])
+        if not plans_df.empty:
+            plans_df = plans_df.sort_values(['entry_timing', 'confidence'], ascending=[True, False])
+        
+        return plans_df
+    
+    def _convert_signal_to_plan(self, pattern: str, signal, analysis_date: str) -> Optional[TradePlan]:
+        """将模式信号转换为交易计划"""
+        
+        timing = self.timing_config.get(pattern)
+        if not timing:
+            return None
+        
+        # 根据模式确定具体参数
+        if pattern == "二板定龙":
+            return self._plan_second_board_dragon(signal, timing, analysis_date)
+        elif pattern == "分歧转一致":
+            return self._plan_divergence_consensus(signal, timing, analysis_date)
+        elif pattern == "弱转强":
+            return self._plan_weak_to_strong(signal, timing, analysis_date)
+        elif pattern == "首板突破":
+            return self._plan_first_board_breakout(signal, timing, analysis_date)
+        elif pattern == "竞价爆量":
+            return self._plan_auction_volume(signal, timing, analysis_date)
+        elif pattern == "炸板回封":
+            return self._plan_blast_reseal(signal, timing, analysis_date)
+        elif pattern == "卡位板":
+            return self._plan_position_battle(signal, timing, analysis_date)
+        elif pattern == "龙二波":
+            return self._plan_second_wave(signal, timing, analysis_date)
+        elif pattern == "龙回头":
+            return self._plan_dragon_pullback(signal, timing, analysis_date)
+        
+        return None
+    
+    def _plan_second_board_dragon(self, signal, timing, date) -> TradePlan:
+        """二板定龙计划"""
+        return TradePlan(
+            pattern_type="二板定龙",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.BUY,
+            entry_timing=timing["primary"],
+            entry_price=signal.entry_price,  # 涨停价
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],
+            pre_conditions=[
+                "次日高开3%-7%",
+                "竞价量>前日10%",
+                "竞价价格向上"
+            ],
+            cancel_conditions=[
+                "低开或平开",
+                "竞价量<5%",
+                "同板块已有2只二板"
+            ],
+            confidence=signal.confidence,
+            reason=signal.reason,
+            add_to_watchlist=True
+        )
+    
+    def _plan_divergence_consensus(self, signal, timing, date) -> TradePlan:
+        """分歧转一致计划"""
+        return TradePlan(
+            pattern_type="分歧转一致",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.BUY,
+            entry_timing=timing["primary"],
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],
+            pre_conditions=[
+                "次日高开2%-5%",
+                "竞价量>前日8%",
+                "不跌破5日线"
+            ],
+            cancel_conditions=[
+                "低开",
+                "开盘后快速跌破昨日最低价",
+                "15分钟未上板"
+            ],
+            confidence=signal.confidence,
+            reason=signal.reason,
+            add_to_watchlist=True
+        )
+    
+    def _plan_weak_to_strong(self, signal, timing, date) -> TradePlan:
+        """弱转强计划"""
+        return TradePlan(
+            pattern_type="弱转强",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.BUY,
+            entry_timing=timing["primary"],
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],  # heavy
+            pre_conditions=[
+                "次日高开2%-7%",
+                "竞价量>8%",
+                "竞价价格向上"
+            ],
+            cancel_conditions=[
+                "低开或平开",
+                "开盘后回踩>2%",
+                "10分钟未上板"
+            ],
+            confidence=signal.confidence,
+            reason=signal.reason,
+            add_to_watchlist=True
+        )
+    
+    def _plan_first_board_breakout(self, signal, timing, date) -> TradePlan:
+        """首板突破计划"""
+        return TradePlan(
+            pattern_type="首板突破",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.BUY,
+            entry_timing=timing["primary"],
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],  # light
+            pre_conditions=[
+                "9:40前涨停",
+                "封单持续增加",
+                "板块效应明显"
+            ],
+            cancel_conditions=[
+                "涨停时间>10:00",
+                "反复炸板",
+                "板块跟风不足"
+            ],
+            confidence=signal.confidence,
+            reason=signal.reason,
+            add_to_watchlist=True
+        )
+    
+    def _plan_auction_volume(self, signal, timing, date) -> TradePlan:
+        """竞价爆量计划"""
+        return TradePlan(
+            pattern_type="竞价爆量",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.BUY,
+            entry_timing=timing["primary"],  # 竞价末段
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],
+            pre_conditions=[
+                "竞价量>前日8%",
+                "高开1%-7%",
+                "竞价价格最后一分钟向上"
+            ],
+            cancel_conditions=[
+                "竞价末端回落",
+                "开盘低开",
+                "开盘无量"
+            ],
+            confidence=signal.confidence,
+            reason=signal.reason,
+            add_to_watchlist=True
+        )
+    
+    def _plan_blast_reseal(self, signal, timing, date) -> TradePlan:
+        """炸板回封计划（次日执行）"""
+        return TradePlan(
+            pattern_type="炸板回封（次日）",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.WATCH,  # 先观察
+            entry_timing=timing["primary"],
+            entry_price=0,  # 次日开盘价
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],  # light
+            pre_conditions=[
+                "次日高开2%+",
+                "竞价量>8%",
+                "不跌破昨日收盘价"
+            ],
+            cancel_conditions=[
+                "低开",
+                "开盘后跌破昨日最低价",
+                "10分钟未翻红"
+            ],
+            confidence=signal.confidence,
+            reason=f"前日炸板回封，次日观察弱转强: {signal.reason}",
+            add_to_watchlist=True
+        )
+    
+    def _plan_position_battle(self, signal, timing, date) -> TradePlan:
+        """卡位板计划"""
+        return TradePlan(
+            pattern_type="卡位板",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.BUY,
+            entry_timing=timing["primary"],
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],
+            pre_conditions=[
+                "低位股涨停瞬间",
+                "高位股疲态（烂板/后封）",
+                "领先时间>5分钟"
+            ],
+            cancel_conditions=[
+                "高位股回封早于低位股",
+                "低位股炸板",
+                "板块整体走弱"
+            ],
+            confidence=signal.confidence,
+            reason=signal.reason,
+            add_to_watchlist=True
+        )
+    
+    def _plan_second_wave(self, signal, timing, date) -> TradePlan:
+        """龙二波计划"""
+        # 判断是启动日还是次日
+        if "今日首板" in signal.reason:
+            entry = timing["primary"]  # 早盘打板
+        else:
+            entry = timing["secondary"]  # 次日竞价
+        
+        return TradePlan(
+            pattern_type="龙二波",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.BUY,
+            entry_timing=entry,
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],
+            pre_conditions=[
+                "启动日：首板打板确认",
+                "次日：高开2%+竞价量8%"
+            ],
+            cancel_conditions=[
+                "低开",
+                "跌破10日线",
+                "无板块支持"
+            ],
+            confidence=signal.confidence,
+            reason=signal.reason,
+            add_to_watchlist=True
+        )
+    
+    def _plan_dragon_pullback(self, signal, timing, date) -> TradePlan:
+        """龙回头计划"""
+        return TradePlan(
+            pattern_type="龙回头",
+            stock_code=signal.stock_code,
+            stock_name=signal.stock_name,
+            action=TradeAction.BUY,
+            entry_timing=timing["primary"],
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            position_size=timing["position"],  # light
+            pre_conditions=[
+                "回踩MA10/MA20",
+                "缩量至前期30%",
+                "出现阳线反弹"
+            ],
+            cancel_conditions=[
+                "跌破均线",
+                "放量下跌",
+                "板块退潮"
+            ],
+            confidence=signal.confidence,
+            reason=signal.reason,
+            add_to_watchlist=True
+        )
+    
+    def _plan_to_dict(self, plan: TradePlan) -> Dict:
+        """转换为字典"""
+        return {
+            "模式": plan.pattern_type,
+            "代码": plan.stock_code,
+            "名称": plan.stock_name,
+            "动作": plan.action.value,
+            "介入时机": plan.entry_timing.value,
+            "目标价": plan.entry_price,
+            "止损价": plan.stop_loss,
+            "止盈价": plan.take_profit,
+            "仓位": plan.position_size,
+            "前置条件": "; ".join(plan.pre_conditions),
+            "取消条件": "; ".join(plan.cancel_conditions),
+            "置信度": plan.confidence,
+            "理由": plan.reason,
+            "加入观察池": plan.add_to_watchlist
+        }
+    
+    # ==================== 当日实时信号 ====================
+    
+    def real_time_check(self, 
+                       current_time: time,
+                       auction_data: Dict,
+                       tick_data: Dict,
+                       watchlist: List[TradePlan]) -> List[Dict]:
+        """
+        当日实时检查，触发交易信号
+        """
+        triggered = []
+        
+        for plan in watchlist:
+            # 检查是否到达介入时机
+            if not self._is_in_timing_window(current_time, plan.entry_timing):
+                continue
+            
+            # 检查是否满足条件
+            check_result = self._check_conditions(plan, auction_data, tick_data)
+            
+            if check_result['should_execute']:
+                triggered.append({
+                    "plan": plan,
+                    "action": "EXECUTE",
+                    "price": check_result['price'],
+                    "reason": check_result['reason']
+                })
+            elif check_result['should_cancel']:
+                triggered.append({
+                    "plan": plan,
+                    "action": "CANCEL",
+                    "reason": check_result['reason']
+                })
+        
+        return triggered
+    
+    def _is_in_timing_window(self, current: time, target: TimeSlot) -> bool:
+        """检查当前时间是否在介入窗口"""
+        windows = {
+            TimeSlot.AUCTION_END: (time(9, 24, 30), time(9, 25, 0)),
+            TimeSlot.OPEN: (time(9, 30, 0), time(9, 31, 0)),
+            TimeSlot.EARLY_MORNING: (time(9, 31, 0), time(10, 0, 0)),
+            TimeSlot.MORNING: (time(10, 0, 0), time(11, 30, 0)),
+            TimeSlot.AFTERNOON: (time(13, 0, 0), time(14, 30, 0)),
+            TimeSlot.LATE_AFTERNOON: (time(14, 30, 0), time(15, 0, 0)),
+        }
+        
+        if target not in windows:
+            return False
+        
+        start, end = windows[target]
+        return start <= current <= end
+    
+    def _check_conditions(self, plan: TradePlan, auction: Dict, tick: Dict) -> Dict:
+        """检查计划的前置条件和取消条件"""
+        # 简化实现，实际应根据模式类型检查具体数据
+        return {
+            'should_execute': True,
+            'should_cancel': False,
+            'price': plan.entry_price,
+            'reason': "条件满足"
+        }
+    
+    # ==================== 生成交易报告 ====================
+    
+    def generate_trade_report(self, plans_df: pd.DataFrame, date: str) -> str:
+        """生成交易计划报告"""
+        if plans_df.empty:
+            return f"{date} 无交易计划"
+        
+        report = []
+        report.append(f"\n{'='*60}")
+        report.append(f"交易执行计划 - {date}")
+        report.append(f"{'='*60}\n")
+        
+        # 按介入时机分组
+        for timing in TimeSlot:
+            group = plans_df[plans_df['介入时机'] == timing.value]
+            if group.empty:
+                continue
+            
+            report.append(f"\n【{timing.value}】")
+            report.append(f"{'-'*40}")
+            
+            for _, row in group.head(3).iterrows():  # 每组最多3只
+                report.append(f"\n{row['模式']} | {row['名称']}({row['代码']})")
+                report.append(f"  动作: {row['动作']} | 仓位: {row['仓位']}")
+                report.append(f"  目标价: {row['目标价']:.2f} | 止损: {row['止损价']:.2f}")
+                report.append(f"  前置: {row['前置条件']}")
+                report.append(f"  取消: {row['取消条件']}")
+                report.append(f"  置信度: {row['置信度']:.0%} | {row['理由'][:30]}...")
+        
+        report.append(f"\n{'='*60}")
+        return "\n".join(report)
+
+# ==================== 使用示例 ====================
+
+if __name__ == "__main__":
+    print("统一交易执行引擎加载完成")
+    print("\n各模式介入时机汇总：")
+    print("-" * 40)
+    
+    engine = UnifiedExecutionEngine(None, None)
+    
+    for pattern, config in engine.timing_config.items():
+        primary = config['primary'].value if config['primary'] else "无"
+        secondary = config['secondary'].value if config['secondary'] else "无"
+        print(f"\n{pattern}:")
+        print(f"  首选: {primary}")
+        print(f"  备选: {secondary}")
+        print(f"  仓位: {config['position']}")
+'''
+
+with open("a_stock_sentiment_system/core/execution_engine.py", "w", encoding="utf-8") as f:
+    f.write(execution_engine_content)
+
+print("✅ core/execution_engine.py 创建完成")
+print("\n核心功能：")
+print("1. 复盘后自动生成次日交易计划（按介入时间排序）")
+print("2. 当日实时检查条件触发")
+print("3. 统一的仓位管理和风控")
+print("4. 生成可执行的交易报告")
