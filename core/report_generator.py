@@ -75,7 +75,7 @@ class ReportGenerator:
                 if 'Is_New' in mainline_df.columns:
                     # 对于新板块，使用L2_Industry作为显示的行业名称
                     mainline_df['行业名称'] = mainline_df.apply(
-                        lambda row: row['L2_Industry'] if row.get('Is_New', False) else row['L3_Industry'],
+                        lambda row: row['L2_Industry'] if row.get('Is_New', False) else row['L2_Industry'],
                         axis=1
                     )
 
@@ -87,7 +87,7 @@ class ReportGenerator:
             if not data_dict.get('sector_heat_df', pd.DataFrame()).empty:
                 sector_heat_df = data_dict['sector_heat_df'].copy()
                 # 只保留关键列
-                display_cols = ['L1_Industry', 'L2_Industry', 'L3_Industry', 
+                display_cols = ['L1_Industry', 'L2_Industry', 'L2_Industry', 
                                '3日涨停数', '5日涨停数', '20日涨停数',
                                '原始热度', '动量加速度', '持续性得分', '综合得分', '板块分类']
                 sector_heat_display = sector_heat_df[display_cols] if all(col in sector_heat_df.columns for col in display_cols) else sector_heat_df
@@ -137,7 +137,7 @@ class ReportGenerator:
             worksheet.write(start_row, 0, '今日主线Top5', header_fmt)
 
             # 过滤掉"其他"行业
-            filtered_df = mainline_df[mainline_df['L3_Industry'] != '其他'].copy()
+            filtered_df = mainline_df[mainline_df['L2_Industry'] != '其他'].copy()
 
             # 处理Is_New标记，显示正确的行业信息
             if 'Is_New' in filtered_df.columns:
@@ -148,7 +148,7 @@ class ReportGenerator:
                         axis=1
                     ),
                     '三级行业': filtered_df.apply(
-                        lambda row: row['L2_Industry'] if row.get('Is_New', False) else row['L3_Industry'],
+                        lambda row: row['L2_Industry'] if row.get('Is_New', False) else row['L2_Industry'],
                         axis=1
                     ),
                     '涨停数': filtered_df['LimitUp_Count'],
@@ -156,7 +156,7 @@ class ReportGenerator:
                     '强度评分': filtered_df['Strength_Score']
                 })
             else:
-                display_cols = ['L1_Industry', 'L2_Industry', 'L3_Industry', 'LimitUp_Count', 'Max_BoardHeight',
+                display_cols = ['L1_Industry', 'L2_Industry', 'L2_Industry', 'LimitUp_Count', 'Max_BoardHeight',
                                 'Strength_Score']
                 display_df = filtered_df[display_cols] if all(col in filtered_df.columns for col in display_cols) else filtered_df
 
@@ -205,6 +205,7 @@ class ReportGenerator:
                     '模式': signal.pattern_type,
                     '代码': signal.stock_code,
                     '名称': signal.stock_name,
+                    '所属行业': signal.l2_industry,
                     '置信度': signal.confidence,
                     '描述': signal.description,
                     '关键指标': str(signal.key_metrics)
@@ -214,12 +215,12 @@ class ReportGenerator:
             df_patterns = pd.DataFrame(all_signals)
             df_patterns.to_excel(writer, sheet_name='模式信号', index=False)
             worksheet = writer.sheets['模式信号']
-            worksheet.set_column('A:F', 20)
+            worksheet.set_column('A:G', 20)
 
             # 高亮高置信度信号
             for row_num in range(1, len(df_patterns) + 1):
                 if df_patterns.iloc[row_num - 1]['置信度'] >= 0.8:
-                    worksheet.write(row_num, 3, df_patterns.iloc[row_num - 1]['置信度'], strong_fmt)
+                    worksheet.write(row_num, 4, df_patterns.iloc[row_num - 1]['置信度'], strong_fmt)
 
     def _format_time(self, time_val):
         """格式化时间字符串"""
@@ -248,7 +249,7 @@ class ReportGenerator:
             if limit_up_time and limit_up_time <= '10:30:00':
                 l1 = row.get('L1_Industry', '')
                 l2 = row.get('L2_Industry', '')
-                l3 = row.get('L3_Industry', '')
+                l3 = row.get('L2_Industry', '')
 
                 # 跳过"其他"行业
                 if l3 == '其他' or l2 == '其他' or l1 == '其他':
@@ -278,7 +279,7 @@ class ReportGenerator:
             for _, row in hierarchy_df.iterrows():
                 l1 = row.get('L1_Industry', '')
                 l2 = row.get('L2_Industry', '')
-                l3 = row.get('L3_Industry', '')
+                l3 = row.get('L2_Industry', '')
 
                 if l3 == '其他' or l2 == '其他' or l1 == '其他':
                     continue

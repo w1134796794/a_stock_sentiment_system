@@ -30,7 +30,8 @@ class PatternSignal:
     take_profit: Optional[float] = None
     position_size: str = "medium"  # light/medium/heavy
     validation_rules: List[str] = None
-    
+    l2_industry: str = ""  # 二级行业
+
     def __post_init__(self):
         if self.validation_rules is None:
             self.validation_rules = []
@@ -501,19 +502,22 @@ class PatternRecognition:
             today_change = today_row.get('涨跌幅', 0)
             if isinstance(today_change, str):
                 today_change = float(today_change.replace('%', ''))
-            
+
             key_metrics = {
                 "涨停时间": today_row.get('首次封板时间', ''),
                 "封单额": f"{today_row.get('封单额', 0)/1e4:.0f}万",
                 "换手率": f"{today_row.get('换手率', 0):.1f}%"
             }
-            
+
             if board_height:
                 key_metrics["连板高度"] = board_height
-            
+
             if yest_row is not None:
                 key_metrics["昨日涨幅"] = yest_row.get('涨跌幅', 0)
-            
+
+            # 获取二级行业（所属行业）
+            l2_industry = today_row.get('所属行业', '')
+
             return PatternSignal(
                 pattern_type=pattern_type,
                 stock_code=code,
@@ -524,7 +528,8 @@ class PatternRecognition:
                 entry_price=entry_price,
                 stop_loss=entry_price * 0.93 if entry_price else None,
                 take_profit=entry_price * 1.10 if entry_price else None,
-                validation_rules=[f"检测到{pattern_type}模式"]
+                validation_rules=[f"检测到{pattern_type}模式"],
+                l2_industry=l2_industry
             )
         except Exception as e:
             logger.error(f"转换信号失败: {e}")

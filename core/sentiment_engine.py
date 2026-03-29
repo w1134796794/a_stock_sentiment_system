@@ -6,16 +6,19 @@ import numpy as np
 from typing import Dict, List, Tuple
 from collections import defaultdict
 import loguru
+import sys
+from pathlib import Path
+
+# 添加项目根目录到路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config.settings import SENTIMENT_WEIGHTS, LIMIT_UP_THRESHOLD
 
 logger = loguru.logger
 
 class SentimentEngine:
     def __init__(self, weights: Dict[str, float] = None):
-        self.weights = weights or {
-            "limit_up_count": 0.6,
-            "continuing_board_height": 0.4
-        }
-        self.limit_up_threshold = 0.095
+        self.weights = weights or SENTIMENT_WEIGHTS
+        self.limit_up_threshold = LIMIT_UP_THRESHOLD
     
     def calculate_mainline_strength(self, hierarchy_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -28,8 +31,8 @@ class SentimentEngine:
         
         # 按L3行业聚合
         stats = []
-        for l3_name, group in hierarchy_df.groupby('L3_Industry'):
-            if l3_name == '其他':
+        for l2_name, group in hierarchy_df.groupby('L2_Industry'):
+            if l2_name == '其他':
                 continue
                 
             limit_up_count = len(group)
@@ -47,7 +50,7 @@ class SentimentEngine:
             top_stock = group.loc[group['BoardHeight'].idxmax(), 'Name'] if 'BoardHeight' in group.columns else ''
             
             stats.append({
-                'L3_Industry': l3_name,
+                'L2_Industry': l2_name,
                 'L2_Industry': group['L2_Industry'].iloc[0] if not group.empty else '未知',
                 'L1_Industry': group['L1_Industry'].iloc[0] if not group.empty and 'L1_Industry' in group.columns else '未知',
                 'LimitUp_Count': limit_up_count,
@@ -86,7 +89,7 @@ class SentimentEngine:
         # 使用实际的连板数数据
         for _, row in hierarchy_df.iterrows():
             name = row['Name']
-            l3 = row['L3_Industry']
+            l3 = row['L2_Industry']
             # 使用实际的连板数字段
             board_height = row.get('BoardHeight', 1)
             if pd.isna(board_height):
@@ -120,10 +123,10 @@ class SentimentEngine:
         
         # 联动判定：检查最高板所属行业的跟风情况
         if gradient['highest_stock']:
-            leader_l3 = hierarchy_df[hierarchy_df['Name'] == gradient['highest_stock']]['L3_Industry'].values
+            leader_l3 = hierarchy_df[hierarchy_df['Name'] == gradient['highest_stock']]['L2_Industry'].values
             if len(leader_l3) > 0:
                 leader_l3 = leader_l3[0]
-                l3_stocks = hierarchy_df[hierarchy_df['L3_Industry'] == leader_l3]
+                l3_stocks = hierarchy_df[hierarchy_df['L2_Industry'] == leader_l3]
                 
                 # 检查是否有2个以上一字板或秒板
                 fast_limit = l3_stocks[l3_stocks['LimitUpTime'].astype(str) < '09:35:00']
@@ -189,8 +192,8 @@ class SentimentEngine:
         
         rotation = []
         
-        current_sectors = set(current_df['L3_Industry'].unique())
-        prev_sectors = set(prev_df['L3_Industry'].unique())
+        current_sectors = set(current_df['L2_Industry'].unique())
+        prev_sectors = set(prev_df['L2_Industry'].unique())
         
         # 新出现的板块
         new_sectors = current_sectors - prev_sectors
@@ -199,7 +202,7 @@ class SentimentEngine:
                 rotation.append({
                     'type': 'new_emerging',
                     'sector': sector,
-                    'stocks': current_df[current_df['L3_Industry'] == sector]['Name'].tolist()
+                    'stocks': current_df[current_df['L2_Industry'] == sector]['Name'].tolist()
                 })
         
         # 强度提升的板块
@@ -208,8 +211,8 @@ class SentimentEngine:
         
         if not current_strength.empty and not prev_strength.empty:
             for _, row in current_strength.head(3).iterrows():
-                sector = row['L3_Industry']
-                prev_row = prev_strength[prev_strength['L3_Industry'] == sector]
+                sector = row['L2_Industry']
+                prev_row = prev_strength[prev_strength['L2_Industry'] == sector]
                 if prev_row.empty:
                     continue
                 if row['Strength_Score'] > prev_row['Strength_Score'].values[0] * 1.5:

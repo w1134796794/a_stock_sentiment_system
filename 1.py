@@ -1,591 +1,359 @@
-
-# 创建统一交易执行引擎 - 整合所有模式的介入时机
-
-execution_engine_content = '''"""
-交易执行引擎 - 统一整合所有模式的介入时机
-实现：复盘生成次日计划 + 当日实时信号推送
 """
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Tuple, Union
+板块状态联动系统 - 趋势阶段 × 共振强度
+"""
+from enum import Enum, auto
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
-from enum import Enum
-import json
-import loguru
+from typing import Optional, Dict, List
+import pandas as pd
 
-logger = loguru.logger
+# ========== 第一层：趋势阶段（时间维度）==========
 
-class TradeAction(Enum):
-    BUY = "买入"
-    WATCH = "观察"
-    SELL = "卖出"
-    HOLD = "持有"
-    SKIP = "放弃"
+class TrendStage(Enum):
+    START = "启动期"           # 昨日0→今日有（质变）
+    EXPLOSION = "爆发期"       # 今日倍增（量变加速）
+    ACCELERATION = "加速期"    # 3日/5日持续增（趋势强化）
+    CONFIRMED = "确认期"       # 多周期共振（趋势确立）
+    MATURE = "成熟期"          # 高位震荡（后期）
+    DECLINE_EARLY = "早期退潮" # 3日骤降（敏感撤退）
+    DECLINE_LATE = "晚期退潮"  # 确认退潮（坚决回避）
+    WATCH = "观察期"           # 无明确趋势
 
-class TimeSlot(Enum):
-    PRE_AUCTION = "09:15-09:25"      # 竞价阶段
-    AUCTION_END = "09:24:30-09:25:00" # 竞价末段
-    OPEN = "09:30:00-09:31:00"       # 开盘第一笔
-    EARLY_MORNING = "09:31-10:00"    # 早盘
-    MORNING = "10:00-11:30"          # 上午
-    AFTERNOON = "13:00-14:30"        # 下午
-    LATE_AFTERNOON = "14:30-15:00"   # 尾盘
+# ========== 第二层：共振强度（空间维度）==========
+
+class ResonanceType(Enum):
+    STRONG = "强共振"          # 涨停多+板块涨幅大+大票动
+    QUANTITY_LEADS = "数量引领" # 涨停多+板块涨幅小（小票活跃）
+    PRICE_LEADS = "价格引领"   # 涨停少+板块涨幅大（龙头独舞）
+    WEAK = "弱共振"            # 涨停少+板块涨幅小
+    NONE = "无共振"            # 单点异动，无板块效应
+
+# ========== 联动状态组合 ==========
 
 @dataclass
-class TradePlan:
-    """交易计划"""
-    pattern_type: str           # 模式类型
-    stock_code: str
-    stock_name: str
-    action: TradeAction         # 动作
-    entry_timing: TimeSlot      # 介入时机
-    entry_price: float          # 目标买入价
-    stop_loss: float           # 止损价
-    take_profit: float         # 止盈价
-    position_size: str         # 仓位（light/medium/heavy）
-    pre_conditions: List[str]   # 前置条件（必须满足）
-    cancel_conditions: List[str] # 取消条件（任一满足则放弃）
-    confidence: float            # 置信度
-    reason: str                # 交易理由
-    add_to_watchlist: bool     # 是否加入观察池
+class SectorState:
+    """板块完整状态"""
+    trend: TrendStage           # 趋势阶段
+    resonance: ResonanceType    # 共振类型
+    combined_signal: str        # 联动信号（趋势+共振）
+    priority: int               # 优先级（1-5，1最高）
+    action: str                 # 具体行动
+    position_size: str          # 仓位建议
+    risk_warning: str           # 风险提示
+    key_metrics: Dict           # 核心指标
 
-class UnifiedExecutionEngine:
+class SectorStateEngine:
     """
-    统一交易执行引擎
-    整合所有模式的介入时机，生成可执行的交易计划
+    板块状态联动引擎
+    
+    输入：趋势指标 + 共振指标
+    输出：联动状态 + 行动建议
     """
     
-    def __init__(self, data_manager, strategy_engine):
-        self.dm = data_manager
-        self.se = strategy_engine
-        self.today = datetime.now().strftime("%Y%m%d")
+    # 联动决策矩阵（趋势 × 共振 = 行动）
+    DECISION_MATRIX = {
+        # 启动期组合
+        (TrendStage.START, ResonanceType.STRONG): {
+            'signal': '强共振启动',
+            'priority': 1,
+            'action': '🔥立即重仓，做首板/二板',
+            'position': 'heavy',
+            'risk': '最佳机会，次日有溢价'
+        },
+        (TrendStage.START, ResonanceType.QUANTITY_LEADS): {
+            'signal': '数量启动-虚热',
+            'priority': 2,
+            'action': '⚠️只做龙头，不做跟风',
+            'position': 'light',
+            'risk': '大票未动，持续性存疑'
+        },
+        (TrendStage.START, ResonanceType.PRICE_LEADS): {
+            'signal': '价格启动-独舞',
+            'priority': 2,
+            'action': '🎯只做龙头，放弃跟风',
+            'position': 'medium',
+            'risk': '缺乏梯队，龙头炸则全崩'
+        },
+        (TrendStage.START, ResonanceType.WEAK): {
+            'signal': '弱启动',
+            'priority': 4,
+            'action': '👁️1成仓试探或观察',
+            'position': 'light',
+            'risk': '可能一日游，严格止损'
+        },
         
-        # 各模式介入时机配置
-        self.timing_config = {
-            # 二板定龙：竞价定生死
-            "二板定龙": {
-                "primary": TimeSlot.AUCTION_END,    # 首选：竞价末段
-                "secondary": TimeSlot.OPEN,          # 备选：开盘第一笔
-                "deadline": TimeSlot.EARLY_MORNING, # 最晚：早盘10点前
-                "price_type": "涨停价",
-                "position": "medium"
-            },
-            
-            # 分歧转一致：竞价确认转强
-            "分歧转一致": {
-                "primary": TimeSlot.AUCTION_END,    # 竞价末段
-                "secondary": TimeSlot.OPEN,          # 开盘第一笔
-                "deadline": TimeSlot.EARLY_MORNING,
-                "price_type": "开盘价",
-                "position": "medium"
-            },
-            
-            # 弱转强：竞价超预期
-            "弱转强": {
-                "primary": TimeSlot.AUCTION_END,
-                "secondary": TimeSlot.OPEN,
-                "deadline": TimeSlot.EARLY_MORNING,
-                "price_type": "开盘价",
-                "position": "heavy"  # 高置信度，重仓
-            },
-            
-            # 首板突破：早盘秒封
-            "首板突破": {
-                "primary": TimeSlot.EARLY_MORNING,  # 9:40前涨停瞬间
-                "secondary": None,
-                "deadline": TimeSlot.EARLY_MORNING,
-                "price_type": "涨停价",
-                "position": "light"
-            },
-            
-            # 竞价爆量：竞价即介入
-            "竞价爆量": {
-                "primary": TimeSlot.AUCTION_END,
-                "secondary": None,
-                "deadline": TimeSlot.AUCTION_END,
-                "price_type": "竞价匹配价",
-                "position": "medium"
-            },
-            
-            # 炸板回封：次日观察，非当日买
-            "炸板回封": {
-                "primary": TimeSlot.AUCTION_END,    # 次日竞价
-                "secondary": TimeSlot.OPEN,          # 次日开盘
-                "deadline": TimeSlot.EARLY_MORNING,
-                "price_type": "开盘价",
-                "position": "light",
-                "note": "次日执行，非当日"
-            },
-            
-            # 卡位板：涨停瞬间
-            "卡位板": {
-                "primary": TimeSlot.EARLY_MORNING,  # 涨停瞬间
-                "secondary": None,
-                "deadline": TimeSlot.EARLY_MORNING,
-                "price_type": "涨停价",
-                "position": "medium"
-            },
-            
-            # 龙二波：启动日首板或次日竞价
-            "龙二波": {
-                "primary": TimeSlot.EARLY_MORNING,  # 首板打板
-                "secondary": TimeSlot.AUCTION_END,  # 次日竞价
-                "deadline": TimeSlot.AFTERNOON,
-                "price_type": "涨停价/开盘价",
-                "position": "medium"
-            },
-            
-            # 龙回头：回踩均线低吸
-            "龙回头": {
-                "primary": TimeSlot.EARLY_MORNING,  # 早盘回踩
-                "secondary": TimeSlot.AFTERNOON,     # 下午回踩
-                "deadline": TimeSlot.LATE_AFTERNOON,
-                "price_type": "均线价",
-                "position": "light"
+        # 爆发期组合
+        (TrendStage.EXPLOSION, ResonanceType.STRONG): {
+            'signal': '强共振爆发',
+            'priority': 1,
+            'action': '🚀积极参与，做前排',
+            'position': 'heavy',
+            'risk': '加速期，注意分歧'
+        },
+        (TrendStage.EXPLOSION, ResonanceType.QUANTITY_LEADS): {
+            'signal': '数量爆发-虚热警告',
+            'priority': 3,
+            'action': '❌回避，小票乱炒',
+            'position': 'none',
+            'risk': '虚热，次日分化严重'
+        },
+        
+        # 加速期组合
+        (TrendStage.ACCELERATION, ResonanceType.STRONG): {
+            'signal': '强共振加速',
+            'priority': 2,
+            'action': '✅做龙头分歧转一致',
+            'position': 'medium',
+            'risk': '后期，精选个股'
+        },
+        (TrendStage.ACCELERATION, ResonanceType.PRICE_LEADS): {
+            'signal': '价格加速-独舞',
+            'priority': 2,
+            'action': '🎯只做龙头，不补涨',
+            'position': 'medium',
+            'risk': '跟风已死，只做龙头'
+        },
+        
+        # 确认期组合
+        (TrendStage.CONFIRMED, ResonanceType.STRONG): {
+            'signal': '强共振确认',
+            'priority': 3,
+            'action': '📈做核心龙头，不杂毛',
+            'position': 'medium',
+            'risk': '主线后期，控制仓位'
+        },
+        (TrendStage.CONFIRMED, ResonanceType.WEAK): {
+            'signal': '弱确认-分化',
+            'priority': 4,
+            'action': '🔍精选个股，非全面参与',
+            'position': 'light',
+            'risk': '板块分化，多数股跌'
+        },
+        
+        # 成熟期组合（统一降级）
+        (TrendStage.MATURE, ResonanceType.STRONG): {
+            'signal': '成熟期末期',
+            'priority': 4,
+            'action': '⚠️减仓，只留龙头',
+            'position': 'light',
+            'risk': '随时退潮，警惕'
+        },
+        (TrendStage.MATURE, ResonanceType.ANY): {
+            'signal': '成熟期-回避',
+            'priority': 5,
+            'action': '❌不介入，等退潮后',
+            'position': 'none',
+            'risk': '高位震荡，风险大于机会'
+        },
+        
+        # 退潮期组合（统一回避）
+        (TrendStage.DECLINE_EARLY, ResonanceType.ANY): {
+            'signal': '早期退潮',
+            'priority': 1,  # 风险信号也是高优先级
+            'action': '🚨坚决回避，不抄底',
+            'position': 'none',
+            'risk': '资金撤离，还有下跌空间'
+        },
+        (TrendStage.DECLINE_LATE, ResonanceType.ANY): {
+            'signal': '晚期退潮',
+            'priority': 1,
+            'action': '❌彻底放弃，等下一轮',
+            'position': 'none',
+            'risk': '已确认死亡，不关注'
+        },
+        
+        # 观察期
+        (TrendStage.WATCH, ResonanceType.STRONG): {
+            'signal': '观察-待爆发',
+            'priority': 4,
+            'action': '👀加入观察池，等启动',
+            'position': 'none',
+            'risk': '提前埋伏，可能等待较久'
+        },
+    }
+    
+    def calculate_combined_state(self,
+                                  # 趋势指标
+                                  today_zt: int,
+                                  yesterday_zt: int,
+                                  count_3d: int,
+                                  count_5d: int,
+                                  count_20d: int,
+                                  # 共振指标
+                                  sector_change: float,
+                                  large_cap_change: float,
+                                  zt_avg_change: float) -> SectorState:
+        """
+        计算联动状态
+        """
+        # 1. 判断趋势阶段
+        trend = self._classify_trend_stage(
+            today_zt, yesterday_zt, count_3d, count_5d, count_20d
+        )
+        
+        # 2. 判断共振类型
+        resonance = self._classify_resonance(
+            today_zt, sector_change, large_cap_change, zt_avg_change
+        )
+        
+        # 3. 查询决策矩阵
+        decision = self._lookup_decision(trend, resonance)
+        
+        return SectorState(
+            trend=trend,
+            resonance=resonance,
+            combined_signal=decision['signal'],
+            priority=decision['priority'],
+            action=decision['action'],
+            position_size=decision['position'],
+            risk_warning=decision['risk'],
+            key_metrics={
+                '今日涨停': today_zt,
+                '昨日涨停': yesterday_zt,
+                '3日累计': count_3d,
+                '板块涨幅': f"{sector_change*100:.1f}%",
+                '大票涨幅': f"{large_cap_change*100:.1f}%",
+                '趋势阶段': trend.value,
+                '共振类型': resonance.value
             }
-        }
+        )
     
-    # ==================== 复盘后生成次日计划 ====================
-    
-    def generate_next_day_plans(self, 
-                               analysis_date: str,
-                               all_signals: Dict[str, List]) -> pd.DataFrame:
-        """
-        复盘后生成次日交易计划
-        输入：当日分析的所有模式信号
-        输出：次日可执行的交易计划表
-        """
-        plans = []
+    def _classify_trend_stage(self, today, yesterday, d3, d5, d20) -> TrendStage:
+        """判断趋势阶段"""
+        # 启动：昨日0→今日有
+        if yesterday == 0 and today >= 2:
+            return TrendStage.START
         
-        for pattern_name, signals in all_signals.items():
-            for signal in signals:
-                plan = self._convert_signal_to_plan(pattern_name, signal, analysis_date)
-                if plan:
-                    plans.append(plan)
+        # 爆发：倍增
+        if yesterday > 0 and today >= yesterday * 2 and today >= 3:
+            return TrendStage.EXPLOSION
         
-        # 按介入时间排序
-        plans_df = pd.DataFrame([self._plan_to_dict(p) for p in plans])
-        if not plans_df.empty:
-            plans_df = plans_df.sort_values(['entry_timing', 'confidence'], ascending=[True, False])
+        # 加速：3日>5日，持续增
+        if d3 > d5 * 0.8 and today >= 2:
+            return TrendStage.ACCELERATION
         
-        return plans_df
-    
-    def _convert_signal_to_plan(self, pattern: str, signal, analysis_date: str) -> Optional[TradePlan]:
-        """将模式信号转换为交易计划"""
+        # 确认：多周期共振
+        if d3 >= 8 and d5 >= 10 and d20 >= 15:
+            return TrendStage.CONFIRMED
         
-        timing = self.timing_config.get(pattern)
-        if not timing:
-            return None
+        # 退潮：3日骤降
+        if d3 < d5 * 0.5 and today < yesterday * 0.7:
+            return TrendStage.DECLINE_EARLY
         
-        # 根据模式确定具体参数
-        if pattern == "二板定龙":
-            return self._plan_second_board_dragon(signal, timing, analysis_date)
-        elif pattern == "分歧转一致":
-            return self._plan_divergence_consensus(signal, timing, analysis_date)
-        elif pattern == "弱转强":
-            return self._plan_weak_to_strong(signal, timing, analysis_date)
-        elif pattern == "首板突破":
-            return self._plan_first_board_breakout(signal, timing, analysis_date)
-        elif pattern == "竞价爆量":
-            return self._plan_auction_volume(signal, timing, analysis_date)
-        elif pattern == "炸板回封":
-            return self._plan_blast_reseal(signal, timing, analysis_date)
-        elif pattern == "卡位板":
-            return self._plan_position_battle(signal, timing, analysis_date)
-        elif pattern == "龙二波":
-            return self._plan_second_wave(signal, timing, analysis_date)
-        elif pattern == "龙回头":
-            return self._plan_dragon_pullback(signal, timing, analysis_date)
+        # 晚期退潮：5日也降
+        if d5 < d20 * 0.3:
+            return TrendStage.DECLINE_LATE
         
-        return None
+        return TrendStage.WATCH
     
-    def _plan_second_board_dragon(self, signal, timing, date) -> TradePlan:
-        """二板定龙计划"""
-        return TradePlan(
-            pattern_type="二板定龙",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.BUY,
-            entry_timing=timing["primary"],
-            entry_price=signal.entry_price,  # 涨停价
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],
-            pre_conditions=[
-                "次日高开3%-7%",
-                "竞价量>前日10%",
-                "竞价价格向上"
-            ],
-            cancel_conditions=[
-                "低开或平开",
-                "竞价量<5%",
-                "同板块已有2只二板"
-            ],
-            confidence=signal.confidence,
-            reason=signal.reason,
-            add_to_watchlist=True
-        )
-    
-    def _plan_divergence_consensus(self, signal, timing, date) -> TradePlan:
-        """分歧转一致计划"""
-        return TradePlan(
-            pattern_type="分歧转一致",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.BUY,
-            entry_timing=timing["primary"],
-            entry_price=signal.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],
-            pre_conditions=[
-                "次日高开2%-5%",
-                "竞价量>前日8%",
-                "不跌破5日线"
-            ],
-            cancel_conditions=[
-                "低开",
-                "开盘后快速跌破昨日最低价",
-                "15分钟未上板"
-            ],
-            confidence=signal.confidence,
-            reason=signal.reason,
-            add_to_watchlist=True
-        )
-    
-    def _plan_weak_to_strong(self, signal, timing, date) -> TradePlan:
-        """弱转强计划"""
-        return TradePlan(
-            pattern_type="弱转强",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.BUY,
-            entry_timing=timing["primary"],
-            entry_price=signal.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],  # heavy
-            pre_conditions=[
-                "次日高开2%-7%",
-                "竞价量>8%",
-                "竞价价格向上"
-            ],
-            cancel_conditions=[
-                "低开或平开",
-                "开盘后回踩>2%",
-                "10分钟未上板"
-            ],
-            confidence=signal.confidence,
-            reason=signal.reason,
-            add_to_watchlist=True
-        )
-    
-    def _plan_first_board_breakout(self, signal, timing, date) -> TradePlan:
-        """首板突破计划"""
-        return TradePlan(
-            pattern_type="首板突破",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.BUY,
-            entry_timing=timing["primary"],
-            entry_price=signal.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],  # light
-            pre_conditions=[
-                "9:40前涨停",
-                "封单持续增加",
-                "板块效应明显"
-            ],
-            cancel_conditions=[
-                "涨停时间>10:00",
-                "反复炸板",
-                "板块跟风不足"
-            ],
-            confidence=signal.confidence,
-            reason=signal.reason,
-            add_to_watchlist=True
-        )
-    
-    def _plan_auction_volume(self, signal, timing, date) -> TradePlan:
-        """竞价爆量计划"""
-        return TradePlan(
-            pattern_type="竞价爆量",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.BUY,
-            entry_timing=timing["primary"],  # 竞价末段
-            entry_price=signal.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],
-            pre_conditions=[
-                "竞价量>前日8%",
-                "高开1%-7%",
-                "竞价价格最后一分钟向上"
-            ],
-            cancel_conditions=[
-                "竞价末端回落",
-                "开盘低开",
-                "开盘无量"
-            ],
-            confidence=signal.confidence,
-            reason=signal.reason,
-            add_to_watchlist=True
-        )
-    
-    def _plan_blast_reseal(self, signal, timing, date) -> TradePlan:
-        """炸板回封计划（次日执行）"""
-        return TradePlan(
-            pattern_type="炸板回封（次日）",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.WATCH,  # 先观察
-            entry_timing=timing["primary"],
-            entry_price=0,  # 次日开盘价
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],  # light
-            pre_conditions=[
-                "次日高开2%+",
-                "竞价量>8%",
-                "不跌破昨日收盘价"
-            ],
-            cancel_conditions=[
-                "低开",
-                "开盘后跌破昨日最低价",
-                "10分钟未翻红"
-            ],
-            confidence=signal.confidence,
-            reason=f"前日炸板回封，次日观察弱转强: {signal.reason}",
-            add_to_watchlist=True
-        )
-    
-    def _plan_position_battle(self, signal, timing, date) -> TradePlan:
-        """卡位板计划"""
-        return TradePlan(
-            pattern_type="卡位板",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.BUY,
-            entry_timing=timing["primary"],
-            entry_price=signal.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],
-            pre_conditions=[
-                "低位股涨停瞬间",
-                "高位股疲态（烂板/后封）",
-                "领先时间>5分钟"
-            ],
-            cancel_conditions=[
-                "高位股回封早于低位股",
-                "低位股炸板",
-                "板块整体走弱"
-            ],
-            confidence=signal.confidence,
-            reason=signal.reason,
-            add_to_watchlist=True
-        )
-    
-    def _plan_second_wave(self, signal, timing, date) -> TradePlan:
-        """龙二波计划"""
-        # 判断是启动日还是次日
-        if "今日首板" in signal.reason:
-            entry = timing["primary"]  # 早盘打板
-        else:
-            entry = timing["secondary"]  # 次日竞价
+    def _classify_resonance(self, zt_count, sector_change, large_cap_change, zt_avg) -> ResonanceType:
+        """判断共振类型"""
+        # 强共振：数量多+板块涨+大票动
+        if (zt_count >= 5 and sector_change >= 0.03 and 
+            large_cap_change >= 0.02 and zt_avg >= 9.8):
+            return ResonanceType.STRONG
         
-        return TradePlan(
-            pattern_type="龙二波",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.BUY,
-            entry_timing=entry,
-            entry_price=signal.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],
-            pre_conditions=[
-                "启动日：首板打板确认",
-                "次日：高开2%+竞价量8%"
-            ],
-            cancel_conditions=[
-                "低开",
-                "跌破10日线",
-                "无板块支持"
-            ],
-            confidence=signal.confidence,
-            reason=signal.reason,
-            add_to_watchlist=True
-        )
+        # 数量引领：数量多但板块一般
+        if zt_count >= 5 and sector_change < 0.03:
+            return ResonanceType.QUANTITY_LEADS
+        
+        # 价格引领：数量少但板块涨
+        if zt_count < 5 and zt_count >= 2 and sector_change >= 0.03:
+            return ResonanceType.PRICE_LEADS
+        
+        # 弱共振：都弱
+        if zt_count >= 2 and sector_change >= 0.015:
+            return ResonanceType.WEAK
+        
+        return ResonanceType.NONE
     
-    def _plan_dragon_pullback(self, signal, timing, date) -> TradePlan:
-        """龙回头计划"""
-        return TradePlan(
-            pattern_type="龙回头",
-            stock_code=signal.stock_code,
-            stock_name=signal.stock_name,
-            action=TradeAction.BUY,
-            entry_timing=timing["primary"],
-            entry_price=signal.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            position_size=timing["position"],  # light
-            pre_conditions=[
-                "回踩MA10/MA20",
-                "缩量至前期30%",
-                "出现阳线反弹"
-            ],
-            cancel_conditions=[
-                "跌破均线",
-                "放量下跌",
-                "板块退潮"
-            ],
-            confidence=signal.confidence,
-            reason=signal.reason,
-            add_to_watchlist=True
-        )
-    
-    def _plan_to_dict(self, plan: TradePlan) -> Dict:
-        """转换为字典"""
+    def _lookup_decision(self, trend: TrendStage, resonance: ResonanceType) -> Dict:
+        """查询决策矩阵"""
+        key = (trend, resonance)
+        
+        # 精确匹配
+        if key in self.DECISION_MATRIX:
+            return self.DECISION_MATRIX[key]
+        
+        # 模糊匹配（ANY）
+        for (t, r), decision in self.DECISION_MATRIX.items():
+            if t == trend and r == ResonanceType.ANY:
+                return decision
+        
+        # 默认
         return {
-            "模式": plan.pattern_type,
-            "代码": plan.stock_code,
-            "名称": plan.stock_name,
-            "动作": plan.action.value,
-            "介入时机": plan.entry_timing.value,
-            "目标价": plan.entry_price,
-            "止损价": plan.stop_loss,
-            "止盈价": plan.take_profit,
-            "仓位": plan.position_size,
-            "前置条件": "; ".join(plan.pre_conditions),
-            "取消条件": "; ".join(plan.cancel_conditions),
-            "置信度": plan.confidence,
-            "理由": plan.reason,
-            "加入观察池": plan.add_to_watchlist
+            'signal': f'{trend.value}-{resonance.value}',
+            'priority': 5,
+            'action': '观察',
+            'position': 'none',
+            'risk': '不明确状态'
         }
-    
-    # ==================== 当日实时信号 ====================
-    
-    def real_time_check(self, 
-                       current_time: time,
-                       auction_data: Dict,
-                       tick_data: Dict,
-                       watchlist: List[TradePlan]) -> List[Dict]:
-        """
-        当日实时检查，触发交易信号
-        """
-        triggered = []
-        
-        for plan in watchlist:
-            # 检查是否到达介入时机
-            if not self._is_in_timing_window(current_time, plan.entry_timing):
-                continue
-            
-            # 检查是否满足条件
-            check_result = self._check_conditions(plan, auction_data, tick_data)
-            
-            if check_result['should_execute']:
-                triggered.append({
-                    "plan": plan,
-                    "action": "EXECUTE",
-                    "price": check_result['price'],
-                    "reason": check_result['reason']
-                })
-            elif check_result['should_cancel']:
-                triggered.append({
-                    "plan": plan,
-                    "action": "CANCEL",
-                    "reason": check_result['reason']
-                })
-        
-        return triggered
-    
-    def _is_in_timing_window(self, current: time, target: TimeSlot) -> bool:
-        """检查当前时间是否在介入窗口"""
-        windows = {
-            TimeSlot.AUCTION_END: (time(9, 24, 30), time(9, 25, 0)),
-            TimeSlot.OPEN: (time(9, 30, 0), time(9, 31, 0)),
-            TimeSlot.EARLY_MORNING: (time(9, 31, 0), time(10, 0, 0)),
-            TimeSlot.MORNING: (time(10, 0, 0), time(11, 30, 0)),
-            TimeSlot.AFTERNOON: (time(13, 0, 0), time(14, 30, 0)),
-            TimeSlot.LATE_AFTERNOON: (time(14, 30, 0), time(15, 0, 0)),
-        }
-        
-        if target not in windows:
-            return False
-        
-        start, end = windows[target]
-        return start <= current <= end
-    
-    def _check_conditions(self, plan: TradePlan, auction: Dict, tick: Dict) -> Dict:
-        """检查计划的前置条件和取消条件"""
-        # 简化实现，实际应根据模式类型检查具体数据
-        return {
-            'should_execute': True,
-            'should_cancel': False,
-            'price': plan.entry_price,
-            'reason': "条件满足"
-        }
-    
-    # ==================== 生成交易报告 ====================
-    
-    def generate_trade_report(self, plans_df: pd.DataFrame, date: str) -> str:
-        """生成交易计划报告"""
-        if plans_df.empty:
-            return f"{date} 无交易计划"
-        
-        report = []
-        report.append(f"\n{'='*60}")
-        report.append(f"交易执行计划 - {date}")
-        report.append(f"{'='*60}\n")
-        
-        # 按介入时机分组
-        for timing in TimeSlot:
-            group = plans_df[plans_df['介入时机'] == timing.value]
-            if group.empty:
-                continue
-            
-            report.append(f"\n【{timing.value}】")
-            report.append(f"{'-'*40}")
-            
-            for _, row in group.head(3).iterrows():  # 每组最多3只
-                report.append(f"\n{row['模式']} | {row['名称']}({row['代码']})")
-                report.append(f"  动作: {row['动作']} | 仓位: {row['仓位']}")
-                report.append(f"  目标价: {row['目标价']:.2f} | 止损: {row['止损价']:.2f}")
-                report.append(f"  前置: {row['前置条件']}")
-                report.append(f"  取消: {row['取消条件']}")
-                report.append(f"  置信度: {row['置信度']:.0%} | {row['理由'][:30]}...")
-        
-        report.append(f"\n{'='*60}")
-        return "\n".join(report)
 
-# ==================== 使用示例 ====================
+# ==================== 实战输出 ====================
+
+def generate_linked_report(states: List[SectorState]) -> str:
+    """
+    生成联动状态报告（散户极简版）
+    """
+    # 按优先级排序
+    states.sort(key=lambda x: (x.priority, -x.key_metrics.get('今日涨停', 0)))
+    
+    report = []
+    report.append("=" * 70)
+    report.append("板块联动状态报告")
+    report.append("=" * 70)
+    
+    # 立即行动（优先级1-2）
+    urgent = [s for s in states if s.priority <= 2]
+    if urgent:
+        report.append(f"\n🔥【立即行动】{len(urgent)}个板块")
+        for s in urgent:
+            report.append(f"\n【{s.combined_signal}】{s.key_metrics.get('L3行业', '未知')}")
+            report.append(f"  趋势：{s.trend.value} | 共振：{s.resonance.value}")
+            report.append(f"  涨停：{s.key_metrics.get('今日涨停', 0)}只 | "
+                         f"板块{s.key_metrics.get('板块涨幅', 'N/A')}")
+            report.append(f"  👉 {s.action}")
+            report.append(f"  仓位：{s.position_size} | ⚠️ {s.risk_warning}")
+    
+    # 观察池（优先级3-4）
+    watch = [s for s in states if 3 <= s.priority <= 4]
+    if watch:
+        report.append(f"\n👀【观察池】{len(watch)}个板块")
+        for s in watch:
+            report.append(f"  • {s.combined_signal}：{s.action}")
+    
+    # 回避（风险信号）
+    avoid = [s for s in states if '退潮' in s.trend.value]
+    if avoid:
+        report.append(f"\n❌【坚决回避】{len(avoid)}个板块")
+        for s in avoid:
+            report.append(f"  • {s.key_metrics.get('L3行业', '未知')}：{s.trend.value}")
+    
+    report.append("\n" + "=" * 70)
+    return "\n".join.join(report)
+
+# ==================== 测试 ====================
 
 if __name__ == "__main__":
-    print("统一交易执行引擎加载完成")
-    print("\n各模式介入时机汇总：")
-    print("-" * 40)
+    engine = SectorStateEngine()
     
-    engine = UnifiedExecutionEngine(None, None)
+    # 测试案例：强共振启动
+    state1 = engine.calculate_combined_state(
+        today_zt=6, yesterday_zt=0, count_3d=6, count_5d=6, count_20d=6,
+        sector_change=0.04, large_cap_change=0.03, zt_avg_change=10.0
+    )
     
-    for pattern, config in engine.timing_config.items():
-        primary = config['primary'].value if config['primary'] else "无"
-        secondary = config['secondary'].value if config['secondary'] else "无"
-        print(f"\n{pattern}:")
-        print(f"  首选: {primary}")
-        print(f"  备选: {secondary}")
-        print(f"  仓位: {config['position']}")
-'''
-
-with open("a_stock_sentiment_system/core/execution_engine.py", "w", encoding="utf-8") as f:
-    f.write(execution_engine_content)
-
-print("✅ core/execution_engine.py 创建完成")
-print("\n核心功能：")
-print("1. 复盘后自动生成次日交易计划（按介入时间排序）")
-print("2. 当日实时检查条件触发")
-print("3. 统一的仓位管理和风控")
-print("4. 生成可执行的交易报告")
+    # 测试案例：数量爆发-虚热
+    state2 = engine.calculate_combined_state(
+        today_zt=8, yesterday_zt=2, count_3d=12, count_5d=10, count_20d=8,
+        sector_change=0.015, large_cap_change=0.005, zt_avg_change=9.5
+    )
+    
+    print("案例1：强共振启动")
+    print(f"  联动信号：{state1.combined_signal}")
+    print(f"  行动：{state1.action}")
+    print(f"  仓位：{state1.position_size}")
+    
+    print("\n案例2：数量爆发-虚热")
+    print(f"  联动信号：{state2.combined_signal}")
+    print(f"  行动：{state2.action}")
+    print(f"  风险：{state2.risk_warning}")

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict
 import pandas as pd
+import numpy as np
 import loguru
 
 # 添加项目路径
@@ -22,8 +23,9 @@ from core.industry_mapper import IndustryMapper
 from core.sentiment_engine import SentimentEngine
 from core.pattern_recognition import PatternRecognition
 from core.report_generator import ReportGenerator
-from core.sector_heat_calculator import SectorHeatCalculator
+from core.sector_heat_v2 import SectorHeatCalculatorV2
 from core.execution_engine import UnifiedExecutionEngine
+from core.retail_trader_support import RetailTraderSupport
 
 logger = loguru.logger
 
@@ -34,6 +36,7 @@ class SentimentSystem:
         self.engine = SentimentEngine()
         self.reporter = ReportGenerator(OUTPUT_DIR)
         self.execution_engine = None  # 延迟初始化
+        self.retail_support = None  # 散户支持模块延迟初始化
         self.today = datetime.now().strftime("%Y%m%d")
         self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
         
@@ -71,7 +74,7 @@ class SentimentSystem:
         logger.info("[2/5] 构建行业层级映射...")
         hierarchy_df = self.mapper.build_hierarchy_dataframe(zt_pool)
         if not hierarchy_df.empty:
-            logger.info(f"层级映射完成，覆盖 {hierarchy_df['L3_Industry'].nunique()} 个三级行业")
+            logger.info(f"层级映射完成，覆盖 {hierarchy_df['L2_Industry'].nunique()} 个二级行业")
         
         # 3. 情绪分析
         logger.info("[3/5] 计算情绪指标...")
@@ -86,7 +89,7 @@ class SentimentSystem:
         logger.info("[4/5] 识别交易模式...")
         pr = PatternRecognition(self.dm)
         patterns = pr.scan_all_patterns(date, self.yesterday)
-        
+
         total_signals = sum(len(v) for v in patterns.values())
         logger.info(f"识别到 {total_signals} 个交易信号")
         for ptype, signals in patterns.items():
@@ -97,31 +100,23 @@ class SentimentSystem:
         logger.info("[5/5] 计算综合板块权重（当日+20日）...")
         display_mainline_df = self._calculate_combined_mainline(mainline_df, hierarchy_df)
         
-        # 6. 多维度板块热度计算（3日/5日/20日）
-        logger.info("[6/6] 计算多维度板块热度（3日/5日/20日）...")
-        heat_calculator = SectorHeatCalculator()
-        sector_heat_df = self._calculate_sector_heat(heat_calculator, date)
+        # 6. 多维度板块热度计算 V2（散户聚焦版）
+        logger.info("[6/6] 计算多维度板块热度 V2（散户聚焦版）...")
+        heat_calculator = SectorHeatCalculatorV2()
+        sector_heat_df = self._calculate_sector_heat(heat_calculator, date, hierarchy_df)
         
-        # 输出板块分类结果
+        # 输出板块信号（V2版本输出优先级、行动建议等）
         if not sector_heat_df.empty:
-            new_mainlines = sector_heat_df[sector_heat_df['板块分类'] == '新主线候选']
-            old_mainlines = sector_heat_df[sector_heat_df['板块分类'] == '老主线确认']
-            decline_warnings = sector_heat_df[sector_heat_df['板块分类'] == '退潮预警']
-            
-            if not new_mainlines.empty:
-                logger.info(f"🚀 新主线候选: {len(new_mainlines)}个")
-                for _, row in new_mainlines.head(3).iterrows():
-                    logger.info(f"   {row['L3_Industry']}: 动量{row['动量加速度']:.1%}, 综合得分{row['综合得分']:.1f}")
-            
-            if not old_mainlines.empty:
-                logger.info(f"📈 老主线确认: {len(old_mainlines)}个")
-                for _, row in old_mainlines.head(3).iterrows():
-                    logger.info(f"   {row['L3_Industry']}: 20日{row['20日涨停数']}家, 综合得分{row['综合得分']:.1f}")
-            
-            if not decline_warnings.empty:
-                logger.info(f"⚠️  退潮预警: {len(decline_warnings)}个")
-                for _, row in decline_warnings.head(3).iterrows():
-                    logger.info(f"   {row['L3_Industry']}: 动量{row['动量加速度']:.1%}, 3日{row['3日涨停数']}家")
+            logger.info(f"✓ 板块热度分析完成，发现 {len(sector_heat_df)} 个 actionable 信号")
+            for _, row in sector_heat_df.iterrows():
+                priority = row['优先级']
+                trend = row['趋势阶段']
+                l3 = row['二级行业']
+                action = row['行动建议']
+                confidence = row['置信度']
+                logger.info(f"  [优先级{priority}] {trend} - {l3}: {action} (置信度{confidence})")
+        else:
+            logger.info("  无明确板块信号，建议观望")
         
         # 7. 为核心标的获取概念数据
         logger.info("[7/7] 获取核心标的所属概念...")
@@ -131,8 +126,8 @@ class SentimentSystem:
             core_stocks_df = hierarchy_df[core_stocks_mask].copy()
             
             if not core_stocks_df.empty:
-                # 获取概念数据
-                core_stocks_df = self.dm.enrich_core_stocks_concepts(core_stocks_df)
+                # 获取概念数据（使用当前分析日期）
+                core_stocks_df = self.dm.enrich_core_stocks_concepts(core_stocks_df, date)
                 # 更新hierarchy_df中的概念数据
                 hierarchy_df.loc[core_stocks_df.index, 'Concept'] = core_stocks_df['Concept']
                 logger.info(f"已获取{len(core_stocks_df)}只核心标的的概念数据")
@@ -158,7 +153,11 @@ class SentimentSystem:
         logger.info("[9/9] 生成次日交易计划...")
         self._generate_trade_plans(date, patterns)
         
-        # 10. 输出交易建议
+        # 10. 生成散户支持报告（隔夜预判、三阶过滤、剧本推演等）
+        logger.info("[10/10] 生成散户决策支持报告...")
+        self._generate_retail_support_report(date, zt_pool, hierarchy_df, patterns, sentiment)
+        
+        # 11. 输出交易建议
         self._print_trading_advice(display_mainline_df, patterns, sentiment)
     
     def _generate_trade_plans(self, date: str, patterns: Dict):
@@ -189,7 +188,7 @@ class SentimentSystem:
                     group = plans_df[plans_df['介入时机'] == timing]
                     print(f"\n【{timing}】{len(group)}只")
                     for _, row in group.head(2).iterrows():
-                        print(f"  • {row['名称']}({row['代码']}) - {row['模式']}")
+                        print(f"  - {row['名称']}({row['代码']}) - {row['模式']}")
                         print(f"    目标价:{row['目标价']:.2f} 止损:{row['止损价']:.2f} 仓位:{row['仓位']}")
                 print("="*60)
             else:
@@ -197,6 +196,88 @@ class SentimentSystem:
                 
         except Exception as e:
             logger.error(f"生成交易计划失败: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+    
+    def _generate_retail_support_report(self, date: str, today_zt: pd.DataFrame,
+                                        hierarchy_df: pd.DataFrame, patterns: Dict,
+                                        sentiment: Dict):
+        """
+        生成散户决策支持报告
+        包含：隔夜预判、三阶过滤、散户指标、剧本推演等
+        """
+        try:
+            # 初始化散户支持模块
+            if self.retail_support is None:
+                self.retail_support = RetailTraderSupport(self.dm)
+            
+            # 获取昨日涨停数据
+            yesterday_zt = self.dm.get_limit_up_pool(self.yesterday)
+            
+            # 1. 生成隔夜决策清单
+            decisions = self.retail_support.generate_overnight_decisions(
+                today_zt, yesterday_zt, patterns
+            )
+            
+            # 2. 计算散户特供指标
+            indicators = self.retail_support.calculate_retail_indicators(
+                date, self.yesterday
+            )
+            
+            # 3. 推演次日剧本
+            today_data = {
+                'sentiment': sentiment,
+                'mainline_df': hierarchy_df
+            }
+            scenarios = self.retail_support.forecast_next_day_scenarios(today_data)
+            
+            # 4. 生成报告
+            report = self.retail_support.generate_overnight_report(
+                decisions, indicators, scenarios
+            )
+            
+            # 5. 保存报告
+            report_file = Path(OUTPUT_DIR) / f"散户决策报告_{date}.txt"
+            with open(report_file, 'w', encoding='utf-8') as f:
+                f.write(report)
+            logger.info(f"✓ 散户决策报告已保存: {report_file}")
+            
+            # 6. 打印摘要 - 使用格式化函数
+            def fmt_val(val, decimal_places=2):
+                if val is None:
+                    return 0.0
+                if isinstance(val, (np.integer, np.int64, np.int32)):
+                    return int(val)
+                if isinstance(val, (np.floating, np.float64, np.float32)):
+                    return round(float(val), decimal_places)
+                if isinstance(val, (int, float)):
+                    if isinstance(val, float):
+                        return round(val, decimal_places)
+                    return val
+                return val
+            
+            print("\n" + "="*60)
+            print("【散户决策支持摘要】")
+            print("="*60)
+            print(f"\n[散户特供指标]")
+            print(f"  昨日涨停溢价率: {fmt_val(indicators.get('昨日涨停溢价率', 0), 2)}%")
+            print(f"  一字板占比: {fmt_val(indicators.get('一字板占比', 0), 1)}%")
+            print(f"  策略建议: {indicators.get('次日策略建议', '稳健')}")
+            
+            print(f"\n[隔夜决策清单] ({len(decisions)}项):")
+            for decision in decisions[:5]:
+                print(f"  - {decision.stock_name}({decision.stock_code}) - {decision.decision_type}")
+                print(f"    适配度: {decision.retail_suitability} | {decision.suggested_action}")
+            
+            print(f"\n[次日剧本推演]:")
+            for i, scenario in enumerate(scenarios[:3], 1):
+                print(f"  {i}. {scenario.scenario_name} (概率{scenario.probability:.0%})")
+                print(f"     动作: {scenario.retail_action}")
+            
+            print("="*60)
+            
+        except Exception as e:
+            logger.error(f"生成散户支持报告失败: {e}")
             import traceback
             logger.debug(traceback.format_exc())
     
@@ -209,24 +290,24 @@ class SentimentSystem:
         # 情绪判断
         temp = sentiment.get('temperature', '')
         if '高潮' in temp:
-            print("⚠️  市场情绪高潮，建议减仓观望，避免高位接盘")
+            print("[!] 市场情绪高潮，建议减仓观望，避免高位接盘")
         elif '冰点' in temp:
-            print("❄️  市场情绪冰点，轻仓试错或空仓等待")
+            print("[i] 市场情绪冰点，轻仓试错或空仓等待")
         elif '活跃' in temp:
-            print("🔥  市场活跃，积极参与主线板块")
+            print("[+] 市场活跃，积极参与主线板块")
         
         # 主线推荐
         if not mainline_df.empty:
-            print("\n📊 重点关注的L3板块（主线Top3）:")
+            print("\n[重点关注的L3板块 - 主线Top3]:")
             for i, row in mainline_df.head(3).iterrows():
-                print(f"  {i+1}. {row['L3_Industry']} (涨停{row['LimitUp_Count']}家, 强度{row['Strength_Score']})")
+                print(f"  {i+1}. {row['L2_Industry']} (涨停{row['LimitUp_Count']}家, 强度{row['Strength_Score']})")
         
         # 模式推荐
-        print("\n🎯 明日竞价关注标的:")
+        print("\n[明日竞价关注标的]:")
         watchlist = []
         for ptype, signals in patterns.items():
             for sig in signals[:2]:  # 每类模式取前2
-                watchlist.append(f"  • {sig.stock_name} ({sig.pattern_type}) - {sig.description}")
+                watchlist.append(f"  - {sig.stock_name} ({sig.pattern_type}) - {sig.description}")
         if watchlist:
             print("\n".join(watchlist[:5]))  # 最多显示5个
         else:
@@ -268,8 +349,8 @@ class SentimentSystem:
         # 1. 统计当日各板块涨停数
         today_stats = {}
         if not hierarchy_df.empty:
-            for l3_name, group in hierarchy_df.groupby('L3_Industry'):
-                if l3_name == '其他':
+            for l2_name, group in hierarchy_df.groupby('L2_Industry'):
+                if l2_name == '其他':
                     continue
                 
                 # 获取该组的L1和L2（取第一个非空值）
@@ -281,17 +362,14 @@ class SentimentSystem:
                 
                 # 如果L1或L2为空，尝试从行业映射获取
                 if l1 == '未知' or l2 == '未知' or l1 == '其他' or l2 == '其他':
-                    from core.industry_mapper import IndustryMapper
-                    from config.settings import INDUSTRY_MAPPING_FILE
-                    mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
-                    l2_mapped = mapper.get_l2_by_l3(l3_name)
-                    l1_mapped = mapper.get_l1_by_l2(l2_mapped)
+                    l2_mapped = self.mapper.get_l2_by_l3(l2_name)
+                    l1_mapped = self.mapper.get_l1_by_l2(l2_mapped)
                     if l2 == '未知' or l2 == '其他':
                         l2 = l2_mapped if l2_mapped != '其他' else l2
                     if l1 == '未知' or l1 == '其他':
                         l1 = l1_mapped if l1_mapped != '其他' else l1
                 
-                today_stats[l3_name] = {
+                today_stats[l2_name] = {
                     'today_count': len(group),
                     'max_board': group['BoardHeight'].max() if 'BoardHeight' in group.columns else 1,
                     'l1': l1,
@@ -307,13 +385,13 @@ class SentimentSystem:
             
             # 3. 合并数据计算综合权重
             for _, row in mainline_20d_df.iterrows():
-                l3_name = row['L3_Industry']
+                l2_name = row['L2_Industry']
                 
                 # 20日数据
                 count_20d = row['Total_Limit_Up']
                 
                 # 当日数据（如果有）
-                today_data = today_stats.get(l3_name, {})
+                today_data = today_stats.get(l2_name, {})
                 today_count = today_data.get('today_count', 0)
                 today_max_board = today_data.get('max_board', 1)
                 
@@ -324,7 +402,7 @@ class SentimentSystem:
                 )
                 
                 # 获取东财行业板块因子
-                sector_factor = sector_dict.get(l3_name, {})
+                sector_factor = sector_dict.get(l2_name, {})
                 dc_composite = sector_factor.get('composite_strength', 0)
                 dc_up_down_ratio = sector_factor.get('up_down_ratio', 0)
                 dc_leading_strength = sector_factor.get('leading_strength', 0)
@@ -341,7 +419,7 @@ class SentimentSystem:
                 combined_data.append({
                     'L1_Industry': row['L1_Industry'],
                     'L2_Industry': row['L2_Industry'],
-                    'L3_Industry': l3_name,
+                    'L2_Industry': l2_name,
                     'LimitUp_Count': count_20d,  # 兼容报告生成器
                     'LimitUp_Count_20d': count_20d,
                     'LimitUp_Count_Today': today_count,
@@ -357,10 +435,10 @@ class SentimentSystem:
                 })
             
             # 4. 检查当日新出现的强势板块（不在20日统计中但当日有多只涨停）
-            for l3_name, data in today_stats.items():
-                if l3_name not in mainline_20d_df['L3_Industry'].values and data['today_count'] >= 2:
+            for l2_name, data in today_stats.items():
+                if l2_name not in mainline_20d_df['L2_Industry'].values and data['today_count'] >= 2:
                     # 获取东财行业板块因子
-                    sector_factor = sector_dict.get(l3_name, {})
+                    sector_factor = sector_dict.get(l2_name, {})
                     dc_composite = sector_factor.get('composite_strength', 0)
                     dc_up_down_ratio = sector_factor.get('up_down_ratio', 0)
                     dc_leading_strength = sector_factor.get('leading_strength', 0)
@@ -379,18 +457,15 @@ class SentimentSystem:
                     # 如果L1或L2是"其他"，尝试从行业映射获取
                     if l1 == '其他' or l2 == '其他' or l1 == '未知' or l2 == '未知':
                         # 从mapper获取正确的行业信息
-                        from core.industry_mapper import IndustryMapper
-                        from config.settings import INDUSTRY_MAPPING_FILE
-                        mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
-                        l2_correct = mapper.get_l2_by_l3(l3_name)
-                        l1_correct = mapper.get_l1_by_l2(l2_correct)
+                        l2_correct = self.mapper.get_l2_by_l3(l2_name)
+                        l1_correct = self.mapper.get_l1_by_l2(l2_correct)
                         l1 = l1_correct if l1_correct != '其他' else l1
                         l2 = l2_correct if l2_correct != '其他' else l2
                     
                     combined_data.append({
                         'L1_Industry': l1,
                         'L2_Industry': l2,
-                        'L3_Industry': l3_name,
+                        'L2_Industry': l2_name,
                         'LimitUp_Count': data['today_count'],  # 兼容报告生成器
                         'LimitUp_Count_20d': 0,
                         'LimitUp_Count_Today': data['today_count'],
@@ -405,7 +480,7 @@ class SentimentSystem:
                         'DC_UpNum': sector_factor.get('up_num', 0),
                         'DC_DownNum': sector_factor.get('down_num', 0)
                     })
-                    logger.info(f"发现新强势板块: {l3_name} (当日{data['today_count']}只涨停)")
+                    logger.info(f"发现新强势板块: {l2_name} (当日{data['today_count']}只涨停)")
         else:
             # 如果没有20日数据，使用当日数据
             logger.info("20日统计数据不存在，使用当日数据")
@@ -419,34 +494,69 @@ class SentimentSystem:
             # 显示TOP5
             for i, row in result_df.head(5).iterrows():
                 new_flag = " [NEW]" if row.get('Is_New', False) else ""
-                logger.info(f"  {row['L3_Industry']}: 强度{row['Strength_Score']:.1f} (20日{row['LimitUp_Count_20d']}, 当日{row['LimitUp_Count_Today']}){new_flag}")
+                logger.info(f"  {row['L2_Industry']}: 强度{row['Strength_Score']:.1f} (20日{row['LimitUp_Count_20d']}, 当日{row['LimitUp_Count_Today']}){new_flag}")
         
         return result_df
     
-    def _calculate_sector_heat(self, calculator, date: str) -> pd.DataFrame:
+    def _calculate_sector_heat(self, calculator, date: str, today_zt: pd.DataFrame) -> pd.DataFrame:
         """
-        计算多维度板块热度（3日/5日/20日）
-        """
-        # 获取最近20个交易日的涨停数据
-        limit_up_history = {}
+        计算多维度板块热度 V2（修复版）
         
-        for i in range(20):
-            check_date = (datetime.strptime(date, "%Y%m%d") - timedelta(days=i)).strftime("%Y%m%d")
+        修复：正确处理非交易日，确保拿满20个交易日数据
+        """
+        
+        limit_up_history = {}
+        current_date = datetime.strptime(date, "%Y%m%d")
+        days_checked = 0  # 已检查的日历天数
+        max_calendar_days = 60  # 最多检查60个日历日（约3个月）
+        
+        while len(limit_up_history) < 20 and days_checked < max_calendar_days:
+            # 从昨天开始，逐日往前检查
+            check_date = (current_date - timedelta(days=days_checked + 1)).strftime("%Y%m%d")
+            days_checked += 1
             
             # 验证是否为交易日
-            is_valid, actual_date, _ = self.dm.validate_trade_date(check_date)
-            if actual_date not in limit_up_history:
-                zt_pool = self.dm.get_limit_up_pool(actual_date)
-                if not zt_pool.empty:
-                    # 构建层级数据
-                    hierarchy = self.mapper.build_hierarchy_dataframe(zt_pool)
-                    limit_up_history[actual_date] = hierarchy
+            is_valid, actual_date, is_trade_date = self.dm.validate_trade_date(check_date)
+            
+            # 如果不是交易日，跳过（不加入history，但days_checked已+1）
+            if not is_trade_date:
+                logger.debug(f"  {check_date} 非交易日，跳过")
+                continue
+            
+            # 已经获取过该日期，跳过（防止重复）
+            if actual_date in limit_up_history:
+                continue
+            
+            # 获取该交易日涨停数据
+            zt_pool = self.dm.get_limit_up_pool(actual_date)
+            
+            if not zt_pool.empty:
+                # 构建层级数据
+                hierarchy = self.mapper.build_hierarchy_dataframe(zt_pool)
+                limit_up_history[actual_date] = hierarchy
+                logger.info(f"  ✅ 获取交易日数据: {actual_date}, "
+                        f"进度 {len(limit_up_history)}/20")
+            
+            # 即使数据为空，也算作一个交易日（记录存在但无涨停）
+            else:
+                limit_up_history[actual_date] = pd.DataFrame()  # 空数据占位
+                logger.info(f"  ⚠️ {actual_date} 无涨停数据, "
+                        f"进度 {len(limit_up_history)}/20")
         
-        # 使用计算器分析板块热度
-        sector_heat_df = calculator.analyze_from_limit_up_data(limit_up_history, self.mapper)
+        # 检查是否拿满20个交易日
+        if len(limit_up_history) < 20:
+            logger.warning(f"仅获取到 {len(limit_up_history)} 个交易日数据"
+                        f"（目标20个），可能数据不足")
+        
+        logger.info(f"历史数据获取完成：共 {len(limit_up_history)} 个交易日")
+        
+        # 使用V2计算器分析
+        sector_heat_df = calculator.analyze_all_sectors_v2(
+            today_zt, limit_up_history, self.mapper
+        )
         
         return sector_heat_df
-    
+
     def _is_core_stock(self, row) -> bool:
         """
         判断是否为10点半前封板的核心标的
@@ -462,7 +572,7 @@ class SentimentSystem:
         if limit_up_time and limit_up_time <= '10:30:00':
             l1 = row.get('L1_Industry', '')
             l2 = row.get('L2_Industry', '')
-            l3 = row.get('L3_Industry', '')
+            l3 = row.get('L2_Industry', '')
             
             # 跳过"其他"行业
             if l3 != '其他' and l2 != '其他' and l1 != '其他':
@@ -515,7 +625,7 @@ def main():
 
 if __name__ == "__main__":
     # 如果直接运行，执行今日分析
-    print("🚀 A股短线情绪量化系统启动...")
+    print(">>> A股短线情绪量化系统启动...")
     print("提示: 首次运行请先在 config/settings.py 中配置Tushare Token")
     print("-" * 60)
     
@@ -524,7 +634,7 @@ if __name__ == "__main__":
         system.run_daily_analysis()
     except Exception as e:
         logger.error(f"系统运行错误: {e}")
-        print(f"❌ 运行出错: {e}")
+        print(f"[X] 运行出错: {e}")
         print("请检查:")
         print("1. 是否已安装依赖: pip install pandas tushare akshare xlsxwriter loguru")
         print("2. 是否已配置Tushare Token")

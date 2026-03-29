@@ -140,8 +140,8 @@ class IndustryMapper:
     def build_hierarchy_dataframe(self, limit_up_df: pd.DataFrame) -> pd.DataFrame:
         """
         构建层级化数据框
-        输入涨停池数据，输出带L1/L2/L3层级的结构化数据
-        使用实际的连板数和所属行业数据
+        输入涨停池数据，输出带L1/L2层级的结构化数据
+        注：涨停池数据返回的是二级行业，直接使用即可
         """
         if limit_up_df.empty:
             return pd.DataFrame()
@@ -150,8 +150,8 @@ class IndustryMapper:
         for _, row in limit_up_df.iterrows():
             code = row.get('代码', row.get('ts_code', ''))
             name = row.get('名称', row.get('name', ''))
-            # 使用实际的所属行业字段
-            l3_industry = row.get('所属行业', '')
+            # 涨停池返回的是二级行业，直接使用
+            l2_industry = row.get('所属行业', '')
             concept = row.get('所属概念', row.get('concept', ''))
             
             # 获取实际的连板数
@@ -160,28 +160,12 @@ class IndustryMapper:
                 board_height = 1
             board_height = int(board_height)
             
-            # 根据三级行业查找对应的二级和一级行业
-            l2_industry = self.get_l2_by_l3(l3_industry)
+            # 根据二级行业查找对应的一级行业
             l1_industry = self.get_l1_by_l2(l2_industry)
-            
-            # 如果找不到映射（返回"其他"），可能是L2被当作L3的情况
-            # 例如："电力"在映射中是L2，但数据中可能是L3
-            if l2_industry == '其他' and l1_industry == '其他':
-                # 尝试将输入当作L2来查找
-                l1_from_l2 = self.get_l1_by_l2(l3_industry)
-                if l1_from_l2 != '其他':
-                    # 输入实际上是L2，需要找到对应的L3
-                    # 使用L2下的第一个L3作为代表
-                    l3_list = self.get_l3_by_l2(l3_industry)
-                    if l3_list:
-                        l2_industry = l3_industry
-                        l1_industry = l1_from_l2
-                        l3_industry = l3_list[0]  # 使用第一个L3
             
             result.append({
                 'L1_Industry': l1_industry,  # 一级行业
-                'L2_Industry': l2_industry,  # 二级行业
-                'L3_Industry': l3_industry,  # 三级行业（使用实际数据）
+                'L2_Industry': l2_industry,  # 二级行业（直接使用原始数据）
                 'Code': code,
                 'Name': name,
                 'ChangePct': row.get('涨跌幅', row.get('pct_change', 0)),

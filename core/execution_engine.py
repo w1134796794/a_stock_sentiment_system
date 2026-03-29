@@ -14,6 +14,47 @@ import loguru
 
 logger = loguru.logger
 
+
+def format_value(val, decimal_places=2):
+    """格式化数值，处理numpy类型和精度"""
+    if val is None or pd.isna(val):
+        return ""
+    if isinstance(val, (np.integer, np.int64, np.int32)):
+        return int(val)
+    if isinstance(val, (np.floating, np.float64, np.float32)):
+        return round(float(val), decimal_places)
+    if isinstance(val, (int, float)):
+        if isinstance(val, float):
+            return round(val, decimal_places)
+        return val
+    return val
+
+
+def format_time_field(val):
+    """格式化时间字段为 hh:mm:ss"""
+    if val is None or pd.isna(val):
+        return ""
+    if isinstance(val, str):
+        # 已经是字符串，检查格式
+        val = val.strip()
+        if len(val) == 5:  # HH:MM
+            return val + ":00"
+        elif len(val) == 6:  # HHMMSS
+            return f"{val[:2]}:{val[2:4]}:{val[4:]}"
+        elif len(val) == 8 and ':' in val:  # HH:MM:SS
+            return val
+        return val
+    if isinstance(val, (int, float, np.integer, np.floating)):
+        # 数字格式，假设是 HHMMSS
+        val = int(val)
+        if val < 100:  # 可能是小时
+            return f"{val:02d}:00:00"
+        elif val < 10000:  # 可能是 HHMM
+            return f"{val//100:02d}:{val%100:02d}:00"
+        else:  # HHMMSS
+            return f"{val//10000:02d}:{(val//100)%100:02d}:{val%100:02d}"
+    return str(val)
+
 class TradeAction(Enum):
     BUY = "买入"
     WATCH = "观察"
@@ -550,12 +591,17 @@ class UnifiedExecutionEngine:
             report.append(f"{'-'*40}")
             
             for _, row in group.head(3).iterrows():  # 每组最多3只
+                # 格式化数值
+                target_price = format_value(row['目标价'], 2)
+                stop_loss = format_value(row['止损价'], 2)
+                confidence = format_value(row['置信度'] * 100, 0) if isinstance(row['置信度'], (int, float, np.number)) else row['置信度']
+                
                 report.append(f"\n{row['模式']} | {row['名称']}({row['代码']})")
                 report.append(f"  动作: {row['动作']} | 仓位: {row['仓位']}")
-                report.append(f"  目标价: {row['目标价']:.2f} | 止损: {row['止损价']:.2f}")
+                report.append(f"  目标价: {target_price} | 止损: {stop_loss}")
                 report.append(f"  前置: {row['前置条件']}")
                 report.append(f"  取消: {row['取消条件']}")
-                report.append(f"  置信度: {row['置信度']:.0%} | {row['理由'][:30]}...")
+                report.append(f"  置信度: {confidence}% | {str(row['理由'])[:30]}...")
         
         report.append(f"\n{'='*60}")
         return "\n".join(report)
@@ -595,9 +641,30 @@ class UnifiedExecutionEngine:
         plans_df = plans_df.sort_values(['排序', '置信度'], ascending=[True, False])
         plans_df = plans_df.drop(columns=['排序'])
         
+        # 格式化数据
+        formatted_df = plans_df.copy()
+        
+        # 格式化数值列（保留2位小数）
+        numeric_cols = ['目标价', '止损价', '止盈价', '置信度']
+        for col in numeric_cols:
+            if col in formatted_df.columns:
+                formatted_df[col] = formatted_df[col].apply(lambda x: format_value(x, 2))
+        
+        # 格式化时间列
+        time_cols = ['首次封板时间', '最后封板时间']
+        for col in time_cols:
+            if col in formatted_df.columns:
+                formatted_df[col] = formatted_df[col].apply(format_time_field)
+        
+        # 格式化整数列（去除np.int64）
+        int_cols = ['炸板次数', '连板数', 'BoardHeight']
+        for col in int_cols:
+            if col in formatted_df.columns:
+                formatted_df[col] = formatted_df[col].apply(lambda x: int(x) if pd.notna(x) else "")
+        
         # 保存CSV
         csv_file = output_path / f"交易计划_{date}.csv"
-        plans_df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+        formatted_df.to_csv(csv_file, index=False, encoding='utf-8-sig')
         logger.info(f"✓ 交易计划已保存: {csv_file}")
         
         return str(csv_file)
