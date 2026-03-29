@@ -57,7 +57,7 @@ class HotspotFirstBoardStrategy:
         # 首板突破专用参数
         self.params = {
             "max_5d_rise": 0.15,           # 近5日涨幅<15%（低位要求）
-            "min_volume_ratio": 2.0,       # 量比>3（资金突然介入）
+            "min_volume_ratio": 3.0,       # 量比>3（资金突然介入）
             "max_limit_up_time": "14:30",  # 最晚14:30前涨停（拒绝偷袭板）
             "hot_sector_heat_threshold": 5,   # 板块3日涨停数>=5（确认是热点）
             "fast_limit_max_time": "0940"     # 早盘秒封最长时间（9:40）

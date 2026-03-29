@@ -44,20 +44,18 @@ class TradeSignal:
 
 
 class HotspotFirstBoardStrategy:
-    def __init__(self, data_manager, sector_engine=None, mapper=None):
+    def __init__(self, data_manager, sector_engine=None):
         """
         data_manager: 数据管理器（DataManager）
         sector_engine: 板块热度引擎（可选）
-        mapper: 行业映射器（可选）
         """
         self.dm = data_manager
         self.sector_engine = sector_engine
-        self.mapper = mapper
 
         # 首板突破专用参数
         self.params = {
             "max_5d_rise": 0.15,           # 近5日涨幅<15%（低位要求）
-            "min_volume_ratio": 2.0,       # 量比>3（资金突然介入）
+            "min_volume_ratio": 3.0,       # 量比>3（资金突然介入）
             "max_limit_up_time": "14:30",  # 最晚14:30前涨停（拒绝偷袭板）
             "hot_sector_heat_threshold": 5,   # 板块3日涨停数>=5（确认是热点）
             "fast_limit_max_time": "0940"     # 早盘秒封最长时间（9:40）
@@ -103,7 +101,7 @@ class HotspotFirstBoardStrategy:
             return signals
 
         logger.info(f"识别到 {len(hot_sectors)} 个热点二级行业，开始分析首板...")
-        for i, sector in enumerate(hot_sectors):  # 打印所有热点行业
+        for i, sector in enumerate(hot_sectors[:5]):  # 只打印前5个
             logger.debug(f"  热点行业[{i+1}]: {sector['sector_name']}, 趋势: {sector['trend_stage']}")
 
         # 2. 获取昨日涨停池（用于确认首板）
@@ -165,7 +163,7 @@ class HotspotFirstBoardStrategy:
         # 使用sector_heat_v2分析板块热度
         try:
             calculator = SectorHeatCalculatorV2()
-            sector_df = calculator.analyze_all_sectors_v2(today_zt, history_pools, self.mapper)
+            sector_df = calculator.analyze_all_sectors_v2(today_zt, history_pools)
 
             if sector_df.empty:
                 logger.warning("板块分析结果为空")
@@ -174,7 +172,7 @@ class HotspotFirstBoardStrategy:
             # 筛选热点行业（爆发期、加速期、确认期）
             for _, row in sector_df.iterrows():
                 trend_stage = row.get('趋势阶段', '')
-                if trend_stage in ['爆发期', '加速期', '确认期', '启动期']:
+                if trend_stage in ['爆发期', '加速期', '确认期']:
                     sector_name = row.get('二级行业', '')
                     if sector_name:
                         hot_sectors.append({
@@ -251,16 +249,7 @@ class HotspotFirstBoardStrategy:
         logger.debug(f"    [分析{name}] 涨幅{change:.2f}% 符合条件")
 
         # 条件2: 昨日未涨停（首板确认）
-        # 兼容映射后的列名 'Code' 和原始列名 '代码'
-        yesterday_codes = []
-        if '代码' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['代码'].values
-        elif 'Code' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['Code'].values
-        elif 'ts_code' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['ts_code'].values
-
-        if not yesterday_zt.empty and code in yesterday_codes:
+        if not yesterday_zt.empty and code in yesterday_zt['代码'].values:
             logger.debug(f"    [分析{name}] 过滤: 昨日已涨停，非首板")
             return None  # 昨日已涨停，不是首板
         logger.debug(f"    [分析{name}] 昨日未涨停，首板确认")
@@ -275,11 +264,11 @@ class HotspotFirstBoardStrategy:
         # 条件4: 封单强度 > 5%
         # 尝试获取封单额（不同数据源可能使用不同列名）
         seal_amount = stock.get('封单额', 0) or stock.get('封板资金', 0)
-        float_cap = stock.get('流通市值', 1)  # 流通市值单位是亿，转换为万
+        float_cap = stock.get('流通市值', 1) * 10000  # 流通市值单位是亿，转换为万
         seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
         logger.debug(f"    [分析{name}] 封单数据: 封单额={seal_amount}, 流通市值={stock.get('流通市值', 0)}亿, 强度={seal_ratio*100:.2f}%")
-        if seal_ratio < 0.02:
-            logger.debug(f"    [分析{name}] 过滤: 封单强度{seal_ratio*100:.2f}% < 2%")
+        if seal_ratio < 0.05:
+            logger.debug(f"    [分析{name}] 过滤: 封单强度{seal_ratio*100:.2f}% < 5%")
             return None
         logger.debug(f"    [分析{name}] 封单强度{seal_ratio*100:.2f}% 符合条件")
 
@@ -386,7 +375,7 @@ class HotspotFirstBoardStrategy:
 
     def _get_daily_data(self, stock_code: str, date_str: str) -> Optional[Dict]:
         """
-        获取股票的日线数据并计算相关指标
+        获取股票的日线数据
 
         Returns:
             Dict: 包含以下字段（如果可用）：
@@ -397,69 +386,22 @@ class HotspotFirstBoardStrategy:
                 - ma10: 10日均线
         """
         try:
-            # 转换日期格式
-            dt = datetime.strptime(date_str, "%Y%m%d")
-            end_date = date_str
-            start_date = (dt - timedelta(days=30)).strftime("%Y%m%d")  # 获取近30日数据用于计算均线
-
             # 尝试从data_manager获取日线数据
-            if hasattr(self.dm, 'get_stock_daily'):
-                # 添加后缀
-                ts_code = self._add_suffix(stock_code)
-                df = self.dm.get_stock_daily(ts_code, start_date, end_date)
-
-                if not df.empty and len(df) >= 10:  # 至少需要10天数据计算MA10
-                    # 按日期排序
-                    df = df.sort_values('trade_date')
-
-                    # 计算均线
-                    df['ma5'] = df['close'].rolling(window=5).mean()
-                    df['ma10'] = df['close'].rolling(window=10).mean()
-
-                    # 获取最新数据
+            if hasattr(self.dm, 'get_daily_data'):
+                df = self.dm.get_daily_data(stock_code, date_str)
+                if not df.empty:
                     latest = df.iloc[-1]
-                    prev_5d = df.iloc[-6] if len(df) >= 6 else df.iloc[0]
-
-                    # 计算5日涨幅
-                    rise_5d = (latest['close'] - prev_5d['close']) / prev_5d['close'] if prev_5d['close'] > 0 else 0
-
-                    # 计算量比 (当日成交量 / 前5日平均成交量)
-                    if len(df) >= 6:
-                        avg_volume_5d = df.iloc[-6:-1]['vol'].mean()
-                        volume_ratio = latest['vol'] / avg_volume_5d if avg_volume_5d > 0 else 0
-                    else:
-                        volume_ratio = 0
-
-                    result = {
-                        'rise_5d': rise_5d,
-                        'volume_ratio': volume_ratio,
-                        'close': latest['close'],
-                        'ma5': latest['ma5'],
-                        'ma10': latest['ma10']
+                    return {
+                        'rise_5d': latest.get('rise_5d', 0) / 100 if 'rise_5d' in latest else 0,
+                        'volume_ratio': latest.get('volume_ratio', 0),
+                        'close': latest.get('close', 0),
+                        'ma5': latest.get('ma5', 0),
+                        'ma10': latest.get('ma10', 0)
                     }
-                    logger.debug(f"    [_get_daily_data] {stock_code} 数据获取成功: 5日涨幅={rise_5d*100:.2f}%, 量比={volume_ratio:.2f}, MA5={latest['ma5']:.2f}, MA10={latest['ma10']:.2f}")
-                    return result
-                else:
-                    logger.debug(f"    [_get_daily_data] {stock_code} 数据不足: {len(df)}条")
-            else:
-                logger.debug(f"    [_get_daily_data] data_manager没有get_stock_daily方法")
         except Exception as e:
             logger.debug(f"获取日线数据失败 {stock_code}: {e}")
 
         return None
-
-    def _add_suffix(self, stock_code: str) -> str:
-        """为股票代码添加后缀，并补齐6位"""
-        code = str(stock_code).strip()
-        if '.' not in code:
-            # 补齐6位
-            code = code.zfill(6)
-            # 根据代码规则判断交易所
-            if code.startswith('6'):
-                return f"{code}.SH"
-            else:
-                return f"{code}.SZ"
-        return code
 
     def _is_valid_limit_time(self, limit_up_time: str) -> bool:
         """

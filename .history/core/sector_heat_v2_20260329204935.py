@@ -725,17 +725,10 @@ class SectorHeatCalculatorV2:
 
                 stats[industry]['daily_counts'][date] = stats[industry]['daily_counts'].get(date, 0) + 1
 
-                # 设置L1和L2名称
                 if 'L1_Industry' in row:
                     stats[industry]['L1'] = row['L1_Industry']
                 if 'L2_Industry' in row:
                     stats[industry]['L2'] = row['L2_Industry']
-                # 如果使用'所属行业'列，则行业名称本身就是L2
-                if industry_col == '所属行业':
-                    stats[industry]['L2'] = industry
-                    # 尝试从其他列获取L1
-                    if 'L1_Industry' in row:
-                        stats[industry]['L1'] = row['L1_Industry']
 
         # 计算持续天数
         for industry, s in stats.items():

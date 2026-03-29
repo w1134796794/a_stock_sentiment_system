@@ -433,9 +433,6 @@ class PatternRecognition:
                 date = self._get_date_offset(today_date, -i)
                 pool = self.dm.get_limit_up_pool(date)
                 if not pool.empty:
-                    # 如果有mapper，进行行业映射
-                    if self.mapper:
-                        pool = self.mapper.build_hierarchy_dataframe(pool)
                     history_pools[date] = pool
             except Exception as e:
                 logger.warning(f"  获取{date}涨停池失败: {e}")

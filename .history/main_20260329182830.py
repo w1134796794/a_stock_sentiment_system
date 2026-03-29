@@ -87,7 +87,7 @@ class SentimentSystem:
         
         # 4. 模式识别
         logger.info("[4/5] 识别交易模式...")
-        pr = PatternRecognition(self.dm, mapper=self.mapper)
+        pr = PatternRecognition(self.dm)
         patterns = pr.scan_all_patterns(date, self.yesterday)
 
         total_signals = sum(len(v) for v in patterns.values())

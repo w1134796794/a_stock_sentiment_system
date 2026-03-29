@@ -57,7 +57,7 @@ class HotspotFirstBoardStrategy:
         # 首板突破专用参数
         self.params = {
             "max_5d_rise": 0.15,           # 近5日涨幅<15%（低位要求）
-            "min_volume_ratio": 2.0,       # 量比>3（资金突然介入）
+            "min_volume_ratio": 3.0,       # 量比>3（资金突然介入）
             "max_limit_up_time": "14:30",  # 最晚14:30前涨停（拒绝偷袭板）
             "hot_sector_heat_threshold": 5,   # 板块3日涨停数>=5（确认是热点）
             "fast_limit_max_time": "0940"     # 早盘秒封最长时间（9:40）
@@ -165,7 +165,7 @@ class HotspotFirstBoardStrategy:
         # 使用sector_heat_v2分析板块热度
         try:
             calculator = SectorHeatCalculatorV2()
-            sector_df = calculator.analyze_all_sectors_v2(today_zt, history_pools, self.mapper)
+            sector_df = calculator.analyze_all_sectors_v2(today_zt, history_pools)
 
             if sector_df.empty:
                 logger.warning("板块分析结果为空")
@@ -174,7 +174,7 @@ class HotspotFirstBoardStrategy:
             # 筛选热点行业（爆发期、加速期、确认期）
             for _, row in sector_df.iterrows():
                 trend_stage = row.get('趋势阶段', '')
-                if trend_stage in ['爆发期', '加速期', '确认期', '启动期']:
+                if trend_stage in ['爆发期', '加速期', '确认期']:
                     sector_name = row.get('二级行业', '')
                     if sector_name:
                         hot_sectors.append({
@@ -251,16 +251,7 @@ class HotspotFirstBoardStrategy:
         logger.debug(f"    [分析{name}] 涨幅{change:.2f}% 符合条件")
 
         # 条件2: 昨日未涨停（首板确认）
-        # 兼容映射后的列名 'Code' 和原始列名 '代码'
-        yesterday_codes = []
-        if '代码' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['代码'].values
-        elif 'Code' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['Code'].values
-        elif 'ts_code' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['ts_code'].values
-
-        if not yesterday_zt.empty and code in yesterday_codes:
+        if not yesterday_zt.empty and code in yesterday_zt['代码'].values:
             logger.debug(f"    [分析{name}] 过滤: 昨日已涨停，非首板")
             return None  # 昨日已涨停，不是首板
         logger.debug(f"    [分析{name}] 昨日未涨停，首板确认")

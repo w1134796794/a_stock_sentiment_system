@@ -39,13 +39,12 @@ class PatternSignal:
 
 class PatternRecognition:
     """模式识别引擎 - 统一调度各策略模块"""
-
-    def __init__(self, data_manager, sector_engine=None, mapper=None):
+    
+    def __init__(self, data_manager, sector_engine=None):
         self.dm = data_manager
         self.se = sector_engine
-        self.mapper = mapper
         self.lookback_days = 20
-
+        
         # 初始化各策略模块
         self._init_strategies()
     
@@ -72,7 +71,7 @@ class PatternRecognition:
         try:
             # 首板突破策略
             from core.pattern.first_board_breakout import HotspotFirstBoardStrategy
-            self.first_board_breakout = HotspotFirstBoardStrategy(self.dm, self.se, self.mapper)
+            self.first_board_breakout = HotspotFirstBoardStrategy(self.dm, self.se)
             logger.info("✓ 首板突破策略加载成功")
         except Exception as e:
             logger.warning(f"✗ 首板突破策略加载失败: {e}")
@@ -420,63 +419,58 @@ class PatternRecognition:
             return results
         
         logger.info(f"开始模式识别，今日涨停{len(today_zt)}只，昨日涨停{len(yesterday_zt)}只")
-
+        
         # 获取前日数据（用于计算连板高度）
         day_before_yesterday_date = self._get_date_offset(today_date, -2)
         day_before_yesterday_zt = self.dm.get_limit_up_pool(day_before_yesterday_date)
-
-        # 准备历史涨停池数据（用于首板突破和龙二波检测）
-        logger.info("  准备历史涨停池数据（近20日）...")
-        history_pools = {}
-        for i in range(20):
-            try:
-                date = self._get_date_offset(today_date, -i)
-                pool = self.dm.get_limit_up_pool(date)
-                if not pool.empty:
-                    # 如果有mapper，进行行业映射
-                    if self.mapper:
-                        pool = self.mapper.build_hierarchy_dataframe(pool)
-                    history_pools[date] = pool
-            except Exception as e:
-                logger.warning(f"  获取{date}涨停池失败: {e}")
-                continue
-        logger.info(f"  历史涨停池准备完成: {len(history_pools)}日数据")
-
+        
         # 1. 检测弱转强
         if not yesterday_zt.empty:
             results["弱转强"] = self.detect_weak_to_strong(
                 today_zt, yesterday_zt, day_before_yesterday_zt
             )
             logger.info(f"  弱转强: {len(results['弱转强'])}个")
-
+        
         # 2. 检测二板定龙
         if not yesterday_zt.empty:
             results["二板定龙"] = self.detect_second_board_dragon(today_zt, yesterday_zt)
             logger.info(f"  二板定龙: {len(results['二板定龙'])}个")
-
-        # 3. 检测首板突破（使用历史涨停池数据）
-        results["首板突破"] = self.detect_first_board_breakout(today_zt, yesterday_zt, today_date, history_pools)
+        
+        # 3. 检测首板突破
+        results["首板突破"] = self.detect_first_board_breakout(today_zt, yesterday_zt, today_date)
         logger.info(f"  首板突破: {len(results['首板突破'])}个")
-
+        
         # 4. 检测分歧转一致
         if not yesterday_zt.empty:
             results["分歧转一致"] = self.detect_divergence_to_consensus(today_zt, yesterday_zt)
             logger.info(f"  分歧转一致: {len(results['分歧转一致'])}个")
-
+        
         # 5. 检测卡位板
         results["卡位板"] = self.detect_position_battle(today_zt, yesterday_zt)
         logger.info(f"  卡位板: {len(results['卡位板'])}个")
-
+        
         # 6. 检测炸板回封
         results["炸板回封"] = self.detect_blast_reseal(today_zt)
         logger.info(f"  炸板回封: {len(results['炸板回封'])}个")
-
+        
         # 7. 检测龙二波（需要近15日涨停池数据）
-        if len(history_pools) >= 5:
-            results["龙二波"] = self.detect_dragon_second_wave(today_zt, history_pools)
-            logger.info(f"  龙二波: {len(results['龙二波'])}个（基于{len(history_pools)}日数据）")
+        logger.info("  准备龙二波检测数据（近15日涨停池）...")
+        recent_pools = {}
+        for i in range(15):
+            try:
+                date = self._get_date_offset(today_date, -i)
+                pool = self.dm.get_limit_up_pool(date)
+                if not pool.empty:
+                    recent_pools[date] = pool
+            except Exception as e:
+                logger.warning(f"  获取{date}涨停池失败: {e}")
+                continue
+        
+        if len(recent_pools) >= 5:
+            results["龙二波"] = self.detect_dragon_second_wave(today_zt, recent_pools)
+            logger.info(f"  龙二波: {len(results['龙二波'])}个（基于{len(recent_pools)}日数据）")
         else:
-            logger.warning(f"  龙二波: 数据不足（仅{len(history_pools)}日），跳过检测")
+            logger.warning(f"  龙二波: 数据不足（仅{len(recent_pools)}日），跳过检测")
         
         total = sum(len(v) for v in results.values())
         logger.info(f"模式识别完成，共{total}个信号")

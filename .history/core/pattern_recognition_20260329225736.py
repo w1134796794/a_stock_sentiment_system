@@ -72,7 +72,7 @@ class PatternRecognition:
         try:
             # 首板突破策略
             from core.pattern.first_board_breakout import HotspotFirstBoardStrategy
-            self.first_board_breakout = HotspotFirstBoardStrategy(self.dm, self.se, self.mapper)
+            self.first_board_breakout = HotspotFirstBoardStrategy(self.dm, self.se)
             logger.info("✓ 首板突破策略加载成功")
         except Exception as e:
             logger.warning(f"✗ 首板突破策略加载失败: {e}")
@@ -433,9 +433,6 @@ class PatternRecognition:
                 date = self._get_date_offset(today_date, -i)
                 pool = self.dm.get_limit_up_pool(date)
                 if not pool.empty:
-                    # 如果有mapper，进行行业映射
-                    if self.mapper:
-                        pool = self.mapper.build_hierarchy_dataframe(pool)
                     history_pools[date] = pool
             except Exception as e:
                 logger.warning(f"  获取{date}涨停池失败: {e}")

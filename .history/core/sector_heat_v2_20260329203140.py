@@ -616,7 +616,7 @@ class SectorHeatCalculatorV2:
     def _calculate_history_stats(self, history_pools: Dict, today_zt: pd.DataFrame = None, mapper=None) -> Dict:
         """
         计算历史统计数据 - 滚动统计方式（包含今日）
-
+        
         统计维度（包含今日）：
         - yesterday_count: 昨日涨停数（用于计算爆发力）
         - rolling_2d: 2日滚动（今+昨）
@@ -635,110 +635,74 @@ class SectorHeatCalculatorV2:
             'L1': '未知',
             'L2': '未知'
         })
-
-        # 辅助函数：获取行业列名
-        def get_industry_col(df):
-            if 'L2_Industry' in df.columns:
-                return 'L2_Industry'
-            elif '所属行业' in df.columns:
-                return '所属行业'
-            return None
-
-        # 辅助函数：处理DataFrame获取行业
-        def process_df(df, is_today=False):
-            if df.empty:
-                return df, None
-
-            # 尝试映射行业
-            if mapper:
-                try:
-                    if 'L2_Industry' not in df.columns:
-                        df = mapper.build_hierarchy_dataframe(df)
-                except Exception as e:
-                    logger.debug(f"行业映射失败: {e}")
-
-            industry_col = get_industry_col(df)
-            return df, industry_col
-
+        
         # 1. 先统计今日数据（如果传入）
         if today_zt is not None and not today_zt.empty:
-            df, industry_col = process_df(today_zt, is_today=True)
-
-            if industry_col:
-                for _, row in df.iterrows():
-                    industry = row.get(industry_col, '其他')
-                    if industry == '其他' or pd.isna(industry):
-                        continue
-
-                    # 今日数据计入所有滚动统计
-                    stats[industry]['rolling_2d'] += 1
-                    stats[industry]['rolling_3d'] += 1
-                    stats[industry]['rolling_5d'] += 1
-                    stats[industry]['rolling_20d'] += 1
-
-                    # 设置L1和L2名称
-                    if 'L1_Industry' in row:
-                        stats[industry]['L1'] = row['L1_Industry']
-                    if 'L2_Industry' in row:
-                        stats[industry]['L2'] = row['L2_Industry']
-                    # 如果使用'所属行业'列，则行业名称本身就是L2
-                    if industry_col == '所属行业':
-                        stats[industry]['L2'] = industry
-                        # 尝试从其他列获取L1
-                        if 'L1_Industry' in row:
-                            stats[industry]['L1'] = row['L1_Industry']
-
+            # 映射行业
+            df = today_zt
+            if mapper and 'L2_Industry' not in df.columns:
+                df = mapper.build_hierarchy_dataframe(df)
+            
+            for _, row in df.iterrows():
+                l3 = row.get('L2_Industry', '其他')
+                if l3 == '其他':
+                    continue
+                
+                # 今日数据计入所有滚动统计
+                stats[l3]['rolling_2d'] += 1
+                stats[l3]['rolling_3d'] += 1
+                stats[l3]['rolling_5d'] += 1
+                stats[l3]['rolling_20d'] += 1
+                
+                if 'L1_Industry' in row:
+                    stats[l3]['L1'] = row['L1_Industry']
+                if 'L2_Industry' in row:
+                    stats[l3]['L2'] = row['L2_Industry']
+        
         # 2. 统计历史数据
         dates = sorted(history_pools.keys(), reverse=True)
-
+        
         for idx, date in enumerate(dates):
             df = history_pools[date]
             if df.empty:
                 continue
-
-            df, industry_col = process_df(df)
-            if not industry_col:
-                continue
-
+            
+            # 映射行业
+            if mapper and 'L2_Industry' not in df.columns:
+                df = mapper.build_hierarchy_dataframe(df)
+            
             for _, row in df.iterrows():
-                industry = row.get(industry_col, '其他')
-                if industry == '其他' or pd.isna(industry):
+                l3 = row.get('L2_Industry', '其他')
+                if l3 == '其他':
                     continue
-
+                
                 # idx=0 是昨日（最近一天）
                 if idx == 0:
-                    stats[industry]['yesterday_count'] += 1
-
+                    stats[l3]['yesterday_count'] += 1
+                
                 # 滚动统计（历史数据累加）
                 # rolling_2d = 今日 + 昨日
                 if idx < 1:
-                    stats[industry]['rolling_2d'] += 1
+                    stats[l3]['rolling_2d'] += 1
                 # rolling_3d = 今日 + 昨日 + 前2天
                 if idx < 2:
-                    stats[industry]['rolling_3d'] += 1
+                    stats[l3]['rolling_3d'] += 1
                 # rolling_5d = 今日 + 最近4天
                 if idx < 4:
-                    stats[industry]['rolling_5d'] += 1
+                    stats[l3]['rolling_5d'] += 1
                 # rolling_20d = 今日 + 最近19天
                 if idx < 19:
-                    stats[industry]['rolling_20d'] += 1
-
-                stats[industry]['daily_counts'][date] = stats[industry]['daily_counts'].get(date, 0) + 1
-
-                # 设置L1和L2名称
+                    stats[l3]['rolling_20d'] += 1
+                
+                stats[l3]['daily_counts'][date] = stats[l3]['daily_counts'].get(date, 0) + 1
+                
                 if 'L1_Industry' in row:
-                    stats[industry]['L1'] = row['L1_Industry']
+                    stats[l3]['L1'] = row['L1_Industry']
                 if 'L2_Industry' in row:
-                    stats[industry]['L2'] = row['L2_Industry']
-                # 如果使用'所属行业'列，则行业名称本身就是L2
-                if industry_col == '所属行业':
-                    stats[industry]['L2'] = industry
-                    # 尝试从其他列获取L1
-                    if 'L1_Industry' in row:
-                        stats[industry]['L1'] = row['L1_Industry']
-
+                    stats[l3]['L2'] = row['L2_Industry']
+        
         # 计算持续天数
-        for industry, s in stats.items():
+        for l3, s in stats.items():
             sorted_dates = sorted(s['daily_counts'].keys(), reverse=True)
             continuity = 0
             for date in sorted_dates:
@@ -747,7 +711,7 @@ class SectorHeatCalculatorV2:
                 else:
                     break
             s['continuity_days'] = continuity
-
+        
         return dict(stats)
 
 
