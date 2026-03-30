@@ -426,21 +426,48 @@ class PatternRecognition:
         day_before_yesterday_zt = self.dm.get_limit_up_pool(day_before_yesterday_date)
 
         # 准备历史涨停池数据（用于首板突破和龙二波检测）
-        logger.info("  准备历史涨停池数据（近20日）...")
+        logger.info("  准备历史涨停池数据（近20个交易日）...")
         history_pools = {}
-        for i in range(20):
+        days_checked = 0
+        max_calendar_days = 60  # 最多检查60个日历日
+
+        while len(history_pools) < 20 and days_checked < max_calendar_days:
+            check_date = self._get_date_offset(today_date, -(days_checked + 1))
+            days_checked += 1
+
+            # 验证是否为交易日
+            is_valid, actual_date, message = self.dm.validate_trade_date(check_date)
+
+            # 如果不是交易日，跳过
+            if not is_valid:
+                logger.debug(f"  {check_date} 非交易日，跳过")
+                continue
+
+            # 已经获取过该日期，跳过
+            if actual_date in history_pools:
+                continue
+
+            # 获取该交易日涨停数据
             try:
-                date = self._get_date_offset(today_date, -i)
-                pool = self.dm.get_limit_up_pool(date)
+                pool = self.dm.get_limit_up_pool(actual_date)
                 if not pool.empty:
                     # 如果有mapper，进行行业映射
                     if self.mapper:
                         pool = self.mapper.build_hierarchy_dataframe(pool)
-                    history_pools[date] = pool
+                    history_pools[actual_date] = pool
+                    logger.debug(f"  ✅ 获取交易日数据: {actual_date}, 进度 {len(history_pools)}/20")
+                else:
+                    # 即使数据为空，也算作一个交易日
+                    history_pools[actual_date] = pd.DataFrame()
+                    logger.debug(f"  ⚠️ {actual_date} 无涨停数据, 进度 {len(history_pools)}/20")
             except Exception as e:
-                logger.warning(f"  获取{date}涨停池失败: {e}")
+                logger.warning(f"  获取{actual_date}涨停池失败: {e}")
                 continue
-        logger.info(f"  历史涨停池准备完成: {len(history_pools)}日数据")
+
+        if len(history_pools) < 20:
+            logger.warning(f"  仅获取到 {len(history_pools)} 个交易日数据（目标20个）")
+
+        logger.info(f"  历史涨停池准备完成: {len(history_pools)}个交易日数据")
 
         # 1. 检测弱转强
         if not yesterday_zt.empty:
