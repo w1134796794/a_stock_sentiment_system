@@ -401,19 +401,40 @@ class DataManager:
     
     def get_stock_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """获取个股历史日线数据"""
-        cache_file = self.cache_dir / f"{ts_code}_{start_date}_{end_date}.csv"
+        # 确保代码格式正确（添加后缀）
+        code = str(ts_code).strip()
+        if '.' not in code:
+            # 补齐6位
+            code = code.zfill(6)
+            # 根据代码前缀判断交易所
+            if code.startswith('6'):
+                code = f"{code}.SH"
+            else:
+                code = f"{code}.SZ"
+
+        logger.debug(f"[get_stock_daily] 获取 {code} 从 {start_date} 到 {end_date} 的日线数据")
+
+        cache_file = self.cache_dir / f"{code}_{start_date}_{end_date}.csv"
         if cache_file.exists():
+            logger.debug(f"[get_stock_daily] 从缓存加载: {cache_file}")
             return pd.read_csv(cache_file, parse_dates=['trade_date'])
-        
+
         try:
             if self.ts_pro:
-                df = self.ts_pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+                logger.debug(f"[get_stock_daily] 调用Tushare daily接口: ts_code={code}")
+                df = self.ts_pro.daily(ts_code=code, start_date=start_date, end_date=end_date)
+                logger.debug(f"[get_stock_daily] Tushare返回 {len(df)} 条数据")
                 if not df.empty:
                     df['trade_date'] = pd.to_datetime(df['trade_date'])
                     df.to_csv(cache_file, index=False)
+                    logger.debug(f"[get_stock_daily] 数据已缓存: {cache_file}")
                     return df
+                else:
+                    logger.debug(f"[get_stock_daily] Tushare返回空数据")
+            else:
+                logger.debug(f"[get_stock_daily] Tushare未初始化")
         except Exception as e:
-            logger.error(f"获取个股{ts_code}历史数据失败: {e}")
+            logger.error(f"[get_stock_daily] 获取个股{code}历史数据失败: {e}")
         return pd.DataFrame()
     
     def get_stock_5min_kline(self, code: str) -> pd.DataFrame:

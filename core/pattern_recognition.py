@@ -123,30 +123,43 @@ class PatternRecognition:
         引用: core.pattern.weak_to_strong.WeakToStrongStrategy
         """
         signals = []
-        
+
+        logger.debug(f"[弱转强] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
+
         if self.weak_to_strong is None:
-            logger.warning("弱转强策略未加载")
+            logger.warning("[弱转强] 策略未加载")
             return signals
-        
+
         if today_df.empty or yesterday_df.empty:
+            logger.debug(f"[弱转强] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
             return signals
-        
+
         try:
+            total_checked = 0
+            total_passed = 0
+
             # 遍历今日涨停股，调用策略检测
             for _, today_row in today_df.iterrows():
                 code = today_row.get('代码', '')
                 name = today_row.get('名称', '')
-                
+                total_checked += 1
+
+                logger.debug(f"[弱转强] 检测 {name}({code})...")
+
                 # 查找昨日数据
                 yest_row = yesterday_df[yesterday_df['代码'] == code]
                 if yest_row.empty:
+                    logger.debug(f"[弱转强]   {name} 昨日未涨停，跳过")
                     continue
-                
+
+                logger.debug(f"[弱转强]   {name} 昨日已涨停，继续分析...")
+
                 # 计算连板高度
                 board_height = self._calculate_board_height(
                     code, today_row, yesterday_df, day_before_yesterday_df
                 )
-                
+                logger.debug(f"[弱转强]   {name} 连板高度={board_height}")
+
                 # 构造策略需要的参数（简化版，实际使用时需要更多数据）
                 # 这里转换为PatternSignal格式返回
                 signal = self._convert_to_pattern_signal(
@@ -154,10 +167,16 @@ class PatternRecognition:
                 )
                 if signal:
                     signals.append(signal)
-                    
+                    total_passed += 1
+                    logger.debug(f"[弱转强]   {name} 生成信号 (置信度{signal.confidence:.2f})")
+                else:
+                    logger.debug(f"[弱转强]   {name} 未生成信号")
+
+            logger.info(f"[弱转强] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 通过{total_passed}只)")
+
         except Exception as e:
-            logger.error(f"弱转强检测失败: {e}")
-        
+            logger.error(f"[弱转强] 检测失败: {e}", exc_info=True)
+
         return signals
     
     def detect_second_board_dragon(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame) -> List[PatternSignal]:
@@ -166,34 +185,54 @@ class PatternRecognition:
         引用: core.pattern.second_board_dragon.SecondBoardDragonStrategy
         """
         signals = []
-        
+
+        logger.debug(f"[二板定龙] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
+
         if self.second_board_dragon is None:
-            logger.warning("二板定龙策略未加载")
+            logger.warning("[二板定龙] 策略未加载")
             return signals
-        
+
         if today_df.empty or yesterday_df.empty:
+            logger.debug(f"[二板定龙] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
             return signals
-        
+
         try:
+            total_checked = 0
+            total_passed = 0
+
             for _, yest_row in yesterday_df.iterrows():
                 code = yest_row.get('代码', '')
                 name = yest_row.get('名称', '')
-                
+                total_checked += 1
+
+                logger.debug(f"[二板定龙] 检测 {name}({code})...")
+
                 # 查找今日数据
                 today_row = today_df[today_df['代码'] == code]
                 if today_row.empty:
+                    logger.debug(f"[二板定龙]   {name} 今日未涨停，跳过")
                     continue
-                
+
+                logger.debug(f"[二板定龙]   {name} 今日涨停，检查是否为二板...")
+
+                # 检查昨日是否为首板（昨日涨停但前日未涨停）
+                # 这里简化处理，实际应该检查前日数据
                 # 检测二板定龙信号
                 signal = self._convert_to_pattern_signal(
                     code, name, "二板定龙", today_row.iloc[0], yest_row, 2
                 )
                 if signal:
                     signals.append(signal)
-                    
+                    total_passed += 1
+                    logger.debug(f"[二板定龙]   {name} 生成二板定龙信号 (置信度{signal.confidence:.2f})")
+                else:
+                    logger.debug(f"[二板定龙]   {name} 未生成信号")
+
+            logger.info(f"[二板定龙] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 通过{total_passed}只)")
+
         except Exception as e:
-            logger.error(f"二板定龙检测失败: {e}")
-        
+            logger.error(f"[二板定龙] 检测失败: {e}", exc_info=True)
+
         return signals
     
     def detect_first_board_breakout(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame = None,
@@ -248,32 +287,58 @@ class PatternRecognition:
         引用: core.pattern.divergence_to_consensus.DivergenceToConsensusStrategy
         """
         signals = []
-        
+
+        logger.debug(f"[分歧转一致] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
+
         if self.divergence_to_consensus is None:
-            logger.warning("分歧转一致策略未加载")
+            logger.warning("[分歧转一致] 策略未加载")
             return signals
-        
+
         if today_df.empty or yesterday_df.empty:
+            logger.debug(f"[分歧转一致] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
             return signals
-        
+
         try:
+            total_checked = 0
+            total_passed = 0
+
             for _, today_row in today_df.iterrows():
                 code = today_row.get('代码', '')
                 name = today_row.get('名称', '')
-                
+                total_checked += 1
+
+                logger.debug(f"[分歧转一致] 检测 {name}({code})...")
+
                 yest_row = yesterday_df[yesterday_df['代码'] == code]
                 if yest_row.empty:
+                    logger.debug(f"[分歧转一致]   {name} 昨日未涨停，跳过")
                     continue
-                
+
+                logger.debug(f"[分歧转一致]   {name} 昨日已涨停，检查分歧特征...")
+
+                # 检查昨日是否有分歧特征（炸板、放量等）
+                yest_blast = yest_row.iloc[0].get('炸板次数', 0)
+                yest_change = yest_row.iloc[0].get('涨跌幅', 0)
+                if isinstance(yest_change, str):
+                    yest_change = float(yest_change.replace('%', ''))
+
+                logger.debug(f"[分歧转一致]   {name} 昨日炸板={yest_blast}, 涨幅={yest_change:.2f}%")
+
                 signal = self._convert_to_pattern_signal(
                     code, name, "分歧转一致", today_row, yest_row.iloc[0], None
                 )
                 if signal:
                     signals.append(signal)
-                    
+                    total_passed += 1
+                    logger.debug(f"[分歧转一致]   {name} 生成信号 (置信度{signal.confidence:.2f})")
+                else:
+                    logger.debug(f"[分歧转一致]   {name} 未生成信号")
+
+            logger.info(f"[分歧转一致] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 通过{total_passed}只)")
+
         except Exception as e:
-            logger.error(f"分歧转一致检测失败: {e}")
-        
+            logger.error(f"[分歧转一致] 检测失败: {e}", exc_info=True)
+
         return signals
     
     def detect_position_battle(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
@@ -283,22 +348,28 @@ class PatternRecognition:
         引用: core.pattern.position_battle.PositionBattleStrategy
         """
         signals = []
-        
+
+        logger.debug(f"[卡位板] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
+
         if self.position_battle is None:
-            logger.warning("卡位板策略未加载")
+            logger.warning("[卡位板] 策略未加载")
             return signals
-        
+
         if today_df.empty or yesterday_df.empty:
+            logger.debug(f"[卡位板] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
             return signals
-        
+
         try:
+            logger.debug(f"[卡位板] 调用PositionBattleStrategy.detect_position_battle...")
+
             # 调用策略模块的检测方法
-            # 这里简化处理，实际应该调用self.position_battle.detect_position_battle()
-            sector_stocks = today_df  # 简化
+            sector_stocks = today_df
             battle_signals = self.position_battle.detect_position_battle(
                 sector_stocks, today_df, yesterday_df
             )
-            
+
+            logger.debug(f"[卡位板] 策略返回 {len(battle_signals)} 个原始信号")
+
             # 转换信号格式
             for bs in battle_signals:
                 signal = PatternSignal(
@@ -316,10 +387,13 @@ class PatternRecognition:
                     validation_rules=["低位抢先涨停", "封单质量优势"]
                 )
                 signals.append(signal)
-                
+                logger.debug(f"[卡位板] 转换信号: {bs.low_stock_name} 卡位 {bs.high_stock_name} (置信度{bs.confidence:.2f})")
+
+            logger.info(f"[卡位板] 检测完成: 共{len(signals)}个信号")
+
         except Exception as e:
-            logger.error(f"卡位板检测失败: {e}")
-        
+            logger.error(f"[卡位板] 检测失败: {e}", exc_info=True)
+
         return signals
     
     def detect_blast_reseal(self, today_df: pd.DataFrame) -> List[PatternSignal]:
@@ -328,71 +402,172 @@ class PatternRecognition:
         引用: core.pattern.blast_reseal.BlastResealAnalyzer
         """
         signals = []
-        
+
+        logger.debug(f"[炸板回封] 开始检测，今日涨停{len(today_df)}只")
+
         if self.blast_reseal is None:
-            logger.warning("炸板回封策略未加载")
+            logger.warning("[炸板回封] 策略未加载")
             return signals
-        
+
         if today_df.empty:
+            logger.debug("[炸板回封] 今日数据为空")
             return signals
-        
+
         try:
+            total_checked = 0
+            total_blast = 0
+            total_passed = 0
+
             for _, today_row in today_df.iterrows():
                 code = today_row.get('代码', '')
                 name = today_row.get('名称', '')
-                
+                total_checked += 1
+
                 # 检查是否有炸板
                 blast_times = today_row.get('炸板次数', 0)
                 if blast_times == 0:
                     continue
-                
+
+                total_blast += 1
+                logger.debug(f"[炸板回封] 检测 {name}({code})，炸板次数={blast_times}")
+
                 signal = self._convert_to_pattern_signal(
                     code, name, "炸板回封", today_row, None, None
                 )
                 if signal:
                     signals.append(signal)
-                    
+                    total_passed += 1
+                    logger.debug(f"[炸板回封]   {name} 生成信号 (置信度{signal.confidence:.2f})")
+                else:
+                    logger.debug(f"[炸板回封]   {name} 未生成信号")
+
+            logger.info(f"[炸板回封] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 炸板{total_blast}只, 通过{total_passed}只)")
+
         except Exception as e:
-            logger.error(f"炸板回封检测失败: {e}")
-        
+            logger.error(f"[炸板回封] 检测失败: {e}", exc_info=True)
+
         return signals
     
     def detect_dragon_second_wave(self, today_df: pd.DataFrame,
                                   recent_zt_pools: Dict[str, pd.DataFrame],
+                                  today_date: str,
                                   hot_sectors: List[str] = None) -> List[PatternSignal]:
         """
         龙二波模式识别
-        引用: core.pattern.dragon_second_wave.DragonSecondWaveStrategy
+        引用: core.pattern.dragon_second_wave.DragonSecondWaveStrategyV2.detect_second_wave
         """
         signals = []
-        
+
         if self.dragon_second_wave is None:
-            logger.warning("龙二波策略未加载")
+            logger.warning("[龙二波] 策略未加载")
             return signals
-        
-        if today_df.empty or not recent_zt_pools:
+
+        if today_df.empty:
+            logger.debug("[龙二波] 今日涨停池为空，跳过检测")
             return signals
-        
+
+        if not recent_zt_pools:
+            logger.debug("[龙二波] 历史涨停池为空，跳过检测")
+            return signals
+
+        logger.debug(f"[龙二波] 开始检测，今日涨停{len(today_df)}只，历史池{len(recent_zt_pools)}日")
+        logger.debug(f"[龙二波] 热点板块: {hot_sectors[:5] if hot_sectors else 'None'}...")
+
         try:
+            # 准备近15日涨停池（龙二波策略需要）
+            recent_15d_pools = {}
+
+            # 首先添加今日的涨停池（today_df）
+            if not today_df.empty:
+                today_pool = today_df.copy()
+                # 统一代码格式：补齐到6位
+                code_col = None
+                if '代码' in today_pool.columns:
+                    code_col = '代码'
+                elif 'Code' in today_pool.columns:
+                    code_col = 'Code'
+
+                if code_col:
+                    today_pool[code_col] = today_pool[code_col].astype(str).str.zfill(6)
+
+                recent_15d_pools[today_date] = today_pool
+                logger.debug(f"[龙二波] 添加今日涨停池: {today_date}, {len(today_pool)}条")
+
+            # 然后添加历史涨停池
+            sorted_dates = sorted(recent_zt_pools.keys(), reverse=True)
+            for date in sorted_dates[:14]:  # 只取14天历史数据，加上今天共15天
+                pool = recent_zt_pools[date].copy()
+                # 统一代码格式：补齐到6位
+                code_col = None
+                if '代码' in pool.columns:
+                    code_col = '代码'
+                elif 'Code' in pool.columns:
+                    code_col = 'Code'
+
+                if code_col and not pool.empty:
+                    pool[code_col] = pool[code_col].astype(str).str.zfill(6)
+
+                recent_15d_pools[date] = pool
+            logger.debug(f"[龙二波] 准备近15日涨停池: {list(recent_15d_pools.keys())}")
+
             # 调用策略模块的检测方法
+            total_checked = 0
+            total_passed = 0
             for _, today_row in today_df.iterrows():
                 code = today_row.get('代码', '')
                 name = today_row.get('名称', '')
-                
-                # 重建连板记录
-                record = self._rebuild_consecutive_from_pools(code, recent_zt_pools)
-                if not record['is_valid']:
-                    continue
-                
-                signal = self._convert_to_pattern_signal(
-                    code, name, "龙二波", today_row, None, None
+                total_checked += 1
+
+                # 补齐代码到6位
+                code_padded = str(code).zfill(6)
+
+                logger.debug(f"[龙二波] 检测 {name}({code} -> {code_padded})...")
+
+                # 检查板块是否热点
+                sector_hot = False
+                stock_sector = today_row.get('所属行业', '')
+                if hot_sectors and stock_sector:
+                    sector_hot = stock_sector in hot_sectors
+                    logger.debug(f"[龙二波]   {name} 所属行业: {stock_sector}, 是否热点: {sector_hot}")
+
+                # 调用DragonSecondWaveStrategyV2.detect_second_wave
+                trade_signal = self.dragon_second_wave.detect_second_wave(
+                    stock_code=code_padded,
+                    stock_name=name,
+                    today_str=today_date,
+                    recent_zt_pools=recent_15d_pools,
+                    today_data=today_row,
+                    sector_hot=sector_hot
                 )
-                if signal:
-                    signals.append(signal)
-                    
+
+                if trade_signal:
+                    total_passed += 1
+                    logger.debug(f"[龙二波]   {name} 通过检测，生成信号 (置信度{trade_signal.confidence:.2f})")
+
+                    # 将TradeSignal转换为PatternSignal
+                    pattern_signal = PatternSignal(
+                        pattern_type="龙二波",
+                        stock_code=trade_signal.stock_code,
+                        stock_name=trade_signal.stock_name,
+                        confidence=trade_signal.confidence,
+                        description=trade_signal.reason,
+                        key_metrics=trade_signal.key_metrics,
+                        entry_price=trade_signal.entry_price,
+                        stop_loss=trade_signal.stop_loss,
+                        take_profit=trade_signal.take_profit,
+                        position_size=trade_signal.position_size,
+                        validation_rules=trade_signal.validation_rules,
+                        l2_industry=stock_sector
+                    )
+                    signals.append(pattern_signal)
+                else:
+                    logger.debug(f"[龙二波]   {name} 未通过检测")
+
+            logger.info(f"[龙二波] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 通过{total_passed}只)")
+
         except Exception as e:
-            logger.error(f"龙二波检测失败: {e}")
-        
+            logger.error(f"[龙二波] 检测失败: {e}", exc_info=True)
+
         return signals
     
     # ==================== 批量扫描接口 ====================
@@ -500,7 +675,17 @@ class PatternRecognition:
 
         # 7. 检测龙二波（需要近15日涨停池数据）
         if len(history_pools) >= 5:
-            results["龙二波"] = self.detect_dragon_second_wave(today_zt, history_pools)
+            # 获取热点板块列表
+            hot_sectors = []
+            if hasattr(self, 'sector_engine') and self.sector_engine:
+                try:
+                    sector_df = self.sector_engine.analyze_all_sectors_v2(today_zt, history_pools, self.mapper)
+                    if not sector_df.empty:
+                        hot_sectors = sector_df['二级行业'].tolist()
+                except Exception as e:
+                    logger.debug(f"获取热点板块失败: {e}")
+
+            results["龙二波"] = self.detect_dragon_second_wave(today_zt, history_pools, today_date, hot_sectors)
             logger.info(f"  龙二波: {len(results['龙二波'])}个（基于{len(history_pools)}日数据）")
         else:
             logger.warning(f"  龙二波: 数据不足（仅{len(history_pools)}日），跳过检测")
@@ -574,61 +759,7 @@ class PatternRecognition:
                         height += 1
         
         return height
-    
-    def _rebuild_consecutive_from_pools(self, stock_code: str,
-                                       recent_pools: Dict[str, pd.DataFrame]) -> Dict:
-        """从近15日涨停池重建该股的连板记录"""
-        dates = sorted(recent_pools.keys())
-        zt_dates = []
-        
-        for date in dates:
-            pool = recent_pools[date]
-            if pool.empty or '代码' not in pool.columns:
-                continue
-            if stock_code in pool['代码'].values:
-                zt_dates.append(date)
-        
-        if len(zt_dates) < 4:
-            return {'is_valid': False, 'reason': '连板数不足'}
-        
-        consecutive_groups = []
-        current_group = [zt_dates[0]]
-        
-        for i in range(1, len(zt_dates)):
-            prev_date = datetime.strptime(zt_dates[i-1], "%Y%m%d")
-            curr_date = datetime.strptime(zt_dates[i], "%Y%m%d")
-            gap = (curr_date - prev_date).days
-            
-            if gap <= 2:
-                current_group.append(zt_dates[i])
-            else:
-                consecutive_groups.append(current_group)
-                current_group = [zt_dates[i]]
-        
-        consecutive_groups.append(current_group)
-        max_group = max(consecutive_groups, key=len)
-        max_boards = len(max_group)
-        
-        if max_boards < 4:
-            return {'is_valid': False, 'reason': '最大连板数不足'}
-        
-        peak_date = max_group[-1]
-        today = datetime.strptime(dates[-1], "%Y%m%d")
-        peak = datetime.strptime(peak_date, "%Y%m%d")
-        
-        if (today - peak).days > 15:
-            return {'is_valid': False, 'reason': '第一波距今太久'}
-        
-        return {
-            'is_valid': True,
-            'first_wave': {
-                'max_boards': max_boards,
-                'start_date': max_group[0],
-                'peak_date': peak_date,
-                'zt_dates': max_group
-            }
-        }
-    
+
     def _get_date_offset(self, date_str: str, offset_days: int) -> str:
         """获取指定日期偏移后的日期"""
         date = datetime.strptime(date_str, "%Y%m%d")
