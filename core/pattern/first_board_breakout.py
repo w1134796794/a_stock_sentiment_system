@@ -60,7 +60,8 @@ class HotspotFirstBoardStrategy:
             "min_volume_ratio": 1.8,       # 量比>3（资金突然介入）
             "max_limit_up_time": "14:30",  # 最晚14:30前涨停（拒绝偷袭板）
             "hot_sector_heat_threshold": 5,   # 板块3日涨停数>=5（确认是热点）
-            "fast_limit_max_time": "0940"     # 早盘秒封最长时间（9:40）
+            "fast_limit_max_time": "0940",    # 早盘秒封最长时间（9:40）
+            "max_float_cap": 100.0         # 流通市值<100亿（小盘偏好）
         }
 
     def detect_first_board_by_sectors(self,
@@ -220,11 +221,12 @@ class HotspotFirstBoardStrategy:
 
         筛选条件：
         1. 今日涨停 + 昨日未涨停（首板确认）
-        2. 涨停时间 < 14:30（拒绝偷袭板）
-        3. 封单强度 > 5%
-        4. 近5日涨幅 < 15%（低位要求）- 需要日线数据
-        5. 量比 > 1.8（资金突然介入）- 需要日线数据
-        6. 当天日线穿过5日、10日线 - 需要日线数据
+        2. 流通市值 < 100亿（小盘偏好）
+        3. 涨停时间 < 14:30（拒绝偷袭板）
+        4. 封单强度 > 5%
+        5. 近5日涨幅 < 15%（低位要求）- 需要日线数据
+        6. 量比 > 1.8（资金突然介入）- 需要日线数据
+        7. 当天日线穿过5日、10日线 - 需要日线数据
 
         Args:
             stock: 股票数据（来自涨停池）
@@ -265,7 +267,16 @@ class HotspotFirstBoardStrategy:
             return None  # 昨日已涨停，不是首板
         logger.debug(f"    [分析{name}] 昨日未涨停，首板确认")
 
-        # 条件3: 涨停时间 < 14:30（拒绝偷袭板）
+        # 条件3: 流通市值 < 100亿（小盘偏好）
+        float_cap = stock.get('流通市值', 0) / 100000000
+        if isinstance(float_cap, str):
+            float_cap = float(float_cap.replace('亿', ''))
+        if float_cap > self.params['max_float_cap']:
+            logger.debug(f"    [分析{name}] 过滤: 流通市值{float_cap:.2f}亿 > {self.params['max_float_cap']}亿")
+            return None
+        logger.debug(f"    [分析{name}] 流通市值{float_cap:.2f}亿 符合条件")
+
+        # 条件4: 涨停时间 < 14:30（拒绝偷袭板）
         limit_up_time = str(stock.get('首次封板时间', '')).strip()
         if not self._is_valid_limit_time(limit_up_time):
             logger.debug(f"    [分析{name}] 过滤: 涨停时间{limit_up_time}不符合要求(需<14:30)")
