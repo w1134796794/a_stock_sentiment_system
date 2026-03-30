@@ -57,7 +57,7 @@ class HotspotFirstBoardStrategy:
         # 首板突破专用参数
         self.params = {
             "max_5d_rise": 0.15,           # 近5日涨幅<15%（低位要求）
-            "min_volume_ratio": 2.0,       # 量比>3（资金突然介入）
+            "min_volume_ratio": 1.8,       # 量比>3（资金突然介入）
             "max_limit_up_time": "14:30",  # 最晚14:30前涨停（拒绝偷袭板）
             "hot_sector_heat_threshold": 5,   # 板块3日涨停数>=5（确认是热点）
             "fast_limit_max_time": "0940"     # 早盘秒封最长时间（9:40）
@@ -223,7 +223,7 @@ class HotspotFirstBoardStrategy:
         2. 涨停时间 < 14:30（拒绝偷袭板）
         3. 封单强度 > 5%
         4. 近5日涨幅 < 15%（低位要求）- 需要日线数据
-        5. 量比 > 3（资金突然介入）- 需要日线数据
+        5. 量比 > 1.8（资金突然介入）- 需要日线数据
         6. 当天日线穿过5日、10日线 - 需要日线数据
 
         Args:
@@ -296,10 +296,10 @@ class HotspotFirstBoardStrategy:
         elif daily_data:
             logger.debug(f"    [分析{name}] 无5日涨幅数据，跳过此条件")
 
-        # 条件6: 量比 > 3（资金突然介入）
+        # 条件6: 量比 > 1.8（资金突然介入）
         if daily_data and 'volume_ratio' in daily_data:
             if daily_data['volume_ratio'] < self.params['min_volume_ratio']:
-                logger.debug(f"    [分析{name}] 过滤: 量比{daily_data['volume_ratio']:.2f} < 3")
+                logger.debug(f"    [分析{name}] 过滤: 量比{daily_data['volume_ratio']:.2f} < {self.params['min_volume_ratio']}")
                 return None
             logger.debug(f"    [分析{name}] 量比{daily_data['volume_ratio']:.2f} 符合条件")
         elif daily_data:
@@ -321,7 +321,7 @@ class HotspotFirstBoardStrategy:
         confidence = 0.70  # 基础置信度
         confidence += min(seal_ratio * 2, 0.15)  # 封单强度加成
         if daily_data and 'volume_ratio' in daily_data:
-            confidence += min((daily_data['volume_ratio'] - 3) * 0.02, 0.10)  # 量比加成
+            confidence += min((daily_data['volume_ratio'] - self.params['min_volume_ratio']) * 0.02, 0.10)  # 量比加成
         if ma_breakthrough:
             confidence += 0.05  # 均线突破加成
         confidence = min(confidence, 0.95)
