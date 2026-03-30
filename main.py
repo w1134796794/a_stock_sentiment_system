@@ -516,11 +516,11 @@ class SentimentSystem:
             days_checked += 1
             
             # 验证是否为交易日
-            is_valid, actual_date, is_trade_date = self.dm.validate_trade_date(check_date)
-            
+            is_valid, actual_date, message = self.dm.validate_trade_date(check_date)
+
             # 如果不是交易日，跳过（不加入history，但days_checked已+1）
-            if not is_trade_date:
-                logger.debug(f"  {check_date} 非交易日，跳过")
+            if not is_valid:
+                logger.debug(f"  {check_date} 非交易日，跳过: {message}")
                 continue
             
             # 已经获取过该日期，跳过（防止重复）
