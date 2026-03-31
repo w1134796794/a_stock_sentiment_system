@@ -86,16 +86,9 @@ class HotspotFirstBoardStrategy:
         """
         signals = []
 
-        logger.debug(f"[首板突破] 开始检测，今日涨停池数量: {len(today_zt)}, 历史池数量: {len(history_pools)}, 日期: {date_str}")
-
         if today_zt.empty:
             logger.warning("涨停池为空，无法检测首板突破")
             return signals
-
-        # 打印涨停池列名和数据样例
-        logger.debug(f"[首板突破] 涨停池列名: {list(today_zt.columns)}")
-        if not today_zt.empty:
-            logger.debug(f"[首板突破] 涨停池首行数据: {today_zt.iloc[0].to_dict()}")
 
         # 1. 获取热点二级行业（使用sector_heat_v2分析）
         hot_sectors = self._get_hot_sectors(today_zt, history_pools, date_str)
@@ -104,13 +97,10 @@ class HotspotFirstBoardStrategy:
             return signals
 
         logger.info(f"识别到 {len(hot_sectors)} 个热点二级行业，开始分析首板...")
-        for i, sector in enumerate(hot_sectors):  # 打印所有热点行业
-            logger.debug(f"  热点行业[{i+1}]: {sector['sector_name']}, 趋势: {sector['trend_stage']}")
 
         # 2. 获取昨日涨停池（用于确认首板）
         yesterday_date = self._get_date_offset(date_str, -1)
         yesterday_zt = history_pools.get(yesterday_date, pd.DataFrame())
-        logger.debug(f"[首板突破] 昨日涨停池日期: {yesterday_date}, 数量: {len(yesterday_zt)}")
 
         # 3. 遍历每个热点行业，分析其中的首板
         total_analyzed = 0
@@ -123,7 +113,6 @@ class HotspotFirstBoardStrategy:
             # 获取该行业的涨停股票
             sector_stocks = self._get_sector_stocks(today_zt, sector_name)
             if sector_stocks.empty:
-                logger.debug(f"  [{sector_name}] 无涨停股票")
                 continue
 
             logger.info(f"  [{sector_name}] 今日涨停 {len(sector_stocks)} 只，分析首板...")
@@ -141,7 +130,6 @@ class HotspotFirstBoardStrategy:
                 else:
                     total_filtered += 1
 
-            logger.debug(f"  [{sector_name}] 符合条件: {sector_signals}/{len(sector_stocks)}")
 
         # 按置信度排序
         signals.sort(key=lambda x: x.confidence, reverse=True)
@@ -197,16 +185,12 @@ class HotspotFirstBoardStrategy:
         """
         获取指定行业的涨停股票
         """
-        logger.debug(f"    [_get_sector_stocks] 查找行业'{sector_name}'的股票")
-        logger.debug(f"    [_get_sector_stocks] 涨停池列名: {list(today_zt.columns)}")
 
         result = pd.DataFrame()
         if '所属行业' in today_zt.columns:
             result = today_zt[today_zt['所属行业'] == sector_name].copy()
-            logger.debug(f"    [_get_sector_stocks] 使用'所属行业'列，找到{len(result)}只")
         elif 'L2_Industry' in today_zt.columns:
             result = today_zt[today_zt['L2_Industry'] == sector_name].copy()
-            logger.debug(f"    [_get_sector_stocks] 使用'L2_Industry'列，找到{len(result)}只")
         else:
             logger.warning(f"    [_get_sector_stocks] 涨停池缺少行业列，可用列: {list(today_zt.columns)}")
 
@@ -243,16 +227,12 @@ class HotspotFirstBoardStrategy:
         name = stock.get('名称', '')
         sector_name = sector_info['sector_name']
 
-        logger.debug(f"    [分析{name}] 开始首板分析...")
-
         # 条件1: 今日涨停（涨停池中的股票默认已涨停）
         change = stock.get('涨跌幅', 0)
         if isinstance(change, str):
             change = float(change.replace('%', ''))
         if change < 9.5:
-            logger.debug(f"    [分析{name}] 过滤: 涨幅{change:.2f}% < 9.5%")
             return None
-        logger.debug(f"    [分析{name}] 涨幅{change:.2f}% 符合条件")
 
         # 条件2: 昨日未涨停（首板确认）
         # 兼容映射后的列名 'Code' 和原始列名 '代码'
@@ -265,58 +245,40 @@ class HotspotFirstBoardStrategy:
             yesterday_codes = yesterday_zt['ts_code'].values
 
         if not yesterday_zt.empty and code in yesterday_codes:
-            logger.debug(f"    [分析{name}] 过滤: 昨日已涨停，非首板")
             return None  # 昨日已涨停，不是首板
-        logger.debug(f"    [分析{name}] 昨日未涨停，首板确认")
 
         # 条件3: 流通市值 < 100亿（小盘偏好）
         float_cap = stock.get('流通市值', 0) / 100000000
         if isinstance(float_cap, str):
             float_cap = float(float_cap.replace('亿', ''))
         if float_cap > self.params['max_float_cap']:
-            logger.debug(f"    [分析{name}] 过滤: 流通市值{float_cap:.2f}亿 > {self.params['max_float_cap']}亿")
             return None
-        logger.debug(f"    [分析{name}] 流通市值{float_cap:.2f}亿 符合条件")
 
         # 条件4: 涨停时间 < 14:30（拒绝偷袭板）
         limit_up_time = str(stock.get('首次封板时间', '')).strip()
         if not self._is_valid_limit_time(limit_up_time):
-            logger.debug(f"    [分析{name}] 过滤: 涨停时间{limit_up_time}不符合要求(需<14:30)")
             return None
-        logger.debug(f"    [分析{name}] 涨停时间{limit_up_time} 符合条件")
 
         # 条件4: 封单强度 > 5%
         # 尝试获取封单额（不同数据源可能使用不同列名）
         seal_amount = stock.get('封单额', 0) or stock.get('封板资金', 0)
         float_cap = stock.get('流通市值', 1)  # 流通市值单位是亿，转换为万
         seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
-        logger.debug(f"    [分析{name}] 封单数据: 封单额={seal_amount}, 流通市值={stock.get('流通市值', 0)}亿, 强度={seal_ratio*100:.2f}%")
         if seal_ratio < 0.02:
-            logger.debug(f"    [分析{name}] 过滤: 封单强度{seal_ratio*100:.2f}% < 2%")
             return None
-        logger.debug(f"    [分析{name}] 封单强度{seal_ratio*100:.2f}% 符合条件")
 
         # 获取日线数据进行进一步分析
         daily_data = self._get_daily_data(code, date_str)
-        logger.debug(f"    [分析{name}] 日线数据: {daily_data is not None}")
 
         # 条件5: 近5日涨幅 < 15%（低位要求）
         if daily_data and 'rise_5d' in daily_data:
             if daily_data['rise_5d'] >= self.params['max_5d_rise']:
-                logger.debug(f"    [分析{name}] 过滤: 5日涨幅{daily_data['rise_5d']*100:.2f}% >= 15%")
                 return None
-            logger.debug(f"    [分析{name}] 5日涨幅{daily_data['rise_5d']*100:.2f}% 符合条件")
-        elif daily_data:
-            logger.debug(f"    [分析{name}] 无5日涨幅数据，跳过此条件")
 
         # 条件6: 量比 > 1.8（资金突然介入）
         if daily_data and 'volume_ratio' in daily_data:
             if daily_data['volume_ratio'] < self.params['min_volume_ratio']:
-                logger.debug(f"    [分析{name}] 过滤: 量比{daily_data['volume_ratio']:.2f} < {self.params['min_volume_ratio']}")
                 return None
-            logger.debug(f"    [分析{name}] 量比{daily_data['volume_ratio']:.2f} 符合条件")
-        elif daily_data:
-            logger.debug(f"    [分析{name}] 无量比数据，跳过此条件")
 
         # 条件7: 当天日线穿过5日、10日线
         ma_breakthrough = False
@@ -324,11 +286,6 @@ class HotspotFirstBoardStrategy:
             # 当天收盘价上穿5日线和10日线
             if daily_data['close'] > daily_data['ma5'] and daily_data['close'] > daily_data['ma10']:
                 ma_breakthrough = True
-                logger.debug(f"    [分析{name}] 均线突破: 收盘价{daily_data['close']:.2f} > MA5({daily_data['ma5']:.2f}) & MA10({daily_data['ma10']:.2f})")
-            else:
-                logger.debug(f"    [分析{name}] 未突破均线: 收盘价{daily_data['close']:.2f}, MA5({daily_data['ma5']:.2f}), MA10({daily_data['ma10']:.2f})")
-        else:
-            logger.debug(f"    [分析{name}] 无均线数据")
 
         # 计算置信度
         confidence = 0.70  # 基础置信度
@@ -379,7 +336,6 @@ class HotspotFirstBoardStrategy:
         if daily_data and 'volume_ratio' in daily_data:
             validation_rules.append(f"量比>{self.params['min_volume_ratio']}（资金介入）")
 
-        logger.debug(f"    [分析{name}] 通过所有条件，生成信号 (置信度{confidence:.2f})")
 
         return TradeSignal(
             pattern_type=PatternType.HOTSPOT_FIRST_BOARD,
@@ -450,12 +406,7 @@ class HotspotFirstBoardStrategy:
                         'ma5': latest['ma5'],
                         'ma10': latest['ma10']
                     }
-                    logger.debug(f"    [_get_daily_data] {stock_code} 数据获取成功: 5日涨幅={rise_5d*100:.2f}%, 量比={volume_ratio:.2f}, MA5={latest['ma5']:.2f}, MA10={latest['ma10']:.2f}")
                     return result
-                else:
-                    logger.debug(f"    [_get_daily_data] {stock_code} 数据不足: {len(df)}条")
-            else:
-                logger.debug(f"    [_get_daily_data] data_manager没有get_stock_daily方法")
         except Exception as e:
             logger.debug(f"获取日线数据失败 {stock_code}: {e}")
 
@@ -492,7 +443,6 @@ class HotspotFirstBoardStrategy:
             elif len(time_str) == 5:  # HMMSS 格式 (如 93916)
                 time_str = '0' + time_str[:3]  # 补0变成 09:39
             elif len(time_str) < 4:  # 太短，无法解析
-                logger.debug(f"时间格式太短: {limit_up_time}")
                 return False
 
             hour = int(time_str[:2])
@@ -500,7 +450,6 @@ class HotspotFirstBoardStrategy:
             max_hour = int(self.params['max_limit_up_time'][:2])
             max_minute = int(self.params['max_limit_up_time'][3:5])  # 注意: 14:30 的冒号位置
 
-            logger.debug(f"解析时间: {limit_up_time} -> {hour:02d}:{minute:02d}, 限制: {max_hour:02d}:{max_minute:02d}")
 
             if hour < max_hour or (hour == max_hour and minute <= max_minute):
                 return True
