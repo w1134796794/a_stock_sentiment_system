@@ -111,9 +111,16 @@ class PatternRecognition:
     
     def detect_weak_to_strong(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
                               day_before_yesterday_df: pd.DataFrame = None,
-                              today_date: str = None) -> List[PatternSignal]:
+                              today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
         """
         弱转强模式识别 - 完整策略逻辑
+        
+        Args:
+            today_df: 今日涨停池数据
+            yesterday_df: 昨日涨停池数据
+            day_before_yesterday_df: 前日涨停池数据
+            today_date: 今日日期 (YYYYMMDD)
+            yest_date: 昨日日期 (YYYYMMDD)，用于获取准确的昨日收盘价
         """
         signals = []
 
@@ -167,7 +174,7 @@ class PatternRecognition:
                     try:
                         auction_data = self.dm.get_auction_data(code, today_date)
                         if auction_data:
-                            auction_analysis = self._analyze_auction_data(auction_data, yest_row, today_row)
+                            auction_analysis = self._analyze_auction_data(auction_data, yest_row, today_row, yest_date)
                             logger.debug(f"[弱转强]   {name} 竞价分析: 高开{auction_analysis.get('gap', 0)*100:.1f}%, 量比{auction_analysis.get('auction_vol_ratio', 0)*100:.1f}%")
                     except Exception as e:
                         logger.debug(f"[弱转强]   {name} 获取竞价数据失败: {e}")
@@ -223,52 +230,55 @@ class PatternRecognition:
         return signals
     
     def detect_second_board_dragon(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
-                                   day_before_yesterday_df: pd.DataFrame = None) -> List[PatternSignal]:
+                                   day_before_yesterday_df: pd.DataFrame = None,
+                                   today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
         """
-        二板定龙模式识别 - 完整策略逻辑
+        二板定龙模式识别 - 使用连板数字段优化
+        
+        Args:
+            today_df: 今日涨停池数据
+            yesterday_df: 昨日涨停池数据
+            day_before_yesterday_df: 前日涨停池数据
+            today_date: 今日日期 (YYYYMMDD)，用于获取准确的开盘价
+            yest_date: 昨日日期 (YYYYMMDD)，用于获取准确的昨收价
         """
         signals = []
 
-        logger.debug(f"[二板定龙] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
+        logger.debug(f"[二板定龙] 开始检测，今日涨停{len(today_df)}只")
 
         if self.second_board_dragon is None:
             logger.warning("[二板定龙] 策略未加载")
             return signals
 
-        if today_df.empty or yesterday_df.empty:
-            logger.debug(f"[二板定龙] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
+        if today_df.empty:
+            logger.debug(f"[二板定龙] 今日数据为空")
             return signals
 
         try:
             total_checked = 0
             total_passed = 0
 
-            for _, yest_row in yesterday_df.iterrows():
-                code = str(yest_row.get('代码', '')).zfill(6)
-                name = yest_row.get('名称', '')
+            # 直接使用连板数=2的股票（二板）
+            for _, today_row in today_df.iterrows():
+                code = str(today_row.get('代码', '')).zfill(6)
+                name = today_row.get('名称', '')
                 total_checked += 1
 
-                logger.debug(f"[二板定龙] 检测 {name}({code})...")
-
-                today_match = today_df[today_df['代码'].astype(str).str.zfill(6) == code]
-                if today_match.empty:
-                    logger.debug(f"[二板定龙]   {name} 今日未涨停，跳过")
+                # 检查连板数是否为2
+                board_count = today_row.get('连板数', 0)
+                if board_count != 2:
+                    logger.debug(f"[二板定龙]   {name} 连板数={board_count}，不是二板，跳过")
                     continue
 
-                today_row = today_match.iloc[0]
-                logger.debug(f"[二板定龙]   {name} 今日涨停，检查是否为二板...")
+                logger.debug(f"[二板定龙] 检测 {name}({code})，确认二板...")
 
-                is_first_board_yesterday = True
-                if day_before_yesterday_df is not None and not day_before_yesterday_df.empty:
-                    prev_match = day_before_yesterday_df[day_before_yesterday_df['代码'].astype(str).str.zfill(6) == code]
-                    if not prev_match.empty:
-                        is_first_board_yesterday = False
-                        logger.debug(f"[二板定龙]   {name} 前日已涨停，非首板，跳过")
-                        continue
-
-                if not is_first_board_yesterday:
+                # 获取昨日数据用于分析首板质量
+                yest_match = yesterday_df[yesterday_df['代码'].astype(str).str.zfill(6) == code]
+                if yest_match.empty:
+                    logger.debug(f"[二板定龙]   {name} 昨日未涨停，跳过")
                     continue
 
+                yest_row = yest_match.iloc[0]
                 logger.debug(f"[二板定龙]   {name} 确认昨日首板，今日二板")
 
                 first_board_quality = self._analyze_first_board_quality(yest_row)
@@ -278,7 +288,7 @@ class PatternRecognition:
                     logger.debug(f"[二板定龙]   {name} 过滤: 首板质量分{first_board_quality.get('score', 0)} < 60")
                     continue
 
-                gap_ratio = self._calculate_gap_ratio(today_row, yest_row)
+                gap_ratio = self._calculate_gap_ratio(today_row, yest_row, today_date, yest_date)
                 logger.debug(f"[二板定龙]   {name} 次日高开: {gap_ratio*100:.1f}%")
 
                 if gap_ratio < 0.02:
@@ -340,9 +350,15 @@ class PatternRecognition:
         return signals
 
     def detect_divergence_to_consensus(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
-                                       today_date: str = None) -> List[PatternSignal]:
+                                       today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
         """
         分歧转一致模式识别 - 完整策略逻辑
+        
+        Args:
+            today_df: 今日涨停池数据
+            yesterday_df: 昨日涨停池数据
+            today_date: 今日日期 (YYYYMMDD)，用于获取准确的开盘价
+            yest_date: 昨日日期 (YYYYMMDD)，用于获取准确的昨收价
         """
         signals = []
 
@@ -405,7 +421,7 @@ class PatternRecognition:
                     continue
 
                 # 条件4: 今日高开（弱转强信号）
-                gap_ratio = self._calculate_gap_ratio(today_row, yest_row)
+                gap_ratio = self._calculate_gap_ratio(today_row, yest_row, today_date, yest_date)
                 logger.debug(f"[分歧转一致]   {name} 今日高开={gap_ratio*100:.1f}%")
                 
                 if not (0.02 <= gap_ratio <= 0.07):
@@ -500,57 +516,45 @@ class PatternRecognition:
                     continue
 
                 total_blast += 1
-                logger.debug(f"[炸板回封] 检测 {name}({code})，炸板次数={blast_times}")
 
                 # 条件1: 炸板次数检查
                 if blast_times > 3:
-                    logger.debug(f"[炸板回封]   {name} 过滤: 炸板次数{blast_times} > 3")
                     continue
 
                 # 条件2: 涨停时间（早盘炸板才可能是洗盘）
                 first_limit_time = str(today_row.get('首次封板时间', '')).strip()
                 last_limit_time = str(today_row.get('最后封板时间', '')).strip()
-                logger.debug(f"[炸板回封]   {name} 首次涨停={first_limit_time}, 最后封板={last_limit_time}")
 
                 # 统一时间格式为 HH:MM:SS 进行比较
                 first_limit_time_formatted = self._format_time(first_limit_time)
                 if first_limit_time_formatted > "10:30:00":
-                    logger.debug(f"[炸板回封]   {name} 过滤: 首次涨停时间{first_limit_time_formatted} > 10:30，可能是尾盘偷袭")
                     continue
 
                 # 条件3: 回封时间分析
                 reseal_duration = self._calculate_reseal_duration(first_limit_time, last_limit_time, blast_times)
-                logger.debug(f"[炸板回封]   {name} 回封用时={reseal_duration}分钟")
                 
                 if reseal_duration > 20:
-                    logger.debug(f"[炸板回封]   {name} 过滤: 回封用时{reseal_duration}分钟 > 20分钟，资金犹豫")
                     continue
 
                 # 条件4: 换手检查（全天换手不能太高）
                 turnover = today_row.get('换手率', 0)
-                logger.debug(f"[炸板回封]   {name} 全天换手率={turnover:.1f}%")
                 
                 if turnover > 35:
-                    logger.debug(f"[炸板回封]   {name} 过滤: 全天换手{turnover:.1f}% > 35%，筹码散乱")
                     continue
 
                 # 条件5: 封单质量
                 seal_amount = today_row.get('封单额', 0) or today_row.get('封板资金', 0)
                 float_cap = today_row.get('流通市值', 1)
                 seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
-                logger.debug(f"[炸板回封]   {name} 封单强度={seal_ratio*100:.2f}%")
 
                 # 计算置信度
                 confidence = self._calculate_blast_reseal_confidence(blast_times, reseal_duration, turnover, seal_ratio)
-                logger.debug(f"[炸板回封]   {name} 综合置信度={confidence:.2f}")
 
                 if confidence < 0.60:
-                    logger.debug(f"[炸板回封]   {name} 过滤: 置信度{confidence:.2f} < 0.60")
                     continue
 
                 # 判断信号类型
                 signal_type = self._classify_blast_reseal(blast_times, reseal_duration, turnover)
-                logger.debug(f"[炸板回封]   {name} 信号类型={signal_type}")
 
                 signal = PatternSignal(
                     pattern_type=f"炸板回封-{signal_type}",
@@ -583,7 +587,6 @@ class PatternRecognition:
                 
                 signals.append(signal)
                 total_passed += 1
-                logger.debug(f"[炸板回封]   {name} 生成信号 (置信度{confidence:.2f})")
 
             logger.info(f"[炸板回封] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 炸板{total_blast}只, 通过{total_passed}只)")
 
@@ -633,11 +636,40 @@ class PatternRecognition:
             'turnover': turnover
         }
 
-    def _analyze_auction_data(self, auction: Dict, yesterday: pd.Series, today: pd.Series) -> Dict:
-        """分析竞价数据"""
+    def _analyze_auction_data(self, auction: Dict, yesterday: pd.Series, today: pd.Series,
+                               yest_date: str = None) -> Dict:
+        """
+        分析竞价数据
+        
+        Args:
+            auction: 竞价数据字典
+            yesterday: 昨日涨停池数据
+            today: 今日涨停池数据
+            yest_date: 昨日日期 (YYYYMMDD)，用于获取准确的昨日收盘价
+        """
         open_price = auction.get('开盘价', 0)
-        yest_close = yesterday.get('收盘价', 1)
+        
+        # 获取昨日收盘价（优先使用tushare日线数据）
+        yest_close = yesterday.get('收盘价', 0)
+        code = str(yesterday.get('代码', '')).zfill(6)
+        name = yesterday.get('名称', '')
+        
+        if yest_close == 0 and self.dm and yest_date:
+            try:
+                daily_price = self.dm.get_stock_daily_price(code, yest_date)
+                if daily_price:
+                    yest_close = daily_price.get('close', 0)
+                    logger.debug(f"[_analyze_auction_data] {name} 从tushare获取昨日收盘价: {yest_close}")
+            except Exception as e:
+                logger.debug(f"[_analyze_auction_data] {name} 从tushare获取收盘价失败: {e}")
+        
+        # 如果仍然没有，使用昨日最新价
+        if yest_close == 0:
+            yest_close = yesterday.get('最新价', 1)
+            logger.debug(f"[_analyze_auction_data] {name} 使用昨日最新价作为收盘价: {yest_close}")
+        
         gap = (open_price - yest_close) / yest_close if yest_close > 0 else 0
+        logger.debug(f"[_analyze_auction_data] {name} 高开计算: ({open_price} - {yest_close}) / {yest_close} = {gap*100:.2f}%")
 
         auction_vol = auction.get('竞价成交量', 0)
         yest_vol = yesterday.get('成交量', 1)
@@ -720,11 +752,61 @@ class PatternRecognition:
 
         return {'score': score, 'type': board_type}
 
-    def _calculate_gap_ratio(self, today_row: pd.Series, yest_row: pd.Series) -> float:
-        """计算高开幅度"""
+    def _calculate_gap_ratio(self, today_row: pd.Series, yest_row: pd.Series,
+                              today_date: str = None, yest_date: str = None) -> float:
+        """
+        计算高开幅度: (当日开盘价 - 昨日收盘价) / 昨日收盘价
+        
+        优先从涨停池数据获取，如果没有则使用tushare接口获取准确的开盘价和昨收价
+        """
+        code = str(today_row.get('代码', '')).zfill(6)
+        name = today_row.get('名称', '')
+        
         today_open = today_row.get('开盘价', 0)
-        yest_close = yest_row.get('收盘价', 1)
-        return (today_open - yest_close) / yest_close if yest_close > 0 else 0
+        yest_close = yest_row.get('收盘价', 0)
+        
+        # 如果涨停池数据中没有开盘价/收盘价，尝试使用tushare接口获取
+        if (today_open == 0 or yest_close == 0) and self.dm and today_date and yest_date:
+            try:
+                # 获取今日开盘价
+                if today_open == 0:
+                    today_price = self.dm.get_stock_daily_price(code, today_date)
+                    if today_price:
+                        today_open = today_price.get('open', 0)
+                        logger.debug(f"[_calculate_gap_ratio] {name} 从tushare获取今日开盘价: {today_open}")
+                
+                # 获取昨日收盘价（close，不是pre_close）
+                if yest_close == 0:
+                    yest_price = self.dm.get_stock_daily_price(code, yest_date)
+                    if yest_price:
+                        yest_close = yest_price.get('close', 0)
+                        logger.debug(f"[_calculate_gap_ratio] {name} 从tushare获取昨日收盘价: {yest_close}")
+            except Exception as e:
+                logger.debug(f"[_calculate_gap_ratio] {name} 从tushare获取价格失败: {e}")
+        
+        # 如果仍然没有数据，尝试用最新价和涨跌幅反推（备用方案）
+        if today_open == 0:
+            latest_price = today_row.get('最新价', 0)
+            change_pct = today_row.get('涨跌幅', 0)
+            if isinstance(change_pct, str):
+                change_pct = float(change_pct.replace('%', ''))
+            if latest_price > 0 and change_pct != 0:
+                today_open = latest_price / (1 + change_pct / 100)
+                logger.debug(f"[_calculate_gap_ratio] {name} 反推开盘价: {latest_price} / (1 + {change_pct}/100) = {today_open}")
+        
+        if yest_close == 0:
+            yest_close = yest_row.get('最新价', 0)
+            logger.debug(f"[_calculate_gap_ratio] {name} 使用昨日最新价作为收盘价: {yest_close}")
+        
+        logger.debug(f"[_calculate_gap_ratio] {name} 今日开盘价={today_open}, 昨日收盘价={yest_close}")
+        
+        if yest_close > 0 and today_open > 0:
+            gap = (today_open - yest_close) / yest_close
+            logger.debug(f"[_calculate_gap_ratio] {name} 计算高开: ({today_open} - {yest_close}) / {yest_close} = {gap*100:.2f}%")
+            return gap
+        
+        logger.debug(f"[_calculate_gap_ratio] {name} 数据不足，返回0: yest_close={yest_close}, today_open={today_open}")
+        return 0
 
     def _is_fast_limit(self, limit_up_time: str, max_time: str = "09:40:00") -> bool:
         """判断是否快速涨停"""
@@ -881,34 +963,26 @@ class PatternRecognition:
         """
         signals = []
 
-        logger.debug(f"[首板突破] 开始检测，今日涨停{len(today_df)}只")
 
         if self.first_board_breakout is None:
             logger.warning("[首板突破] 策略未加载")
             return signals
 
         if today_df.empty:
-            logger.debug("[首板突破] 今日数据为空")
             return signals
 
         try:
-            logger.debug(f"[首板突破] 调用HotspotFirstBoardStrategy.detect_first_board_by_sectors...")
-            # 转换日期格式为YYYYMMDD（first_board_breakout需要）
-            date_str_ymd = date_str.replace("-", "") if date_str else ""
-            # 转换history_pools的键为YYYYMMDD格式，并排除今日数据（避免重复统计）
-            history_pools_ymd = {}
+            # history_pools的键已经是YYYYMMDD格式，只需排除今日数据（避免重复统计）
+            history_pools_filtered = {}
             if history_pools:
                 for date_key, pool_df in history_pools.items():
-                    date_key_ymd = date_key.replace("-", "")
                     # 排除今日数据，因为detect_first_board_by_sectors内部会单独处理今日数据
-                    if date_key_ymd != date_str_ymd:
-                        history_pools_ymd[date_key_ymd] = pool_df
-            logger.debug(f"[首板突破] 转换后历史池: {len(history_pools_ymd)}天 (排除今日)")
+                    if date_key != date_str:
+                        history_pools_filtered[date_key] = pool_df
+            logger.debug(f"[首板突破] 过滤后历史池: {len(history_pools_filtered)}天 (排除今日)")
             trade_signals = self.first_board_breakout.detect_first_board_by_sectors(
-                today_df, history_pools_ymd, date_str_ymd
+                today_df, history_pools_filtered, date_str
             )
-
-            logger.debug(f"[首板突破] 策略返回 {len(trade_signals)} 个原始信号")
 
             for ts in trade_signals:
                 pattern_signal = PatternSignal(
@@ -926,7 +1000,6 @@ class PatternRecognition:
                     l2_industry=getattr(ts, 'l2_industry', '')
                 )
                 signals.append(pattern_signal)
-                logger.debug(f"[首板突破] 转换信号: {ts.stock_name} (置信度{ts.confidence:.2f})")
 
             logger.info(f"[首板突破] 检测完成: 共{len(signals)}个信号")
 
@@ -999,23 +1072,18 @@ class PatternRecognition:
         """
         signals = []
 
-        logger.debug(f"[龙二波] 开始检测，今日涨停{len(today_df)}只，历史池{len(recent_zt_pools)}日")
-        logger.debug(f"[龙二波] 热点板块: {hot_sectors[:5] if hot_sectors else 'None'}...")
-
         if self.dragon_second_wave is None:
             logger.warning("[龙二波] 策略未加载")
             return signals
 
         if today_df.empty:
-            logger.debug("[龙二波] 今日涨停池为空，跳过检测")
             return signals
 
         if not recent_zt_pools:
-            logger.debug("[龙二波] 历史涨停池为空，跳过检测")
             return signals
 
         try:
-            # 准备近15日涨停池
+            # 准备近15日涨停池（日期已经是YYYYMMDD格式）
             recent_15d_pools = {}
 
             if not today_df.empty:
@@ -1030,7 +1098,6 @@ class PatternRecognition:
                     today_pool[code_col] = today_pool[code_col].astype(str).str.zfill(6)
 
                 recent_15d_pools[today_date] = today_pool
-                logger.debug(f"[龙二波] 添加今日涨停池: {today_date}, {len(today_pool)}条")
 
             sorted_dates = sorted(recent_zt_pools.keys(), reverse=True)
             for date in sorted_dates[:14]:
@@ -1046,8 +1113,6 @@ class PatternRecognition:
 
                 recent_15d_pools[date] = pool
 
-            logger.debug(f"[龙二波] 准备近15日涨停池: {list(recent_15d_pools.keys())}")
-
             total_checked = 0
             total_passed = 0
 
@@ -1056,34 +1121,23 @@ class PatternRecognition:
                 name = today_row.get('名称', '')
                 total_checked += 1
 
-                logger.debug(f"[龙二波] 检测 {name}({code})...")
-
                 sector_hot = False
                 stock_sector = today_row.get('所属行业', '')
                 if hot_sectors and stock_sector:
                     sector_hot = stock_sector in hot_sectors
-                    logger.debug(f"[龙二波]   {name} 所属行业: {stock_sector}, 是否热点: {sector_hot}")
 
-                # 转换日期格式为YYYYMMDD（dragon_second_wave需要）
-                today_date_ymd = today_date.replace("-", "")
-                # 转换recent_zt_pools的键为YYYYMMDD格式
-                recent_15d_pools_ymd = {}
-                for date_key, pool_df in recent_15d_pools.items():
-                    date_key_ymd = date_key.replace("-", "")
-                    recent_15d_pools_ymd[date_key_ymd] = pool_df
-                
+                # 日期已经是YYYYMMDD格式，直接使用
                 trade_signal = self.dragon_second_wave.detect_second_wave(
                     stock_code=code,
                     stock_name=name,
-                    today_str=today_date_ymd,
-                    recent_zt_pools=recent_15d_pools_ymd,
+                    today_str=today_date,
+                    recent_zt_pools=recent_15d_pools,
                     today_data=today_row,
                     sector_hot=sector_hot
                 )
 
                 if trade_signal:
                     total_passed += 1
-                    logger.debug(f"[龙二波]   {name} 通过检测，生成信号 (置信度{trade_signal.confidence:.2f})")
 
                     pattern_signal = PatternSignal(
                         pattern_type="龙二波",
@@ -1110,20 +1164,44 @@ class PatternRecognition:
 
         return signals
 
-    def _normalize_date(self, date_str: str) -> str:
+    def _normalize_date_to_ymd(self, date_str: str) -> str:
         """
-        标准化日期格式为 YYYY-MM-DD
+        标准化日期格式为 YYYYMMDD
         支持输入格式: YYYYMMDD 或 YYYY-MM-DD
         """
         if not date_str:
             return date_str
-        # 如果已经是 YYYY-MM-DD 格式，直接返回
-        if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
-            return date_str
-        # 如果是 YYYYMMDD 格式，转换为 YYYY-MM-DD
+        # 如果已经是 YYYYMMDD 格式，直接返回
         if len(date_str) == 8 and date_str.isdigit():
-            return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+            return date_str
+        # 如果是 YYYY-MM-DD 格式，转换为 YYYYMMDD
+        if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+            return date_str.replace("-", "")
         return date_str
+
+    def _get_prev_trading_day(self, date_str: str, days: int = 1) -> str:
+        """
+        获取前N个交易日（跳过周末）
+        
+        Args:
+            date_str: 日期字符串 YYYYMMDD
+            days: 往前推几个交易日
+            
+        Returns:
+            str: 前一个交易日的日期 YYYYMMDD
+        """
+        from datetime import datetime, timedelta
+        
+        dt = datetime.strptime(date_str, "%Y%m%d")
+        count = 0
+        
+        while count < days:
+            dt = dt - timedelta(days=1)
+            # 跳过周末 (0=周一, 6=周日)
+            if dt.weekday() < 5:  # 周一到周五
+                count += 1
+        
+        return dt.strftime("%Y%m%d")
 
     def scan_all_patterns(self, today_date: str, yesterday_date: str = None) -> Dict[str, List[PatternSignal]]:
         """
@@ -1136,41 +1214,35 @@ class PatternRecognition:
         Returns:
             Dict[str, List[PatternSignal]]: 各模式识别结果
         """
-        # 标准化日期格式
-        today_date = self._normalize_date(today_date)
-        yesterday_date = self._normalize_date(yesterday_date) if yesterday_date else None
+        # 标准化日期格式为YYYYMMDD（data_manager需要）
+        today_date_ymd = self._normalize_date_to_ymd(today_date)
+        yesterday_date_ymd = self._normalize_date_to_ymd(yesterday_date) if yesterday_date else None
         
         logger.info(f"=" * 60)
-        logger.info(f"开始全模式扫描: 今日={today_date}, 昨日={yesterday_date}")
+        logger.info(f"开始全模式扫描: 今日={today_date_ymd}, 昨日={yesterday_date_ymd}")
         logger.info(f"=" * 60)
         
-        # 计算昨日日期
-        if yesterday_date is None:
-            yesterday_date = (datetime.strptime(today_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        # 转换日期格式为YYYYMMDD（data_manager需要）
-        today_date_ymd = today_date.replace("-", "")
-        yesterday_date_ymd = yesterday_date.replace("-", "")
+        # 计算昨日日期（跳过周末）
+        if yesterday_date_ymd is None:
+            yesterday_date_ymd = self._get_prev_trading_day(today_date_ymd, 1)
         
         # 获取涨停池数据
         logger.info("获取涨停池数据...")
         today_df = self.dm.get_limit_up_pool(today_date_ymd)
         yesterday_df = self.dm.get_limit_up_pool(yesterday_date_ymd)
         
-        # 获取前日数据（用于计算连板高度）
-        day_before_yesterday = (datetime.strptime(yesterday_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-        day_before_yesterday_ymd = day_before_yesterday.replace("-", "")
+        # 获取前日数据（用于龙二波检测等，跳过周末）
+        day_before_yesterday_ymd = self._get_prev_trading_day(yesterday_date_ymd, 1)
         day_before_yesterday_df = self.dm.get_limit_up_pool(day_before_yesterday_ymd)
         
-        # 获取最近15天涨停池数据（用于龙二波检测）
-        logger.info("获取最近15天涨停池数据...")
+        # 获取最近15个交易日涨停池数据（用于龙二波检测，跳过周末）
+        logger.info("获取最近15个交易日涨停池数据...")
         recent_zt_pools = {}
-        for i in range(15):
-            date_str = (datetime.strptime(today_date, "%Y-%m-%d") - timedelta(days=i)).strftime("%Y-%m-%d")
-            date_str_ymd = date_str.replace("-", "")
+        for i in range(1, 16):  # 从1开始，排除今日
+            date_str_ymd = self._get_prev_trading_day(today_date_ymd, i)
             df = self.dm.get_limit_up_pool(date_str_ymd)
             if not df.empty:
-                recent_zt_pools[date_str] = df
+                recent_zt_pools[date_str_ymd] = df
         
         logger.info(f"今日涨停: {len(today_df)}只, 昨日涨停: {len(yesterday_df)}只, 前日涨停: {len(day_before_yesterday_df)}只, 历史池: {len(recent_zt_pools)}天")
         
@@ -1180,7 +1252,7 @@ class PatternRecognition:
         try:
             logger.info("-" * 40)
             results["弱转强"] = self.detect_weak_to_strong(
-                today_df, yesterday_df, day_before_yesterday_df, today_date
+                today_df, yesterday_df, day_before_yesterday_df, today_date_ymd, yesterday_date_ymd
             )
         except Exception as e:
             logger.error(f"弱转强检测失败: {e}")
@@ -1190,7 +1262,7 @@ class PatternRecognition:
         try:
             logger.info("-" * 40)
             results["分歧转一致"] = self.detect_divergence_to_consensus(
-                today_df, yesterday_df, today_date
+                today_df, yesterday_df, today_date_ymd, yesterday_date_ymd
             )
         except Exception as e:
             logger.error(f"分歧转一致检测失败: {e}")
@@ -1200,7 +1272,8 @@ class PatternRecognition:
         try:
             logger.info("-" * 40)
             results["二板定龙"] = self.detect_second_board_dragon(
-                today_df, yesterday_df, day_before_yesterday_df
+                today_df, yesterday_df, day_before_yesterday_df,
+                today_date_ymd, yesterday_date_ymd
             )
         except Exception as e:
             logger.error(f"二板定龙检测失败: {e}")
@@ -1213,11 +1286,11 @@ class PatternRecognition:
             hot_sectors = []
             if self.se:
                 try:
-                    hot_sectors = self.se.get_hot_sectors(today_date, top_n=10)
+                    hot_sectors = self.se.get_hot_sectors(today_date_ymd, top_n=10)
                 except Exception as e:
                     logger.warning(f"获取热点板块失败: {e}")
             results["龙二波"] = self.detect_dragon_second_wave(
-                today_df, recent_zt_pools, today_date, hot_sectors
+                today_df, recent_zt_pools, today_date_ymd, hot_sectors
             )
         except Exception as e:
             logger.error(f"龙二波检测失败: {e}")
@@ -1227,7 +1300,7 @@ class PatternRecognition:
         try:
             logger.info("-" * 40)
             results["首板突破"] = self.detect_first_board_breakout(
-                today_df, yesterday_df, today_date, recent_zt_pools
+                today_df, yesterday_df, today_date_ymd, recent_zt_pools
             )
         except Exception as e:
             logger.error(f"首板突破检测失败: {e}")
@@ -1237,7 +1310,7 @@ class PatternRecognition:
         try:
             logger.info("-" * 40)
             results["卡位板"] = self.detect_position_battle(
-                today_df, yesterday_df, today_date
+                today_df, yesterday_df, today_date_ymd
             )
         except Exception as e:
             logger.error(f"卡位板检测失败: {e}")
@@ -1247,7 +1320,7 @@ class PatternRecognition:
         try:
             logger.info("-" * 40)
             results["炸板回封"] = self.detect_blast_reseal(
-                today_df, today_date
+                today_df, today_date_ymd
             )
         except Exception as e:
             logger.error(f"炸板回封检测失败: {e}")

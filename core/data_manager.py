@@ -427,7 +427,7 @@ class DataManager:
                 if not df.empty:
                     df['trade_date'] = pd.to_datetime(df['trade_date'])
                     df.to_csv(cache_file, index=False)
-                    logger.debug(f"[get_stock_daily] 数据已缓存: {cache_file}")
+                    logger.debug(f"[get_stock_daily] 从Tushare获取并缓存数据: {cache_file}")
                     return df
                 else:
                     logger.debug(f"[get_stock_daily] Tushare返回空数据")
@@ -436,6 +436,96 @@ class DataManager:
         except Exception as e:
             logger.error(f"[get_stock_daily] 获取个股{code}历史数据失败: {e}")
         return pd.DataFrame()
+
+    def get_stock_daily_price(self, ts_code: str, trade_date: str) -> Dict:
+        """
+        获取个股某日的开盘价、收盘价、昨收价
+        
+        根据时间判断使用接口:
+        - 交易日盘中(9:30-17:00): 使用 rt_k 实时接口
+        - 17点之后: 使用 daily 历史接口
+        
+        Args:
+            ts_code: 股票代码（如 002218.SZ 或 002218）
+            trade_date: 交易日期（YYYYMMDD）
+            
+        Returns:
+            Dict: 包含 open, close, pre_close 的字典，获取失败返回空字典
+        """
+        from datetime import datetime
+        
+        # 确保代码格式正确
+        code = str(ts_code).strip()
+        if '.' not in code:
+            code = code.zfill(6)
+            if code.startswith('6'):
+                code = f"{code}.SH"
+            else:
+                code = f"{code}.SZ"
+        
+        # 检查缓存
+        cache_file = self.cache_dir / f"daily_price_{code}_{trade_date}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"读取日线价格缓存失败: {e}")
+        
+        try:
+            if not self.ts_pro:
+                logger.debug(f"[get_stock_daily_price] Tushare未初始化")
+                return {}
+            
+            # 判断当前时间
+            now = datetime.now()
+            current_time = now.strftime("%H%M")
+            
+            # 交易日盘中(9:30-17:00)使用 rt_k 接口
+            if "0930" <= current_time <= "1700":
+                logger.debug(f"[get_stock_daily_price] 盘中时间，使用 rt_k 接口: {code}")
+                df = self.ts_pro.rt_k(ts_code=code)
+                if df is not None and not df.empty:
+                    # rt_k 返回的列名可能不同，需要适配
+                    # rt_k 通常返回: ts_code, trade_date, open, high, low, close, pre_close, change, pct_change, vol, amount
+                    result = {
+                        'open': float(df.iloc[0].get('open', 0)),
+                        'close': float(df.iloc[0].get('close', 0)),
+                        'pre_close': float(df.iloc[0].get('pre_close', 0))
+                    }
+                    logger.debug(f"[get_stock_daily_price] rt_k 返回: {result}")
+                    
+                    # 缓存结果
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(result, f)
+                    return result
+                else:
+                    logger.warning(f"[get_stock_daily_price] rt_k 返回空数据，尝试使用 daily 接口")
+            
+            # 17点之后或 rt_k 失败，使用 daily 接口
+            logger.debug(f"[get_stock_daily_price] 使用 daily 接口: {code}, {trade_date}")
+            df = self.ts_pro.daily(ts_code=code, start_date=trade_date, end_date=trade_date)
+            
+            if df is not None and not df.empty:
+                row = df.iloc[0]
+                result = {
+                    'open': float(row.get('open', 0)),
+                    'close': float(row.get('close', 0)),
+                    'pre_close': float(row.get('pre_close', 0))
+                }
+                logger.debug(f"[get_stock_daily_price] daily 返回: {result}")
+                
+                # 缓存结果
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(result, f)
+                return result
+            else:
+                logger.warning(f"[get_stock_daily_price] daily 返回空数据")
+                
+        except Exception as e:
+            logger.error(f"[get_stock_daily_price] 获取 {code} {trade_date} 日线数据失败: {e}")
+        
+        return {}
     
     def get_stock_5min_kline(self, code: str) -> pd.DataFrame:
         """获取5分钟K线（用于5日走势微图）"""
@@ -462,6 +552,8 @@ class DataManager:
         """
         获取个股分时数据（1分钟线）
         
+        使用Tushare rt_min接口获取实时分钟数据，比AkShare更稳定
+        
         Args:
             code: 股票代码（如 002218）
             trade_date: 交易日期（YYYYMMDD）
@@ -473,23 +565,96 @@ class DataManager:
         
         # 检查缓存
         if cache_file.exists():
-            df = pd.read_csv(cache_file)
-            logger.debug(f"从缓存加载分时数据: {code} {trade_date}")
-            return df
+            try:
+                df = pd.read_csv(cache_file)
+                logger.debug(f"从缓存加载分时数据: {code} {trade_date}")
+                return df
+            except Exception as e:
+                logger.warning(f"读取缓存分时数据失败: {e}")
         
+        # 优先使用Tushare rt_min接口
+        if self.ts_pro:
+            try:
+                # 确保代码格式正确（添加后缀）
+                code_str = str(code).zfill(6)
+                if '.' not in code_str:
+                    if code_str.startswith('6'):
+                        ts_code = f"{code_str}.SH"
+                    else:
+                        ts_code = f"{code_str}.SZ"
+                else:
+                    ts_code = code_str
+                
+                logger.debug(f"[get_stock_tick] 使用Tushare rt_min接口: {ts_code}")
+                
+                # 使用rt_min接口获取1分钟数据（频率参数必须大写）
+                df = self.ts_pro.rt_min(ts_code=ts_code, freq='1MIN')
+                
+                if df is None:
+                    logger.warning(f"[get_stock_tick] Tushare rt_min返回None: {code}")
+                    return pd.DataFrame()
+                
+                if not isinstance(df, pd.DataFrame):
+                    logger.warning(f"[get_stock_tick] Tushare rt_min返回类型错误: {type(df)}, {code}")
+                    return pd.DataFrame()
+                
+                if df.empty:
+                    logger.warning(f"[get_stock_tick] Tushare rt_min返回空数据: {code}")
+                    return pd.DataFrame()
+                
+                # 检查必要的列是否存在（rt_min返回的列名是time而不是trade_time）
+                required_cols = ['time', 'open', 'close', 'high', 'low', 'vol', 'amount']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                if missing_cols:
+                    logger.warning(f"[get_stock_tick] Tushare rt_min返回数据缺少列: {missing_cols}, 实际列={df.columns.tolist()}")
+                    return pd.DataFrame()
+                
+                # 重命名列以统一格式
+                df = df.rename(columns={
+                    'vol': 'volume'
+                })
+                
+                # 提取日期和时间（time格式为：YYYY-MM-DD HH:MM:SS）
+                df['date'] = df['time'].str[:10]
+                df['time'] = df['time'].str[11:19]
+                
+                # 筛选指定日期的数据
+                target_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                df = df[df['date'] == target_date]
+                
+                if not df.empty:
+                    df.to_csv(cache_file, index=False)
+                    logger.debug(f"[get_stock_tick] 缓存分时数据: {code} {trade_date}, {len(df)}条")
+                
+                logger.debug(f"[get_stock_tick] Tushare rt_min成功获取 {len(df)} 条数据: {code}")
+                return df
+                
+            except Exception as e:
+                logger.error(f"[get_stock_tick] Tushare rt_min获取失败 {code}: {e}")
+                # Tushare失败时，尝试使用AkShare作为备用
+                logger.debug(f"[get_stock_tick] 尝试使用AkShare作为备用: {code}")
+        else:
+            logger.debug(f"[get_stock_tick] Tushare未初始化，使用AkShare: {code}")
+        
+        # 备用：使用AkShare获取分钟数据
         try:
-            # 使用AkShare获取分钟数据
             code_str = str(code).zfill(6)
             if code_str.startswith('6'):
                 symbol = f"sh{code_str}"
             else:
                 symbol = f"sz{code_str}"
             
-            # 获取1分钟数据
+            logger.debug(f"[get_stock_tick] 使用AkShare获取分钟数据: {symbol}")
+            
             df = ak.stock_zh_a_hist_min_em(symbol=symbol, period="1", adjust="qfq")
             
-            if df.empty:
-                logger.warning(f"获取分时数据为空: {code} {trade_date}")
+            if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+                logger.warning(f"[get_stock_tick] AkShare返回空数据: {code}")
+                return pd.DataFrame()
+            
+            # 检查必要的列是否存在
+            if '时间' not in df.columns:
+                logger.warning(f"[get_stock_tick] AkShare数据缺少'时间'列: {code}, 列={df.columns.tolist()}")
                 return pd.DataFrame()
             
             # 重命名列以统一格式
@@ -514,17 +679,19 @@ class DataManager:
             
             if not df.empty:
                 df.to_csv(cache_file, index=False)
-                logger.debug(f"缓存分时数据: {code} {trade_date}, {len(df)}条")
+                logger.debug(f"[get_stock_tick] 缓存分时数据: {code} {trade_date}, {len(df)}条")
             
             return df
             
         except Exception as e:
-            logger.error(f"获取分时数据失败 {code} {trade_date}: {e}")
+            logger.error(f"[get_stock_tick] AkShare获取失败 {code} {trade_date}: {e}")
             return pd.DataFrame()
     
     def get_auction_data(self, code: str, trade_date: str) -> Dict:
         """
         获取个股竞价数据（集合竞价）
+        
+        优先使用日线数据获取开盘价，更准确可靠
         
         Args:
             code: 股票代码（如 002218）
@@ -537,14 +704,38 @@ class DataManager:
         
         # 检查缓存
         if cache_file.exists():
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"读取竞价数据缓存失败: {e}")
         
         try:
-            # 从分时数据中提取竞价信息
+            # 优先使用日线数据获取开盘价（更准确）
+            daily_price = self.get_stock_daily_price(code, trade_date)
+            if daily_price and daily_price.get('open', 0) > 0:
+                open_price = daily_price['open']
+                logger.debug(f"[get_auction_data] 从日线数据获取开盘价: {code} = {open_price}")
+                
+                result = {
+                    '开盘价': float(open_price),
+                    '竞价成交量': 0,  # 日线数据不包含竞价成交量
+                    '竞价成交额': 0,
+                    '价格趋势': []
+                }
+                
+                # 缓存结果
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, ensure_ascii=False)
+                
+                return result
+            
+            # 如果日线数据获取失败，尝试从分时数据中提取
+            logger.debug(f"[get_auction_data] 日线数据获取失败，尝试分时数据: {code}")
             tick_df = self.get_stock_tick(code, trade_date)
             
             if tick_df.empty:
+                logger.debug(f"[get_auction_data] 分时数据为空: {code}")
                 return {}
             
             # 获取9:25的竞价数据
@@ -554,12 +745,16 @@ class DataManager:
                 # 尝试获取9:30的数据作为开盘价
                 first_tick = tick_df[tick_df['time'] >= '09:30:00'].iloc[0] if not tick_df.empty else None
                 if first_tick is not None:
-                    return {
+                    result = {
                         '开盘价': float(first_tick['open']),
                         '竞价成交量': 0,
                         '竞价成交额': 0,
                         '价格趋势': []
                     }
+                    # 缓存结果
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(result, f, ensure_ascii=False)
+                    return result
                 return {}
             
             auction_row = auction_data.iloc[0]
@@ -585,7 +780,7 @@ class DataManager:
             return result
             
         except Exception as e:
-            logger.error(f"获取竞价数据失败 {code} {trade_date}: {e}")
+            logger.error(f"[get_auction_data] 获取竞价数据失败 {code} {trade_date}: {e}")
             return {}
     
     def get_stock_concepts(self, stock_code: str) -> str:
