@@ -458,6 +458,136 @@ class DataManager:
         # 主板10%，创业板科创板20%
         return pct_change >= 9.5 or (pct_change >= 19.5)
     
+    def get_stock_tick(self, code: str, trade_date: str) -> pd.DataFrame:
+        """
+        获取个股分时数据（1分钟线）
+        
+        Args:
+            code: 股票代码（如 002218）
+            trade_date: 交易日期（YYYYMMDD）
+            
+        Returns:
+            分时数据DataFrame，包含time, price, volume等列
+        """
+        cache_file = self.cache_dir / f"tick_{code}_{trade_date}.csv"
+        
+        # 检查缓存
+        if cache_file.exists():
+            df = pd.read_csv(cache_file)
+            logger.debug(f"从缓存加载分时数据: {code} {trade_date}")
+            return df
+        
+        try:
+            # 使用AkShare获取分钟数据
+            code_str = str(code).zfill(6)
+            if code_str.startswith('6'):
+                symbol = f"sh{code_str}"
+            else:
+                symbol = f"sz{code_str}"
+            
+            # 获取1分钟数据
+            df = ak.stock_zh_a_hist_min_em(symbol=symbol, period="1", adjust="qfq")
+            
+            if df.empty:
+                logger.warning(f"获取分时数据为空: {code} {trade_date}")
+                return pd.DataFrame()
+            
+            # 重命名列以统一格式
+            df = df.rename(columns={
+                '时间': 'time',
+                '开盘': 'open',
+                '收盘': 'close',
+                '最高': 'high',
+                '最低': 'low',
+                '成交量': 'volume',
+                '成交额': 'amount',
+                '均价': 'vwap'
+            })
+            
+            # 提取日期和时间
+            df['date'] = df['time'].str[:10]
+            df['time'] = df['time'].str[11:19]
+            
+            # 筛选指定日期的数据
+            target_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+            df = df[df['date'] == target_date]
+            
+            if not df.empty:
+                df.to_csv(cache_file, index=False)
+                logger.debug(f"缓存分时数据: {code} {trade_date}, {len(df)}条")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"获取分时数据失败 {code} {trade_date}: {e}")
+            return pd.DataFrame()
+    
+    def get_auction_data(self, code: str, trade_date: str) -> Dict:
+        """
+        获取个股竞价数据（集合竞价）
+        
+        Args:
+            code: 股票代码（如 002218）
+            trade_date: 交易日期（YYYYMMDD）
+            
+        Returns:
+            竞价数据字典，包含开盘价、竞价成交量等
+        """
+        cache_file = self.cache_dir / f"auction_{code}_{trade_date}.json"
+        
+        # 检查缓存
+        if cache_file.exists():
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        
+        try:
+            # 从分时数据中提取竞价信息
+            tick_df = self.get_stock_tick(code, trade_date)
+            
+            if tick_df.empty:
+                return {}
+            
+            # 获取9:25的竞价数据
+            auction_data = tick_df[tick_df['time'] == '09:25:00']
+            
+            if auction_data.empty:
+                # 尝试获取9:30的数据作为开盘价
+                first_tick = tick_df[tick_df['time'] >= '09:30:00'].iloc[0] if not tick_df.empty else None
+                if first_tick is not None:
+                    return {
+                        '开盘价': float(first_tick['open']),
+                        '竞价成交量': 0,
+                        '竞价成交额': 0,
+                        '价格趋势': []
+                    }
+                return {}
+            
+            auction_row = auction_data.iloc[0]
+            
+            # 计算价格趋势（9:15-9:25的价格变化）
+            morning_ticks = tick_df[
+                (tick_df['time'] >= '09:15:00') & 
+                (tick_df['time'] <= '09:25:00')
+            ]
+            price_trend = morning_ticks['close'].tolist() if not morning_ticks.empty else []
+            
+            result = {
+                '开盘价': float(auction_row['close']),
+                '竞价成交量': float(auction_row['volume']),
+                '竞价成交额': float(auction_row['amount']),
+                '价格趋势': price_trend
+            }
+            
+            # 缓存结果
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"获取竞价数据失败 {code} {trade_date}: {e}")
+            return {}
+    
     def get_stock_concepts(self, stock_code: str) -> str:
         """
         获取个股所属概念（使用tushare kpl_concept_cons接口）

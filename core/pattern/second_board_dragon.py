@@ -75,7 +75,7 @@ class SecondBoardDragonStrategy:
         sector_second_board_count = {}
         
         for _, yest_row in yesterday_zt.iterrows():
-            code = yest_row['代码']
+            code = str(yest_row['代码']).zfill(6)
             name = yest_row['名称']
             
             # ========== 前置过滤：今日是否二板 ==========

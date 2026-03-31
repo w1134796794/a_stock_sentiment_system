@@ -99,11 +99,11 @@ class PositionBattleStrategy:
         high_stocks = []
         
         for _, row in sector.iterrows():
-            code = row['代码']
-            
+            code = str(row['代码']).zfill(6)
+
             # 计算连板高度（从昨日涨停池+今日状态）
             boards = self._calculate_boards(code, yest_pool, row)
-            
+
             if self.params["min_high_board"] <= boards <= self.params["max_high_board"]:
                 high_stocks.append({
                     'code': code,
@@ -123,11 +123,11 @@ class PositionBattleStrategy:
     def _identify_low_stocks(self, sector: pd.DataFrame, yest_pool: pd.DataFrame) -> List[Dict]:
         """识别板块内低位股（1-2板）"""
         low_stocks = []
-        
+
         for _, row in sector.iterrows():
-            code = row['代码']
+            code = str(row['代码']).zfill(6)
             boards = self._calculate_boards(code, yest_pool, row)
-            
+
             if 1 <= boards <= self.params["max_low_board"]:
                 low_stocks.append({
                     'code': code,
@@ -139,7 +139,7 @@ class PositionBattleStrategy:
                     'float_cap': row.get('流通市值', 1),
                     'is_first_board': boards == 1
                 })
-        
+
         return low_stocks
     
     def _calculate_boards(self, code: str, yest_pool: pd.DataFrame, today_row: pd.Series) -> int:

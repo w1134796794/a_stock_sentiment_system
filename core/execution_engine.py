@@ -79,15 +79,21 @@ class TradePlan:
     stock_name: str
     action: TradeAction         # 动作
     entry_timing: TimeSlot      # 介入时机
-    entry_price: float          # 目标买入价
-    stop_loss: float           # 止损价
-    take_profit: float         # 止盈价
-    position_size: str         # 仓位（light/medium/heavy）
-    pre_conditions: List[str]   # 前置条件（必须满足）
-    cancel_conditions: List[str] # 取消条件（任一满足则放弃）
-    confidence: float            # 置信度
-    reason: str                # 交易理由
-    add_to_watchlist: bool     # 是否加入观察池
+    entry_price: Optional[float] = None  # 目标买入价
+    stop_loss: Optional[float] = None   # 止损价
+    take_profit: Optional[float] = None # 止盈价
+    position_size: str = "medium"       # 仓位（light/medium/heavy）
+    pre_conditions: List[str] = None    # 前置条件（必须满足）
+    cancel_conditions: List[str] = None # 取消条件（任一满足则放弃）
+    confidence: float = 0.0             # 置信度
+    reason: str = ""                   # 交易理由
+    add_to_watchlist: bool = False     # 是否加入观察池
+    
+    def __post_init__(self):
+        if self.pre_conditions is None:
+            self.pre_conditions = []
+        if self.cancel_conditions is None:
+            self.cancel_conditions = []
 
 class UnifiedExecutionEngine:
     """

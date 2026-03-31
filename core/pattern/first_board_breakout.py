@@ -238,6 +238,8 @@ class HotspotFirstBoardStrategy:
             TradeSignal or None: 符合条件的交易信号
         """
         code = stock.get('代码', '')
+        # 确保代码是6位字符串
+        code = str(code).zfill(6)
         name = stock.get('名称', '')
         sector_name = sector_info['sector_name']
 
