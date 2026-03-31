@@ -512,8 +512,10 @@ class PatternRecognition:
                 last_limit_time = str(today_row.get('最后封板时间', '')).strip()
                 logger.debug(f"[炸板回封]   {name} 首次涨停={first_limit_time}, 最后封板={last_limit_time}")
 
-                if first_limit_time > "10:30:00":
-                    logger.debug(f"[炸板回封]   {name} 过滤: 首次涨停时间{first_limit_time} > 10:30，可能是尾盘偷袭")
+                # 统一时间格式为 HH:MM:SS 进行比较
+                first_limit_time_formatted = self._format_time(first_limit_time)
+                if first_limit_time_formatted > "10:30:00":
+                    logger.debug(f"[炸板回封]   {name} 过滤: 首次涨停时间{first_limit_time_formatted} > 10:30，可能是尾盘偷袭")
                     continue
 
                 # 条件3: 回封时间分析
@@ -733,11 +735,28 @@ class PatternRecognition:
         except:
             return False
 
+    def _format_time(self, time_str: str) -> str:
+        """将时间字符串统一格式化为 HH:MM:SS"""
+        if not time_str:
+            return ""
+        time_str = str(time_str).strip()
+        # 如果已经是 HH:MM:SS 格式，直接返回
+        if len(time_str) == 8 and ":" in time_str:
+            return time_str
+        # 如果是 HHMMSS 格式（如 93002），转换为 HH:MM:SS
+        if len(time_str) == 5 or len(time_str) == 6:
+            time_str = time_str.zfill(6)  # 补齐为 6 位
+            return f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+        return time_str
+
     def _calculate_reseal_duration(self, first_time: str, last_time: str, blast_times: int) -> int:
         """计算回封用时（估算）"""
         if not first_time or not last_time:
             return 999
         try:
+            # 统一时间格式
+            first_time = self._format_time(first_time)
+            last_time = self._format_time(last_time)
             fmt = "%H:%M:%S"
             start = datetime.strptime(first_time, fmt)
             end = datetime.strptime(last_time, fmt)
