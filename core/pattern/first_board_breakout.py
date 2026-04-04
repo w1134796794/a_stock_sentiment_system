@@ -73,8 +73,9 @@ class HotspotFirstBoardStrategy:
 
         流程：
         1. 调用analyze_all_sectors_v2获取热点二级行业
-        2. 筛选每个热点行业中的首板股票
+        2. 分析所有涨停股票中的首板（不限于热点板块）
         3. 结合技术指标进行过滤
+        4. 属于热点板块的股票增加仓位权重
 
         Args:
             today_zt: 今日涨停池
@@ -92,48 +93,52 @@ class HotspotFirstBoardStrategy:
 
         # 1. 获取热点二级行业（使用sector_heat_v2分析）
         hot_sectors = self._get_hot_sectors(today_zt, history_pools, date_str)
-        if not hot_sectors:
-            logger.warning("未识别到热点二级行业")
-            return signals
-
-        logger.info(f"识别到 {len(hot_sectors)} 个热点二级行业，开始分析首板...")
+        hot_sector_names = {s['sector_name'] for s in hot_sectors}
+        logger.info(f"识别到 {len(hot_sectors)} 个热点二级行业，开始分析所有首板...")
 
         # 2. 获取昨日涨停池（用于确认首板）
         yesterday_date = self._get_date_offset(date_str, -1)
         yesterday_zt = history_pools.get(yesterday_date, pd.DataFrame())
 
-        # 3. 遍历每个热点行业，分析其中的首板
+        # 3. 分析所有涨停股票中的首板（不限于热点板块）
         total_analyzed = 0
         total_filtered = 0
 
-        for sector_info in hot_sectors:
-            sector_name = sector_info['sector_name']
-            sector_stats = sector_info['stats']
+        for _, stock in today_zt.iterrows():
+            total_analyzed += 1
 
-            # 获取该行业的涨停股票
-            sector_stocks = self._get_sector_stocks(today_zt, sector_name)
-            if sector_stocks.empty:
-                continue
+            # 获取股票所属行业
+            sector_name = stock.get('所属行业', '') or stock.get('L2_Industry', '')
 
-            logger.info(f"  [{sector_name}] 今日涨停 {len(sector_stocks)} 只，分析首板...")
+            # 判断该股票是否属于热点板块
+            if sector_name in hot_sector_names:
+                # 属于热点板块，获取板块信息
+                sector_info = next((s for s in hot_sectors if s['sector_name'] == sector_name), None)
+                is_hot_sector = True
+            else:
+                # 不属于热点板块，创建空板块信息
+                sector_info = {
+                    'sector_name': sector_name or '未知行业',
+                    'stats': {},
+                    'trend_stage': '非热点',
+                    'action': '',
+                    'confidence': 0.0
+                }
+                is_hot_sector = False
 
-            # 分析该行业中的首板
-            sector_signals = 0
-            for _, stock in sector_stocks.iterrows():
-                total_analyzed += 1
-                signal = self._analyze_first_board(
-                    stock, yesterday_zt, sector_info, date_str
-                )
-                if signal:
-                    signals.append(signal)
-                    sector_signals += 1
-                else:
-                    total_filtered += 1
-
+            # 分析首板
+            signal = self._analyze_first_board(
+                stock, yesterday_zt, sector_info, date_str, is_hot_sector
+            )
+            if signal:
+                signals.append(signal)
+            else:
+                total_filtered += 1
 
         # 按置信度排序
         signals.sort(key=lambda x: x.confidence, reverse=True)
-        logger.info(f"首板突破检测完成: 共 {len(signals)} 个信号 (分析{total_analyzed}只, 过滤{total_filtered}只)")
+        hot_count = sum(1 for s in signals if s.l2_industry in hot_sector_names)
+        logger.info(f"首板突破检测完成: 共 {len(signals)} 个信号 (热点板块{hot_count}只, 非热点{len(signals)-hot_count}只, 分析{total_analyzed}只, 过滤{total_filtered}只)")
 
         return signals
 
@@ -199,7 +204,8 @@ class HotspotFirstBoardStrategy:
     def _analyze_first_board(self, stock: pd.Series,
                             yesterday_zt: pd.DataFrame,
                             sector_info: Dict,
-                            date_str: str) -> Optional[TradeSignal]:
+                            date_str: str,
+                            is_hot_sector: bool = True) -> Optional[TradeSignal]:
         """
         分析单只股票是否为首板突破
 
@@ -217,6 +223,7 @@ class HotspotFirstBoardStrategy:
             yesterday_zt: 昨日涨停池
             sector_info: 行业信息
             date_str: 日期字符串
+            is_hot_sector: 是否属于热点板块（影响仓位权重）
 
         Returns:
             TradeSignal or None: 符合条件的交易信号
@@ -227,12 +234,16 @@ class HotspotFirstBoardStrategy:
         name = stock.get('名称', '')
         sector_name = sector_info['sector_name']
 
+        logger.debug(f"[{code}] 开始分析首板 - 名称:{name}, 行业:{sector_name}, 热点:{is_hot_sector}")
+
         # 条件1: 今日涨停（涨停池中的股票默认已涨停）
         change = stock.get('涨跌幅', 0)
         if isinstance(change, str):
             change = float(change.replace('%', ''))
         if change < 9.5:
+            logger.debug(f"[{code}] 过滤: 涨幅不足9.5% ({change:.2f}%)")
             return None
+        logger.debug(f"[{code}] 通过: 今日涨停 ({change:.2f}%)")
 
         # 条件2: 昨日未涨停（首板确认）
         # 兼容映射后的列名 'Code' 和原始列名 '代码'
@@ -245,19 +256,25 @@ class HotspotFirstBoardStrategy:
             yesterday_codes = yesterday_zt['ts_code'].values
 
         if not yesterday_zt.empty and code in yesterday_codes:
+            logger.debug(f"[{code}] 过滤: 昨日已涨停，非首板")
             return None  # 昨日已涨停，不是首板
+        logger.debug(f"[{code}] 通过: 昨日未涨停，确认首板")
 
         # 条件3: 流通市值 < 100亿（小盘偏好）
         float_cap = stock.get('流通市值', 0) / 100000000
         if isinstance(float_cap, str):
             float_cap = float(float_cap.replace('亿', ''))
         if float_cap > self.params['max_float_cap']:
+            logger.debug(f"[{code}] 过滤: 流通市值过大 ({float_cap:.2f}亿 > {self.params['max_float_cap']}亿)")
             return None
+        logger.debug(f"[{code}] 通过: 流通市值 {float_cap:.2f}亿")
 
         # 条件4: 涨停时间 < 14:30（拒绝偷袭板）
         limit_up_time = str(stock.get('首次封板时间', '')).strip()
         if not self._is_valid_limit_time(limit_up_time):
+            logger.debug(f"[{code}] 过滤: 涨停时间过晚 ({limit_up_time} > {self.params['max_limit_up_time']})")
             return None
+        logger.debug(f"[{code}] 通过: 涨停时间 {limit_up_time}")
 
         # 条件4: 封单强度 > 5%
         # 尝试获取封单额（不同数据源可能使用不同列名）
@@ -265,20 +282,30 @@ class HotspotFirstBoardStrategy:
         float_cap = stock.get('流通市值', 1)  # 流通市值单位是亿，转换为万
         seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
         if seal_ratio < 0.02:
+            logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.2f}% < 2%)")
             return None
+        logger.debug(f"[{code}] 通过: 封单强度 {seal_ratio*100:.2f}%")
 
         # 获取日线数据进行进一步分析
         daily_data = self._get_daily_data(code, date_str)
+        if daily_data:
+            logger.debug(f"[{code}] 日线数据: 5日涨幅{daily_data.get('rise_5d', 0)*100:.2f}%, 量比{daily_data.get('volume_ratio', 0):.2f}")
+        else:
+            logger.debug(f"[{code}] 未获取到日线数据")
 
         # 条件5: 近5日涨幅 < 15%（低位要求）
         if daily_data and 'rise_5d' in daily_data:
             if daily_data['rise_5d'] >= self.params['max_5d_rise']:
+                logger.debug(f"[{code}] 过滤: 5日涨幅过高 ({daily_data['rise_5d']*100:.2f}% >= {self.params['max_5d_rise']*100:.0f}%)")
                 return None
+            logger.debug(f"[{code}] 通过: 5日涨幅 {daily_data['rise_5d']*100:.2f}%")
 
         # 条件6: 量比 > 1.8（资金突然介入）
         if daily_data and 'volume_ratio' in daily_data:
             if daily_data['volume_ratio'] < self.params['min_volume_ratio']:
+                logger.debug(f"[{code}] 过滤: 量比过低 ({daily_data['volume_ratio']:.2f} < {self.params['min_volume_ratio']})")
                 return None
+            logger.debug(f"[{code}] 通过: 量比 {daily_data['volume_ratio']:.2f}")
 
         # 条件7: 当天日线穿过5日、10日线
         ma_breakthrough = False
@@ -286,6 +313,9 @@ class HotspotFirstBoardStrategy:
             # 当天收盘价上穿5日线和10日线
             if daily_data['close'] > daily_data['ma5'] and daily_data['close'] > daily_data['ma10']:
                 ma_breakthrough = True
+                logger.debug(f"[{code}] 通过: 突破MA5/MA10均线 (close:{daily_data['close']:.2f}, ma5:{daily_data['ma5']:.2f}, ma10:{daily_data['ma10']:.2f})")
+            else:
+                logger.debug(f"[{code}] 未突破均线 (close:{daily_data['close']:.2f}, ma5:{daily_data['ma5']:.2f}, ma10:{daily_data['ma10']:.2f})")
 
         # 计算置信度
         confidence = 0.70  # 基础置信度
@@ -294,10 +324,20 @@ class HotspotFirstBoardStrategy:
             confidence += min((daily_data['volume_ratio'] - self.params['min_volume_ratio']) * 0.02, 0.10)  # 量比加成
         if ma_breakthrough:
             confidence += 0.05  # 均线突破加成
+        if is_hot_sector:
+            confidence += 0.05  # 热点板块加成
         confidence = min(confidence, 0.95)
 
+        # 确定仓位权重：热点板块 -> medium, 非热点 -> light
+        position_size = "medium" if is_hot_sector else "light"
+
+        logger.debug(f"[{code}] 生成信号: 置信度{confidence:.2f}, 仓位{position_size}, 热点{is_hot_sector}")
+
         # 构建理由
-        reason_parts = [f"首板突破+{sector_name}热点"]
+        if is_hot_sector:
+            reason_parts = [f"首板突破+{sector_name}热点"]
+        else:
+            reason_parts = [f"首板突破+{sector_name}"]
         if daily_data:
             if 'rise_5d' in daily_data:
                 reason_parts.append(f"5日涨幅{daily_data['rise_5d']*100:.1f}%")
@@ -329,8 +369,11 @@ class HotspotFirstBoardStrategy:
             "昨日未涨停（首板）",
             f"涨停时间<{self.params['max_limit_up_time']}（非偷袭）",
             "封单强度>5%",
-            f"属于热点行业: {sector_name}"
         ]
+        if is_hot_sector:
+            validation_rules.append(f"属于热点行业: {sector_name}")
+        else:
+            validation_rules.append(f"行业: {sector_name}（非热点）")
         if daily_data and 'rise_5d' in daily_data:
             validation_rules.append(f"近5日涨幅<{self.params['max_5d_rise']*100:.0f}%（低位）")
         if daily_data and 'volume_ratio' in daily_data:
@@ -346,7 +389,7 @@ class HotspotFirstBoardStrategy:
             entry_price=stock.get('涨停价', stock.get('最新价', 0)),
             stop_loss=stock.get('涨停价', stock.get('最新价', 0)) * 0.93,
             take_profit=stock.get('涨停价', stock.get('最新价', 0)) * 1.10,
-            position_size="light",
+            position_size=position_size,
             reason="+".join(reason_parts),
             key_metrics=key_metrics,
             validation_rules=validation_rules,

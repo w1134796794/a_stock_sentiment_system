@@ -57,6 +57,8 @@ class DragonSecondWaveStrategyV2:
         检测龙二波机会
         recent_zt_pools: {日期: 当日涨停池DataFrame}
         """
+        stock_code_padded = str(stock_code).zfill(6)
+        logger.debug(f"[{stock_code_padded}] 开始检测龙二波 - 名称:{stock_name}, 日期:{today_str}, 板块热度:{sector_hot}")
 
         # ========== 步骤1：从涨停池重建近期连板记录（关键！）==========
         consecutive_record = self._rebuild_consecutive_from_pools(
@@ -64,9 +66,11 @@ class DragonSecondWaveStrategyV2:
         )
 
         if not consecutive_record['is_valid']:
+            logger.debug(f"[{stock_code_padded}] 过滤: 连板记录无效 - {consecutive_record.get('reason', '未知原因')}")
             return None
 
         first_wave_info = consecutive_record['first_wave']
+        logger.debug(f"[{stock_code_padded}] 连板记录: 最大连板{first_wave_info['max_boards']}板, 起涨日{first_wave_info['start_date']}, 见顶日{first_wave_info['peak_date']}")
 
         # 检查是否是近期这一波（非历史久远）
         days_since_peak = self._calculate_days_since_peak(
@@ -74,12 +78,16 @@ class DragonSecondWaveStrategyV2:
         )
 
         if days_since_peak > self.params["max_adjust_days"] + 5:
+            logger.debug(f"[{stock_code_padded}] 过滤: 第一波距今太久 ({days_since_peak}天 > {self.params['max_adjust_days'] + 5}天)")
             return None
+        logger.debug(f"[{stock_code_padded}] 通过: 第一波距今{days_since_peak}天")
 
         # ========== 步骤2：判断第一波高度（真龙标准）==========
 
         if not (self.params["min_first_wave"] <= first_wave_info['max_boards'] <= self.params["max_first_wave"]):
+            logger.debug(f"[{stock_code_padded}] 过滤: 第一波高度不符合 ({first_wave_info['max_boards']}板, 要求{self.params['min_first_wave']}-{self.params['max_first_wave']}板)")
             return None
+        logger.debug(f"[{stock_code_padded}] 通过: 第一波高度{first_wave_info['max_boards']}板")
 
         # ========== 步骤3：检查调整期形态 ==========
         adjust_period = self._get_adjust_period(
@@ -87,20 +95,27 @@ class DragonSecondWaveStrategyV2:
         )
 
         if not adjust_period:
+            logger.debug(f"[{stock_code_padded}] 过滤: 无法获取调整期数据")
             return None
 
+        logger.debug(f"[{stock_code_padded}] 调整期数据: 深度{adjust_period.get('depth', 0)*100:.1f}%, MA10:{adjust_period.get('ma10', 0):.2f}, 天数{adjust_period.get('days', 0)}")
 
         if not self._check_adjust_quality(adjust_period):
+            logger.debug(f"[{stock_code_padded}] 过滤: 调整期质量不符合要求")
             return None
+        logger.debug(f"[{stock_code_padded}] 通过: 调整期质量检查")
 
         # ========== 步骤4：今日启动确认 ==========
         today_change = today_data.get('涨跌幅', 0)
 
         if today_change < 9.5:  # 今日未涨停
+            logger.debug(f"[{stock_code_padded}] 过滤: 今日未涨停 ({today_change:.2f}% < 9.5%)")
             return None
+        logger.debug(f"[{stock_code_padded}] 通过: 今日涨停 {today_change:.2f}%")
 
         today_pool = recent_zt_pools.get(today_str, pd.DataFrame())
         if today_pool.empty:
+            logger.debug(f"[{stock_code_padded}] 过滤: 今日涨停池为空")
             return None
 
 
@@ -114,16 +129,19 @@ class DragonSecondWaveStrategyV2:
             code_col = 'ts_code'
 
         if code_col is None:
+            logger.debug(f"[{stock_code_padded}] 过滤: 涨停池缺少代码列")
             return None
 
         # 确保代码格式一致（都是字符串）
         today_pool_codes = today_pool[code_col].astype(str).str.zfill(6).tolist()
-        stock_code_padded = str(stock_code).zfill(6)
 
         if stock_code_padded not in today_pool_codes:
+            logger.debug(f"[{stock_code_padded}] 过滤: 不在今日涨停池中")
             return None  # 虽然涨幅>9.5%，但可能不是涨停（如科创板20%）
+        logger.debug(f"[{stock_code_padded}] 通过: 在今日涨停池中")
         
         # ========== 构建信号 ==========
+        logger.debug(f"[{stock_code_padded}] 生成龙二波信号: {first_wave_info['max_boards']}板龙头, 调整{days_since_peak}天, 板块热度:{sector_hot}")
         return TradeSignal(
             pattern_type=PatternType.DRAGON_SECOND_WAVE,
             stock_code=stock_code,
