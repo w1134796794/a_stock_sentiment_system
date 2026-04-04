@@ -622,12 +622,7 @@ def main():
     args = parser.parse_args()
     
     # 配置日志
-    loguru.logger.add(
-        Path(CACHE_DIR) / "system.log",
-        rotation="1 day",
-        retention="30 days",
-        encoding="utf-8"
-    )
+    setup_logging()
     
     system = SentimentSystem()
     
@@ -642,7 +637,44 @@ def main():
     elif args.mode == 'update':
         system.update_industry_mapping()
 
+def setup_logging():
+    """配置日志输出"""
+    # 移除默认的 stderr handler
+    loguru.logger.remove()
+    
+    # 创建 logs 目录
+    LOG_DIR = Path(__file__).parent / "logs"
+    LOG_DIR.mkdir(exist_ok=True)
+    
+    # 添加控制台输出
+    loguru.logger.add(
+        sys.stdout,
+        colorize=True,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        level="DEBUG",
+        backtrace=True,
+        diagnose=True,
+        enqueue=True,
+    )
+    
+    # 添加文件日志 - 保存到 logs 文件夹
+    loguru.logger.add(
+        LOG_DIR / "system.log",
+        rotation="1 day",
+        retention="30 days",
+        encoding="utf-8",
+        level="DEBUG",
+        backtrace=True,
+        diagnose=True,
+    )
+    
+    return LOG_DIR
+
+
 if __name__ == "__main__":
+    # 配置日志
+    setup_logging()
+    
     # 如果直接运行，执行今日分析
     print(">>> A股短线情绪量化系统启动...")
     print("提示: 首次运行请先在 config/settings.py 中配置Tushare Token")

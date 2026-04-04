@@ -1,0 +1,1022 @@
+2026-04-04 22:27:39.753 | INFO     | core.industry_mapper:_load_mapping:77 - 加载行业映射: 31个一级行业, 127个二级行业, 338个三级行业
+2026-04-04 22:27:39.771 | INFO     | __main__:run_daily_analysis:54 - 交易日验证: 20260404是周末，自动使用最近交易日20260403
+2026-04-04 22:27:39.785 | INFO     | __main__:run_daily_analysis:61 - 开始执行 20260403 的日度分析...
+2026-04-04 22:27:39.786 | INFO     | __main__:run_daily_analysis:62 - 对比日期: 20260402
+2026-04-04 22:27:39.786 | INFO     | __main__:run_daily_analysis:65 - [1/5] 获取涨停池数据...
+2026-04-04 22:27:39.809 | INFO     | __main__:run_daily_analysis:71 - 获取到 36 只涨停股票
+2026-04-04 22:27:39.809 | INFO     | __main__:run_daily_analysis:74 - [2/5] 构建行业层级映射...
+2026-04-04 22:27:39.816 | INFO     | __main__:run_daily_analysis:77 - 层级映射完成，覆盖 21 个二级行业
+2026-04-04 22:27:39.817 | INFO     | __main__:run_daily_analysis:80 - [3/5] 计算情绪指标...
+2026-04-04 22:27:39.841 | INFO     | __main__:run_daily_analysis:85 - 市场温度: 温和(精选个股)
+2026-04-04 22:27:39.842 | INFO     | __main__:run_daily_analysis:86 - 最高板: 6板 - 津药药业
+2026-04-04 22:27:39.842 | INFO     | __main__:run_daily_analysis:89 - [4/5] 计算综合板块权重（当日+20日）...
+2026-04-04 22:27:39.885 | INFO     | __main__:_calculate_combined_mainline:366 - ✓ 获取东财行业板块数据: 496个板块
+2026-04-04 22:27:40.084 | INFO     | __main__:_calculate_combined_mainline:502 - 发现新强势板块: 光学光电 (当日2只涨停)
+2026-04-04 22:27:40.085 | INFO     | __main__:_calculate_combined_mainline:502 - 发现新强势板块: 化学制药 (当日2只涨停)
+2026-04-04 22:27:40.085 | INFO     | __main__:_calculate_combined_mainline:502 - 发现新强势板块: 医药商业 (当日2只涨停)
+2026-04-04 22:27:40.087 | INFO     | __main__:_calculate_combined_mainline:502 - 发现新强势板块: 软件开发 (当日5只涨停)
+2026-04-04 22:27:40.087 | INFO     | __main__:_calculate_combined_mainline:502 - 发现新强势板块: 通信设备 (当日5只涨停)
+2026-04-04 22:27:40.088 | INFO     | __main__:_calculate_combined_mainline:512 - ✓ 综合板块分析完成: 10 个板块
+2026-04-04 22:27:40.089 | INFO     | __main__:_calculate_combined_mainline:516 -   电力: 强度34.4 (20日96, 当日0) [NEW]
+2026-04-04 22:27:40.089 | INFO     | __main__:_calculate_combined_mainline:516 -   电网设备: 强度26.5 (20日58, 当日4) [NEW]
+2026-04-04 22:27:40.090 | INFO     | __main__:_calculate_combined_mainline:516 -   通用设备: 强度18.6 (20日49, 当日0) [NEW]
+2026-04-04 22:27:40.090 | INFO     | __main__:_calculate_combined_mainline:516 -   专用设备: 强度17.4 (20日40, 当日2) [NEW]
+2026-04-04 22:27:40.090 | INFO     | __main__:_calculate_combined_mainline:516 -   光学光电子: 强度16.1 (20日40, 当日0) [NEW]
+2026-04-04 22:27:40.091 | INFO     | __main__:run_daily_analysis:93 - [5/6] 计算多维度板块热度 V2（散户聚焦版）...
+2026-04-04 22:27:40.130 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260402, 进度 1/20
+2026-04-04 22:27:40.169 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260401, 进度 2/20
+2026-04-04 22:27:40.211 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260331, 进度 3/20
+2026-04-04 22:27:40.250 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260330, 进度 4/20
+2026-04-04 22:27:40.261 | DEBUG    | __main__:_calculate_sector_heat:542 -   20260329 非交易日，跳过: 20260329是周末，自动使用最近交易日20260327
+2026-04-04 22:27:40.271 | DEBUG    | __main__:_calculate_sector_heat:542 -   20260328 非交易日，跳过: 20260328是周末，自动使用最近交易日20260327
+2026-04-04 22:27:40.313 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260327, 进度 5/20
+2026-04-04 22:27:40.350 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260326, 进度 6/20
+2026-04-04 22:27:40.393 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260325, 进度 7/20
+2026-04-04 22:27:40.438 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260324, 进度 8/20
+2026-04-04 22:27:40.476 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260323, 进度 9/20
+2026-04-04 22:27:40.486 | DEBUG    | __main__:_calculate_sector_heat:542 -   20260322 非交易日，跳过: 20260322是周末，自动使用最近交易日20260320
+2026-04-04 22:27:40.497 | DEBUG    | __main__:_calculate_sector_heat:542 -   20260321 非交易日，跳过: 20260321是周末，自动使用最近交易日20260320
+2026-04-04 22:27:40.534 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260320, 进度 10/20
+2026-04-04 22:27:40.573 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260319, 进度 11/20
+2026-04-04 22:27:40.622 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260318, 进度 12/20
+2026-04-04 22:27:40.661 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260317, 进度 13/20
+2026-04-04 22:27:40.701 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260316, 进度 14/20
+2026-04-04 22:27:40.712 | DEBUG    | __main__:_calculate_sector_heat:542 -   20260315 非交易日，跳过: 20260315是周末，自动使用最近交易日20260313
+2026-04-04 22:27:40.723 | DEBUG    | __main__:_calculate_sector_heat:542 -   20260314 非交易日，跳过: 20260314是周末，自动使用最近交易日20260313
+2026-04-04 22:27:40.766 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260313, 进度 15/20
+2026-04-04 22:27:40.805 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260312, 进度 16/20
+2026-04-04 22:27:40.856 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260311, 进度 17/20
+2026-04-04 22:27:40.901 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260310, 进度 18/20
+2026-04-04 22:27:40.939 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260309, 进度 19/20
+2026-04-04 22:27:40.951 | DEBUG    | __main__:_calculate_sector_heat:542 -   20260308 非交易日，跳过: 20260308是周末，自动使用最近交易日20260306
+2026-04-04 22:27:40.962 | DEBUG    | __main__:_calculate_sector_heat:542 -   20260307 非交易日，跳过: 20260307是周末，自动使用最近交易日20260306
+2026-04-04 22:27:41.002 | INFO     | __main__:_calculate_sector_heat:556 -   ✅ 获取交易日数据: 20260306, 进度 20/20
+2026-04-04 22:27:41.002 | INFO     | __main__:_calculate_sector_heat:570 - 历史数据获取完成：共 20 个交易日
+2026-04-04 22:27:41.003 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:847 - 当日涨停统计: 21个板块, 总涨停数: 36
+2026-04-04 22:27:41.003 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   软件开发: 5只
+2026-04-04 22:27:41.004 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   通信设备: 5只
+2026-04-04 22:27:41.004 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   电网设备: 4只
+2026-04-04 22:27:41.004 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   专用设备: 2只
+2026-04-04 22:27:41.004 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   光学光电: 2只
+2026-04-04 22:27:41.004 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   化学制药: 2只
+2026-04-04 22:27:41.004 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   医药商业: 2只
+2026-04-04 22:27:41.004 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   农化制品: 1只
+2026-04-04 22:27:41.005 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   包装印刷: 1只
+2026-04-04 22:27:41.005 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   化学原料: 1只
+2026-04-04 22:27:41.065 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:855 - 历史数据统计: 104个板块
+2026-04-04 22:27:41.066 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电机Ⅱ: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.067 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】养殖业: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.068 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】环保设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.069 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】军工电子: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.084 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电视广播: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.085 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】农化制品: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.086 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】生物制品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.086 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】纺织制造: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.087 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】非白酒: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.088 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】游戏Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.088 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】地面兵装: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.089 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_industry_None.csv
+2026-04-04 22:27:41.110 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_concept_None.csv
+2026-04-04 22:27:41.148 | DEBUG    | core.sector_heat_v2:_analyze_capital_flow:471 - 板块[通信设备]资金流向: 机构主导 (大单:142690万, 中单:-537584万, 小单:-275521万)
+2026-04-04 22:27:41.149 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】自动化设: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.150 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】造纸: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.151 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】汽车服务: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.151 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】商用车: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.152 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】IT服务Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.153 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】航空装备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.154 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电子化学: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.155 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】医疗器械: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.155 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】中药Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.156 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电池: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.159 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】焦炭Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.160 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】半导体: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.162 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】装修装饰: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.163 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】旅游及景: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.164 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】农产品加: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.165 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】基础建设: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.165 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】互联网电: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.166 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】炼化及贸: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.167 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】饲料: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.168 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】化学原料: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.169 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】服装家纺: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.169 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_industry_None.csv
+2026-04-04 22:27:41.189 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_concept_None.csv
+2026-04-04 22:27:41.213 | DEBUG    | core.sector_heat_v2:_analyze_capital_flow:471 - 板块[软件开发]资金流向: 散户主导 (大单:-75981万, 中单:-34140万, 小单:57149万)
+2026-04-04 22:27:41.214 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】贸易Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.215 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】饮料乳品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.215 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】白色家电: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.216 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】金属新材: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.217 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】其他电源: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.217 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】林业Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.218 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】文娱用品: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.219 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】家居用品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.219 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】装修建材: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.220 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】照明设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.221 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】非金属材: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.221 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】工程咨询: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.222 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】消费电子: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.223 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】元件: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.224 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】食品加工: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.225 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】工业金属: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.225 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】航运港口: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.227 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】汽车零部件: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.228 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】房地产开发: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.229 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】油服工程: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.230 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】小金属: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.231 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】乘用车: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.232 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】计算机设: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.232 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】通用设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.233 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_industry_None.csv
+2026-04-04 22:27:41.253 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_concept_None.csv
+2026-04-04 22:27:41.279 | DEBUG    | core.sector_heat_v2:_analyze_capital_flow:471 - 板块[化学制药]资金流向: 散户主导 (大单:-132157万, 中单:-12322万, 小单:256837万)
+2026-04-04 22:27:41.280 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】铁路公路: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.281 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】专业工程: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.282 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】工程机械: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.282 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】房屋建设: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.283 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电力: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.284 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】个护用品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.284 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】摩托车及: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.285 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】调味发酵: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.286 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】小家电: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.287 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_industry_None.csv
+2026-04-04 22:27:41.308 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_concept_None.csv
+2026-04-04 22:27:41.334 | DEBUG    | core.sector_heat_v2:_analyze_capital_flow:471 - 板块[医药商业]资金流向: 净流出 (大单:-16874万, 中单:-28739万, 小单:-41390万)
+2026-04-04 22:27:41.335 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】多元金融: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.336 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】橡胶: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.337 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】轨交设备: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.338 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_industry_None.csv
+2026-04-04 22:27:41.359 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_concept_None.csv
+2026-04-04 22:27:41.388 | DEBUG    | core.sector_heat_v2:_analyze_capital_flow:471 - 板块[光学光电]资金流向: 净流出 (大单:-72556万, 中单:-27667万, 小单:-40994万)
+2026-04-04 22:27:41.389 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】环境治理: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.390 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】家电零部: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.391 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】其他电子: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.391 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】厨卫电器: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.392 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】体育Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.393 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】煤炭开采: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.395 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_industry_None.csv
+2026-04-04 22:27:41.418 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_concept_None.csv
+2026-04-04 22:27:41.451 | DEBUG    | core.sector_heat_v2:_analyze_capital_flow:471 - 板块[专用设备]资金流向: 散户主导 (大单:-35522万, 中单:-16255万, 小单:68550万)
+2026-04-04 22:27:41.452 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】包装印刷: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.453 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】玻璃玻纤: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.454 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】综合Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.455 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】化学纤维: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.456 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】燃气Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.459 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】黑色家电: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.460 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】光伏设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.462 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】房地产服务: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.463 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_industry_None.csv
+2026-04-04 22:27:41.484 | INFO     | core.data_manager:get_sector_moneyflow:1382 - 从缓存加载板块资金流向数据: g:\a_stock_sentiment_system\data\cache\20260404\sector_moneyflow_concept_None.csv
+2026-04-04 22:27:41.511 | DEBUG    | core.sector_heat_v2:_analyze_capital_flow:471 - 板块[电网设备]资金流向: 散户主导 (大单:-169507万, 中单:-15238万, 小单:350353万)
+2026-04-04 22:27:41.513 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】油气开采: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.513 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】风电设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.514 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】特钢Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.515 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】冶钢原料: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.515 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】出版: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.516 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】化学制品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.517 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】广告营销: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.517 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】普钢: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.518 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】物流: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.518 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】医疗服务: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.519 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】种植业: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.520 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】水泥: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.521 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】能源金属: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.521 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】通信服务: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:41.522 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】塑料: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:41.523 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:930 - ======================================================================
+2026-04-04 22:27:41.523 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:931 - 【板块热度调试信息】
+2026-04-04 22:27:41.523 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:932 - 总板块数: 104, 触发信号数: 7
+2026-04-04 22:27:41.523 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:933 - 当前阈值配置:
+2026-04-04 22:27:41.524 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:934 -   爆发阈值: 1.5倍 (需今日>=4只)
+2026-04-04 22:27:41.524 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:935 -   加速阈值: 25% (需3日滚动>=3只)
+2026-04-04 22:27:41.525 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:936 -   确认期: 动量>0 (需今日>=2只, 3日滚动>=5只)
+2026-04-04 22:27:41.525 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:937 -   观察期: 动量5%-50% (需昨日>=1只, 5日滚动>=4只)
+2026-04-04 22:27:41.525 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:938 -   退潮阈值: -15%
+2026-04-04 22:27:41.526 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:939 -   最小关注数: 2只
+2026-04-04 22:27:41.526 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:940 - ----------------------------------------------------------------------
+2026-04-04 22:27:41.527 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 通信设备: 今日5只, 昨日2只, 3日滚动10只, 爆发2.50倍, 动量19.05% [爆发期]
+2026-04-04 22:27:41.528 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 软件开发: 今日5只, 昨日0只, 3日滚动5只, 爆发5.00倍, 动量19.05% [启动期]
+2026-04-04 22:27:41.529 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 电网设备: 今日4只, 昨日2只, 3日滚动7只, 爆发2.00倍, 动量-16.67% [爆发期]
+2026-04-04 22:27:41.529 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 化学制药: 今日2只, 昨日4只, 3日滚动12只, 爆发0.50倍, 动量-4.76% [观察期]
+2026-04-04 22:27:41.529 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 医药商业: 今日2只, 昨日1只, 3日滚动4只, 爆发2.00倍, 动量11.11% [观察期]
+2026-04-04 22:27:41.529 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 光学光电: 今日2只, 昨日0只, 3日滚动3只, 爆发2.00倍, 动量25.00% [启动期]
+2026-04-04 22:27:41.530 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 专用设备: 今日2只, 昨日0只, 3日滚动4只, 爆发2.00倍, 动量-4.76% [启动期]
+2026-04-04 22:27:41.530 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 电机Ⅱ: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量66.67% [晚期退潮]
+2026-04-04 22:27:41.530 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 农化制品: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量-44.44% [晚期退潮]
+2026-04-04 22:27:41.531 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 半导体: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量-44.44% [观察期]
+2026-04-04 22:27:41.531 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 基础建设: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量-58.33% [观察期]
+2026-04-04 22:27:41.531 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 化学原料: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量66.67% [晚期退潮]
+2026-04-04 22:27:41.531 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 文娱用品: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量-16.67% [晚期退潮]
+2026-04-04 22:27:41.532 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 消费电子: 今日1只, 昨日0只, 3日滚动2只, 爆发1.00倍, 动量66.67% [晚期退潮]
+2026-04-04 22:27:41.532 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 汽车零部件: 今日1只, 昨日0只, 3日滚动4只, 爆发1.00倍, 动量-25.93% [观察期]
+2026-04-04 22:27:41.532 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:951 - ----------------------------------------------------------------------
+2026-04-04 22:27:41.532 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:952 - 【退潮板块】今日无涨停但前几日有数据的板块（共6个）:
+2026-04-04 22:27:41.533 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   炼化及贸: 3日滚动4只, 昨日3只 [观察期]
+2026-04-04 22:27:41.533 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   电力: 3日滚动4只, 昨日3只 [晚期退潮]
+2026-04-04 22:27:41.533 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   医疗器械: 3日滚动3只, 昨日1只 [晚期退潮]
+2026-04-04 22:27:41.533 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   油服工程: 3日滚动3只, 昨日2只 [观察期]
+2026-04-04 22:27:41.534 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   专业工程: 3日滚动3只, 昨日1只 [晚期退潮]
+2026-04-04 22:27:41.534 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   医疗服务: 3日滚动3只, 昨日1只 [观察期]
+2026-04-04 22:27:41.534 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:958 - ======================================================================
+2026-04-04 22:27:41.536 | INFO     | __main__:run_daily_analysis:99 - ✓ 板块热度分析完成，发现 7 个 actionable 信号
+2026-04-04 22:27:41.537 | INFO     | __main__:run_daily_analysis:106 -   [优先级1] 爆发期 - 通信设备: [爆发]积极参与，做前排 (置信度90%)
+2026-04-04 22:27:41.537 | INFO     | __main__:run_daily_analysis:106 -   [优先级1] 启动期 - 软件开发: [启动]立即重仓，做首板/二板 (置信度90%)
+2026-04-04 22:27:41.538 | INFO     | __main__:run_daily_analysis:106 -   [优先级3] 爆发期 - 电网设备: [爆发]谨慎参与 (置信度80%)
+2026-04-04 22:27:41.538 | INFO     | __main__:run_daily_analysis:106 -   [优先级4] 启动期 - 光学光电: [启动]1成仓试探或观察 (置信度80%)
+2026-04-04 22:27:41.539 | INFO     | __main__:run_daily_analysis:106 -   [优先级4] 启动期 - 专用设备: [启动]1成仓试探或观察 (置信度80%)
+2026-04-04 22:27:41.539 | INFO     | __main__:run_daily_analysis:106 -   [优先级5] 观察期 - 医药商业: 观察 (置信度80%)
+2026-04-04 22:27:41.540 | INFO     | __main__:run_daily_analysis:106 -   [优先级5] 观察期 - 化学制药: 观察 (置信度65%)
+2026-04-04 22:27:41.540 | INFO     | __main__:run_daily_analysis:111 - [6/6] 识别交易模式...
+2026-04-04 22:27:41.543 | INFO     | core.pattern_recognition:_init_strategies:57 - ✓ 弱转强策略加载成功
+2026-04-04 22:27:41.545 | INFO     | core.pattern_recognition:_init_strategies:65 - ✓ 二板定龙策略加载成功
+2026-04-04 22:27:41.547 | INFO     | core.pattern_recognition:_init_strategies:73 - ✓ 首板突破策略加载成功
+2026-04-04 22:27:41.549 | INFO     | core.pattern_recognition:_init_strategies:81 - ✓ 分歧转一致策略加载成功
+2026-04-04 22:27:41.551 | INFO     | core.pattern_recognition:_init_strategies:89 - ✓ 卡位板策略加载成功
+2026-04-04 22:27:41.554 | INFO     | core.pattern_recognition:_init_strategies:97 - ✓ 炸板回封策略加载成功
+2026-04-04 22:27:41.555 | INFO     | core.pattern_recognition:_init_strategies:105 - ✓ 龙二波策略加载成功
+2026-04-04 22:27:41.556 | INFO     | __main__:run_daily_analysis:128 - 传递给模式识别的热点板块: 5个
+2026-04-04 22:27:41.557 | INFO     | __main__:run_daily_analysis:130 -   - 通信设备 (爆发期)
+2026-04-04 22:27:41.557 | INFO     | __main__:run_daily_analysis:130 -   - 软件开发 (启动期)
+2026-04-04 22:27:41.557 | INFO     | __main__:run_daily_analysis:130 -   - 电网设备 (爆发期)
+2026-04-04 22:27:41.557 | INFO     | __main__:run_daily_analysis:130 -   - 光学光电 (启动期)
+2026-04-04 22:27:41.557 | INFO     | __main__:run_daily_analysis:130 -   - 专用设备 (启动期)
+2026-04-04 22:27:41.558 | INFO     | core.pattern_recognition:scan_all_patterns:1226 - ============================================================
+2026-04-04 22:27:41.558 | INFO     | core.pattern_recognition:scan_all_patterns:1227 - 开始全模式扫描: 今日=20260403, 昨日=20260402
+2026-04-04 22:27:41.559 | INFO     | core.pattern_recognition:scan_all_patterns:1228 - ============================================================
+2026-04-04 22:27:41.559 | INFO     | core.pattern_recognition:scan_all_patterns:1235 - 获取涨停池数据...
+2026-04-04 22:27:41.610 | INFO     | core.pattern_recognition:scan_all_patterns:1244 - 获取最近15个交易日涨停池数据...
+2026-04-04 22:27:41.888 | INFO     | core.pattern_recognition:scan_all_patterns:1252 - 今日涨停: 36只, 昨日涨停: 28只, 前日涨停: 56只, 历史池: 15天
+2026-04-04 22:27:41.888 | INFO     | core.pattern_recognition:scan_all_patterns:1258 - ----------------------------------------
+2026-04-04 22:27:41.888 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:127 - [弱转强] 开始检测，今日涨停36只，昨日涨停28只
+2026-04-04 22:27:41.889 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 汇源通信(000586)...
+2026-04-04 22:27:41.892 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:154 - [弱转强]   汇源通信 昨日已涨停，开始分析...
+2026-04-04 22:27:41.895 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:157 - [弱转强]   汇源通信 连板高度=2
+2026-04-04 22:27:41.895 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:162 - [弱转强]   汇源通信 过滤: 连板高度2不在[3,8]范围内
+2026-04-04 22:27:41.895 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 新能泰山(000720)...
+2026-04-04 22:27:41.897 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:154 - [弱转强]   新能泰山 昨日已涨停，开始分析...
+2026-04-04 22:27:41.900 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:157 - [弱转强]   新能泰山 连板高度=2
+2026-04-04 22:27:41.900 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:162 - [弱转强]   新能泰山 过滤: 连板高度2不在[3,8]范围内
+2026-04-04 22:27:41.901 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 重药控股(000950)...
+2026-04-04 22:27:41.903 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:154 - [弱转强]   重药控股 昨日已涨停，开始分析...
+2026-04-04 22:27:41.905 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:157 - [弱转强]   重药控股 连板高度=2
+2026-04-04 22:27:41.906 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:162 - [弱转强]   重药控股 过滤: 连板高度2不在[3,8]范围内
+2026-04-04 22:27:41.906 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 福晶科技(002222)...
+2026-04-04 22:27:41.908 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   福晶科技 昨日未涨停，跳过
+2026-04-04 22:27:41.908 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 珠江钢琴(002678)...
+2026-04-04 22:27:41.910 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   珠江钢琴 昨日未涨停，跳过
+2026-04-04 22:27:41.910 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 通宇通讯(002792)...
+2026-04-04 22:27:41.912 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   通宇通讯 昨日未涨停，跳过
+2026-04-04 22:27:41.912 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 世嘉科技(002796)...
+2026-04-04 22:27:41.913 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   世嘉科技 昨日未涨停，跳过
+2026-04-04 22:27:41.914 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 裕同科技(002831)...
+2026-04-04 22:27:41.915 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   裕同科技 昨日未涨停，跳过
+2026-04-04 22:27:41.916 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 亚世光电(002952)...
+2026-04-04 22:27:41.920 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   亚世光电 昨日未涨停，跳过
+2026-04-04 22:27:41.920 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 华盛昌(002980)...
+2026-04-04 22:27:41.924 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   华盛昌 昨日未涨停，跳过
+2026-04-04 22:27:41.924 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 直真科技(003007)...
+2026-04-04 22:27:41.926 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   直真科技 昨日未涨停，跳过
+2026-04-04 22:27:41.927 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 中瓷电子(003031)...
+2026-04-04 22:27:41.930 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   中瓷电子 昨日未涨停，跳过
+2026-04-04 22:27:41.931 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 莱美药业(300006)...
+2026-04-04 22:27:41.932 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   莱美药业 昨日未涨停，跳过
+2026-04-04 22:27:41.933 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 思特奇(300608)...
+2026-04-04 22:27:41.934 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   思特奇 昨日未涨停，跳过
+2026-04-04 22:27:41.935 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 华瑞股份(300626)...
+2026-04-04 22:27:41.936 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   华瑞股份 昨日未涨停，跳过
+2026-04-04 22:27:41.937 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 易天股份(300812)...
+2026-04-04 22:27:41.938 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   易天股份 昨日未涨停，跳过
+2026-04-04 22:27:41.939 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 中国医药(600056)...
+2026-04-04 22:27:41.940 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   中国医药 昨日未涨停，跳过
+2026-04-04 22:27:41.941 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 重庆路桥(600106)...
+2026-04-04 22:27:41.942 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   重庆路桥 昨日未涨停，跳过
+2026-04-04 22:27:41.943 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 标准股份(600302)...
+2026-04-04 22:27:41.944 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   标准股份 昨日未涨停，跳过
+2026-04-04 22:27:41.945 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 津药药业(600488)...
+2026-04-04 22:27:41.947 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:154 - [弱转强]   津药药业 昨日已涨停，开始分析...
+2026-04-04 22:27:41.950 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:157 - [弱转强]   津药药业 连板高度=3
+2026-04-04 22:27:41.950 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:166 - [弱转强]   津药药业 昨日弱类型=尾盘板, 质量分=50
+2026-04-04 22:27:41.951 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:169 - [弱转强]   津药药业 过滤: 昨日不是有效弱板，原因=未知
+2026-04-04 22:27:41.951 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 云赛智联(600602)...
+2026-04-04 22:27:41.953 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   云赛智联 昨日未涨停，跳过
+2026-04-04 22:27:41.953 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 中安科(600654)...
+2026-04-04 22:27:41.954 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   中安科 昨日未涨停，跳过
+2026-04-04 22:27:41.955 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 远东股份(600869)...
+2026-04-04 22:27:41.956 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   远东股份 昨日未涨停，跳过
+2026-04-04 22:27:41.957 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 三维股份(603033)...
+2026-04-04 22:27:41.958 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   三维股份 昨日未涨停，跳过
+2026-04-04 22:27:41.959 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 振华股份(603067)...
+2026-04-04 22:27:41.961 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   振华股份 昨日未涨停，跳过
+2026-04-04 22:27:41.962 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 翠微股份(603123)...
+2026-04-04 22:27:41.963 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   翠微股份 昨日未涨停，跳过
+2026-04-04 22:27:41.964 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 网达软件(603189)...
+2026-04-04 22:27:41.965 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   网达软件 昨日未涨停，跳过
+2026-04-04 22:27:41.966 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 苏利股份(603585)...
+2026-04-04 22:27:41.967 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   苏利股份 昨日未涨停，跳过
+2026-04-04 22:27:41.968 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 法兰泰克(603966)...
+2026-04-04 22:27:41.969 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   法兰泰克 昨日未涨停，跳过
+2026-04-04 22:27:41.970 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 嵘泰股份(605133)...
+2026-04-04 22:27:41.971 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   嵘泰股份 昨日未涨停，跳过
+2026-04-04 22:27:41.971 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 园林股份(605303)...
+2026-04-04 22:27:41.973 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   园林股份 昨日未涨停，跳过
+2026-04-04 22:27:41.973 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 圣泉集团(605589)...
+2026-04-04 22:27:41.975 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   圣泉集团 昨日未涨停，跳过
+2026-04-04 22:27:41.975 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 中船特气(688146)...
+2026-04-04 22:27:41.977 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   中船特气 昨日未涨停，跳过
+2026-04-04 22:27:41.978 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 德科立(688205)...
+2026-04-04 22:27:41.980 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   德科立 昨日未涨停，跳过
+2026-04-04 22:27:41.980 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 威腾电气(688226)...
+2026-04-04 22:27:41.982 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   威腾电气 昨日未涨停，跳过
+2026-04-04 22:27:41.982 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:146 - [弱转强] 检测 九州一轨(688485)...
+2026-04-04 22:27:41.984 | DEBUG    | core.pattern_recognition:detect_weak_to_strong:150 - [弱转强]   九州一轨 昨日未涨停，跳过
+2026-04-04 22:27:41.984 | INFO     | core.pattern_recognition:detect_weak_to_strong:225 - [弱转强] 检测完成: 共0个信号 (检查36只, 通过0只)
+2026-04-04 22:27:41.984 | INFO     | core.pattern_recognition:scan_all_patterns:1268 - ----------------------------------------
+2026-04-04 22:27:41.985 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:365 - [分歧转一致] 开始检测，今日涨停36只，昨日涨停28只
+2026-04-04 22:27:41.985 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 汇源通信(000586)...
+2026-04-04 22:27:41.987 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:392 - [分歧转一致]   汇源通信 昨日已涨停，检查分歧特征...
+2026-04-04 22:27:41.988 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:396 - [分歧转一致]   汇源通信 昨日炸板次数=1
+2026-04-04 22:27:41.988 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:408 - [分歧转一致]   汇源通信 昨日换手率=7.0%
+2026-04-04 22:27:41.988 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:411 - [分歧转一致]   汇源通信 过滤: 换手率7.0%不在[15%,35%]范围内
+2026-04-04 22:27:41.988 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 新能泰山(000720)...
+2026-04-04 22:27:41.990 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:392 - [分歧转一致]   新能泰山 昨日已涨停，检查分歧特征...
+2026-04-04 22:27:41.990 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:396 - [分歧转一致]   新能泰山 昨日炸板次数=0
+2026-04-04 22:27:41.991 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:399 - [分歧转一致]   新能泰山 过滤: 昨日无炸板，无分歧
+2026-04-04 22:27:41.991 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 重药控股(000950)...
+2026-04-04 22:27:41.993 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:392 - [分歧转一致]   重药控股 昨日已涨停，检查分歧特征...
+2026-04-04 22:27:41.993 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:396 - [分歧转一致]   重药控股 昨日炸板次数=0
+2026-04-04 22:27:41.994 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:399 - [分歧转一致]   重药控股 过滤: 昨日无炸板，无分歧
+2026-04-04 22:27:41.994 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 福晶科技(002222)...
+2026-04-04 22:27:41.996 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   福晶科技 昨日未涨停，跳过
+2026-04-04 22:27:41.997 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 珠江钢琴(002678)...
+2026-04-04 22:27:41.998 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   珠江钢琴 昨日未涨停，跳过
+2026-04-04 22:27:41.999 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 通宇通讯(002792)...
+2026-04-04 22:27:42.000 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   通宇通讯 昨日未涨停，跳过
+2026-04-04 22:27:42.001 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 世嘉科技(002796)...
+2026-04-04 22:27:42.002 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   世嘉科技 昨日未涨停，跳过
+2026-04-04 22:27:42.003 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 裕同科技(002831)...
+2026-04-04 22:27:42.004 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   裕同科技 昨日未涨停，跳过
+2026-04-04 22:27:42.005 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 亚世光电(002952)...
+2026-04-04 22:27:42.006 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   亚世光电 昨日未涨停，跳过
+2026-04-04 22:27:42.006 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 华盛昌(002980)...
+2026-04-04 22:27:42.008 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   华盛昌 昨日未涨停，跳过
+2026-04-04 22:27:42.008 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 直真科技(003007)...
+2026-04-04 22:27:42.010 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   直真科技 昨日未涨停，跳过
+2026-04-04 22:27:42.011 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 中瓷电子(003031)...
+2026-04-04 22:27:42.013 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   中瓷电子 昨日未涨停，跳过
+2026-04-04 22:27:42.013 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 莱美药业(300006)...
+2026-04-04 22:27:42.015 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   莱美药业 昨日未涨停，跳过
+2026-04-04 22:27:42.015 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 思特奇(300608)...
+2026-04-04 22:27:42.017 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   思特奇 昨日未涨停，跳过
+2026-04-04 22:27:42.017 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 华瑞股份(300626)...
+2026-04-04 22:27:42.019 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   华瑞股份 昨日未涨停，跳过
+2026-04-04 22:27:42.019 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 易天股份(300812)...
+2026-04-04 22:27:42.021 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   易天股份 昨日未涨停，跳过
+2026-04-04 22:27:42.021 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 中国医药(600056)...
+2026-04-04 22:27:42.022 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   中国医药 昨日未涨停，跳过
+2026-04-04 22:27:42.023 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 重庆路桥(600106)...
+2026-04-04 22:27:42.024 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   重庆路桥 昨日未涨停，跳过
+2026-04-04 22:27:42.025 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 标准股份(600302)...
+2026-04-04 22:27:42.027 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   标准股份 昨日未涨停，跳过
+2026-04-04 22:27:42.027 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 津药药业(600488)...
+2026-04-04 22:27:42.030 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:392 - [分歧转一致]   津药药业 昨日已涨停，检查分歧特征...
+2026-04-04 22:27:42.030 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:396 - [分歧转一致]   津药药业 昨日炸板次数=0
+2026-04-04 22:27:42.030 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:399 - [分歧转一致]   津药药业 过滤: 昨日无炸板，无分歧
+2026-04-04 22:27:42.031 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 云赛智联(600602)...
+2026-04-04 22:27:42.032 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   云赛智联 昨日未涨停，跳过
+2026-04-04 22:27:42.033 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 中安科(600654)...
+2026-04-04 22:27:42.034 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   中安科 昨日未涨停，跳过
+2026-04-04 22:27:42.035 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 远东股份(600869)...
+2026-04-04 22:27:42.036 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   远东股份 昨日未涨停，跳过
+2026-04-04 22:27:42.037 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 三维股份(603033)...
+2026-04-04 22:27:42.038 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   三维股份 昨日未涨停，跳过
+2026-04-04 22:27:42.038 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 振华股份(603067)...
+2026-04-04 22:27:42.040 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   振华股份 昨日未涨停，跳过
+2026-04-04 22:27:42.040 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 翠微股份(603123)...
+2026-04-04 22:27:42.042 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   翠微股份 昨日未涨停，跳过
+2026-04-04 22:27:42.042 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 网达软件(603189)...
+2026-04-04 22:27:42.044 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   网达软件 昨日未涨停，跳过
+2026-04-04 22:27:42.045 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 苏利股份(603585)...
+2026-04-04 22:27:42.046 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   苏利股份 昨日未涨停，跳过
+2026-04-04 22:27:42.047 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 法兰泰克(603966)...
+2026-04-04 22:27:42.048 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   法兰泰克 昨日未涨停，跳过
+2026-04-04 22:27:42.049 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 嵘泰股份(605133)...
+2026-04-04 22:27:42.050 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   嵘泰股份 昨日未涨停，跳过
+2026-04-04 22:27:42.051 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 园林股份(605303)...
+2026-04-04 22:27:42.052 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   园林股份 昨日未涨停，跳过
+2026-04-04 22:27:42.053 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 圣泉集团(605589)...
+2026-04-04 22:27:42.054 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   圣泉集团 昨日未涨停，跳过
+2026-04-04 22:27:42.055 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 中船特气(688146)...
+2026-04-04 22:27:42.056 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   中船特气 昨日未涨停，跳过
+2026-04-04 22:27:42.057 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 德科立(688205)...
+2026-04-04 22:27:42.058 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   德科立 昨日未涨停，跳过
+2026-04-04 22:27:42.059 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 威腾电气(688226)...
+2026-04-04 22:27:42.060 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   威腾电气 昨日未涨停，跳过
+2026-04-04 22:27:42.061 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:384 - [分歧转一致] 检测 九州一轨(688485)...
+2026-04-04 22:27:42.063 | DEBUG    | core.pattern_recognition:detect_divergence_to_consensus:388 - [分歧转一致]   九州一轨 昨日未涨停，跳过
+2026-04-04 22:27:42.063 | INFO     | core.pattern_recognition:detect_divergence_to_consensus:480 - [分歧转一致] 检测完成: 共0个信号 (检查36只, 通过0只)
+2026-04-04 22:27:42.063 | INFO     | core.pattern_recognition:scan_all_patterns:1278 - ----------------------------------------
+2026-04-04 22:27:42.064 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:247 - [二板定龙] 开始检测，今日涨停36只
+2026-04-04 22:27:42.064 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:273 - [二板定龙] 检测 汇源通信(000586)，确认二板...
+2026-04-04 22:27:42.066 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:282 - [二板定龙]   汇源通信 确认昨日首板，今日二板
+2026-04-04 22:27:42.067 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:285 - [二板定龙]   汇源通信 首板质量: {'score': 65, 'type': '尾盘板'}
+2026-04-04 22:27:42.067 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:776 - [_calculate_gap_ratio] 汇源通信 从tushare获取今日开盘价: 18.87
+2026-04-04 22:27:42.068 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:783 - [_calculate_gap_ratio] 汇源通信 从tushare获取昨日收盘价: 17.15
+2026-04-04 22:27:42.068 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:801 - [_calculate_gap_ratio] 汇源通信 今日开盘价=18.87, 昨日收盘价=17.15
+2026-04-04 22:27:42.069 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:805 - [_calculate_gap_ratio] 汇源通信 计算高开: (18.87 - 17.15) / 17.15 = 10.03%
+2026-04-04 22:27:42.069 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:292 - [二板定龙]   汇源通信 次日高开: 10.0%
+2026-04-04 22:27:42.069 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:300 - [二板定龙]   汇源通信 涨停时间=92500, 是否快速=False
+2026-04-04 22:27:42.069 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:305 - [二板定龙]   汇源通信 封单强度: 0.00%
+2026-04-04 22:27:42.069 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:308 - [二板定龙]   汇源通信 综合置信度=0.80
+2026-04-04 22:27:42.070 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:343 - [二板定龙]   汇源通信 生成信号 (置信度0.80)
+2026-04-04 22:27:42.070 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:273 - [二板定龙] 检测 新能泰山(000720)，确认二板...
+2026-04-04 22:27:42.072 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:282 - [二板定龙]   新能泰山 确认昨日首板，今日二板
+2026-04-04 22:27:42.072 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:285 - [二板定龙]   新能泰山 首板质量: {'score': 65, 'type': '尾盘板'}
+2026-04-04 22:27:42.073 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:776 - [_calculate_gap_ratio] 新能泰山 从tushare获取今日开盘价: 5.62
+2026-04-04 22:27:42.073 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:783 - [_calculate_gap_ratio] 新能泰山 从tushare获取昨日收盘价: 5.4
+2026-04-04 22:27:42.074 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:801 - [_calculate_gap_ratio] 新能泰山 今日开盘价=5.62, 昨日收盘价=5.4
+2026-04-04 22:27:42.074 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:805 - [_calculate_gap_ratio] 新能泰山 计算高开: (5.62 - 5.4) / 5.4 = 4.07%
+2026-04-04 22:27:42.074 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:292 - [二板定龙]   新能泰山 次日高开: 4.1%
+2026-04-04 22:27:42.074 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:300 - [二板定龙]   新能泰山 涨停时间=100033, 是否快速=False
+2026-04-04 22:27:42.074 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:305 - [二板定龙]   新能泰山 封单强度: 0.00%
+2026-04-04 22:27:42.075 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:308 - [二板定龙]   新能泰山 综合置信度=0.75
+2026-04-04 22:27:42.075 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:343 - [二板定龙]   新能泰山 生成信号 (置信度0.75)
+2026-04-04 22:27:42.076 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:273 - [二板定龙] 检测 重药控股(000950)，确认二板...
+2026-04-04 22:27:42.078 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:282 - [二板定龙]   重药控股 确认昨日首板，今日二板
+2026-04-04 22:27:42.079 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:285 - [二板定龙]   重药控股 首板质量: {'score': 65, 'type': '尾盘板'}
+2026-04-04 22:27:42.079 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:776 - [_calculate_gap_ratio] 重药控股 从tushare获取今日开盘价: 6.55
+2026-04-04 22:27:42.080 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:783 - [_calculate_gap_ratio] 重药控股 从tushare获取昨日收盘价: 6.49
+2026-04-04 22:27:42.080 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:801 - [_calculate_gap_ratio] 重药控股 今日开盘价=6.55, 昨日收盘价=6.49
+2026-04-04 22:27:42.080 | DEBUG    | core.pattern_recognition:_calculate_gap_ratio:805 - [_calculate_gap_ratio] 重药控股 计算高开: (6.55 - 6.49) / 6.49 = 0.92%
+2026-04-04 22:27:42.081 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:292 - [二板定龙]   重药控股 次日高开: 0.9%
+2026-04-04 22:27:42.081 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:295 - [二板定龙]   重药控股 过滤: 高开0.9% < 2%
+2026-04-04 22:27:42.081 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   福晶科技 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.082 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   珠江钢琴 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.082 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   通宇通讯 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.082 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   世嘉科技 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.083 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   裕同科技 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.083 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   亚世光电 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.083 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   华盛昌 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.084 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   直真科技 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.084 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   中瓷电子 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.084 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   莱美药业 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.085 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   思特奇 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.085 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   华瑞股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.085 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   易天股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.086 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   中国医药 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.086 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   重庆路桥 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.086 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   标准股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.087 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   津药药业 连板数=6.0，不是二板，跳过
+2026-04-04 22:27:42.087 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   云赛智联 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.087 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   中安科 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.088 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   远东股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.088 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   三维股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.088 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   振华股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.089 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   翠微股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.089 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   网达软件 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.089 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   苏利股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.090 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   法兰泰克 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.090 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   嵘泰股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.090 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   园林股份 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.091 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   圣泉集团 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.091 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   中船特气 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.091 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   德科立 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.092 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   威腾电气 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.093 | DEBUG    | core.pattern_recognition:detect_second_board_dragon:270 - [二板定龙]   九州一轨 连板数=1.0，不是二板，跳过
+2026-04-04 22:27:42.093 | INFO     | core.pattern_recognition:detect_second_board_dragon:345 - [二板定龙] 检测完成: 共2个信号 (检查36只, 通过2只)
+2026-04-04 22:27:42.093 | INFO     | core.pattern_recognition:scan_all_patterns:1289 - ----------------------------------------
+2026-04-04 22:27:42.108 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [000586] 开始检测龙二波 - 名称:汇源通信, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.110 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [000586] 过滤: 连板记录无效 - 连板数不足(2 < 4)
+2026-04-04 22:27:42.110 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   汇源通信 未通过检测
+2026-04-04 22:27:42.110 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [000720] 开始检测龙二波 - 名称:新能泰山, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.123 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:73 - [000720] 连板记录: 最大连板4板, 起涨日20260324, 见顶日20260327
+2026-04-04 22:27:42.124 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:83 - [000720] 通过: 第一波距今7天
+2026-04-04 22:27:42.124 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:90 - [000720] 通过: 第一波高度4板
+2026-04-04 22:27:42.124 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 000720.SZ 从 20260307 到 20260403 的日线数据
+2026-04-04 22:27:42.124 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\000720.SZ_20260307_20260403.csv
+2026-04-04 22:27:42.130 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:101 - [000720] 调整期数据: 深度16.7%, MA10:4.96, 天数6
+2026-04-04 22:27:42.130 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:104 - [000720] 过滤: 调整期质量不符合要求
+2026-04-04 22:27:42.131 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   新能泰山 未通过检测
+2026-04-04 22:27:42.131 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [000950] 开始检测龙二波 - 名称:重药控股, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.133 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [000950] 过滤: 连板记录无效 - 连板数不足(2 < 4)
+2026-04-04 22:27:42.133 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   重药控股 未通过检测
+2026-04-04 22:27:42.134 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [002222] 开始检测龙二波 - 名称:福晶科技, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.135 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [002222] 过滤: 连板记录无效 - 连板数不足(3 < 4)
+2026-04-04 22:27:42.135 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   福晶科技 未通过检测
+2026-04-04 22:27:42.136 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [002678] 开始检测龙二波 - 名称:珠江钢琴, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.137 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [002678] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.137 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   珠江钢琴 未通过检测
+2026-04-04 22:27:42.138 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [002792] 开始检测龙二波 - 名称:通宇通讯, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.139 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [002792] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.140 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   通宇通讯 未通过检测
+2026-04-04 22:27:42.140 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [002796] 开始检测龙二波 - 名称:世嘉科技, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.142 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [002796] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.142 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   世嘉科技 未通过检测
+2026-04-04 22:27:42.143 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [002831] 开始检测龙二波 - 名称:裕同科技, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.145 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [002831] 过滤: 连板记录无效 - 连板数不足(2 < 4)
+2026-04-04 22:27:42.145 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   裕同科技 未通过检测
+2026-04-04 22:27:42.146 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [002952] 开始检测龙二波 - 名称:亚世光电, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.147 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [002952] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.148 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   亚世光电 未通过检测
+2026-04-04 22:27:42.148 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [002980] 开始检测龙二波 - 名称:华盛昌, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.150 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [002980] 过滤: 连板记录无效 - 连板数不足(3 < 4)
+2026-04-04 22:27:42.150 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   华盛昌 未通过检测
+2026-04-04 22:27:42.150 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [003007] 开始检测龙二波 - 名称:直真科技, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.152 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [003007] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.152 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   直真科技 未通过检测
+2026-04-04 22:27:42.153 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [003031] 开始检测龙二波 - 名称:中瓷电子, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.155 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [003031] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.155 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   中瓷电子 未通过检测
+2026-04-04 22:27:42.155 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [300006] 开始检测龙二波 - 名称:莱美药业, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.157 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [300006] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.157 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   莱美药业 未通过检测
+2026-04-04 22:27:42.158 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [300608] 开始检测龙二波 - 名称:思特奇, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.159 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [300608] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.160 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   思特奇 未通过检测
+2026-04-04 22:27:42.160 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [300626] 开始检测龙二波 - 名称:华瑞股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.162 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [300626] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.163 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   华瑞股份 未通过检测
+2026-04-04 22:27:42.163 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [300812] 开始检测龙二波 - 名称:易天股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.165 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [300812] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.165 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   易天股份 未通过检测
+2026-04-04 22:27:42.166 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [600056] 开始检测龙二波 - 名称:中国医药, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.167 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [600056] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.168 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   中国医药 未通过检测
+2026-04-04 22:27:42.168 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [600106] 开始检测龙二波 - 名称:重庆路桥, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.169 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [600106] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.170 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   重庆路桥 未通过检测
+2026-04-04 22:27:42.170 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [600302] 开始检测龙二波 - 名称:标准股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.172 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [600302] 过滤: 连板记录无效 - 连板数不足(2 < 4)
+2026-04-04 22:27:42.172 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   标准股份 未通过检测
+2026-04-04 22:27:42.173 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [600488] 开始检测龙二波 - 名称:津药药业, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.186 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:73 - [600488] 连板记录: 最大连板6板, 起涨日20260327, 见顶日20260403
+2026-04-04 22:27:42.186 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:83 - [600488] 通过: 第一波距今0天
+2026-04-04 22:27:42.186 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:90 - [600488] 通过: 第一波高度6板
+2026-04-04 22:27:42.186 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 600488.SH 从 20260314 到 20260403 的日线数据
+2026-04-04 22:27:42.187 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\600488.SH_20260314_20260403.csv
+2026-04-04 22:27:42.190 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:98 - [600488] 过滤: 无法获取调整期数据
+2026-04-04 22:27:42.191 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   津药药业 未通过检测
+2026-04-04 22:27:42.191 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [600602] 开始检测龙二波 - 名称:云赛智联, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.193 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [600602] 过滤: 连板记录无效 - 连板数不足(3 < 4)
+2026-04-04 22:27:42.193 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   云赛智联 未通过检测
+2026-04-04 22:27:42.193 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [600654] 开始检测龙二波 - 名称:中安科, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.196 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [600654] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.196 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   中安科 未通过检测
+2026-04-04 22:27:42.197 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [600869] 开始检测龙二波 - 名称:远东股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.198 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [600869] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.198 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   远东股份 未通过检测
+2026-04-04 22:27:42.199 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [603033] 开始检测龙二波 - 名称:三维股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.201 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [603033] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.201 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   三维股份 未通过检测
+2026-04-04 22:27:42.201 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [603067] 开始检测龙二波 - 名称:振华股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.203 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [603067] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.203 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   振华股份 未通过检测
+2026-04-04 22:27:42.204 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [603123] 开始检测龙二波 - 名称:翠微股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.205 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [603123] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.205 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   翠微股份 未通过检测
+2026-04-04 22:27:42.206 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [603189] 开始检测龙二波 - 名称:网达软件, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.207 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [603189] 过滤: 连板记录无效 - 连板数不足(2 < 4)
+2026-04-04 22:27:42.207 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   网达软件 未通过检测
+2026-04-04 22:27:42.208 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [603585] 开始检测龙二波 - 名称:苏利股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.210 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [603585] 过滤: 连板记录无效 - 连板数不足(3 < 4)
+2026-04-04 22:27:42.210 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   苏利股份 未通过检测
+2026-04-04 22:27:42.211 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [603966] 开始检测龙二波 - 名称:法兰泰克, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.213 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [603966] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.213 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   法兰泰克 未通过检测
+2026-04-04 22:27:42.214 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [605133] 开始检测龙二波 - 名称:嵘泰股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.215 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [605133] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.216 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   嵘泰股份 未通过检测
+2026-04-04 22:27:42.216 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [605303] 开始检测龙二波 - 名称:园林股份, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.218 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [605303] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.218 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   园林股份 未通过检测
+2026-04-04 22:27:42.219 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [605589] 开始检测龙二波 - 名称:圣泉集团, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.220 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [605589] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.220 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   圣泉集团 未通过检测
+2026-04-04 22:27:42.221 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [688146] 开始检测龙二波 - 名称:中船特气, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.223 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [688146] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.223 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   中船特气 未通过检测
+2026-04-04 22:27:42.223 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [688205] 开始检测龙二波 - 名称:德科立, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.225 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [688205] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.225 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   德科立 未通过检测
+2026-04-04 22:27:42.226 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [688226] 开始检测龙二波 - 名称:威腾电气, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.228 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [688226] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.228 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   威腾电气 未通过检测
+2026-04-04 22:27:42.229 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:61 - [688485] 开始检测龙二波 - 名称:九州一轨, 日期:20260403, 板块热度:False
+2026-04-04 22:27:42.230 | DEBUG    | core.pattern.dragon_second_wave:detect_second_wave:69 - [688485] 过滤: 连板记录无效 - 连板数不足(1 < 4)
+2026-04-04 22:27:42.231 | DEBUG    | core.pattern_recognition:detect_dragon_second_wave:1162 - [龙二波]   九州一轨 未通过检测
+2026-04-04 22:27:42.231 | INFO     | core.pattern_recognition:detect_dragon_second_wave:1164 - [龙二波] 检测完成: 共0个信号 (检查36只, 通过0只)
+2026-04-04 22:27:42.232 | INFO     | core.pattern_recognition:scan_all_patterns:1306 - ----------------------------------------
+2026-04-04 22:27:42.232 | DEBUG    | core.pattern_recognition:detect_first_board_breakout:986 - [首板突破] 过滤后历史池: 15天 (排除今日)
+2026-04-04 22:27:42.237 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:847 - 当日涨停统计: 21个板块, 总涨停数: 36
+2026-04-04 22:27:42.238 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   软件开发: 5只
+2026-04-04 22:27:42.238 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   通信设备: 5只
+2026-04-04 22:27:42.240 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   电网设备: 4只
+2026-04-04 22:27:42.241 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   专用设备: 2只
+2026-04-04 22:27:42.241 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   光学光电: 2只
+2026-04-04 22:27:42.241 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   化学制药: 2只
+2026-04-04 22:27:42.242 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   医药商业: 2只
+2026-04-04 22:27:42.242 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   农化制品: 1只
+2026-04-04 22:27:42.242 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   包装印刷: 1只
+2026-04-04 22:27:42.243 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:851 -   化学原料: 1只
+2026-04-04 22:27:42.375 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:855 - 历史数据统计: 102个板块
+2026-04-04 22:27:42.381 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电机Ⅱ: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.386 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】养殖业: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.390 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】环保设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.396 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】军工电子: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.401 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电视广播: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.406 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】农化制品: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.412 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】生物制品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.417 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】纺织制造: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.422 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】非白酒: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.428 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】游戏Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.433 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】地面兵装: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.443 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】自动化设: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.448 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】造纸: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.454 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】商用车: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.458 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】IT服务Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.464 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】航空装备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.469 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电子化学: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.474 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】医疗器械: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.480 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】中药Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.485 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电池: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.490 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】焦炭Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.496 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】半导体: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.501 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】装修装饰: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.506 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】旅游及景: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.512 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】农产品加: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.518 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】基础建设: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.523 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】互联网电: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.528 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】炼化及贸: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.533 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】饲料: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.538 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】化学原料: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.544 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】服装家纺: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.555 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】贸易Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.560 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】饮料乳品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.566 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】白色家电: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.571 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】金属新材: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.576 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】其他电源: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.581 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】林业Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.586 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】文娱用品: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.591 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】家居用品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.597 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】装修建材: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.603 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】照明设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.607 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】非金属材: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.613 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】工程咨询: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.619 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】消费电子: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.623 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】元件: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.630 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】食品加工: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.635 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】工业金属: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.639 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】航运港口: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.645 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】汽车零部件: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.650 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】房地产开发: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.655 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】油服工程: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.661 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】小金属: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.667 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】乘用车: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.671 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】计算机设: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.677 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】通用设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.689 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】铁路公路: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.693 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】专业工程: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.700 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】工程机械: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.704 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】房屋建设: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.710 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】电力: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.716 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】个护用品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.721 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】摩托车及: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.726 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】调味发酵: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.731 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】小家电: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.741 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】多元金融: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.747 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】橡胶: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.752 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】轨交设备: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.763 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】环境治理: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.768 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】家电零部: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.774 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】其他电子: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.779 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】厨卫电器: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.784 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】体育Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.789 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】煤炭开采: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.800 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】包装印刷: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.805 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】玻璃玻纤: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.810 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】综合Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.816 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】化学纤维: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.821 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】燃气Ⅱ: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.826 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】黑色家电: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.831 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】光伏设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.836 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】房地产服务: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.847 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】油气开采: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.852 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】风电设备: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.857 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】冶钢原料: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.863 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】出版: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.868 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】化学制品: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.873 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】广告营销: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.878 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】普钢: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.883 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】物流: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.888 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】医疗服务: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.893 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】种植业: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.898 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】水泥: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.904 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】能源金属: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.909 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】通信服务: 今日涨停0只 < 最小关注数2只
+2026-04-04 22:27:42.914 | DEBUG    | core.sector_heat_v2:calculate_sector_heat_v2:703 - 【过滤】塑料: 今日涨停1只 < 最小关注数2只
+2026-04-04 22:27:42.914 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:930 - ======================================================================
+2026-04-04 22:27:42.914 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:931 - 【板块热度调试信息】
+2026-04-04 22:27:42.915 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:932 - 总板块数: 102, 触发信号数: 7
+2026-04-04 22:27:42.915 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:933 - 当前阈值配置:
+2026-04-04 22:27:42.915 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:934 -   爆发阈值: 1.5倍 (需今日>=4只)
+2026-04-04 22:27:42.916 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:935 -   加速阈值: 25% (需3日滚动>=3只)
+2026-04-04 22:27:42.916 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:936 -   确认期: 动量>0 (需今日>=2只, 3日滚动>=5只)
+2026-04-04 22:27:42.916 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:937 -   观察期: 动量5%-50% (需昨日>=1只, 5日滚动>=4只)
+2026-04-04 22:27:42.917 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:938 -   退潮阈值: -15%
+2026-04-04 22:27:42.917 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:939 -   最小关注数: 2只
+2026-04-04 22:27:42.917 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:940 - ----------------------------------------------------------------------
+2026-04-04 22:27:42.918 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 通信设备: 今日5只, 昨日2只, 3日滚动10只, 爆发2.50倍, 动量19.05% [爆发期]
+2026-04-04 22:27:42.918 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 软件开发: 今日5只, 昨日0只, 3日滚动5只, 爆发5.00倍, 动量19.05% [启动期]
+2026-04-04 22:27:42.919 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 电网设备: 今日4只, 昨日2只, 3日滚动7只, 爆发2.00倍, 动量-16.67% [爆发期]
+2026-04-04 22:27:42.919 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 化学制药: 今日2只, 昨日4只, 3日滚动12只, 爆发0.50倍, 动量-4.76% [观察期]
+2026-04-04 22:27:42.919 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 医药商业: 今日2只, 昨日1只, 3日滚动4只, 爆发2.00倍, 动量11.11% [观察期]
+2026-04-04 22:27:42.920 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 光学光电: 今日2只, 昨日0只, 3日滚动3只, 爆发2.00倍, 动量25.00% [启动期]
+2026-04-04 22:27:42.921 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 专用设备: 今日2只, 昨日0只, 3日滚动4只, 爆发2.00倍, 动量-4.76% [启动期]
+2026-04-04 22:27:42.921 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 电机Ⅱ: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量66.67% [晚期退潮]
+2026-04-04 22:27:42.923 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 农化制品: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量-44.44% [晚期退潮]
+2026-04-04 22:27:42.924 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 半导体: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量-44.44% [观察期]
+2026-04-04 22:27:42.924 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 基础建设: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量-58.33% [观察期]
+2026-04-04 22:27:42.925 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 化学原料: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量66.67% [晚期退潮]
+2026-04-04 22:27:42.926 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 文娱用品: 今日1只, 昨日0只, 3日滚动1只, 爆发1.00倍, 动量-16.67% [晚期退潮]
+2026-04-04 22:27:42.927 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 消费电子: 今日1只, 昨日0只, 3日滚动2只, 爆发1.00倍, 动量66.67% [晚期退潮]
+2026-04-04 22:27:42.927 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:946 - 汽车零部件: 今日1只, 昨日0只, 3日滚动4只, 爆发1.00倍, 动量-25.93% [观察期]
+2026-04-04 22:27:42.928 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:951 - ----------------------------------------------------------------------
+2026-04-04 22:27:42.928 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:952 - 【退潮板块】今日无涨停但前几日有数据的板块（共6个）:
+2026-04-04 22:27:42.929 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   炼化及贸: 3日滚动4只, 昨日3只 [观察期]
+2026-04-04 22:27:42.930 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   电力: 3日滚动4只, 昨日3只 [晚期退潮]
+2026-04-04 22:27:42.930 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   医疗器械: 3日滚动3只, 昨日1只 [观察期]
+2026-04-04 22:27:42.930 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   油服工程: 3日滚动3只, 昨日2只 [观察期]
+2026-04-04 22:27:42.931 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   专业工程: 3日滚动3只, 昨日1只 [晚期退潮]
+2026-04-04 22:27:42.931 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:956 -   医疗服务: 3日滚动3只, 昨日1只 [观察期]
+2026-04-04 22:27:42.931 | INFO     | core.sector_heat_v2:analyze_all_sectors_v2:958 - ======================================================================
+2026-04-04 22:27:42.934 | INFO     | core.pattern.first_board_breakout:_get_hot_sectors:200 - 从板块分析中识别到 5 个热点行业
+2026-04-04 22:27:42.934 | INFO     | core.pattern.first_board_breakout:detect_first_board_by_sectors:104 - [首板突破] 识别到 5 个热点二级行业
+2026-04-04 22:27:42.934 | INFO     | core.pattern.first_board_breakout:detect_first_board_by_sectors:105 - [首板突破] 热点行业列表: ['光学光电', '电网设备', '软件开发', '专用设备', '通信设备']
+2026-04-04 22:27:42.935 | INFO     | core.pattern.first_board_breakout:detect_first_board_by_sectors:114 - [首板突破] 涨停池中的行业数: 21个
+2026-04-04 22:27:42.935 | INFO     | core.pattern.first_board_breakout:detect_first_board_by_sectors:115 - [首板突破] 涨停池行业样例: ['通信设备', '电网设备', '医药商业', '光学光电', '文娱用品', '包装印刷', '软件开发', '化学制药', '电机Ⅱ', '消费电子']
+2026-04-04 22:27:42.936 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [000586] 开始分析首板 - 名称:汇源通信, 行业:通信设备, 热点:True
+2026-04-04 22:27:42.937 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [000586] 通过: 今日涨停 (10.03%)
+2026-04-04 22:27:42.937 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [000586] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.938 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [000586] 通过: 流通市值 36.50亿
+2026-04-04 22:27:42.938 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [000586] 通过: 涨停时间 92500
+2026-04-04 22:27:42.938 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:311 - [000586] 通过: 封单强度 4.10%
+2026-04-04 22:27:42.939 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 000586.SZ 从 20260304 到 20260403 的日线数据
+2026-04-04 22:27:42.939 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\000586.SZ_20260304_20260403.csv
+2026-04-04 22:27:42.944 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:316 - [000586] 日线数据: 5日涨幅25.63%, 量比0.45
+2026-04-04 22:27:42.944 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:323 - [000586] 过滤: 5日涨幅过高 (25.63% >= 15%)
+2026-04-04 22:27:42.944 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [000720] 开始分析首板 - 名称:新能泰山, 行业:电网设备, 热点:True
+2026-04-04 22:27:42.945 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [000720] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:42.945 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [000720] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.945 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [000720] 通过: 流通市值 74.64亿
+2026-04-04 22:27:42.946 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [000720] 通过: 涨停时间 100033
+2026-04-04 22:27:42.946 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [000720] 过滤: 封单强度不足 (1.5747% < 2%, 封单11753万, 流通74.64亿)
+2026-04-04 22:27:42.947 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [000950] 开始分析首板 - 名称:重药控股, 行业:医药商业, 热点:False
+2026-04-04 22:27:42.947 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [000950] 通过: 今日涨停 (10.02%)
+2026-04-04 22:27:42.947 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [000950] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.948 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [000950] 过滤: 流通市值过大 (123.39亿 > 100.0亿)
+2026-04-04 22:27:42.948 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [002222] 开始分析首板 - 名称:福晶科技, 行业:光学光电, 热点:True
+2026-04-04 22:27:42.949 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [002222] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:42.949 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [002222] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.949 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [002222] 过滤: 流通市值过大 (353.27亿 > 100.0亿)
+2026-04-04 22:27:42.950 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [002678] 开始分析首板 - 名称:珠江钢琴, 行业:文娱用品, 热点:False
+2026-04-04 22:27:42.950 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [002678] 通过: 今日涨停 (9.96%)
+2026-04-04 22:27:42.950 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [002678] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.951 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [002678] 通过: 流通市值 82.40亿
+2026-04-04 22:27:42.951 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [002678] 通过: 涨停时间 101627
+2026-04-04 22:27:42.951 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:311 - [002678] 通过: 封单强度 2.15%
+2026-04-04 22:27:42.952 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 002678.SZ 从 20260304 到 20260403 的日线数据
+2026-04-04 22:27:42.952 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\002678.SZ_20260304_20260403.csv
+2026-04-04 22:27:42.957 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:316 - [002678] 日线数据: 5日涨幅15.40%, 量比3.51
+2026-04-04 22:27:42.957 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:323 - [002678] 过滤: 5日涨幅过高 (15.40% >= 15%)
+2026-04-04 22:27:42.957 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [002792] 开始分析首板 - 名称:通宇通讯, 行业:通信设备, 热点:True
+2026-04-04 22:27:42.958 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [002792] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:42.958 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [002792] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.958 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [002792] 过滤: 流通市值过大 (153.17亿 > 100.0亿)
+2026-04-04 22:27:42.958 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [002796] 开始分析首板 - 名称:世嘉科技, 行业:通信设备, 热点:True
+2026-04-04 22:27:42.959 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [002796] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:42.960 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [002796] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.960 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [002796] 过滤: 流通市值过大 (115.20亿 > 100.0亿)
+2026-04-04 22:27:42.961 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [002831] 开始分析首板 - 名称:裕同科技, 行业:包装印刷, 热点:False
+2026-04-04 22:27:42.961 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [002831] 通过: 今日涨停 (10.01%)
+2026-04-04 22:27:42.962 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [002831] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.963 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [002831] 过滤: 流通市值过大 (180.33亿 > 100.0亿)
+2026-04-04 22:27:42.964 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [002952] 开始分析首板 - 名称:亚世光电, 行业:光学光电, 热点:True
+2026-04-04 22:27:42.964 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [002952] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:42.965 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [002952] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.966 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [002952] 通过: 流通市值 33.15亿
+2026-04-04 22:27:42.966 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [002952] 通过: 涨停时间 133130
+2026-04-04 22:27:42.966 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:311 - [002952] 通过: 封单强度 3.13%
+2026-04-04 22:27:42.967 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 002952.SZ 从 20260304 到 20260403 的日线数据
+2026-04-04 22:27:42.967 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\002952.SZ_20260304_20260403.csv
+2026-04-04 22:27:42.971 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:316 - [002952] 日线数据: 5日涨幅4.35%, 量比2.00
+2026-04-04 22:27:42.971 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:325 - [002952] 通过: 5日涨幅 4.35%
+2026-04-04 22:27:42.972 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:332 - [002952] 通过: 量比 2.00
+2026-04-04 22:27:42.972 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:340 - [002952] 通过: 突破MA5/MA10均线 (close:25.18, ma5:23.77, ma10:24.13)
+2026-04-04 22:27:42.972 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:358 - [002952] 生成信号: 置信度0.87, 仓位medium, 热点True
+2026-04-04 22:27:42.972 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [002980] 开始分析首板 - 名称:华盛昌, 行业:电网设备, 热点:True
+2026-04-04 22:27:42.973 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [002980] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:42.973 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [002980] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.974 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [002980] 通过: 流通市值 46.73亿
+2026-04-04 22:27:42.974 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [002980] 通过: 涨停时间 95824
+2026-04-04 22:27:42.975 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:311 - [002980] 通过: 封单强度 4.59%
+2026-04-04 22:27:42.975 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 002980.SZ 从 20260304 到 20260403 的日线数据
+2026-04-04 22:27:42.975 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\002980.SZ_20260304_20260403.csv
+2026-04-04 22:27:42.980 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:316 - [002980] 日线数据: 5日涨幅15.80%, 量比0.77
+2026-04-04 22:27:42.980 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:323 - [002980] 过滤: 5日涨幅过高 (15.80% >= 15%)
+2026-04-04 22:27:42.981 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [003007] 开始分析首板 - 名称:直真科技, 行业:软件开发, 热点:True
+2026-04-04 22:27:42.981 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [003007] 通过: 今日涨停 (10.01%)
+2026-04-04 22:27:42.981 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [003007] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.981 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [003007] 通过: 流通市值 31.67亿
+2026-04-04 22:27:42.982 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [003007] 通过: 涨停时间 100300
+2026-04-04 22:27:42.982 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [003007] 过滤: 封单强度不足 (1.0006% < 2%, 封单3169万, 流通31.67亿)
+2026-04-04 22:27:42.982 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [003031] 开始分析首板 - 名称:中瓷电子, 行业:通信设备, 热点:True
+2026-04-04 22:27:42.983 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [003031] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:42.983 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [003031] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.983 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [003031] 过滤: 流通市值过大 (301.28亿 > 100.0亿)
+2026-04-04 22:27:42.984 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [300006] 开始分析首板 - 名称:莱美药业, 行业:化学制药, 热点:False
+2026-04-04 22:27:42.984 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [300006] 通过: 今日涨停 (20.07%)
+2026-04-04 22:27:42.984 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [300006] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.985 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [300006] 通过: 流通市值 68.84亿
+2026-04-04 22:27:42.985 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [300006] 通过: 涨停时间 103418
+2026-04-04 22:27:42.985 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [300006] 过滤: 封单强度不足 (0.2689% < 2%, 封单1851万, 流通68.84亿)
+2026-04-04 22:27:42.986 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [300608] 开始分析首板 - 名称:思特奇, 行业:软件开发, 热点:True
+2026-04-04 22:27:42.986 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [300608] 通过: 今日涨停 (20.00%)
+2026-04-04 22:27:42.986 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [300608] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.987 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [300608] 通过: 流通市值 37.10亿
+2026-04-04 22:27:42.987 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [300608] 通过: 涨停时间 95642
+2026-04-04 22:27:42.987 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [300608] 过滤: 封单强度不足 (1.1987% < 2%, 封单4447万, 流通37.10亿)
+2026-04-04 22:27:42.988 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [300626] 开始分析首板 - 名称:华瑞股份, 行业:电机Ⅱ, 热点:False
+2026-04-04 22:27:42.988 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [300626] 通过: 今日涨停 (20.01%)
+2026-04-04 22:27:42.988 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [300626] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.989 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [300626] 通过: 流通市值 44.24亿
+2026-04-04 22:27:42.989 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [300626] 通过: 涨停时间 94609
+2026-04-04 22:27:42.990 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [300626] 过滤: 封单强度不足 (0.4147% < 2%, 封单1835万, 流通44.24亿)
+2026-04-04 22:27:42.992 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [300812] 开始分析首板 - 名称:易天股份, 行业:消费电子, 热点:False
+2026-04-04 22:27:42.992 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [300812] 通过: 今日涨停 (20.00%)
+2026-04-04 22:27:42.993 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [300812] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:42.993 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [300812] 通过: 流通市值 37.55亿
+2026-04-04 22:27:42.994 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [300812] 通过: 涨停时间 101300
+2026-04-04 22:27:42.994 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:311 - [300812] 通过: 封单强度 2.51%
+2026-04-04 22:27:42.995 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 300812.SZ 从 20260304 到 20260403 的日线数据
+2026-04-04 22:27:42.995 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\300812.SZ_20260304_20260403.csv
+2026-04-04 22:27:43.000 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:316 - [300812] 日线数据: 5日涨幅19.19%, 量比2.96
+2026-04-04 22:27:43.000 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:323 - [300812] 过滤: 5日涨幅过高 (19.19% >= 15%)
+2026-04-04 22:27:43.001 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [600056] 开始分析首板 - 名称:中国医药, 行业:医药商业, 热点:False
+2026-04-04 22:27:43.001 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [600056] 通过: 今日涨停 (9.96%)
+2026-04-04 22:27:43.001 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [600056] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.001 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [600056] 过滤: 流通市值过大 (173.31亿 > 100.0亿)
+2026-04-04 22:27:43.002 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [600106] 开始分析首板 - 名称:重庆路桥, 行业:铁路公路, 热点:False
+2026-04-04 22:27:43.002 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [600106] 通过: 今日涨停 (9.93%)
+2026-04-04 22:27:43.003 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [600106] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.003 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [600106] 通过: 流通市值 78.01亿
+2026-04-04 22:27:43.003 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [600106] 通过: 涨停时间 103249
+2026-04-04 22:27:43.004 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [600106] 过滤: 封单强度不足 (0.5769% < 2%, 封单4501万, 流通78.01亿)
+2026-04-04 22:27:43.004 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [600302] 开始分析首板 - 名称:标准股份, 行业:专用设备, 热点:True
+2026-04-04 22:27:43.004 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [600302] 通过: 今日涨停 (10.04%)
+2026-04-04 22:27:43.005 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [600302] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.005 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [600302] 通过: 流通市值 42.46亿
+2026-04-04 22:27:43.005 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:293 - [600302] 过滤: 涨停时间过晚 (145544 > 14:30)
+2026-04-04 22:27:43.006 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [600488] 开始分析首板 - 名称:津药药业, 行业:化学制药, 热点:False
+2026-04-04 22:27:43.006 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [600488] 通过: 今日涨停 (9.94%)
+2026-04-04 22:27:43.006 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [600488] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.006 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [600488] 通过: 流通市值 76.10亿
+2026-04-04 22:27:43.007 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [600488] 通过: 涨停时间 93024
+2026-04-04 22:27:43.007 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:311 - [600488] 通过: 封单强度 2.42%
+2026-04-04 22:27:43.007 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 600488.SH 从 20260304 到 20260403 的日线数据
+2026-04-04 22:27:43.008 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\600488.SH_20260304_20260403.csv
+2026-04-04 22:27:43.012 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:316 - [600488] 日线数据: 5日涨幅60.97%, 量比1.87
+2026-04-04 22:27:43.013 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:323 - [600488] 过滤: 5日涨幅过高 (60.97% >= 15%)
+2026-04-04 22:27:43.013 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [600602] 开始分析首板 - 名称:云赛智联, 行业:软件开发, 热点:True
+2026-04-04 22:27:43.013 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [600602] 通过: 今日涨停 (10.01%)
+2026-04-04 22:27:43.014 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [600602] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.014 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [600602] 过滤: 流通市值过大 (262.02亿 > 100.0亿)
+2026-04-04 22:27:43.015 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [600654] 开始分析首板 - 名称:中安科, 行业:软件开发, 热点:True
+2026-04-04 22:27:43.015 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [600654] 通过: 今日涨停 (9.97%)
+2026-04-04 22:27:43.016 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [600654] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.016 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [600654] 通过: 流通市值 84.35亿
+2026-04-04 22:27:43.016 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [600654] 通过: 涨停时间 110539
+2026-04-04 22:27:43.017 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [600654] 过滤: 封单强度不足 (0.7220% < 2%, 封单6091万, 流通84.35亿)
+2026-04-04 22:27:43.017 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [600869] 开始分析首板 - 名称:远东股份, 行业:电网设备, 热点:True
+2026-04-04 22:27:43.017 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [600869] 通过: 今日涨停 (10.01%)
+2026-04-04 22:27:43.018 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [600869] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.018 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [600869] 过滤: 流通市值过大 (346.44亿 > 100.0亿)
+2026-04-04 22:27:43.018 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [603033] 开始分析首板 - 名称:三维股份, 行业:橡胶, 热点:False
+2026-04-04 22:27:43.019 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [603033] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:43.019 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [603033] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.019 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [603033] 过滤: 流通市值过大 (109.15亿 > 100.0亿)
+2026-04-04 22:27:43.020 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [603067] 开始分析首板 - 名称:振华股份, 行业:化学原料, 热点:False
+2026-04-04 22:27:43.020 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [603067] 通过: 今日涨停 (9.99%)
+2026-04-04 22:27:43.021 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [603067] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.021 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [603067] 过滤: 流通市值过大 (246.49亿 > 100.0亿)
+2026-04-04 22:27:43.021 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [603123] 开始分析首板 - 名称:翠微股份, 行业:多元金融, 热点:False
+2026-04-04 22:27:43.022 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [603123] 通过: 今日涨停 (10.03%)
+2026-04-04 22:27:43.022 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [603123] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.022 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [603123] 通过: 流通市值 78.01亿
+2026-04-04 22:27:43.023 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [603123] 通过: 涨停时间 92500
+2026-04-04 22:27:43.023 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [603123] 过滤: 封单强度不足 (1.0903% < 2%, 封单8506万, 流通78.01亿)
+2026-04-04 22:27:43.023 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [603189] 开始分析首板 - 名称:网达软件, 行业:软件开发, 热点:True
+2026-04-04 22:27:43.024 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [603189] 通过: 今日涨停 (10.01%)
+2026-04-04 22:27:43.024 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [603189] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.024 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [603189] 通过: 流通市值 48.60亿
+2026-04-04 22:27:43.024 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [603189] 通过: 涨停时间 93605
+2026-04-04 22:27:43.025 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [603189] 过滤: 封单强度不足 (1.0889% < 2%, 封单5292万, 流通48.60亿)
+2026-04-04 22:27:43.025 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [603585] 开始分析首板 - 名称:苏利股份, 行业:农化制品, 热点:False
+2026-04-04 22:27:43.026 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [603585] 通过: 今日涨停 (10.01%)
+2026-04-04 22:27:43.027 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [603585] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.027 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [603585] 通过: 流通市值 44.79亿
+2026-04-04 22:27:43.028 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [603585] 通过: 涨停时间 94150
+2026-04-04 22:27:43.028 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [603585] 过滤: 封单强度不足 (1.7391% < 2%, 封单7789万, 流通44.79亿)
+2026-04-04 22:27:43.029 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [603966] 开始分析首板 - 名称:法兰泰克, 行业:专用设备, 热点:True
+2026-04-04 22:27:43.029 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [603966] 通过: 今日涨停 (9.97%)
+2026-04-04 22:27:43.030 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [603966] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.030 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [603966] 通过: 流通市值 54.41亿
+2026-04-04 22:27:43.031 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [603966] 通过: 涨停时间 134959
+2026-04-04 22:27:43.031 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [603966] 过滤: 封单强度不足 (0.4190% < 2%, 封单2280万, 流通54.41亿)
+2026-04-04 22:27:43.032 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [605133] 开始分析首板 - 名称:嵘泰股份, 行业:汽车零部件, 热点:False
+2026-04-04 22:27:43.032 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [605133] 通过: 今日涨停 (10.00%)
+2026-04-04 22:27:43.032 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [605133] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.032 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [605133] 通过: 流通市值 80.38亿
+2026-04-04 22:27:43.033 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [605133] 通过: 涨停时间 104535
+2026-04-04 22:27:43.033 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [605133] 过滤: 封单强度不足 (0.4259% < 2%, 封单3423万, 流通80.38亿)
+2026-04-04 22:27:43.033 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [605303] 开始分析首板 - 名称:园林股份, 行业:基础建设, 热点:False
+2026-04-04 22:27:43.033 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [605303] 通过: 今日涨停 (10.03%)
+2026-04-04 22:27:43.034 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [605303] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.034 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [605303] 通过: 流通市值 28.65亿
+2026-04-04 22:27:43.034 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [605303] 通过: 涨停时间 141254
+2026-04-04 22:27:43.035 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:311 - [605303] 通过: 封单强度 2.64%
+2026-04-04 22:27:43.035 | DEBUG    | core.data_manager:get_stock_daily:609 - [get_stock_daily] 获取 605303.SH 从 20260304 到 20260403 的日线数据
+2026-04-04 22:27:43.035 | DEBUG    | core.data_manager:get_stock_daily:613 - [get_stock_daily] 从缓存加载: g:\a_stock_sentiment_system\data\cache\605303.SH_20260304_20260403.csv
+2026-04-04 22:27:43.039 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:316 - [605303] 日线数据: 5日涨幅3.43%, 量比2.77
+2026-04-04 22:27:43.040 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:325 - [605303] 通过: 5日涨幅 3.43%
+2026-04-04 22:27:43.040 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:332 - [605303] 通过: 量比 2.77
+2026-04-04 22:27:43.040 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:340 - [605303] 通过: 突破MA5/MA10均线 (close:17.77, ma5:16.81, ma10:16.99)
+2026-04-04 22:27:43.040 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:358 - [605303] 生成信号: 置信度0.82, 仓位light, 热点False
+2026-04-04 22:27:43.041 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [605589] 开始分析首板 - 名称:圣泉集团, 行业:塑料, 热点:False
+2026-04-04 22:27:43.041 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [605589] 通过: 今日涨停 (10.01%)
+2026-04-04 22:27:43.041 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [605589] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.042 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [605589] 过滤: 流通市值过大 (273.58亿 > 100.0亿)
+2026-04-04 22:27:43.042 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [688146] 开始分析首板 - 名称:中船特气, 行业:半导体, 热点:False
+2026-04-04 22:27:43.043 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [688146] 通过: 今日涨停 (20.01%)
+2026-04-04 22:27:43.043 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [688146] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.043 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [688146] 通过: 流通市值 74.25亿
+2026-04-04 22:27:43.044 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [688146] 通过: 涨停时间 133040
+2026-04-04 22:27:43.044 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [688146] 过滤: 封单强度不足 (0.0180% < 2%, 封单133万, 流通74.25亿)
+2026-04-04 22:27:43.044 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [688205] 开始分析首板 - 名称:德科立, 行业:通信设备, 热点:True
+2026-04-04 22:27:43.045 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [688205] 通过: 今日涨停 (20.00%)
+2026-04-04 22:27:43.046 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [688205] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.046 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:286 - [688205] 过滤: 流通市值过大 (391.30亿 > 100.0亿)
+2026-04-04 22:27:43.047 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [688226] 开始分析首板 - 名称:威腾电气, 行业:电网设备, 热点:True
+2026-04-04 22:27:43.047 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [688226] 通过: 今日涨停 (20.00%)
+2026-04-04 22:27:43.048 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [688226] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.048 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [688226] 通过: 流通市值 94.92亿
+2026-04-04 22:27:43.048 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [688226] 通过: 涨停时间 110721
+2026-04-04 22:27:43.048 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [688226] 过滤: 封单强度不足 (0.1763% < 2%, 封单1673万, 流通94.92亿)
+2026-04-04 22:27:43.049 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:255 - [688485] 开始分析首板 - 名称:九州一轨, 行业:轨交设备, 热点:False
+2026-04-04 22:27:43.049 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:264 - [688485] 通过: 今日涨停 (20.02%)
+2026-04-04 22:27:43.049 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:279 - [688485] 通过: 昨日未涨停，确认首板
+2026-04-04 22:27:43.049 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:288 - [688485] 通过: 流通市值 27.78亿
+2026-04-04 22:27:43.050 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:295 - [688485] 通过: 涨停时间 103555
+2026-04-04 22:27:43.050 | DEBUG    | core.pattern.first_board_breakout:_analyze_first_board:309 - [688485] 过滤: 封单强度不足 (0.7472% < 2%, 封单2076万, 流通27.78亿)
+2026-04-04 22:27:43.050 | INFO     | core.pattern.first_board_breakout:detect_first_board_by_sectors:159 - 首板突破检测完成: 共 2 个信号 (热点板块1只, 非热点1只, 分析36只, 过滤34只)
+2026-04-04 22:27:43.051 | INFO     | core.pattern_recognition:detect_first_board_breakout:1008 - [首板突破] 检测完成: 共2个信号
+2026-04-04 22:27:43.051 | INFO     | core.pattern_recognition:scan_all_patterns:1316 - ----------------------------------------
+2026-04-04 22:27:43.051 | DEBUG    | core.pattern_recognition:detect_position_battle:1022 - [卡位板] 开始检测，今日涨停36只，昨日涨停28只
+2026-04-04 22:27:43.052 | DEBUG    | core.pattern_recognition:detect_position_battle:1033 - [卡位板] 调用PositionBattleStrategy.detect_position_battle...
+2026-04-04 22:27:43.055 | DEBUG    | core.pattern.position_battle:detect_position_battle:73 - 无高位龙头，不存在卡位基础
+2026-04-04 22:27:43.056 | DEBUG    | core.pattern_recognition:detect_position_battle:1038 - [卡位板] 策略返回 0 个原始信号
+2026-04-04 22:27:43.056 | INFO     | core.pattern_recognition:detect_position_battle:1063 - [卡位板] 检测完成: 共0个信号
+2026-04-04 22:27:43.056 | INFO     | core.pattern_recognition:scan_all_patterns:1326 - ----------------------------------------
+2026-04-04 22:27:43.057 | DEBUG    | core.pattern_recognition:detect_blast_reseal:493 - [炸板回封] 开始检测，今日涨停36只
+2026-04-04 22:27:43.060 | INFO     | core.pattern_recognition:detect_blast_reseal:591 - [炸板回封] 检测完成: 共5个信号 (检查36只, 炸板21只, 通过5只)
+2026-04-04 22:27:43.061 | INFO     | core.pattern_recognition:scan_all_patterns:1335 - ============================================================
+2026-04-04 22:27:43.061 | INFO     | core.pattern_recognition:scan_all_patterns:1336 - 扫描完成，结果汇总:
+2026-04-04 22:27:43.062 | INFO     | core.pattern_recognition:scan_all_patterns:1341 -   弱转强: 0个信号
+2026-04-04 22:27:43.062 | INFO     | core.pattern_recognition:scan_all_patterns:1341 -   分歧转一致: 0个信号
+2026-04-04 22:27:43.063 | INFO     | core.pattern_recognition:scan_all_patterns:1341 -   二板定龙: 2个信号
+2026-04-04 22:27:43.063 | INFO     | core.pattern_recognition:scan_all_patterns:1341 -   龙二波: 0个信号
+2026-04-04 22:27:43.063 | INFO     | core.pattern_recognition:scan_all_patterns:1341 -   首板突破: 2个信号
+2026-04-04 22:27:43.064 | INFO     | core.pattern_recognition:scan_all_patterns:1341 -   卡位板: 0个信号
+2026-04-04 22:27:43.064 | INFO     | core.pattern_recognition:scan_all_patterns:1341 -   炸板回封: 5个信号
+2026-04-04 22:27:43.064 | INFO     | core.pattern_recognition:scan_all_patterns:1342 -   总计: 9个信号
+2026-04-04 22:27:43.064 | INFO     | core.pattern_recognition:scan_all_patterns:1343 - ============================================================
+2026-04-04 22:27:43.065 | INFO     | __main__:run_daily_analysis:135 - 识别到 9 个交易信号
+2026-04-04 22:27:43.066 | INFO     | __main__:run_daily_analysis:138 -   - 二板定龙: 2个
+2026-04-04 22:27:43.066 | INFO     | __main__:run_daily_analysis:138 -   - 首板突破: 2个
+2026-04-04 22:27:43.066 | INFO     | __main__:run_daily_analysis:138 -   - 炸板回封: 5个
+2026-04-04 22:27:43.066 | INFO     | __main__:run_daily_analysis:141 - [7/7] 获取核心标的所属概念...
+2026-04-04 22:27:43.068 | INFO     | core.data_manager:enrich_core_stocks_concepts:1030 - 正在获取19只核心标的的概念数据...
+2026-04-04 22:27:43.069 | INFO     | core.data_manager:get_concept_members:1255 - 使用缓存的概念成分股数据: g:\a_stock_sentiment_system\data\cache\concept_members\concept_members_20260403.csv
+2026-04-04 22:27:43.114 | INFO     | core.data_manager:enrich_core_stocks_concepts:1045 - 使用概念成分股数据为核心标的匹配概念...
+2026-04-04 22:27:43.201 | INFO     | core.data_manager:enrich_core_stocks_concepts:1054 - 概念数据获取完成
+2026-04-04 22:27:43.203 | INFO     | __main__:run_daily_analysis:152 - 已获取19只核心标的的概念数据
+2026-04-04 22:27:43.203 | INFO     | __main__:run_daily_analysis:155 - [8/8] 生成分析报告...
+2026-04-04 22:27:43.271 | INFO     | core.report_generator:create_daily_report:119 - 报告已生成: g:\a_stock_sentiment_system\output\A股情绪分析报告_20260403_222743.xlsx
+2026-04-04 22:27:43.271 | INFO     | __main__:run_daily_analysis:169 - ✅ 分析完成，报告保存至: g:\a_stock_sentiment_system\output\A股情绪分析报告_20260403_222743.xlsx
+2026-04-04 22:27:43.271 | INFO     | __main__:run_daily_analysis:172 - [9/9] 生成次日交易计划...
+2026-04-04 22:27:43.272 | INFO     | core.execution_engine:generate_and_save_plans:694 - 生成次日交易计划...
+2026-04-04 22:27:43.274 | INFO     | core.execution_engine:generate_and_save_plans:701 - 生成 9 条交易计划
+2026-04-04 22:27:43.281 | INFO     | core.execution_engine:save_trade_plans:674 - ✓ 交易计划已保存: g:\a_stock_sentiment_system\output\交易计划_20260403.csv
+2026-04-04 22:27:43.287 | INFO     | core.execution_engine:generate_and_save_plans:713 - ✓ 交易报告已保存: g:\a_stock_sentiment_system\output\交易计划报告_20260403.txt
+2026-04-04 22:27:43.287 | INFO     | __main__:_generate_trade_plans:200 - ✅ 交易计划生成完成: 9 条计划
+2026-04-04 22:27:43.292 | INFO     | __main__:run_daily_analysis:176 - [10/10] 生成散户决策支持报告...
+2026-04-04 22:27:43.320 | INFO     | core.retail_trader_support:generate_overnight_decisions:118 - 生成隔夜决策清单: 0项
+2026-04-04 22:27:43.390 | INFO     | core.retail_trader_support:calculate_retail_indicators:394 - 散户指标计算完成: {'昨日涨停溢价率': np.float64(10.0), '炸板股次日表现': -2.5, '一字板占比': 0.0, '次日策略建议': '激进'}
+2026-04-04 22:27:43.391 | INFO     | __main__:_generate_retail_support_report:262 - ✓ 散户决策报告已保存: g:\a_stock_sentiment_system\output\散户决策报告_20260403.txt
