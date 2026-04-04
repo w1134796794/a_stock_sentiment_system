@@ -957,9 +957,13 @@ class PatternRecognition:
             return "谨慎观察"
 
     def detect_first_board_breakout(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame = None,
-                                    date_str: str = None, history_pools: Dict[str, pd.DataFrame] = None) -> List[PatternSignal]:
+                                    date_str: str = None, history_pools: Dict[str, pd.DataFrame] = None,
+                                    hot_sectors: List[Dict] = None) -> List[PatternSignal]:
         """
         首板突破模式识别 - 调用HotspotFirstBoardStrategy
+        
+        Args:
+            hot_sectors: 预计算的热点板块列表（避免重复计算板块热度）
         """
         signals = []
 
@@ -981,7 +985,7 @@ class PatternRecognition:
                         history_pools_filtered[date_key] = pool_df
             logger.debug(f"[首板突破] 过滤后历史池: {len(history_pools_filtered)}天 (排除今日)")
             trade_signals = self.first_board_breakout.detect_first_board_by_sectors(
-                today_df, history_pools_filtered, date_str
+                today_df, history_pools_filtered, date_str, hot_sectors=hot_sectors
             )
 
             for ts in trade_signals:
@@ -1203,13 +1207,14 @@ class PatternRecognition:
         
         return dt.strftime("%Y%m%d")
 
-    def scan_all_patterns(self, today_date: str, yesterday_date: str = None) -> Dict[str, List[PatternSignal]]:
+    def scan_all_patterns(self, today_date: str, yesterday_date: str = None, hot_sectors: List[Dict] = None) -> Dict[str, List[PatternSignal]]:
         """
         扫描所有模式 - 主入口方法
         
         Args:
             today_date: 今日日期 (YYYY-MM-DD 或 YYYYMMDD)
             yesterday_date: 昨日日期 (YYYY-MM-DD 或 YYYYMMDD)，如为None则自动计算
+            hot_sectors: 预计算的热点板块列表（避免重复计算）
             
         Returns:
             Dict[str, List[PatternSignal]]: 各模式识别结果

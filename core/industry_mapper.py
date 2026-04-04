@@ -105,8 +105,23 @@ class IndustryMapper:
         return self.l3_to_l2_map.get(l3_name, '其他')
     
     def get_l1_by_l2(self, l2_name: str) -> str:
-        """根据二级行业获取一级行业"""
-        return self.l2_to_l1_map.get(l2_name, '其他')
+        """根据二级行业获取一级行业，使用包含关系匹配"""
+        if not l2_name:
+            return '其他'
+        
+        # 1. 精确匹配
+        if l2_name in self.l2_to_l1_map:
+            return self.l2_to_l1_map[l2_name]
+        
+        # 2. 包含关系匹配：遍历所有二级行业，检查是否有包含关系
+        # 例如：l2_name="光学光电"，mapped_l2="光学光电子"，"光学光电子"包含"光学光电"
+        for mapped_l2, l1 in self.l2_to_l1_map.items():
+            # 检查mapped_l2是否包含l2_name（如"光学光电子"包含"光学光电"）
+            # 或者l2_name是否包含mapped_l2
+            if mapped_l2 in l2_name or l2_name in mapped_l2:
+                return l1
+        
+        return '其他'
     
     def get_all_l1(self) -> List[str]:
         """获取所有一级行业"""

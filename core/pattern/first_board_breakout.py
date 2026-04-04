@@ -67,12 +67,13 @@ class HotspotFirstBoardStrategy:
     def detect_first_board_by_sectors(self,
                                       today_zt: pd.DataFrame,
                                       history_pools: Dict[str, pd.DataFrame],
-                                      date_str: str) -> List[TradeSignal]:
+                                      date_str: str,
+                                      hot_sectors: List[Dict] = None) -> List[TradeSignal]:
         """
         基于二级行业的首板突破检测
 
         流程：
-        1. 调用analyze_all_sectors_v2获取热点二级行业
+        1. 获取热点二级行业（从参数传入或调用analyze_all_sectors_v2计算）
         2. 分析所有涨停股票中的首板（不限于热点板块）
         3. 结合技术指标进行过滤
         4. 属于热点板块的股票增加仓位权重
@@ -81,6 +82,7 @@ class HotspotFirstBoardStrategy:
             today_zt: 今日涨停池
             history_pools: 历史涨停池（用于板块分析）
             date_str: 日期字符串YYYYMMDD
+            hot_sectors: 预计算的热点板块列表（避免重复计算）
 
         Returns:
             List[TradeSignal]: 符合条件的交易信号
@@ -91,10 +93,26 @@ class HotspotFirstBoardStrategy:
             logger.warning("涨停池为空，无法检测首板突破")
             return signals
 
-        # 1. 获取热点二级行业（使用sector_heat_v2分析）
-        hot_sectors = self._get_hot_sectors(today_zt, history_pools, date_str)
+        # 1. 获取热点二级行业
+        if hot_sectors is None:
+            # 如果没有传入热点板块，则自行计算
+            hot_sectors = self._get_hot_sectors(today_zt, history_pools, date_str)
+        else:
+            logger.info(f"[首板突破] 使用传入的热点板块数据: {len(hot_sectors)}个")
+        
         hot_sector_names = {s['sector_name'] for s in hot_sectors}
-        logger.info(f"识别到 {len(hot_sectors)} 个热点二级行业，开始分析所有首板...")
+        logger.info(f"[首板突破] 识别到 {len(hot_sectors)} 个热点二级行业")
+        logger.info(f"[首板突破] 热点行业列表: {list(hot_sector_names)[:10]}")  # 显示前10个
+        
+        # 调试：显示涨停池中的行业分布
+        if '所属行业' in today_zt.columns:
+            pool_sectors = today_zt['所属行业'].unique()
+        elif 'L2_Industry' in today_zt.columns:
+            pool_sectors = today_zt['L2_Industry'].unique()
+        else:
+            pool_sectors = []
+        logger.info(f"[首板突破] 涨停池中的行业数: {len(pool_sectors)}个")
+        logger.info(f"[首板突破] 涨停池行业样例: {list(pool_sectors)[:10]}")
 
         # 2. 获取昨日涨停池（用于确认首板）
         yesterday_date = self._get_date_offset(date_str, -1)
@@ -276,13 +294,19 @@ class HotspotFirstBoardStrategy:
             return None
         logger.debug(f"[{code}] 通过: 涨停时间 {limit_up_time}")
 
-        # 条件4: 封单强度 > 5%
+        # 条件4: 封单强度 > 2%
         # 尝试获取封单额（不同数据源可能使用不同列名）
-        seal_amount = stock.get('封单额', 0) or stock.get('封板资金', 0)
-        float_cap = stock.get('流通市值', 1)  # 流通市值单位是亿，转换为万
-        seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
+        seal_amount = float(stock.get('封单额', 0) or stock.get('封板资金', 0) or stock.get('封单金额', 0))
+        float_cap = float(stock.get('流通市值', 0))  # 流通市值单位是元
+        
+        # 统一单位计算封单强度（都转换为元）
+        if float_cap > 0 and seal_amount > 0:
+            seal_ratio = seal_amount / float_cap
+        else:
+            seal_ratio = 0
+            
         if seal_ratio < 0.02:
-            logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.2f}% < 2%)")
+            logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.4f}% < 2%, 封单{seal_amount/10000:.0f}万, 流通{float_cap/100000000:.2f}亿)")
             return None
         logger.debug(f"[{code}] 通过: 封单强度 {seal_ratio*100:.2f}%")
 

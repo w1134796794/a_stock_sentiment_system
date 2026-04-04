@@ -189,15 +189,33 @@ class DataManager:
             return pd.DataFrame()
     
     def get_limit_up_pool(self, date: str) -> pd.DataFrame:
-        """获取涨停池数据（AkShare，失败时回退到Tushare）"""
+        """获取涨停池数据（优先使用Tushare，包含板上成交金额和行业代码）"""
         cache_file = self.today_dir / f"zt_pool_{date}.csv"
         if cache_file.exists():
             df = pd.read_csv(cache_file)
-            # 即使从缓存读取，也要确保追加到汇总文件
-            self._append_to_limit_up_summary(df, date)
-            return df
+            # 检查是否有行业代码列，如果没有需要重新获取
+            if '行业代码' not in df.columns:
+                logger.info(f"缓存数据缺少行业代码，重新获取 {date} 的涨停数据")
+            else:
+                # 即使从缓存读取，也要确保追加到汇总文件
+                self._append_to_limit_up_summary(df, date)
+                return df
 
-        # 首先尝试AkShare
+        # 优先使用Tushare（包含板上成交金额等更详细数据）
+        if self.ts_pro:
+            try:
+                df = self._get_limit_up_from_tushare(date)
+                if not df.empty:
+                    # 标准化格式以兼容现有代码，同时保留Tushare特有字段，添加行业代码
+                    df = self._normalize_limit_up_format(df, date)
+                    df.to_csv(cache_file, index=False)
+                    logger.info(f"从Tushare获取涨停池数据: {len(df)}条")
+                    self._append_to_limit_up_summary(df, date)
+                    return df
+            except Exception as e:
+                logger.warning(f"Tushare获取涨停池失败: {e}")
+
+        # 如果Tushare失败，回退到AkShare
         try:
             df = ak.stock_zt_pool_em(date=date)
             if not df.empty:
@@ -207,20 +225,6 @@ class DataManager:
                 return df
         except Exception as e:
             logger.warning(f"AkShare获取涨停池失败: {e}")
-
-        # 如果AkShare失败，尝试Tushare
-        if self.ts_pro:
-            try:
-                df = self._get_limit_up_from_tushare(date)
-                if not df.empty:
-                    # 转换列名以匹配AkShare格式
-                    df = self._convert_tushare_to_akshare_format(df)
-                    df.to_csv(cache_file, index=False)
-                    logger.info(f"从Tushare获取涨停池数据: {len(df)}条")
-                    self._append_to_limit_up_summary(df, date)
-                    return df
-            except Exception as e:
-                logger.warning(f"Tushare获取涨停池失败: {e}")
 
         return pd.DataFrame()
 
@@ -241,61 +245,138 @@ class DataManager:
             # limit_list_d接口获取涨跌停数据
             df = self.ts_pro.limit_list_d(trade_date=date)
             if not df.empty:
-                # 只保留涨停数据（涨跌幅>9%）
-                df = df[df['pct_chg'] >= 9.0].copy()
+                # 只保留涨停数据（limit='U'表示涨停）
+                df = df[df['limit'] == 'U'].copy()
                 logger.info(f"Tushare limit_list_d获取到{len(df)}条涨停数据")
             return df
         except Exception as e:
             logger.warning(f"Tushare limit_list_d接口调用失败: {e}")
             return pd.DataFrame()
 
-    def _convert_tushare_to_akshare_format(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _normalize_limit_up_format(self, df: pd.DataFrame, trade_date: str = None) -> pd.DataFrame:
         """
-        将Tushare limit_list_d数据格式转换为AkShare格式
-
+        标准化涨停数据格式，统一列名以兼容现有代码
+        保留Tushare特有字段，添加行业代码映射
+        
         Args:
-            df: Tushare格式的DataFrame
-
+            df: 原始涨停数据DataFrame
+            trade_date: 交易日期，用于获取行业代码映射
+            
         Returns:
-            AkShare格式的DataFrame
+            标准化后的DataFrame
         """
         if df.empty:
             return df
-
-        # 列名映射：Tushare -> AkShare
+        
+        result_df = df.copy()
+        
+        # 如果已经是标准格式（有'代码'列），直接返回
+        if '代码' in result_df.columns:
+            return result_df
+        
+        # Tushare格式 -> 标准格式
         column_mapping = {
             'ts_code': '代码',
             'name': '名称',
             'close': '最新价',
             'pct_chg': '涨跌幅',
-            'amp': '振幅',
-            'fc_amount': '封单额',
+            'industry': '所属行业',
             'first_time': '首次封板时间',
             'last_time': '最后封板时间',
             'open_times': '炸板次数',
-            'strth': '封单量',
-            'industry': '所属行业'
+            'limit_times': '连板数',
+            'up_stat': '涨停统计',
+            'amount': '成交额',
+            'turnover_ratio': '换手率',
+            'float_mv': '流通市值',
+            'total_mv': '总市值'
         }
-
-        # 选择并重命名列
-        result_df = pd.DataFrame()
-        for tushare_col, akshare_col in column_mapping.items():
-            if tushare_col in df.columns:
-                result_df[akshare_col] = df[tushare_col]
-
-        # 添加缺失的列（默认值）
-        if '连板数' not in result_df.columns:
-            result_df['连板数'] = 1  # 默认为1板
-        if '涨停统计' not in result_df.columns:
-            result_df['涨停统计'] = '1/1'
-
-        # 转换时间格式（Tushare是HHMMSS，AkShare也是HHMMSS）
+        
+        # 重命名列
+        for old_col, new_col in column_mapping.items():
+            if old_col in result_df.columns:
+                result_df[new_col] = result_df[old_col]
+        
+        # 处理Tushare特有字段 - 保留原始字段同时添加中文别名
+        if 'limit_amount' in result_df.columns:
+            result_df['板上成交金额'] = result_df['limit_amount']
+        if 'fd_amount' in result_df.columns:
+            result_df['封单金额'] = result_df['fd_amount']
+        
+        # 处理时间格式（去掉冒号）
         for col in ['首次封板时间', '最后封板时间']:
             if col in result_df.columns:
                 result_df[col] = result_df[col].astype(str).str.replace(':', '')
-
+        
+        # 确保代码格式统一（6位数字）
+        if '代码' in result_df.columns:
+            result_df['代码'] = result_df['代码'].astype(str).str.replace(r'\.SH|\.SZ|\.BJ', '', regex=True).str.zfill(6)
+        
+        # 设置默认值
+        if '连板数' in result_df.columns:
+            result_df['连板数'] = result_df['连板数'].fillna(1)
+        if '涨停统计' in result_df.columns:
+            result_df['涨停统计'] = result_df['涨停统计'].fillna('1/1')
+        
+        # 添加行业代码映射
+        if '所属行业' in result_df.columns and trade_date:
+            result_df = self._add_industry_code(result_df, trade_date)
+        
         return result_df
     
+    def _add_industry_code(self, df: pd.DataFrame, trade_date: str) -> pd.DataFrame:
+        """
+        为涨停数据添加行业代码
+        
+        Args:
+            df: 涨停数据DataFrame
+            trade_date: 交易日期
+            
+        Returns:
+            添加行业代码后的DataFrame
+        """
+        result_df = df.copy()
+        
+        # 获取行业列表（包含代码和名称）
+        industry_list = self.get_dc_industry_list(trade_date)
+        if industry_list.empty:
+            logger.warning(f"无法获取行业列表，无法添加行业代码")
+            result_df['行业代码'] = ''
+            return result_df
+        
+        # 创建行业名称到代码的映射
+        # Tushare的行业名称和dc_index的可能略有不同，需要处理
+        name_to_code = {}
+        for _, row in industry_list.iterrows():
+            name = row.get('name', '')
+            ts_code = row.get('ts_code', '')
+            if name and ts_code:
+                name_to_code[name] = ts_code
+        
+        # 为每只股票添加行业代码
+        industry_codes = []
+        for _, row in result_df.iterrows():
+            industry_name = row.get('所属行业', '')
+            # 直接匹配
+            code = name_to_code.get(industry_name, '')
+            
+            # 如果直接匹配失败，尝试模糊匹配
+            if not code:
+                for name, ts_code in name_to_code.items():
+                    if industry_name in name or name in industry_name:
+                        code = ts_code
+                        break
+            
+            industry_codes.append(code)
+        
+        result_df['行业代码'] = industry_codes
+        
+        # 统计匹配情况
+        matched = sum(1 for c in industry_codes if c)
+        logger.info(f"行业代码映射: {matched}/{len(result_df)}只股票匹配成功")
+        
+        return result_df
+
     def _append_to_limit_up_summary(self, df: pd.DataFrame, trade_date: str):
         """
         将涨停数据追加到汇总文件
@@ -366,20 +447,135 @@ class DataManager:
         except Exception as e:
             logger.warning(f"追加涨停数据到汇总文件失败: {e}")
     
-    def get_concept_industry(self) -> pd.DataFrame:
-        """获取东方财富概念/行业数据"""
-        cache_file = self.today_dir / "concept_industry.csv"
+    def get_dc_industry_list(self, trade_date: str = None) -> pd.DataFrame:
+        """
+        获取东财行业板块列表（使用dc_index接口，包含行业代码）
+        
+        Args:
+            trade_date: 交易日期，格式YYYYMMDD，默认使用当前日期
+            
+        Returns:
+            行业板块DataFrame，包含行业代码(ts_code)和名称(name)
+        """
+        if not self.ts_pro:
+            logger.warning("Tushare未初始化，无法获取东财行业板块")
+            return pd.DataFrame()
+        
+        if not trade_date:
+            trade_date = datetime.now().strftime("%Y%m%d")
+        
+        cache_file = self.cache_dir / f"dc_industry_list_{trade_date}.csv"
         if cache_file.exists():
             return pd.read_csv(cache_file)
         
         try:
-            # 获取东方财富行业板块
-            df = ak.stock_board_industry_name_em()
-            df.to_csv(cache_file, index=False)
+            # 使用dc_index接口获取行业板块数据
+            df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=trade_date)
+            
+            # 如果当日数据为空，尝试获取上一交易日数据
+            if df.empty:
+                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+                logger.warning(f"{trade_date}行业板块数据为空，尝试获取上一交易日{prev_date}数据")
+                df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=prev_date)
+                if not df.empty:
+                    trade_date = prev_date
+                    cache_file = self.cache_dir / f"dc_industry_list_{trade_date}.csv"
+            
+            if not df.empty:
+                df.to_csv(cache_file, index=False)
+                logger.info(f"获取东财行业板块列表: {len(df)}个行业")
             return df
         except Exception as e:
-            logger.error(f"获取行业数据失败: {e}")
+            logger.warning(f"获取东财行业板块列表失败: {e}")
             return pd.DataFrame()
+    
+    def get_dc_industry_cons(self, ts_code: str, trade_date: str = None) -> pd.DataFrame:
+        """
+        获取东财行业板块成分股（使用行业代码关联）
+        
+        Args:
+            ts_code: 行业代码（如'BK1627.DC'）
+            trade_date: 交易日期，格式YYYYMMDD
+            
+        Returns:
+            行业成分股DataFrame
+        """
+        if not self.ts_pro:
+            logger.warning("Tushare未初始化，无法获取东财行业成分")
+            return pd.DataFrame()
+        
+        if not trade_date:
+            trade_date = datetime.now().strftime("%Y%m%d")
+        
+        cache_file = self.cache_dir / f"dc_industry_cons_{ts_code}_{trade_date}.csv"
+        if cache_file.exists():
+            return pd.read_csv(cache_file)
+        
+        try:
+            # 使用dc_member接口获取行业成分（不是dc_index_cons）
+            df = self.ts_pro.dc_member(ts_code=ts_code, trade_date=trade_date)
+            
+            # 如果当日数据为空，尝试获取上一交易日数据
+            if df.empty:
+                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+                logger.warning(f"{trade_date}行业成分数据为空，尝试获取上一交易日{prev_date}数据")
+                df = self.ts_pro.dc_member(ts_code=ts_code, trade_date=prev_date)
+                if not df.empty:
+                    cache_file = self.cache_dir / f"dc_industry_cons_{ts_code}_{prev_date}.csv"
+            
+            if not df.empty:
+                df.to_csv(cache_file, index=False)
+                logger.info(f"获取东财行业{ts_code}成分: {len(df)}只股票")
+            return df
+        except Exception as e:
+            logger.warning(f"获取东财行业成分失败: {e}")
+            return pd.DataFrame()
+    
+    def find_industry_by_stock(self, stock_code: str, trade_date: str = None) -> pd.DataFrame:
+        """
+        根据股票代码查找所属行业（使用dc_index接口）
+        
+        Args:
+            stock_code: 股票代码（如'000001.SZ'或'000001'）
+            trade_date: 交易日期
+            
+        Returns:
+            该股票所属的行业列表
+        """
+        if not self.ts_pro:
+            logger.warning("Tushare未初始化")
+            return pd.DataFrame()
+        
+        # 标准化股票代码
+        if '.' not in stock_code:
+            stock_code = stock_code.zfill(6)
+            if stock_code.startswith('6'):
+                stock_code = f"{stock_code}.SH"
+            else:
+                stock_code = f"{stock_code}.SZ"
+        
+        # 获取所有行业列表
+        industry_df = self.get_dc_industry_list(trade_date)
+        if industry_df.empty:
+            return pd.DataFrame()
+        
+        # 遍历所有行业，查找包含该股票的行业
+        result = []
+        for _, row in industry_df.iterrows():
+            ts_code = row['ts_code']
+            cons_df = self.get_dc_industry_cons(ts_code, trade_date)
+            # dc_member返回的列是con_code而不是ts_code
+            if not cons_df.empty and stock_code in cons_df['con_code'].values:
+                result.append({
+                    'industry_ts_code': row['ts_code'],
+                    'industry_name': row['name'],
+                    'industry_level': row.get('level', ''),
+                    'stock_ts_code': stock_code
+                })
+        
+        if result:
+            return pd.DataFrame(result)
+        return pd.DataFrame()
     
     def get_industry_cons(self, industry: str) -> pd.DataFrame:
         """获取行业成分股"""
@@ -524,23 +720,7 @@ class DataManager:
             logger.error(f"[get_stock_daily_price] 获取 {code} {trade_date} 日线数据失败: {e}")
         
         return {}
-    
-    def get_stock_5min_kline(self, code: str) -> pd.DataFrame:
-        """获取5分钟K线（用于5日走势微图）"""
-        # 使用AkShare获取近期5日分钟数据
-        try:
-            # 股票代码格式转换
-            code = str(code)
-            if code.startswith('6'):
-                code = f"sh{code}"
-            else:
-                code = f"sz{code}"
-            df = ak.stock_zh_a_hist_min_em(symbol=code, period="5", adjust="qfq")
-            return df.tail(240)  # 约5个交易日（每天48个5分钟）
-        except Exception as e:
-            logger.error(f"获取5分钟线失败 {code}: {e}")
-            return pd.DataFrame()
-    
+
     def is_limit_up(self, pct_change: float) -> bool:
         """判断是否涨停（考虑创业板20%）"""
         # 主板10%，创业板科创板20%
@@ -983,12 +1163,13 @@ class DataManager:
             logger.error(f"获取行业板块数据失败: {e}")
             return pd.DataFrame()
     
-    def get_sector_factors(self, industry_name: str, trade_date: str = None) -> dict:
+    def get_sector_factors(self, industry_name: str = None, ts_code: str = None, trade_date: str = None) -> dict:
         """
         获取指定行业的因子数据
         
         Args:
-            industry_name: 行业名称（如'火力发电'）
+            industry_name: 行业名称（如'火力发电'），推荐使用ts_code
+            ts_code: 行业代码（如'BK1627.DC'），优先使用
             trade_date: 交易日期
         
         Returns:
@@ -998,27 +1179,51 @@ class DataManager:
         if df.empty:
             return {}
         
-        # 模糊匹配行业名称
-        matched = df[df['name'].str.contains(industry_name, na=False, regex=False)]
-        if matched.empty:
-            return {}
+        # 优先使用行业代码精确匹配
+        if ts_code:
+            matched = df[df['ts_code'] == ts_code]
+            if not matched.empty:
+                row = matched.iloc[0]
+                return {
+                    'industry_ts_code': row['ts_code'],
+                    'industry_name': row['name'],
+                    'pct_change': row['pct_change'],
+                    'up_num': row['up_num'],
+                    'down_num': row['down_num'],
+                    'up_down_ratio': row['up_down_ratio'],
+                    'up_down_diff': row['up_down_diff'],
+                    'leading': row['leading'],
+                    'leading_pct': row['leading_pct'],
+                    'leading_strength': row['leading_strength'],
+                    'turnover_rate': row['turnover_rate'],
+                    'activity_score': row['activity_score'],
+                    'composite_strength': row['composite_strength'],
+                    'total_mv': row['total_mv']
+                }
         
-        row = matched.iloc[0]
-        return {
-            'industry_name': row['name'],
-            'pct_change': row['pct_change'],
-            'up_num': row['up_num'],
-            'down_num': row['down_num'],
-            'up_down_ratio': row['up_down_ratio'],
-            'up_down_diff': row['up_down_diff'],
-            'leading': row['leading'],
-            'leading_pct': row['leading_pct'],
-            'leading_strength': row['leading_strength'],
-            'turnover_rate': row['turnover_rate'],
-            'activity_score': row['activity_score'],
-            'composite_strength': row['composite_strength'],
-            'total_mv': row['total_mv']
-        }
+        # 如果没有提供ts_code或精确匹配失败，使用行业名称精确匹配
+        if industry_name:
+            matched = df[df['name'] == industry_name]
+            if not matched.empty:
+                row = matched.iloc[0]
+                return {
+                    'industry_ts_code': row['ts_code'],
+                    'industry_name': row['name'],
+                    'pct_change': row['pct_change'],
+                    'up_num': row['up_num'],
+                    'down_num': row['down_num'],
+                    'up_down_ratio': row['up_down_ratio'],
+                    'up_down_diff': row['up_down_diff'],
+                    'leading': row['leading'],
+                    'leading_pct': row['leading_pct'],
+                    'leading_strength': row['leading_strength'],
+                    'turnover_rate': row['turnover_rate'],
+                    'activity_score': row['activity_score'],
+                    'composite_strength': row['composite_strength'],
+                    'total_mv': row['total_mv']
+                }
+        
+        return {}
     
     def get_concept_members(self, trade_date: str = None) -> pd.DataFrame:
         """
@@ -1147,7 +1352,7 @@ class DataManager:
         concepts = matched['concept_name'].dropna().unique()
         return ','.join(concepts)
 
-    def get_sector_moneyflow(self, trade_date: str, sector_type: str = 'industry') -> pd.DataFrame:
+    def get_sector_moneyflow(self, trade_date: str, sector_type: str = '行业') -> pd.DataFrame:
         """
         获取板块资金流向数据（使用Tushare的moneyflow_ind_dc接口）
         
@@ -1222,12 +1427,13 @@ class DataManager:
             logger.error(f"获取板块资金流向数据失败: {e}")
             return pd.DataFrame()
     
-    def get_sector_capital_flow_type(self, sector_name: str, trade_date: str) -> Dict:
+    def get_sector_capital_flow_type(self, sector_name: str = None, ts_code: str = None, trade_date: str = None) -> Dict:
         """
         分析板块资金流向类型
         
         Args:
-            sector_name: 板块名称
+            sector_name: 板块名称（推荐使用ts_code）
+            ts_code: 板块代码（如'BK1627.DC'），优先使用
             trade_date: 交易日期
         
         Returns:
@@ -1252,12 +1458,21 @@ class DataManager:
                 'description': '数据获取失败'
             }
         
-        # 查找匹配的板块（支持模糊匹配）
-        matched = all_sectors[all_sectors['name'].str.contains(sector_name, na=False, case=False)]
+        # 优先使用板块代码精确匹配
+        matched = pd.DataFrame()
+        if ts_code and 'ts_code' in all_sectors.columns:
+            matched = all_sectors[all_sectors['ts_code'] == ts_code]
         
-        if matched.empty:
-            # 尝试反向匹配
-            matched = all_sectors[all_sectors['name'].apply(lambda x: sector_name in str(x) if pd.notna(x) else False)]
+        # 如果没有提供ts_code或精确匹配失败，使用板块名称精确匹配
+        if matched.empty and sector_name:
+            matched = all_sectors[all_sectors['name'] == sector_name]
+        
+        # 如果精确匹配失败，尝试模糊匹配（作为备选）
+        if matched.empty and sector_name:
+            matched = all_sectors[all_sectors['name'].str.contains(sector_name, na=False, case=False)]
+            if matched.empty:
+                # 尝试反向匹配
+                matched = all_sectors[all_sectors['name'].apply(lambda x: sector_name in str(x) if pd.notna(x) else False)]
         
         if matched.empty:
             return {
@@ -1266,7 +1481,7 @@ class DataManager:
                 'medium_net': 0,
                 'small_net': 0,
                 'total_net': 0,
-                'description': f'未找到板块[{sector_name}]的资金流向数据'
+                'description': f'未找到板块[{sector_name or ts_code}]的资金流向数据'
             }
         
         # 取第一条匹配记录（最匹配的）

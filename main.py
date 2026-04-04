@@ -85,23 +85,12 @@ class SentimentSystem:
         logger.info(f"市场温度: {sentiment.get('temperature', '未知')}")
         logger.info(f"最高板: {gradient.get('highest_board', 0)}板 - {gradient.get('highest_stock', '')}")
         
-        # 4. 模式识别
-        logger.info("[4/5] 识别交易模式...")
-        pr = PatternRecognition(self.dm, sector_engine=None, mapper=self.mapper)
-        patterns = pr.scan_all_patterns(date, self.yesterday)
-
-        total_signals = sum(len(v) for v in patterns.values())
-        logger.info(f"识别到 {total_signals} 个交易信号")
-        for ptype, signals in patterns.items():
-            if signals:
-                logger.info(f"  - {ptype}: {len(signals)}个")
-        
-        # 5. 综合当日数据和20日数据计算板块权重
-        logger.info("[5/5] 计算综合板块权重（当日+20日）...")
+        # 4. 综合当日数据和20日数据计算板块权重
+        logger.info("[4/5] 计算综合板块权重（当日+20日）...")
         display_mainline_df = self._calculate_combined_mainline(mainline_df, hierarchy_df)
         
-        # 6. 多维度板块热度计算 V2（散户聚焦版）
-        logger.info("[6/6] 计算多维度板块热度 V2（散户聚焦版）...")
+        # 5. 多维度板块热度计算 V2（散户聚焦版）
+        logger.info("[5/6] 计算多维度板块热度 V2（散户聚焦版）...")
         heat_calculator = SectorHeatCalculatorV2()
         sector_heat_df = self._calculate_sector_heat(heat_calculator, date, hierarchy_df)
         
@@ -117,6 +106,36 @@ class SentimentSystem:
                 logger.info(f"  [优先级{priority}] {trend} - {l3}: {action} (置信度{confidence})")
         else:
             logger.info("  无明确板块信号，建议观望")
+        
+        # 6. 模式识别（传入已计算的板块热度数据，避免重复计算）
+        logger.info("[6/6] 识别交易模式...")
+        pr = PatternRecognition(self.dm, sector_engine=None, mapper=self.mapper)
+        # 从sector_heat_df提取热点板块信息
+        hot_sectors = []
+        if not sector_heat_df.empty:
+            for _, row in sector_heat_df.iterrows():
+                trend_stage = row.get('趋势阶段', '')
+                if trend_stage in ['爆发期', '加速期', '确认期', '启动期']:
+                    hot_sectors.append({
+                        'sector_name': row.get('二级行业', ''),
+                        'stats': row.get('核心指标', {}),
+                        'trend_stage': trend_stage,
+                        'action': row.get('行动建议', ''),
+                        'confidence': float(row.get('置信度', '0%').replace('%', '')) / 100
+                    })
+        
+        # 调试日志：显示传递的热点板块
+        logger.info(f"传递给模式识别的热点板块: {len(hot_sectors)}个")
+        for hs in hot_sectors[:5]:  # 显示前5个
+            logger.info(f"  - {hs['sector_name']} ({hs['trend_stage']})")
+        
+        patterns = pr.scan_all_patterns(date, self.yesterday, hot_sectors=hot_sectors)
+
+        total_signals = sum(len(v) for v in patterns.values())
+        logger.info(f"识别到 {total_signals} 个交易信号")
+        for ptype, signals in patterns.items():
+            if signals:
+                logger.info(f"  - {ptype}: {len(signals)}个")
         
         # 7. 为核心标的获取概念数据
         logger.info("[7/7] 获取核心标的所属概念...")
