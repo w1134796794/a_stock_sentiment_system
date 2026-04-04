@@ -550,9 +550,9 @@ class SentimentSystem:
         
         logger.info(f"历史数据获取完成：共 {len(limit_up_history)} 个交易日")
         
-        # 使用V2计算器分析
+        # 使用V2计算器分析（传入data_manager和date参数）
         sector_heat_df = calculator.analyze_all_sectors_v2(
-            today_zt, limit_up_history, self.mapper
+            today_zt, limit_up_history, self.mapper, self.dm, date
         )
         
         return sector_heat_df

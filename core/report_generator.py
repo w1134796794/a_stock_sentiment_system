@@ -83,17 +83,27 @@ class ReportGenerator:
                 worksheet = writer.sheets['主线板块Top5']
                 worksheet.set_column('A:G', 15)
 
-            # Sheet 3: 板块热度分析（新增）
+            # Sheet 3: 板块热度分析（新增）- 包含资金流向等增强分析
             if not data_dict.get('sector_heat_df', pd.DataFrame()).empty:
                 sector_heat_df = data_dict['sector_heat_df'].copy()
-                # 只保留关键列
-                display_cols = ['L1_Industry', 'L2_Industry', 'L2_Industry', 
-                               '3日涨停数', '5日涨停数', '20日涨停数',
-                               '原始热度', '动量加速度', '持续性得分', '综合得分', '板块分类']
-                sector_heat_display = sector_heat_df[display_cols] if all(col in sector_heat_df.columns for col in display_cols) else sector_heat_df
+                
+                # 定义新的显示列（包含资金流向等增强分析字段）
+                display_cols = [
+                    '优先级', '联动信号', '趋势阶段', '共振类型',
+                    '一级行业', '二级行业', '行动建议', '仓位建议',
+                    '置信度', '涨停趋势', '爆发倍数', '短期动量', '综合得分',
+                    '关注理由', '风险提示',
+                    # 增强分析字段
+                    '资金流向', '龙头质量', '轮动预判', '风险评分', '动态仓位'
+                ]
+                
+                # 只保留存在的列
+                available_cols = [col for col in display_cols if col in sector_heat_df.columns]
+                sector_heat_display = sector_heat_df[available_cols]
+                
                 sector_heat_display.to_excel(writer, sheet_name='板块热度分析', index=False)
                 worksheet = writer.sheets['板块热度分析']
-                worksheet.set_column('A:K', 15)
+                worksheet.set_column('A:Z', 15)
 
             # Sheet 4: 梯队追踪
             self._write_gradient_sheet(writer, data_dict.get('gradient', {}), header_format, cell_format)

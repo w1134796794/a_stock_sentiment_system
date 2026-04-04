@@ -338,7 +338,6 @@ class DataManager:
                     
                     # 1. 检查是否已有该日期的数据
                     if trade_date in existing_df['trade_date'].astype(str).values:
-                        logger.debug(f"汇总文件中已存在{trade_date}的涨停数据，跳过追加")
                         return
                     
                     # 2. 检查是否与最近一个交易日的代码列表完全相同（处理非交易日问题）
@@ -353,7 +352,6 @@ class DataManager:
                             current_codes = set(df['代码'].astype(str))
                             
                             if latest_codes == current_codes:
-                                logger.info(f"{trade_date}的数据与最近交易日{latest_date}完全相同，判定为非交易日数据，跳过追加")
                                 return
                                 
                 except Exception as e:
@@ -1148,6 +1146,165 @@ class DataManager:
         # 获取所有概念名称并去重
         concepts = matched['concept_name'].dropna().unique()
         return ','.join(concepts)
+
+    def get_sector_moneyflow(self, trade_date: str, sector_type: str = 'industry') -> pd.DataFrame:
+        """
+        获取板块资金流向数据（使用Tushare的moneyflow_ind_dc接口）
+        
+        Args:
+            trade_date: 交易日期，格式YYYYMMDD
+            sector_type: 板块类型，'industry'(行业) 或 'concept'(概念)
+        
+        Returns:
+            板块资金流向DataFrame，包含以下关键字段：
+            - ts_code: 板块代码
+            - name: 板块名称
+            - pct_change: 板块涨跌幅
+            - net_amount: 小单净流入（万元）
+            - net_damount: 大单净流入（万元）
+            - net_mamount: 中单净流入（万元）
+            - buy_sm_amount: 小单买入金额（万元）
+            - sell_sm_amount: 小单卖出金额（万元）
+            - buy_md_amount: 中单买入金额（万元）
+            - sell_md_amount: 中单卖出金额（万元）
+            - buy_lg_amount: 大单买入金额（万元）
+            - sell_lg_amount: 大单卖出金额（万元）
+        """
+        cache_file = self.today_dir / f"sector_moneyflow_{sector_type}_{trade_date}.csv"
+        
+        # 检查缓存
+        if cache_file.exists():
+            logger.info(f"从缓存加载板块资金流向数据: {cache_file}")
+            return pd.read_csv(cache_file)
+        
+        if not self.ts_pro:
+            logger.warning("Tushare未初始化，无法获取板块资金流向数据")
+            return pd.DataFrame()
+        
+        try:
+            logger.info(f"从Tushare获取板块资金流向数据: {trade_date}, 类型: {sector_type}")
+            
+            # 使用moneyflow_ind_dc接口获取板块资金流向
+            # 该接口支持行业板块和概念板块
+            df = self.ts_pro.moneyflow_ind_dc(trade_date=trade_date, type=sector_type)
+            
+            if df.empty:
+                logger.warning(f"{trade_date}板块资金流向数据为空")
+                # 尝试获取上一交易日数据
+                from datetime import timedelta
+                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+                logger.info(f"尝试获取上一交易日{prev_date}数据")
+                df = self.ts_pro.moneyflow_ind_dc(trade_date=prev_date, type=sector_type)
+                if not df.empty:
+                    trade_date = prev_date
+                    cache_file = self.today_dir / f"sector_moneyflow_{sector_type}_{trade_date}.csv"
+            
+            if not df.empty:
+                # moneyflow_ind_dc接口直接返回净流入金额（元）
+                # buy_sm_amount: 小单净流入, buy_md_amount: 中单净流入, buy_lg_amount: 大单净流入
+                # 转换为万元
+                df['net_amount'] = df.get('buy_sm_amount', 0) / 10000  # 小单净流入（万元）
+                df['net_mamount'] = df.get('buy_md_amount', 0) / 10000  # 中单净流入（万元）
+                df['net_damount'] = df.get('buy_lg_amount', 0) / 10000  # 大单净流入（万元）
+                
+                # 计算总净流入
+                df['total_net_amount'] = df['net_amount'] + df['net_mamount'] + df['net_damount']
+                
+                # 缓存数据
+                df.to_csv(cache_file, index=False)
+                logger.info(f"获取板块资金流向数据成功: {len(df)}个板块，已缓存至 {cache_file}")
+                return df
+            else:
+                logger.warning("无法获取板块资金流向数据")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            logger.error(f"获取板块资金流向数据失败: {e}")
+            return pd.DataFrame()
+    
+    def get_sector_capital_flow_type(self, sector_name: str, trade_date: str) -> Dict:
+        """
+        分析板块资金流向类型
+        
+        Args:
+            sector_name: 板块名称
+            trade_date: 交易日期
+        
+        Returns:
+            资金流向分析结果字典
+        """
+        # 获取行业资金流向数据
+        industry_df = self.get_sector_moneyflow(trade_date, 'industry')
+        
+        # 获取概念资金流向数据
+        concept_df = self.get_sector_moneyflow(trade_date, 'concept')
+        
+        # 合并数据
+        all_sectors = pd.concat([industry_df, concept_df], ignore_index=True)
+        
+        if all_sectors.empty:
+            return {
+                'capital_flow_type': 'UNKNOWN',
+                'large_net': 0,
+                'medium_net': 0,
+                'small_net': 0,
+                'total_net': 0,
+                'description': '数据获取失败'
+            }
+        
+        # 查找匹配的板块（支持模糊匹配）
+        matched = all_sectors[all_sectors['name'].str.contains(sector_name, na=False, case=False)]
+        
+        if matched.empty:
+            # 尝试反向匹配
+            matched = all_sectors[all_sectors['name'].apply(lambda x: sector_name in str(x) if pd.notna(x) else False)]
+        
+        if matched.empty:
+            return {
+                'capital_flow_type': 'UNKNOWN',
+                'large_net': 0,
+                'medium_net': 0,
+                'small_net': 0,
+                'total_net': 0,
+                'description': f'未找到板块[{sector_name}]的资金流向数据'
+            }
+        
+        # 取第一条匹配记录（最匹配的）
+        sector_data = matched.iloc[0]
+        
+        # 获取资金流向数据
+        large_net = sector_data.get('net_damount', 0)  # 大单净流入
+        medium_net = sector_data.get('net_mamount', 0)  # 中单净流入
+        small_net = sector_data.get('net_amount', 0)   # 小单净流入
+        total_net = sector_data.get('total_net_amount', large_net + medium_net + small_net)
+        
+        # 判断资金流向类型
+        if large_net > medium_net + small_net and large_net > 0:
+            flow_type = 'INSTITUTION_LEADING'
+            description = '机构主导'
+        elif small_net > large_net + medium_net and small_net > 0:
+            flow_type = 'RETAIL_LEADING'
+            description = '散户主导'
+        elif total_net > 0:
+            flow_type = 'BALANCED'
+            description = '均衡流入'
+        elif total_net < 0:
+            flow_type = 'NET_OUTFLOW'
+            description = '净流出'
+        else:
+            flow_type = 'UNKNOWN'
+            description = '数据不足'
+        
+        return {
+            'capital_flow_type': flow_type,
+            'large_net': large_net,
+            'medium_net': medium_net,
+            'small_net': small_net,
+            'total_net': total_net,
+            'description': description,
+            'sector_name': sector_data.get('name', sector_name),
+            'pct_change': sector_data.get('pct_change', 0)
+        }
 
 if __name__ == "__main__":
     # 测试
