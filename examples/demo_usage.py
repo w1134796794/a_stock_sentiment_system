@@ -6,10 +6,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR, INDUSTRY_MAPPING_FILE
-from core.data_manager import DataManager
-from core.industry_mapper import IndustryMapper
-from core.sentiment_engine import SentimentEngine
-from core.pattern_recognition import PatternRecognition
+from core.data.data_manager import DataManager
+from core.data.industry_mapper import IndustryMapper
+from core.analysis.sentiment_engine import SentimentEngine
+from core.analysis.pattern_recognition import PatternRecognition
 
 # 初始化
 dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)

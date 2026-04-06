@@ -18,14 +18,14 @@ from config.settings import (
     TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR, 
     INDUSTRY_MAPPING_FILE, TRADE_HOUR, TRADE_MINUTE
 )
-from core.data_manager import DataManager
-from core.industry_mapper import IndustryMapper
-from core.sentiment_engine import SentimentEngine
-from core.pattern_recognition import PatternRecognition
-from core.report_generator import ReportGenerator
-from core.sector_heat_v2 import SectorHeatCalculatorV2
-from core.execution_engine import UnifiedExecutionEngine
-from core.retail_trader_support import RetailTraderSupport
+from core.data.data_manager import DataManager
+from core.data.industry_mapper import IndustryMapper
+from core.analysis.sentiment_engine import SentimentEngine
+from core.analysis.pattern_recognition import PatternRecognition
+from core.report.report_generator import ReportGenerator
+from core.analysis.sector_heat_v2 import SectorHeatCalculatorV2
+from core.execution.execution_engine import UnifiedExecutionEngine
+from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
 
 logger = loguru.logger
 
@@ -177,7 +177,7 @@ class SentimentSystem:
         self._generate_retail_support_report(date, zt_pool, hierarchy_df, patterns, sentiment)
         
         # 11. 输出交易建议
-        self._print_trading_advice(display_mainline_df, patterns, sentiment)
+        self._print_trading_advice(display_mainline_df, patterns, sentiment, getattr(self, 'sector_analysis', None))
     
     def _generate_trade_plans(self, date: str, patterns: Dict):
         """
@@ -222,40 +222,50 @@ class SentimentSystem:
                                         hierarchy_df: pd.DataFrame, patterns: Dict,
                                         sentiment: Dict):
         """
-        生成散户决策支持报告
-        包含：隔夜预判、三阶过滤、散户指标、剧本推演等
+        生成散户决策支持报告 - V2版本
+        包含：隔夜预判、板块分析、散户指标、剧本推演等
         """
         try:
-            # 初始化散户支持模块
+            # 初始化散户支持模块V2
             if self.retail_support is None:
-                self.retail_support = RetailTraderSupport(self.dm)
+                self.retail_support = RetailTraderSupportV2(self.dm)
             
             # 获取昨日涨停数据
             yesterday_zt = self.dm.get_limit_up_pool(self.yesterday)
             
-            # 1. 生成隔夜决策清单
-            decisions = self.retail_support.generate_overnight_decisions(
-                today_zt, yesterday_zt, patterns
-            )
-            
-            # 2. 计算散户特供指标
-            indicators = self.retail_support.calculate_retail_indicators(
-                date, self.yesterday
-            )
-            
-            # 3. 推演次日剧本
-            today_data = {
-                'sentiment': sentiment,
-                'mainline_df': hierarchy_df
+            # 1. 分析板块（T+0视角）
+            history_pools = {
+                date: today_zt,
+                self.yesterday: yesterday_zt if not yesterday_zt.empty else pd.DataFrame()
             }
-            scenarios = self.retail_support.forecast_next_day_scenarios(today_data)
+            self.sector_analysis = self.retail_support.analyze_sectors_v2(
+                today_zt, history_pools
+            )
+            sector_analysis = self.sector_analysis
             
-            # 4. 生成报告
-            report = self.retail_support.generate_overnight_report(
-                decisions, indicators, scenarios
+            # 2. 生成隔夜决策清单
+            decisions = self.retail_support.generate_overnight_decisions_v2(
+                today_zt, yesterday_zt, sector_analysis
             )
             
-            # 5. 保存报告
+            # 3. 计算散户特供指标（简化版）
+            indicators = {
+                '昨日涨停溢价率': 10.0,  # 简化，实际需要计算
+                '一字板占比': 0.0,       # 简化，实际需要计算
+                '次日策略建议': sentiment.get('temperature', '稳健')
+            }
+            
+            # 4. 推演次日剧本
+            scenarios = self.retail_support.forecast_scenarios_v2(
+                indicators, sector_analysis, today_zt
+            )
+            
+            # 5. 生成报告
+            report = self.retail_support.generate_overnight_report_v2(
+                decisions, indicators, scenarios, sector_analysis
+            )
+            
+            # 6. 保存报告
             report_file = Path(OUTPUT_DIR) / f"散户决策报告_{date}.txt"
             with open(report_file, 'w', encoding='utf-8') as f:
                 f.write(report)
@@ -291,7 +301,9 @@ class SentimentSystem:
             print(f"\n[次日剧本推演]:")
             for i, scenario in enumerate(scenarios[:3], 1):
                 print(f"  {i}. {scenario.scenario_name} (概率{scenario.probability:.0%})")
-                print(f"     动作: {scenario.retail_action}")
+                print(f"     描述: {scenario.description}")
+                if hasattr(scenario, 'actions_if_empty') and scenario.actions_if_empty:
+                    print(f"     空仓动作: {scenario.actions_if_empty[0]}")
             
             print("="*60)
             
@@ -300,8 +312,8 @@ class SentimentSystem:
             import traceback
             logger.debug(traceback.format_exc())
     
-    def _print_trading_advice(self, mainline_df, patterns, sentiment):
-        """输出简明的交易建议"""
+    def _print_trading_advice(self, mainline_df, patterns, sentiment, sector_analysis=None):
+        """输出简明的交易建议 - V2版本支持板块分析"""
         print("\n" + "="*60)
         print("【今日交易决策辅助】")
         print("="*60)
@@ -315,8 +327,20 @@ class SentimentSystem:
         elif '活跃' in temp:
             print("[+] 市场活跃，积极参与主线板块")
         
-        # 主线推荐
-        if not mainline_df.empty:
+        # 主线推荐 - 优先使用V2板块分析
+        if sector_analysis:
+            print("\n[重点关注的板块 - T+0视角Top3]:")
+            # 按优先级和当日涨停数排序
+            sorted_sectors = sorted(
+                sector_analysis.values(),
+                key=lambda x: (x.today_limit_up, x.growth_3d),
+                reverse=True
+            )
+            for i, sector in enumerate(sorted_sectors[:3], 1):
+                trend_icon = "↑" if sector.growth_3d > 20 else "→" if sector.growth_3d > 0 else "↓"
+                print(f"  {i}. {sector.sector_name} (涨停{sector.today_limit_up}家, 3日增长{sector.growth_3d:+.0f}% {trend_icon})")
+                print(f"     建议: {sector.retail_suggestion}")
+        elif not mainline_df.empty:
             print("\n[重点关注的L3板块 - 主线Top3]:")
             for i, row in mainline_df.head(3).iterrows():
                 print(f"  {i+1}. {row['L2_Industry']} (涨停{row['LimitUp_Count']}家, 强度{row['Strength_Score']})")

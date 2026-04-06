@@ -1,7 +1,4 @@
-
-# 生成修复后的散户决策支持系统代码
-
-fixed_retail_support_code = '''"""
+"""
 散户交易支持模块 V2 - 修复版
 修复内容：
 1. 隔夜决策清单为空问题 - 增加数据验证和备选方案
@@ -776,7 +773,11 @@ class RetailTraderSupportV2:
             growth_3d = self._calculate_3d_growth(sector, history_pools)
             
             # 20日数据（仅用于判断退潮）
-            history_20d = sum([len(df[df['sector'] == sector]) for df in history_pools.values() if not df.empty])
+            history_20d = sum([
+                len(df[df['sector'] == sector]) 
+                for df in history_pools.values() 
+                if not df.empty and 'sector' in df.columns
+            ])
             is_declining = (history_20d > 50) and (today_count < 5)  # 历史多但当前少
             
             # 确定优先级
@@ -891,7 +892,7 @@ class RetailTraderSupportV2:
                 report.append(f"     ⚠️  退潮预警: 20日涨停多但当前仅{sector.today_limit_up}家")
         
         # 3. 隔夜决策清单
-        report.append("\n\n📝 【隔夜决策清单】")
+        report.append("\n📝 【隔夜决策清单】")
         report.append("-" * 70)
         
         if not decisions:
@@ -920,7 +921,7 @@ class RetailTraderSupportV2:
                         report.append(f"       • {k}: {v}")
         
         # 4. 剧本推演
-        report.append("\n\n🔮 【次日剧本推演（基于真实数据）】")
+        report.append("\n🔮 【次日剧本推演（基于真实数据）】")
         report.append("-" * 70)
         
         for i, scenario in enumerate(scenarios[:3], 1):
@@ -957,21 +958,8 @@ if __name__ == "__main__":
     print("2. 剧本推演无效 → 基于真实数据的动态推演")
     print("3. 板块关注逻辑错误 → T+0短期视角替代20日滞后数据")
     print("4. 标的描述不精准 → 明确历史数据vs预判条件")
-    print("\n核心改进：")
+    print("\n 核心改进：")
     print("• 板块优先级：S/A/B/C/D五级（基于当日涨停+3日趋势）")
     print("• 剧本推演：基于溢价率/一字板占比/炸板率动态计算概率")
     print("• 决策清单：每项包含历史数据+次日条件+执行计划+取消条件")
     print("=" * 70)
-'''
-
-# 保存修复版代码
-with open('a_stock_sentiment_system/core/execution/retail_trader_support_v2_fixed.py', 'w', encoding='utf-8') as f:
-    f.write(fixed_retail_support_code)
-
-print("散户决策支持系统V2修复版已生成")
-print("文件路径: a_stock_sentiment_system/core/execution/retail_trader_support_v2_fixed.py")
-print("\n主要修复：")
-print("1. 隔夜决策清单为空 → 增加数据验证、放宽筛选条件、增加日志")
-print("2. 剧本推演无效 → 基于溢价率/一字板占比/炸板率动态计算")
-print("3. 板块关注逻辑 → T+0视角（当日涨停+3日趋势），替代20日滞后数据")
-print("4. 标的描述 → 明确区分历史数据/次日条件/执行计划/取消条件")

@@ -14,7 +14,7 @@ from typing import Optional, Dict, List
 import time
 
 # 导入交易日管理器
-from core.trade_date_manager import TradeDateManager, get_trade_date_manager
+from core.data.trade_date_manager import TradeDateManager, get_trade_date_manager
 
 logger = loguru.logger
 
@@ -1445,6 +1445,207 @@ class DataManager:
             'sector_name': sector_data.get('name', sector_name),
             'pct_change': sector_data.get('pct_change', 0)
         }
+
+    def get_stock_float_shares(self, symbol: str) -> float:
+        """
+        获取股票流通股本（使用akshare）
+
+        Args:
+            symbol: 股票代码（如 000001 或 000001.SZ）
+
+        Returns:
+            流通股本（万股），获取失败返回0
+        """
+        # 标准化代码格式
+        code = str(symbol).strip().replace('.SH', '').replace('.SZ', '').replace('.BJ', '').zfill(6)
+
+        # 检查缓存
+        cache_file = self.cache_dir / f"float_shares_{code}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # 检查缓存是否过期（7天）
+                    cache_time = datetime.fromisoformat(data.get('cache_time', '2000-01-01'))
+                    if (datetime.now() - cache_time).days < 7:
+                        logger.debug(f"[get_stock_float_shares] 从缓存获取 {code} 流通股本: {data.get('float_shares', 0)}万股")
+                        return data.get('float_shares', 0)
+            except Exception as e:
+                logger.warning(f"[get_stock_float_shares] 读取缓存失败: {e}")
+
+        try:
+            # 使用akshare获取个股信息
+            df = ak.stock_individual_info_em(symbol=code)
+            if df is not None and not df.empty:
+                # 查找流通股字段
+                float_shares_row = df[df['item'] == '流通股']
+                if not float_shares_row.empty:
+                    # 流通股单位是股，转换为万股
+                    float_shares = float(float_shares_row.iloc[0]['value']) / 10000
+
+                    # 缓存结果
+                    cache_data = {
+                        'float_shares': float_shares,
+                        'cache_time': datetime.now().isoformat()
+                    }
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(cache_data, f)
+
+                    logger.debug(f"[get_stock_float_shares] 获取 {code} 流通股本: {float_shares:.2f}万股")
+                    return float_shares
+                else:
+                    logger.warning(f"[get_stock_float_shares] {code} 未找到流通股数据")
+            else:
+                logger.warning(f"[get_stock_float_shares] {code} 获取个股信息失败")
+        except Exception as e:
+            logger.error(f"[get_stock_float_shares] 获取 {code} 流通股本异常: {e}")
+
+        return 0
+
+    def get_stock_daily_data(self, symbol: str, trade_date: str) -> Dict:
+        """
+        获取股票日行情数据（使用tushare daily接口）
+
+        Args:
+            symbol: 股票代码（如 000001 或 000001.SZ）
+            trade_date: 交易日期（YYYYMMDD）
+
+        Returns:
+            Dict: 包含以下字段的字典，获取失败返回空字典
+                - ts_code: 股票代码
+                - trade_date: 交易日期
+                - open: 开盘价
+                - high: 最高价
+                - low: 最低价
+                - close: 收盘价
+                - pre_close: 昨收价
+                - change: 涨跌额
+                - pct_chg: 涨跌幅
+                - vol: 成交量（手）
+                - amount: 成交额（千元）
+        """
+        # 标准化代码格式
+        code = str(symbol).strip().replace('.SH', '').replace('.SZ', '').replace('.BJ', '').zfill(6)
+        if '.' not in code:
+            code = f"{code}.SH" if code.startswith('6') else f"{code}.SZ"
+
+        # 检查缓存
+        cache_file = self.cache_dir / f"daily_data_{code}_{trade_date}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    logger.debug(f"[get_stock_daily_data] 从缓存获取 {code} {trade_date} 日行情数据")
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"[get_stock_daily_data] 读取缓存失败: {e}")
+
+        if not self.ts_pro:
+            logger.warning("[get_stock_daily_data] Tushare未初始化")
+            return {}
+
+        try:
+            df = self.ts_pro.daily(ts_code=code, start_date=trade_date, end_date=trade_date)
+            if df is not None and not df.empty:
+                row = df.iloc[0]
+                result = {
+                    'ts_code': row.get('ts_code', code),
+                    'trade_date': trade_date,
+                    'open': float(row.get('open', 0)),
+                    'high': float(row.get('high', 0)),
+                    'low': float(row.get('low', 0)),
+                    'close': float(row.get('close', 0)),
+                    'pre_close': float(row.get('pre_close', 0)),
+                    'change': float(row.get('change', 0)),
+                    'pct_chg': float(row.get('pct_chg', 0)),
+                    'vol': float(row.get('vol', 0)),  # 成交量（手）
+                    'amount': float(row.get('amount', 0))  # 成交额（千元）
+                }
+
+                # 缓存结果
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(result, f)
+
+                logger.debug(f"[get_stock_daily_data] 获取 {code} {trade_date} 日行情: 成交量={result['vol']}手, 成交额={result['amount']}千元")
+                return result
+            else:
+                logger.warning(f"[get_stock_daily_data] {code} {trade_date} 返回空数据")
+        except Exception as e:
+            logger.error(f"[get_stock_daily_data] 获取 {code} {trade_date} 日行情异常: {e}")
+
+        return {}
+
+    def get_stock_daily_basic(self, symbol: str, trade_date: str) -> Dict:
+        """
+        获取股票每日基本面指标（使用tushare daily_basic接口）
+        包含实际换手率、流通股本等关键指标
+
+        Args:
+            symbol: 股票代码（如 000001 或 000001.SZ）
+            trade_date: 交易日期（YYYYMMDD）
+
+        Returns:
+            Dict: 包含以下字段的字典，获取失败返回空字典
+                - ts_code: 股票代码
+                - trade_date: 交易日期
+                - close: 收盘价
+                - turnover_rate: 换手率（%）
+                - turnover_rate_f: 实际换手率（自由流通股，%）
+                - float_share: 流通股本（万股）
+                - free_share: 自由流通股本（万股）
+                - total_share: 总股本（万股）
+                - circ_mv: 流通市值（万元）
+                - total_mv: 总市值（万元）
+        """
+        # 标准化代码格式
+        code = str(symbol).strip().replace('.SH', '').replace('.SZ', '').replace('.BJ', '').zfill(6)
+        if '.' not in code:
+            code = f"{code}.SH" if code.startswith('6') else f"{code}.SZ"
+
+        # 检查缓存
+        cache_file = self.cache_dir / f"daily_basic_{code}_{trade_date}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    logger.debug(f"[get_stock_daily_basic] 从缓存获取 {code} {trade_date} 基本面数据")
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"[get_stock_daily_basic] 读取缓存失败: {e}")
+
+        if not self.ts_pro:
+            logger.warning("[get_stock_daily_basic] Tushare未初始化")
+            return {}
+
+        try:
+            df = self.ts_pro.daily_basic(ts_code=code, trade_date=trade_date)
+            if df is not None and not df.empty:
+                row = df.iloc[0]
+                result = {
+                    'ts_code': row.get('ts_code', code),
+                    'trade_date': trade_date,
+                    'close': float(row.get('close', 0)),
+                    'turnover_rate': float(row.get('turnover_rate', 0)),  # 换手率（%）
+                    'turnover_rate_f': float(row.get('turnover_rate_f', 0)),  # 实际换手率（%）
+                    'float_share': float(row.get('float_share', 0)),  # 流通股本（万股）
+                    'free_share': float(row.get('free_share', 0)),  # 自由流通股本（万股）
+                    'total_share': float(row.get('total_share', 0)),  # 总股本（万股）
+                    'circ_mv': float(row.get('circ_mv', 0)),  # 流通市值（万元）
+                    'total_mv': float(row.get('total_mv', 0)),  # 总市值（万元）
+                }
+
+                # 缓存结果
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(result, f)
+
+                logger.debug(f"[get_stock_daily_basic] 获取 {code} {trade_date} 基本面数据: "
+                            f"实际换手率={result['turnover_rate_f']:.2f}%, "
+                            f"流通股本={result['float_share']:.2f}万股")
+                return result
+            else:
+                logger.warning(f"[get_stock_daily_basic] {code} {trade_date} 返回空数据")
+        except Exception as e:
+            logger.error(f"[get_stock_daily_basic] 获取 {code} {trade_date} 基本面数据异常: {e}")
+
+        return {}
 
 if __name__ == "__main__":
     # 测试

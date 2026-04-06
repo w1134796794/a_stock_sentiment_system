@@ -106,6 +106,17 @@ class PatternRecognition:
         except Exception as e:
             logger.warning(f"✗ 龙二波策略加载失败: {e}")
             self.dragon_second_wave = None
+        
+        # 初始化弱转强V2策略
+        try:
+            from core.pattern.weak_to_strong_v2 import WeakToStrongStrategyV2
+            # 从config获取token，如果没有则使用空字符串
+            tushare_token = getattr(self.dm, 'tushare_token', '') if self.dm else ''
+            self.weak_to_strong_v2 = WeakToStrongStrategyV2(tushare_token=tushare_token)
+            logger.info("✓ 弱转强策略V2加载成功")
+        except Exception as e:
+            logger.warning(f"✗ 弱转强策略V2加载失败: {e}")
+            self.weak_to_strong_v2 = None
     
     # ==================== 模式识别接口 ====================
     
@@ -1213,6 +1224,191 @@ class PatternRecognition:
 
         return signals
 
+    def detect_weak_to_strong_v2(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
+                                  today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
+        """
+        弱转强模式识别 V2 - 基于Tushare股东数据的实际换手率计算
+        
+        核心改进：
+        1. 连板高度分层：1-2板(低位) + 5板以上(高位)，排除3-4板中位股陷阱
+        2. 实际换手率计算：基于Tushare Pro股东数据，剔除大股东锁定筹码
+        3. 分层换手率阈值：低位实际换手>25%，高位实际换手>35%
+        
+        Args:
+            today_df: 今日涨停池数据
+            yesterday_df: 昨日涨停池数据
+            today_date: 今日日期 (YYYYMMDD)
+            yest_date: 昨日日期 (YYYYMMDD)
+        """
+        signals = []
+        
+        logger.debug(f"[弱转强V2] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
+        
+        if self.weak_to_strong_v2 is None:
+            logger.warning("[弱转强V2] 策略未加载")
+            return signals
+        
+        if today_df.empty or yesterday_df.empty:
+            logger.debug(f"[弱转强V2] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
+            return signals
+        
+        try:
+            total_checked = 0
+            total_passed = 0
+            
+            for _, today_row in today_df.iterrows():
+                code = str(today_row.get('代码', '')).zfill(6)
+                name = today_row.get('名称', '')
+                total_checked += 1
+                
+                logger.debug(f"[弱转强V2] 检测 {name}({code})...")
+                
+                # 检查昨日是否涨停
+                yest_match = yesterday_df[yesterday_df['代码'].astype(str).str.zfill(6) == code]
+                if yest_match.empty:
+                    logger.debug(f"[弱转强V2]   {name} 昨日未涨停，跳过")
+                    continue
+                
+                yest_row = yest_match.iloc[0]
+                
+                # 获取连板高度
+                board_height = today_row.get('连板数', 0)
+                if board_height == 0:
+                    # 如果没有连板数字段，尝试计算
+                    board_height = self._calculate_board_height(code, today_row, yesterday_df, None)
+                
+                logger.debug(f"[弱转强V2]   {name} 连板高度={board_height}")
+                
+                # 调用V2策略检测
+                try:
+                    # 获取实际字段值（涨停池数据字段名兼容）
+                    # 涨停池数据字段：最新价(close), 流通市值(float_mv), 成交额(amount), 换手率(turnover_ratio)
+                    yest_close = yest_row.get('最新价', yest_row.get('收盘价', 0))
+                    yest_turnover = yest_row.get('换手率', 0)
+
+                    logger.debug(f"[弱转强V2]   {name} 涨停池数据: 最新价={yest_close}, 换手率={yest_turnover}")
+
+                    # 使用tushare daily_basic接口获取实际换手率和流通股本
+                    # 优先使用传入的yest_date参数，否则尝试从today_date计算
+                    if yest_date:
+                        yest_date_str = yest_date
+                    elif today_date:
+                        yest_date_str = self.dm.get_date_offset(today_date, -1)
+                    else:
+                        logger.warning(f"[弱转强V2]   {name} 无法确定昨日日期，跳过")
+                        continue
+
+                    basic_data = self.dm.get_stock_daily_basic(code, yest_date_str)
+
+                    if not basic_data:
+                        logger.warning(f"[弱转强V2]   {name} 获取daily_basic数据失败，跳过")
+                        continue
+
+                    # 从daily_basic获取关键数据
+                    float_shares = basic_data.get('float_share', 0)  # 流通股本（万股）
+                    free_shares = basic_data.get('free_share', 0)  # 自由流通股本（万股）
+                    real_turnover = basic_data.get('turnover_rate_f', 0)  # 实际换手率（%）
+                    daily_close = basic_data.get('close', yest_close)
+
+                    if float_shares <= 0:
+                        logger.warning(f"[弱转强V2]   {name} 流通股本为0，跳过")
+                        continue
+
+                    logger.debug(f"[弱转强V2]   {name} daily_basic数据: 流通股本={float_shares:.2f}万股, "
+                                f"自由流通股本={free_shares:.2f}万股, 实际换手率={real_turnover:.2f}%")
+
+                    # 获取今日开盘价（使用daily接口）
+                    today_date_str = today_date if today_date else yest_date_str
+                    today_daily = self.dm.get_stock_daily_data(code, today_date_str)
+                    if today_daily:
+                        today_open = today_daily.get('open', today_row.get('最新价', 0))
+                        logger.debug(f"[弱转强V2]   {name} 今日开盘价: {today_open} (来自daily接口)")
+                    else:
+                        today_open = today_row.get('最新价', 0)
+                        logger.warning(f"[弱转强V2]   {name} 无法获取今日开盘价，使用涨停池最新价: {today_open}")
+
+                    # 准备昨日数据（转换为Series格式）
+                    yesterday_data = pd.Series({
+                        '代码': code,
+                        '名称': name,
+                        '收盘价': daily_close,
+                        '涨停价': yest_row.get('涨停价', daily_close * 1.1 if daily_close > 0 else 0),
+                        '炸板次数': yest_row.get('炸板次数', 0),
+                        '最后封板时间': yest_row.get('最后封板时间', ''),
+                        '涨跌幅': yest_row.get('涨跌幅', 0),
+                        '换手率': real_turnover,  # 使用实际换手率
+                        '流通股本': float_shares * 10000,  # 万股转回股，保持兼容性
+                    })
+
+                    # 准备竞价数据
+                    today_auction = {
+                        '开盘价': today_open,
+                        '竞价成交量': today_row.get('竞价成交量', 0),
+                        '竞价成交额': today_row.get('竞价成交额', 0),
+                    }
+
+                    # 流通股本（万股）
+                    total_float_shares = float_shares
+                    logger.debug(f"[弱转强V2]   {name} 流通股本={total_float_shares:.2f}万股, 实际换手率={real_turnover:.2f}%")
+                    
+                    # 判断是否板块龙头（简化判断：连板数>=2且属于热门板块）
+                    sector_leader = board_height >= 2
+                    
+                    logger.debug(f"[弱转强V2]   {name} 调用策略检测，流通股本={total_float_shares:.2f}万股")
+                    
+                    # 调用V2策略
+                    signal = self.weak_to_strong_v2.detect(
+                        stock_code=code,
+                        stock_name=name,
+                        board_height=board_height,
+                        yesterday_data=yesterday_data,
+                        yesterday_tick=pd.DataFrame(),  # 暂时传入空DataFrame
+                        today_auction=today_auction,
+                        today_tick=pd.DataFrame(),  # 暂时传入空DataFrame
+                        sector_leader=sector_leader,
+                        total_float_shares=total_float_shares
+                    )
+                    
+                    if signal:
+                        total_passed += 1
+                        
+                        # 转换为PatternSignal格式
+                        pattern_signal = PatternSignal(
+                            pattern_type=f"弱转强V2-{signal.pattern_type.value}",
+                            stock_code=signal.stock_code,
+                            stock_name=signal.stock_name,
+                            confidence=signal.confidence,
+                            description=signal.reason,
+                            key_metrics={
+                                **signal.key_metrics,
+                                '实际换手率': signal.turnover_data.get('real_turnover', 0) if signal.turnover_data else 0,
+                                '名义换手率': signal.turnover_data.get('nominal_turnover', 0) if signal.turnover_data else 0,
+                                '锁定筹码占比': signal.turnover_data.get('locked_ratio', 0) if signal.turnover_data else 0,
+                            },
+                            entry_price=signal.entry_price,
+                            stop_loss=signal.stop_loss,
+                            take_profit=signal.take_profit,
+                            position_size=signal.position_size,
+                            validation_rules=signal.validation_rules,
+                            l2_industry=today_row.get('所属行业', '')
+                        )
+                        
+                        signals.append(pattern_signal)
+                        logger.debug(f"[弱转强V2]   {name} 生成信号 (置信度{signal.confidence:.2f})")
+                    else:
+                        logger.debug(f"[弱转强V2]   {name} 未通过检测")
+                        
+                except Exception as e:
+                    logger.error(f"[弱转强V2]   {name} 检测异常: {e}")
+                    continue
+            
+            logger.info(f"[弱转强V2] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 通过{total_passed}只)")
+            
+        except Exception as e:
+            logger.error(f"[弱转强V2] 检测失败: {e}", exc_info=True)
+        
+        return signals
+
     def _normalize_date_to_ymd(self, date_str: str) -> str:
         """
         标准化日期格式为 YYYYMMDD
@@ -1308,6 +1504,17 @@ class PatternRecognition:
         except Exception as e:
             logger.error(f"弱转强检测失败: {e}")
             results["弱转强"] = []
+        
+        # 1.5 弱转强V2检测（基于Tushare股东数据）
+        try:
+            logger.info("-" * 40)
+            logger.info("开始弱转强V2检测（基于实际换手率）...")
+            results["弱转强V2"] = self.detect_weak_to_strong_v2(
+                today_df, yesterday_df, today_date_ymd, yesterday_date_ymd
+            )
+        except Exception as e:
+            logger.error(f"弱转强V2检测失败: {e}")
+            results["弱转强V2"] = []
         
         # 2. 分歧转一致检测
         try:
