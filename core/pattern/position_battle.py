@@ -64,13 +64,26 @@ class PositionBattleStrategy:
         """
         signals = []
         
+        logger.debug(f"[卡位板] 开始检测，输入数据: 今日{len(sector_stocks)}只, 昨日涨停池{len(yesterday_zt_pool)}只")
+        
+        # 打印前5条数据的连板数字段，用于调试
+        if not sector_stocks.empty and '连板数' in sector_stocks.columns:
+            sample = sector_stocks[['代码', '名称', '连板数', '涨跌幅']].head(5)
+            logger.debug(f"[卡位板] 样本数据:\n{sample}")
+        else:
+            logger.debug(f"[卡位板] 数据列: {sector_stocks.columns.tolist() if not sector_stocks.empty else '空'}")
+        
         # 1. 识别板块内的高位龙头（3板+）
         high_stocks = self._identify_high_stocks(
             sector_stocks, yesterday_zt_pool
         )
         
+        logger.debug(f"[卡位板] 识别到 {len(high_stocks)} 个高位龙头(3-6板)")
+        for h in high_stocks:
+            logger.debug(f"[卡位板]   高位龙头: {h['name']}({h['code']}) - {h['boards']}板")
+        
         if not high_stocks:
-            logger.debug("无高位龙头，不存在卡位基础")
+            logger.debug("[卡位板] 无高位龙头，不存在卡位基础")
             return signals
         
         # 2. 识别板块内的低位股（1-2板）
@@ -78,7 +91,12 @@ class PositionBattleStrategy:
             sector_stocks, yesterday_zt_pool
         )
         
+        logger.debug(f"[卡位板] 识别到 {len(low_stocks)} 个低位股(1-2板)")
+        for l in low_stocks:
+            logger.debug(f"[卡位板]   低位股: {l['name']}({l['code']}) - {l['boards']}板")
+        
         if not low_stocks:
+            logger.debug("[卡位板] 无低位股，无法形成卡位")
             return signals
         
         # 3. 对比每对高低位股的涨停时间
@@ -97,14 +115,24 @@ class PositionBattleStrategy:
     def _identify_high_stocks(self, sector: pd.DataFrame, yest_pool: pd.DataFrame) -> List[Dict]:
         """识别板块内高位龙头（3板+）"""
         high_stocks = []
+        checked = 0
+        
+        logger.debug(f"[卡位板] _identify_high_stocks: 检查{len(sector)}只股票，目标3-6板")
         
         for _, row in sector.iterrows():
             code = str(row['代码']).zfill(6)
-
+            name = row.get('名称', '')
+            
             # 计算连板高度（从昨日涨停池+今日状态）
             boards = self._calculate_boards(code, yest_pool, row)
-
+            checked += 1
+            
+            # 打印每只股票的连板数调试信息
+            if checked <= 10 or boards >= 3:
+                logger.debug(f"[卡位板]   检查 {name}({code}): 连板数={boards}, 涨跌幅={row.get('涨跌幅', 0):.2f}%")
+            
             if self.params["min_high_board"] <= boards <= self.params["max_high_board"]:
+                logger.debug(f"[卡位板]   ✓ 命中高位龙头: {name}({code}) - {boards}板")
                 high_stocks.append({
                     'code': code,
                     'name': row['名称'],
@@ -115,6 +143,8 @@ class PositionBattleStrategy:
                     'float_cap': row.get('流通市值', 1),
                     'turnover': row.get('换手率', 0)
                 })
+        
+        logger.debug(f"[卡位板] _identify_high_stocks: 共检查{checked}只，命中{len(high_stocks)}只高位龙头")
         
         # 按高度排序，取最高
         high_stocks.sort(key=lambda x: x['boards'], reverse=True)
@@ -143,14 +173,26 @@ class PositionBattleStrategy:
         return low_stocks
     
     def _calculate_boards(self, code: str, yest_pool: pd.DataFrame, today_row: pd.Series) -> int:
-        """计算当前连板高度"""
+        """计算当前连板高度 - 优先使用涨停池中的连板数字段"""
+        name = today_row.get('名称', '')
+        
         # 今日涨停？
-        if today_row.get('涨跌幅', 0) < 9.5:
+        change_pct = today_row.get('涨跌幅', 0)
+        if change_pct < 9.5:
+            logger.debug(f"[卡位板]     _calculate_boards: {name}({code}) 涨跌幅{change_pct:.2f}% < 9.5%，未涨停")
             return 0
         
-        # 昨日涨停？
-        if code in yest_pool['代码'].values if not yest_pool.empty else False:
-            # 递归查前日（简化版）
+        # 优先使用涨停池中的连板数字段
+        board_count = today_row.get('连板数', 0)
+        logger.debug(f"[卡位板]     _calculate_boards: {name}({code}) 原始连板数字段={board_count}")
+        
+        if pd.notna(board_count) and board_count > 0:
+            logger.debug(f"[卡位板]     _calculate_boards: {name}({code}) 使用连板数字段={int(board_count)}")
+            return int(board_count)
+        
+        # 如果没有连板数字段，通过昨日涨停池判断
+        if not yest_pool.empty and code in yest_pool['代码'].astype(str).str.zfill(6).values:
+            logger.debug(f"[卡位板]     _calculate_boards: {name}({code}) 无连板数字段，通过昨日涨停池判断=2板")
             return 2  # 至少2板
         else:
             return 1  # 首板

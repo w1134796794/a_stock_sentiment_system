@@ -275,18 +275,14 @@ class DragonSecondWaveStrategyV2:
             两个日期之间的交易日数量
         """
         try:
-            # 尝试使用data_manager的交易日历
-            if hasattr(self.dm, 'get_trade_calendar'):
-                cal_df = self.dm.get_trade_calendar(start_date, end_date)
-                if not cal_df.empty and 'is_open' in cal_df.columns:
-                    # 计算start_date和end_date之间的交易日数量
-                    # 不包括start_date当天
-                    cal_df['cal_date'] = cal_df['cal_date'].astype(str)
-                    mask = (cal_df['cal_date'] > start_date) & (cal_df['cal_date'] <= end_date)
-                    trading_days = cal_df[mask & (cal_df['is_open'] == 1)]
-                    return len(trading_days)
+            # 尝试使用交易日管理器
+            if self.dm and hasattr(self.dm, 'trade_date_mgr'):
+                trade_dates = self.dm.trade_date_mgr.get_trade_dates_between(start_date, end_date)
+                # 过滤掉start_date当天
+                trade_dates = [d for d in trade_dates if d > start_date]
+                return len(trade_dates)
         except Exception as e:
-            logger.debug(f"获取交易日历失败，使用简化计算: {e}")
+            logger.debug(f"使用交易日管理器失败，使用简化计算: {e}")
 
         # 简化计算：使用日历天数减去周末
         start = datetime.strptime(start_date, "%Y%m%d")

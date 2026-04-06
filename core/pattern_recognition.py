@@ -729,15 +729,25 @@ class PatternRecognition:
         score = 60
         board_type = "硬板"
 
-        if limit_up_time <= "09:35:00":
-            score += 20
-            board_type = "秒板"
-        elif limit_up_time <= "10:00:00":
-            score += 10
-            board_type = "早盘板"
-        elif limit_up_time > "14:00:00":
-            score -= 10
-            board_type = "尾盘板"
+        # 统一时间格式为分钟数（从0点开始）用于比较
+        time_minutes = self._time_to_minutes(limit_up_time)
+        
+        if time_minutes is not None:
+            # 09:25:00 且 无炸板 -> 一字板
+            if time_minutes == 9 * 60 + 25 and blast_times == 0:
+                score += 25
+                board_type = "一字板"
+            elif time_minutes <= 9 * 60 + 35:  # 09:35:00 之前
+                score += 20
+                board_type = "秒板"
+            elif time_minutes <= 10 * 60:  # 10:00:00 之前
+                score += 10
+                board_type = "早盘板"
+            elif time_minutes < 14 * 60:  # 10:00:00 - 14:00:00
+                board_type = "盘中板"
+            else:  # 14:00:00 之后
+                score -= 10
+                board_type = "尾盘板"
 
         if blast_times == 0:
             score += 15
@@ -751,6 +761,41 @@ class PatternRecognition:
             score += 10
 
         return {'score': score, 'type': board_type}
+
+    def _time_to_minutes(self, time_str: str) -> int:
+        """
+        将时间字符串转换为从0点开始的分钟数
+        支持格式: HH:MM:SS, HH:MM, HHMMSS, HHMM
+        返回: 分钟数 (如 09:30:00 -> 570)，解析失败返回 None
+        """
+        if not time_str or time_str == '-':
+            return None
+        
+        try:
+            time_str = str(time_str).strip().replace(':', '')
+            
+            # 统一转换为 HHMM 格式
+            if len(time_str) == 6:  # HHMMSS 格式
+                time_str = time_str[:4]  # 取 HHMM
+            elif len(time_str) == 5:  # HMMSS 格式 (如 93500)
+                time_str = '0' + time_str[:3]  # 补0变成 0935
+            elif len(time_str) == 4:  # HHMM 格式
+                pass  # 已经是 HHMM
+            elif len(time_str) == 3:  # HMM 格式 (如 935)
+                time_str = '0' + time_str  # 补0变成 0935
+            else:
+                return None
+            
+            hour = int(time_str[:2])
+            minute = int(time_str[2:4])
+            
+            # 验证时间范围
+            if 0 <= hour < 24 and 0 <= minute < 60:
+                return hour * 60 + minute
+        except Exception:
+            pass
+        
+        return None
 
     def _calculate_gap_ratio(self, today_row: pd.Series, yest_row: pd.Series,
                               today_date: str = None, yest_date: str = None) -> float:
@@ -1185,7 +1230,7 @@ class PatternRecognition:
 
     def _get_prev_trading_day(self, date_str: str, days: int = 1) -> str:
         """
-        获取前N个交易日（跳过周末）
+        获取前N个交易日 - 使用交易日管理器
         
         Args:
             date_str: 日期字符串 YYYYMMDD
@@ -1194,17 +1239,18 @@ class PatternRecognition:
         Returns:
             str: 前一个交易日的日期 YYYYMMDD
         """
-        from datetime import datetime, timedelta
+        # 使用交易日管理器获取前N个交易日
+        if self.dm and hasattr(self.dm, 'trade_date_mgr'):
+            return self.dm.trade_date_mgr.get_prev_trade_date(date_str, days)
         
+        # 备用方案：简化处理（仅跳过周末）
+        from datetime import datetime, timedelta
         dt = datetime.strptime(date_str, "%Y%m%d")
         count = 0
-        
         while count < days:
             dt = dt - timedelta(days=1)
-            # 跳过周末 (0=周一, 6=周日)
             if dt.weekday() < 5:  # 周一到周五
                 count += 1
-        
         return dt.strftime("%Y%m%d")
 
     def scan_all_patterns(self, today_date: str, yesterday_date: str = None, hot_sectors: List[Dict] = None) -> Dict[str, List[PatternSignal]]:

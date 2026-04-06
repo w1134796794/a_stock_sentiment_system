@@ -13,6 +13,9 @@ import loguru
 from typing import Optional, Dict, List
 import time
 
+# 导入交易日管理器
+from core.trade_date_manager import TradeDateManager, get_trade_date_manager
+
 logger = loguru.logger
 
 class DataManager:
@@ -23,6 +26,9 @@ class DataManager:
         self.today_str = datetime.now().strftime("%Y%m%d")
         self.today_dir = self.cache_dir / self.today_str
         self.today_dir.mkdir(exist_ok=True)
+        
+        # 初始化交易日管理器
+        self.trade_date_mgr = get_trade_date_manager(self.cache_dir)
         
     def get_trade_calendar(self, start_date: str, end_date: str) -> pd.DataFrame:
         """获取交易日历"""
@@ -37,38 +43,22 @@ class DataManager:
         return pd.DataFrame()
     
     def get_date_offset(self, date: str, offset: int) -> str:
-        """获取偏移交易日"""
-        # 简化处理，实际应该使用交易日历
-        date_obj = datetime.strptime(date, "%Y%m%d")
-        target = date_obj + timedelta(days=offset)
-        return target.strftime("%Y%m%d")
+        """获取偏移交易日 - 使用交易日管理器"""
+        return self.trade_date_mgr.get_date_offset(date, offset)
     
     def _get_trade_calendar_df(self) -> pd.DataFrame:
         """
-        获取交易日历DataFrame
+        获取交易日历DataFrame - 使用交易日管理器
         
         Returns:
             交易日历DataFrame
         """
-        # 优先使用新的交易日历文件
-        cal_file = self.cache_dir.parent / "trade_calendar.csv"
-        if cal_file.exists():
-            cal_df = pd.read_csv(cal_file)
-            cal_df['cal_date'] = pd.to_datetime(cal_df['cal_date']).dt.strftime('%Y%m%d')
-            return cal_df
-        
-        # 兼容旧版缓存文件
-        cal_file = self.cache_dir / "trade_calendar_2025_2026.csv"
-        if cal_file.exists():
-            cal_df = pd.read_csv(cal_file)
-            cal_df['cal_date'] = cal_df['cal_date'].astype(str)
-            return cal_df
-        
-        return pd.DataFrame()
+        # 直接返回交易日管理器中的日历
+        return self.trade_date_mgr._cal_df if self.trade_date_mgr._cal_df is not None else pd.DataFrame()
     
     def is_trade_date(self, date: str) -> bool:
         """
-        判断是否为交易日
+        判断是否为交易日 - 使用交易日管理器
         
         Args:
             date: 日期字符串，格式YYYYMMDD
@@ -76,91 +66,24 @@ class DataManager:
         Returns:
             是否为交易日
         """
-        cal_df = self._get_trade_calendar_df()
-        
-        if cal_df.empty:
-            logger.warning("交易日历为空，默认返回True")
-            return True
-        
-        date_data = cal_df[cal_df['cal_date'] == date]
-        
-        if date_data.empty:
-            logger.warning(f"日期{date}不在交易日历中，默认返回True")
-            return True
-        
-        return date_data['is_open'].values[0] == 1
+        return self.trade_date_mgr.is_trade_date(date)
     
     def get_nearest_trade_date(self, date: str = None, direction: str = "backward") -> str:
         """
-        获取最近的交易日
+        获取最近的交易日 - 使用交易日管理器
         direction: "backward" - 向前查找（默认），"forward" - 向后查找
         """
         if date is None:
             date = self.today_str
-        
-        cal_df = self._get_trade_calendar_df()
-        
-        if not cal_df.empty:
-            # 将cal_date转换为datetime进行比较，并按日期排序
-            cal_df_copy = cal_df.copy()
-            cal_df_copy['cal_date_dt'] = pd.to_datetime(cal_df_copy['cal_date'], format='%Y%m%d')
-            cal_df_copy = cal_df_copy.sort_values('cal_date_dt').reset_index(drop=True)
-            target_date = pd.to_datetime(date, format='%Y%m%d')
-            
-            if direction == "backward":
-                # 向前查找最近的交易日
-                valid_dates = cal_df_copy[cal_df_copy['cal_date_dt'] <= target_date]
-                if not valid_dates.empty:
-                    trade_dates = valid_dates[valid_dates['is_open'] == 1]
-                    if not trade_dates.empty:
-                        return trade_dates.iloc[-1]['cal_date']
-            else:
-                # 向后查找
-                valid_dates = cal_df_copy[cal_df_copy['cal_date_dt'] >= target_date]
-                if not valid_dates.empty:
-                    trade_dates = valid_dates[valid_dates['is_open'] == 1]
-                    if not trade_dates.empty:
-                        return trade_dates.iloc[0]['cal_date']
-        
-        # 备用方案：简化判断
-        date_obj = datetime.strptime(date, "%Y%m%d")
-        weekday = date_obj.weekday()
-        if weekday >= 5:  # 周六或周日
-            if direction == "backward":
-                # 返回上周五
-                days_back = weekday - 4
-                nearest = date_obj - timedelta(days=days_back)
-                return nearest.strftime("%Y%m%d")
-            else:
-                # 返回下周一
-                days_forward = 7 - weekday
-                nearest = date_obj + timedelta(days=days_forward)
-                return nearest.strftime("%Y%m%d")
-        
-        return date
-    
+
+        return self.trade_date_mgr.get_nearest_trade_date(date, direction)
+
     def validate_trade_date(self, date: str) -> tuple:
         """
-        验证并返回有效的交易日
+        验证并返回有效的交易日 - 使用交易日管理器
         返回: (is_valid, actual_date, message)
         """
-        date_obj = datetime.strptime(date, "%Y%m%d")
-        weekday = date_obj.weekday()
-        
-        # 检查是否是周末
-        if weekday >= 5:
-            nearest = self.get_nearest_trade_date(date, "backward")
-            return (False, nearest, f"{date}是周末，自动使用最近交易日{nearest}")
-        
-        # 尝试获取当日数据验证是否是交易日
-        test_data = self.get_limit_up_pool(date)
-        if test_data.empty:
-            # 可能是非交易日，尝试向前查找
-            nearest = self.get_nearest_trade_date(date, "backward")
-            if nearest != date:
-                return (False, nearest, f"{date}无交易数据，自动使用最近交易日{nearest}")
-        
-        return (True, date, f"{date}是有效交易日")
+        return self.trade_date_mgr.validate_trade_date(date)
     
     def get_daily_basic(self, trade_date: str) -> pd.DataFrame:
         """获取每日行情基础数据（带缓存）"""
@@ -474,12 +397,13 @@ class DataManager:
             
             # 如果当日数据为空，尝试获取上一交易日数据
             if df.empty:
-                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
-                logger.warning(f"{trade_date}行业板块数据为空，尝试获取上一交易日{prev_date}数据")
-                df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=prev_date)
-                if not df.empty:
-                    trade_date = prev_date
-                    cache_file = self.cache_dir / f"dc_industry_list_{trade_date}.csv"
+                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
+                if prev_date != trade_date:
+                    logger.warning(f"{trade_date}行业板块数据为空，尝试获取上一交易日{prev_date}数据")
+                    df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=prev_date)
+                    if not df.empty:
+                        trade_date = prev_date
+                        cache_file = self.cache_dir / f"dc_industry_list_{trade_date}.csv"
             
             if not df.empty:
                 df.to_csv(cache_file, index=False)
@@ -517,11 +441,12 @@ class DataManager:
             
             # 如果当日数据为空，尝试获取上一交易日数据
             if df.empty:
-                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
-                logger.warning(f"{trade_date}行业成分数据为空，尝试获取上一交易日{prev_date}数据")
-                df = self.ts_pro.dc_member(ts_code=ts_code, trade_date=prev_date)
-                if not df.empty:
-                    cache_file = self.cache_dir / f"dc_industry_cons_{ts_code}_{prev_date}.csv"
+                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
+                if prev_date != trade_date:
+                    logger.warning(f"{trade_date}行业成分数据为空，尝试获取上一交易日{prev_date}数据")
+                    df = self.ts_pro.dc_member(ts_code=ts_code, trade_date=prev_date)
+                    if not df.empty:
+                        cache_file = self.cache_dir / f"dc_industry_cons_{ts_code}_{prev_date}.csv"
             
             if not df.empty:
                 df.to_csv(cache_file, index=False)
@@ -1117,13 +1042,13 @@ class DataManager:
             
             # 如果当日数据为空，尝试获取上一交易日数据
             if df.empty:
-                from datetime import timedelta
-                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
-                logger.warning(f"{trade_date}行业板块数据为空，尝试获取上一交易日{prev_date}数据")
-                df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=prev_date)
-                if not df.empty:
-                    trade_date = prev_date
-                    cache_file = self.today_dir / f"industry_sector_{trade_date}.csv"
+                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
+                if prev_date != trade_date:
+                    logger.warning(f"{trade_date}行业板块数据为空，尝试获取上一交易日{prev_date}数据")
+                    df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=prev_date)
+                    if not df.empty:
+                        trade_date = prev_date
+                        cache_file = self.today_dir / f"industry_sector_{trade_date}.csv"
             
             if df.empty:
                 return df
@@ -1260,14 +1185,14 @@ class DataManager:
             concepts_df = self.ts_pro.dc_index(idx_type='概念板块', trade_date=trade_date)
             
             if concepts_df.empty:
-                # 尝试获取上一交易日数据
-                from datetime import timedelta
-                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
-                logger.warning(f"{trade_date}概念板块数据为空，尝试获取上一交易日{prev_date}数据")
-                concepts_df = self.ts_pro.dc_index(idx_type='概念板块', trade_date=prev_date)
-                if not concepts_df.empty:
-                    trade_date = prev_date
-                    cache_file = concept_cache_dir / f"concept_members_{trade_date}.csv"
+                # 尝试获取上一交易日数据（使用交易日历）
+                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
+                if prev_date != trade_date:
+                    logger.warning(f"{trade_date}概念板块数据为空，尝试获取上一交易日{prev_date}数据")
+                    concepts_df = self.ts_pro.dc_index(idx_type='概念板块', trade_date=prev_date)
+                    if not concepts_df.empty:
+                        trade_date = prev_date
+                        cache_file = concept_cache_dir / f"concept_members_{trade_date}.csv"
             
             if concepts_df.empty:
                 logger.warning("无法获取概念板块数据")
@@ -1392,17 +1317,17 @@ class DataManager:
             # 使用moneyflow_ind_dc接口获取板块资金流向
             # 该接口支持行业板块和概念板块
             df = self.ts_pro.moneyflow_ind_dc(trade_date=trade_date, type=sector_type)
-            
+
             if df.empty:
                 logger.warning(f"{trade_date}板块资金流向数据为空")
                 # 尝试获取上一交易日数据
-                from datetime import timedelta
-                prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
-                logger.info(f"尝试获取上一交易日{prev_date}数据")
-                df = self.ts_pro.moneyflow_ind_dc(trade_date=prev_date, type=sector_type)
-                if not df.empty:
-                    trade_date = prev_date
-                    cache_file = self.today_dir / f"sector_moneyflow_{sector_type}_{trade_date}.csv"
+                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
+                if prev_date != trade_date:
+                    logger.info(f"尝试获取上一交易日{prev_date}数据")
+                    df = self.ts_pro.moneyflow_ind_dc(trade_date=prev_date, type=sector_type)
+                    if not df.empty:
+                        trade_date = prev_date
+                        cache_file = self.today_dir / f"sector_moneyflow_{sector_type}_{trade_date}.csv"
             
             if not df.empty:
                 # moneyflow_ind_dc接口直接返回净流入金额（元）
