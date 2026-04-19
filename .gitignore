@@ -1,0 +1,13 @@
+/output/
+/logs/
+/data/
+# 忽略 Python 缓存
+__pycache__/
+*.pyc
+
+# 忽略环境变量文件 (非常重要，不要上传密码)
+.env
+.env.local
+
+# 忽略日志文件
+*.log

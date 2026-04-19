@@ -25,6 +25,22 @@ import tushare as ts
 import time
 import loguru
 
+from core.utils import (
+    time_to_minutes,
+    minutes_from_market_open,
+    calculate_gap,
+    calculate_drawdown,
+    classify_board_height,
+    is_late_board,
+    is_lanban,
+    is_valid_turnover,
+    calculate_stop_loss,
+    calculate_take_profit,
+    calculate_position_size,
+    calculate_confidence_score,
+    standardize_code,
+)
+
 logger = loguru.logger
 
 
@@ -295,42 +311,7 @@ class WeakToStrongStrategyV2:
         self.config = V2Config()
         self.shareholder_data = TushareShareholderData(tushare_token)
 
-    def _time_to_minutes(self, time_str: str) -> int:
-        """
-        将时间字符串转换为分钟数（从0点开始）
-        支持格式: HHMMSS, HH:MM:SS, HHMM, HH:MM
-        """
-        if not time_str or time_str == '0':
-            return 0
 
-        time_str = str(time_str).strip()
-
-        try:
-            # 处理 HH:MM:SS 或 HH:MM 格式
-            if ':' in time_str:
-                parts = time_str.split(':')
-                hour = int(parts[0])
-                minute = int(parts[1])
-                return hour * 60 + minute
-
-            # 处理纯数字格式
-            time_str = time_str.zfill(6)  # 补齐6位
-
-            if len(time_str) == 6:
-                # HHMMSS 格式
-                hour = int(time_str[:2])
-                minute = int(time_str[2:4])
-                return hour * 60 + minute
-            elif len(time_str) == 4:
-                # HHMM 格式
-                hour = int(time_str[:2])
-                minute = int(time_str[2:4])
-                return hour * 60 + minute
-            else:
-                return 0
-        except (ValueError, IndexError):
-            logger.warning(f"时间格式解析失败: {time_str}")
-            return 0
 
     def detect(self,
               stock_code: str,
@@ -457,20 +438,17 @@ class WeakToStrongStrategyV2:
             last_seal_str = str(last_seal)
             # 将时间转换为分钟数进行比较
             # 支持格式: HHMMSS, HH:MM:SS, HHMM, HH:MM
-            last_seal_minutes = self._time_to_minutes(last_seal_str)
+            last_seal_minutes = time_to_minutes(last_seal_str)
             logger.debug(f"[V2-{stock_code}] 最后封板时间转换: {last_seal_str} -> {last_seal_minutes}分钟")
-
-        # 尾盘板阈值: 14:30 = 870分钟
-        late_board_threshold = self._time_to_minutes(self.config.WEAK_QUALITY['last_seal_time'])
 
         # 判断弱类型
         weak_type = ""
-        if blast_times >= 2:
+        if is_lanban(blast_times):
             weak_type = "烂板"
             logger.debug(f"[V2-{stock_code}] 弱类型判断: 烂板 (blast_times={blast_times})")
-        elif last_seal_minutes > late_board_threshold:
+        elif is_late_board(last_seal):
             weak_type = "尾盘板"
-            logger.debug(f"[V2-{stock_code}] 弱类型判断: 尾盘板 (last_seal={last_seal_minutes}分钟 > {late_board_threshold}分钟)")
+            logger.debug(f"[V2-{stock_code}] 弱类型判断: 尾盘板 (last_seal={last_seal})")
         elif zdf < 9.5:
             weak_type = "断板"
             logger.debug(f"[V2-{stock_code}] 弱类型判断: 断板 (zdf={zdf} < 9.5)")
@@ -511,8 +489,9 @@ class WeakToStrongStrategyV2:
             reasons.append("烂板次数太多")
             logger.debug(f"[V2-{stock_code}] 烂板次数太多({blast_times}) -30分，当前={score}")
 
-        # 封板时间
-        if last_seal > "14:50:00":
+        # 封板时间（使用分钟数比较）
+        late_seal_threshold_minutes = time_to_minutes("14:50:00")
+        if last_seal_minutes > late_seal_threshold_minutes:
             score += 10
             reasons.append("尾盘回封有维护")
             logger.debug(f"[V2-{stock_code}] 尾盘回封 +10分，当前={score}")
@@ -676,7 +655,7 @@ class WeakToStrongStrategyV2:
             return {'is_confirmed': False, 'reason': '未涨停'}
 
         first_limit_time = limit_ticks.iloc[0]['time']
-        minutes = self._minutes_from_open(first_limit_time)
+        minutes = minutes_from_market_open(first_limit_time)
         max_minutes = self.config.OPEN_CONFIRM['max_time_to_limit']
 
         logger.debug(f"[_check_open_confirmation] 涨停时间: first_limit_time={first_limit_time}, minutes={minutes}, max={max_minutes}")
@@ -786,13 +765,7 @@ class WeakToStrongStrategyV2:
             turnover_data=turnover_data
         )
     
-    def _minutes_from_open(self, time_str: str) -> int:
-        """计算分钟数"""
-        try:
-            h, m = map(int, time_str.split(':')[:2])
-            return (h - 9) * 60 + (m - 30)
-        except:
-            return 999
+
 
 
 # ==================== 使用示例 ====================

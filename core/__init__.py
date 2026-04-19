@@ -12,24 +12,16 @@
 # 数据层
 from core.data import (
     DataManager,
-    TradeDateManager,
-    get_trade_date_manager,
-    is_trade_date,
-    get_nearest_trade_date,
-    get_prev_trade_date,
-    get_next_trade_date,
-    validate_trade_date,
     IndustryMapper,
-    TushareShareholderFetcher,
 )
 
 # 分析层
 from core.analysis import (
-    SentimentEngine,
-    SectorHeatCalculatorV2,
-    TrendStage,
-    SectorHeatCalculatorV3,
     PatternRecognition,
+    EmotionCycleEngine,
+    EmotionCycle,
+    SectorRotationTracker,
+    SectorStage,
 )
 
 # 执行层
@@ -41,27 +33,45 @@ from core.execution import (
 # 报告层
 from core.report import ReportGenerator
 
+# 工具层 - 导出工具类和函数
+from core.utils import (
+    # 工具类
+    DateUtils,
+    StockCodeUtils,
+    TimeUtils,
+    CalculationUtils,
+    ValidationUtils,
+    # 日期工具函数（向后兼容）
+    is_trade_date,
+    get_nearest_trade_date,
+    get_prev_trade_date,
+    get_next_trade_date,
+)
+
 __all__ = [
     # 数据层
     'DataManager',
-    'TradeDateManager',
-    'get_trade_date_manager',
-    'is_trade_date',
-    'get_nearest_trade_date',
-    'get_prev_trade_date',
-    'get_next_trade_date',
-    'validate_trade_date',
     'IndustryMapper',
-    'TushareShareholderFetcher',
     # 分析层
-    'SentimentEngine',
-    'SectorHeatCalculatorV2',
-    'TrendStage',
-    'SectorHeatCalculatorV3',
     'PatternRecognition',
+    'EmotionCycleEngine',
+    'EmotionCycle',
+    'SectorRotationTracker',
+    'SectorStage',
     # 执行层
     'UnifiedExecutionEngine',
     'RetailTraderSupportV2',
     # 报告层
     'ReportGenerator',
+    # 工具层 - 工具类
+    'DateUtils',
+    'StockCodeUtils',
+    'TimeUtils',
+    'CalculationUtils',
+    'ValidationUtils',
+    # 工具层 - 日期函数
+    'is_trade_date',
+    'get_nearest_trade_date',
+    'get_prev_trade_date',
+    'get_next_trade_date',
 ]

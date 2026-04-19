@@ -10,6 +10,18 @@ from datetime import datetime, time
 from enum import Enum
 import loguru
 
+from core.utils import (
+    time_to_minutes,
+    minutes_from_market_open,
+    calculate_gap,
+    calculate_drawdown,
+    is_time_after,
+    is_late_board,
+    is_lanban,
+    calculate_stop_loss,
+    calculate_take_profit,
+)
+
 logger = loguru.logger
 
 
@@ -117,13 +129,14 @@ class WeakToStrongStrategy:
         )
         
         # 止损：昨日最低价或-7%
-        stop_loss = max(
-            yesterday_data.get('最低价', entry_price * 0.93),
-            entry_price * 0.93
+        stop_loss = calculate_stop_loss(
+            entry_price,
+            stop_loss_pct=0.07,
+            min_stop_price=yesterday_data.get('最低价')
         )
         
         # 止盈：看板块强度，强板块看高到+15%
-        take_profit = entry_price * 1.15
+        take_profit = calculate_take_profit(entry_price, take_profit_pct=0.15)
         
         return TradeSignal(
             pattern_type=PatternType.WEAK_TO_STRONG,
@@ -173,9 +186,9 @@ class WeakToStrongStrategy:
         
         # 判断弱类型
         weak_type = ""
-        if blast_times >= 2:
+        if is_lanban(blast_times):
             weak_type = "烂板"
-        elif last_seal_time and last_seal_time > "14:30:00":
+        elif is_late_board(last_seal_time):
             weak_type = "尾盘板"
         elif yesterday.get('涨跌幅', 0) < 9.5:
             weak_type = "断板"
@@ -209,7 +222,8 @@ class WeakToStrongStrategy:
             if not blast_period.empty:
                 # 炸板后最低价是否远离跌停
                 min_price = blast_period['price'].min()
-                if min_price > limit_price * 0.95:  # 没砸太深
+                drawdown = calculate_drawdown(limit_price, min_price, limit_price)
+                if drawdown <= 0.05:  # 没砸太深（回撤<=5%）
                     score += 10
         
         return {
@@ -227,7 +241,7 @@ class WeakToStrongStrategy:
         """
         open_price = auction.get('开盘价', 0)
         yest_close = yesterday.get('收盘价', 1)
-        gap = (open_price - yest_close) / yest_close
+        gap = calculate_gap(open_price, yest_close)
         
         # 高开范围：2%-7%（低于2%是符合预期，高于7%是加速）
         if not (self.params["min_gap"] <= gap <= self.params["max_gap"]):
@@ -282,7 +296,7 @@ class WeakToStrongStrategy:
         
         # 最大回踩
         min_price = first_5min['price'].min()
-        max_drop = (open_price - min_price) / open_price
+        max_drop = calculate_drawdown(open_price, min_price, open_price)
         
         # 拒绝深V（回踩>2%是弱）
         if max_drop > self.params["max_open_drop"]:
@@ -295,7 +309,7 @@ class WeakToStrongStrategy:
             return {'is_confirmed': False, 'reason': '未涨停'}
         
         first_limit_time = limit_ticks.iloc[0]['time']
-        minutes_to_limit = self._calculate_minutes_from_open(first_limit_time)
+        minutes_to_limit = minutes_from_market_open(first_limit_time)
         
         # 10分钟内涨停
         if minutes_to_limit > self.params["max_time_to_limit"]:
@@ -321,13 +335,7 @@ class WeakToStrongStrategy:
         # 一般超预期：高开2-4%，竞价量8-12%，开盘买
         return auction['开盘价'], "开盘第一笔"
     
-    def _calculate_minutes_from_open(self, time_str: str) -> int:
-        """计算从9:30到涨停的分钟数"""
-        try:
-            hour, minute = map(int, time_str.split(':')[:2])
-            return (hour - 9) * 60 + (minute - 30)
-        except:
-            return 999
+
 
 # ==================== 实战口诀 ====================
 

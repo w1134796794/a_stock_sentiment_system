@@ -17,7 +17,7 @@ import sys
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from core.analysis.sector_heat_v2 import SectorHeatCalculatorV2, TrendStage
+from core.analysis.sector_rotation_tracker import SectorRotationTracker
 
 logger = loguru.logger
 
@@ -174,27 +174,35 @@ class HotspotFirstBoardStrategy:
         """
         hot_sectors = []
 
-        # 使用sector_heat_v2分析板块热度
+        # 使用sector_rotation_tracker分析板块热度
         try:
-            calculator = SectorHeatCalculatorV2()
-            sector_df = calculator.analyze_all_sectors_v2(today_zt, history_pools, self.mapper)
+            from core.data.data_manager import DataManager
+            from config.settings import TUSHARE_TOKEN, CACHE_DIR
+            
+            dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+            tracker = SectorRotationTracker(dm)
+            
+            # 获取最近交易日的板块持续性分析
+            from datetime import datetime
+            trade_date = datetime.now().strftime("%Y%m%d")
+            sector_df = tracker.analyze_sectors_persistence(trade_date, top_n=10)
 
             if sector_df.empty:
                 logger.warning("板块分析结果为空")
                 return hot_sectors
 
-            # 筛选热点行业（爆发期、加速期、确认期）
+            # 筛选热点行业（加速期、高潮期、萌芽期）
             for _, row in sector_df.iterrows():
-                trend_stage = row.get('趋势阶段', '')
-                if trend_stage in ['爆发期', '加速期', '确认期', '启动期']:
-                    sector_name = row.get('二级行业', '')
+                stage = row.get('所处阶段', '')
+                if stage in ['加速期', '高潮期', '萌芽期']:
+                    sector_name = row.get('板块名称', '')
                     if sector_name:
                         hot_sectors.append({
                             'sector_name': sector_name,
-                            'stats': row.get('核心指标', {}),
-                            'trend_stage': trend_stage,
-                            'action': row.get('行动建议', ''),
-                            'confidence': float(row.get('置信度', '0%').replace('%', '')) / 100
+                            'stats': {'涨停家数': row.get('涨停家数', 0)},
+                            'trend_stage': stage,
+                            'action': row.get('操作建议', ''),
+                            'confidence': row.get('持续性评分', 50) / 100
                         })
 
             logger.info(f"从板块分析中识别到 {len(hot_sectors)} 个热点行业")
@@ -263,20 +271,13 @@ class HotspotFirstBoardStrategy:
             return None
         logger.debug(f"[{code}] 通过: 今日涨停 ({change:.2f}%)")
 
-        # 条件2: 昨日未涨停（首板确认）
-        # 兼容映射后的列名 'Code' 和原始列名 '代码'
-        yesterday_codes = []
-        if '代码' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['代码'].values
-        elif 'Code' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['Code'].values
-        elif 'ts_code' in yesterday_zt.columns:
-            yesterday_codes = yesterday_zt['ts_code'].values
-
-        if not yesterday_zt.empty and code in yesterday_codes:
-            logger.debug(f"[{code}] 过滤: 昨日已涨停，非首板")
-            return None  # 昨日已涨停，不是首板
-        logger.debug(f"[{code}] 通过: 昨日未涨停，确认首板")
+        # 条件2: 首板确认（连板数=1）
+        # 直接从涨停池数据中获取连板数
+        board_height = stock.get('连板数', 0)
+        if board_height != 1:
+            logger.debug(f"[{code}] 过滤: 非首板（连板数={board_height}）")
+            return None
+        logger.debug(f"[{code}] 通过: 首板确认（连板数=1）")
 
         # 条件3: 流通市值 < 100亿（小盘偏好）
         float_cap = stock.get('流通市值', 0) / 100000000
@@ -298,15 +299,41 @@ class HotspotFirstBoardStrategy:
         # 尝试获取封单额（不同数据源可能使用不同列名）
         seal_amount = float(stock.get('封单额', 0) or stock.get('封板资金', 0) or stock.get('封单金额', 0))
         float_cap = float(stock.get('流通市值', 0))  # 流通市值单位是元
-        
+
+        # 从daily_basic接口获取自由流通股本计算自由流通市值
+        free_float_cap = 0
+        daily_basic_data = None
+        if hasattr(self.dm, 'get_stock_daily_basic'):
+            try:
+                daily_basic_data = self.dm.get_stock_daily_basic(code, date_str)
+                if daily_basic_data:
+                    free_share = daily_basic_data.get('free_share', 0)  # 自由流通股本（万股）
+                    close_price = daily_basic_data.get('close', 0)  # 收盘价
+                    # 自由流通市值 = 自由流通股本 * 收盘价 * 10000（转换为元）
+                    free_float_cap = free_share * close_price * 10000
+                    logger.debug(f"[{code}] 从daily_basic获取: 自由流通股本={free_share:.2f}万股, "
+                                f"收盘价={close_price:.2f}, 自由流通市值={free_float_cap/100000000:.2f}亿")
+            except Exception as e:
+                logger.debug(f"[{code}] 获取daily_basic数据失败: {e}")
+
+        # 使用自由流通市值计算封单强度，如果没有则使用流通市值
+        base_cap = free_float_cap if free_float_cap > 0 else float_cap
+
         # 统一单位计算封单强度（都转换为元）
-        if float_cap > 0 and seal_amount > 0:
-            seal_ratio = seal_amount / float_cap
+        if base_cap > 0 and seal_amount > 0:
+            seal_ratio = seal_amount / base_cap
         else:
             seal_ratio = 0
-            
+
+        # 打印详细的debug日志
+        logger.debug(f"[{code}] 封单强度计算: 封单={seal_amount/10000:.0f}万, "
+                    f"流通市值={float_cap/100000000:.2f}亿, "
+                    f"自由流通市值={free_float_cap/100000000:.2f}亿, "
+                    f"使用基数={base_cap/100000000:.2f}亿, "
+                    f"封单强度={seal_ratio*100:.4f}%")
+
         if seal_ratio < 0.02:
-            logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.4f}% < 2%, 封单{seal_amount/10000:.0f}万, 流通{float_cap/100000000:.2f}亿)")
+            logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.4f}% < 2%)")
             return None
         logger.debug(f"[{code}] 通过: 封单强度 {seal_ratio*100:.2f}%")
 

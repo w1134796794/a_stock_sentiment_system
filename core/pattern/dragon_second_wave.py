@@ -179,6 +179,7 @@ class DragonSecondWaveStrategyV2:
         返回：是否是近期龙头，第一波信息等
         """
         dates = sorted(recent_pools.keys())
+        logger.debug(f"[{stock_code}] 检查近{len(dates)}天涨停池: {dates}")
 
         zt_dates = []  # 该股涨停的日期列表
 
@@ -199,8 +200,12 @@ class DragonSecondWaveStrategyV2:
             if code_col is None:
                 continue
 
-            if stock_code in pool[code_col].values:
+            # 标准化代码格式进行比较（统一为6位数字）
+            pool_codes = pool[code_col].astype(str).str.replace(r'\.SH|\.SZ|\.BJ', '', regex=True).str.zfill(6).values
+            if stock_code in pool_codes:
                 zt_dates.append(date)
+
+        logger.debug(f"[{stock_code}] 涨停日期: {zt_dates}")
 
         if len(zt_dates) < self.params["min_first_wave"]:
             return {'is_valid': False, 'reason': f'连板数不足({len(zt_dates)} < {self.params["min_first_wave"]})'}
@@ -231,6 +236,8 @@ class DragonSecondWaveStrategyV2:
         # 找最大连板组
         max_group = max(consecutive_groups, key=len)
         max_boards = len(max_group)
+
+        logger.debug(f"[{stock_code}] 连板分组: {[len(g) for g in consecutive_groups]}, 最大连板: {max_boards}")
 
         if max_boards < self.params["min_first_wave"]:
             return {'is_valid': False, 'reason': f'最大连板数不足({max_boards} < {self.params["min_first_wave"]})'}

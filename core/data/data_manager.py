@@ -13,10 +13,17 @@ import loguru
 from typing import Optional, Dict, List
 import time
 
-# 导入交易日管理器
-from core.data.trade_date_manager import TradeDateManager, get_trade_date_manager
+# 导入工具类
+from core.utils import (
+    DateUtils,
+    StockCodeUtils,
+    TimeUtils,
+    CalculationUtils,
+    ValidationUtils,
+)
 
 logger = loguru.logger
+
 
 class DataManager:
     def __init__(self, tushare_token: str, cache_dir: Path):
@@ -27,64 +34,13 @@ class DataManager:
         self.today_dir = self.cache_dir / self.today_str
         self.today_dir.mkdir(exist_ok=True)
         
-        # 初始化交易日管理器
-        self.trade_date_mgr = get_trade_date_manager(self.cache_dir)
+        # 初始化工具类（单例模式）
+        self.date_utils = DateUtils()
+        self.stock_code_utils = StockCodeUtils()
+        self.time_utils = TimeUtils()
+        self.calculation_utils = CalculationUtils()
+        self.validation_utils = ValidationUtils()
         
-    def get_trade_calendar(self, start_date: str, end_date: str) -> pd.DataFrame:
-        """获取交易日历"""
-        cache_file = self.cache_dir / f"trade_cal_{start_date}_{end_date}.csv"
-        if cache_file.exists():
-            return pd.read_csv(cache_file)
-        
-        if self.ts_pro:
-            df = self.ts_pro.trade_cal(exchange='SSE', start_date=start_date, end_date=end_date)
-            df.to_csv(cache_file, index=False)
-            return df
-        return pd.DataFrame()
-    
-    def get_date_offset(self, date: str, offset: int) -> str:
-        """获取偏移交易日 - 使用交易日管理器"""
-        return self.trade_date_mgr.get_date_offset(date, offset)
-    
-    def _get_trade_calendar_df(self) -> pd.DataFrame:
-        """
-        获取交易日历DataFrame - 使用交易日管理器
-        
-        Returns:
-            交易日历DataFrame
-        """
-        # 直接返回交易日管理器中的日历
-        return self.trade_date_mgr._cal_df if self.trade_date_mgr._cal_df is not None else pd.DataFrame()
-    
-    def is_trade_date(self, date: str) -> bool:
-        """
-        判断是否为交易日 - 使用交易日管理器
-        
-        Args:
-            date: 日期字符串，格式YYYYMMDD
-            
-        Returns:
-            是否为交易日
-        """
-        return self.trade_date_mgr.is_trade_date(date)
-    
-    def get_nearest_trade_date(self, date: str = None, direction: str = "backward") -> str:
-        """
-        获取最近的交易日 - 使用交易日管理器
-        direction: "backward" - 向前查找（默认），"forward" - 向后查找
-        """
-        if date is None:
-            date = self.today_str
-
-        return self.trade_date_mgr.get_nearest_trade_date(date, direction)
-
-    def validate_trade_date(self, date: str) -> tuple:
-        """
-        验证并返回有效的交易日 - 使用交易日管理器
-        返回: (is_valid, actual_date, message)
-        """
-        return self.trade_date_mgr.validate_trade_date(date)
-    
     def get_daily_basic(self, trade_date: str) -> pd.DataFrame:
         """获取每日行情基础数据（带缓存）"""
         cache_file = self.today_dir / f"daily_basic_{trade_date}.csv"
@@ -113,7 +69,18 @@ class DataManager:
     
     def get_limit_up_pool(self, date: str) -> pd.DataFrame:
         """获取涨停池数据（优先使用Tushare，包含板上成交金额和行业代码）"""
-        cache_file = self.today_dir / f"zt_pool_{date}.csv"
+        # 检查是否为交易日，如果不是则获取最近的交易日
+        actual_date = date
+        if not self.date_utils.is_trade_date(date):
+            actual_date = self.date_utils.get_nearest_trade_date(date)
+            if actual_date != date:
+                logger.debug(f"[get_limit_up_pool] {date} 非交易日，使用最近交易日 {actual_date}")
+                date = actual_date
+
+        # 使用基于查询日期的缓存目录，确保历史数据可以被复用
+        query_date_dir = self.cache_dir / date
+        query_date_dir.mkdir(exist_ok=True)
+        cache_file = query_date_dir / f"zt_pool_{date}.csv"
         if cache_file.exists():
             df = pd.read_csv(cache_file)
             # 检查是否有行业代码列，如果没有需要重新获取
@@ -121,7 +88,7 @@ class DataManager:
                 logger.info(f"缓存数据缺少行业代码，重新获取 {date} 的涨停数据")
             else:
                 # 即使从缓存读取，也要确保追加到汇总文件
-                self._append_to_limit_up_summary(df, date)
+                self._append_to_limit_up_summary(df, actual_date)
                 return df
 
         # 优先使用Tushare（包含板上成交金额等更详细数据）
@@ -133,23 +100,10 @@ class DataManager:
                     df = self._normalize_limit_up_format(df, date)
                     df.to_csv(cache_file, index=False)
                     logger.info(f"从Tushare获取涨停池数据: {len(df)}条")
-                    self._append_to_limit_up_summary(df, date)
+                    self._append_to_limit_up_summary(df, actual_date)
                     return df
             except Exception as e:
                 logger.warning(f"Tushare获取涨停池失败: {e}")
-
-        # 如果Tushare失败，回退到AkShare
-        try:
-            df = ak.stock_zt_pool_em(date=date)
-            if not df.empty:
-                df.to_csv(cache_file, index=False)
-                logger.info(f"从AkShare获取涨停池数据: {len(df)}条")
-                self._append_to_limit_up_summary(df, date)
-                return df
-        except Exception as e:
-            logger.warning(f"AkShare获取涨停池失败: {e}")
-
-        return pd.DataFrame()
 
     def _get_limit_up_from_tushare(self, date: str) -> pd.DataFrame:
         """
@@ -314,8 +268,8 @@ class DataManager:
         """
         try:
             # 0. 首先使用交易日历判断是否为交易日
-            if not self.is_trade_date(trade_date):
-                actual_trade_date = self.get_nearest_trade_date(trade_date, "backward")
+            if not self.date_utils.is_trade_date(trade_date):
+                actual_trade_date = self.date_utils.get_nearest_trade_date(trade_date)
                 logger.info(f"{trade_date}不是交易日，实际对应交易日为{actual_trade_date}，跳过追加")
                 return
             
@@ -397,7 +351,7 @@ class DataManager:
             
             # 如果当日数据为空，尝试获取上一交易日数据
             if df.empty:
-                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
+                prev_date = self.date_utils.get_nearest_trade_date(trade_date)
                 if prev_date != trade_date:
                     logger.warning(f"{trade_date}行业板块数据为空，尝试获取上一交易日{prev_date}数据")
                     df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=prev_date)
@@ -441,7 +395,7 @@ class DataManager:
             
             # 如果当日数据为空，尝试获取上一交易日数据
             if df.empty:
-                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
+                prev_date = self.date_utils.get_nearest_trade_date(trade_date)
                 if prev_date != trade_date:
                     logger.warning(f"{trade_date}行业成分数据为空，尝试获取上一交易日{prev_date}数据")
                     df = self.ts_pro.dc_member(ts_code=ts_code, trade_date=prev_date)
@@ -472,12 +426,7 @@ class DataManager:
             return pd.DataFrame()
         
         # 标准化股票代码
-        if '.' not in stock_code:
-            stock_code = stock_code.zfill(6)
-            if stock_code.startswith('6'):
-                stock_code = f"{stock_code}.SH"
-            else:
-                stock_code = f"{stock_code}.SZ"
+        stock_code = self.stock_code_utils.standardize_code(stock_code)
         
         # 获取所有行业列表
         industry_df = self.get_dc_industry_list(trade_date)
@@ -521,15 +470,7 @@ class DataManager:
     def get_stock_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """获取个股历史日线数据"""
         # 确保代码格式正确（添加后缀）
-        code = str(ts_code).strip()
-        if '.' not in code:
-            # 补齐6位
-            code = code.zfill(6)
-            # 根据代码前缀判断交易所
-            if code.startswith('6'):
-                code = f"{code}.SH"
-            else:
-                code = f"{code}.SZ"
+        code = self.stock_code_utils.standardize_code(ts_code)
 
         logger.debug(f"[get_stock_daily] 获取 {code} 从 {start_date} 到 {end_date} 的日线数据")
 
@@ -556,32 +497,105 @@ class DataManager:
             logger.error(f"[get_stock_daily] 获取个股{code}历史数据失败: {e}")
         return pd.DataFrame()
 
+    def get_all_rt_k_data(self, trade_date: str = None) -> pd.DataFrame:
+        """
+        批量获取所有股票的实时日线数据（rt_k接口）
+        
+        rt_k接口不传入ts_code时返回所有股票的实时数据，每分钟只能调用一次。
+        此方法将结果缓存到文件，后续需要实时日线数据时直接从缓存读取。
+        
+        Args:
+            trade_date: 交易日期（YYYYMMDD），默认使用当前日期
+            
+        Returns:
+            pd.DataFrame: 包含所有股票实时数据的DataFrame，失败返回空DataFrame
+            列包括: ts_code, trade_date, open, high, low, close, pre_close, change, pct_change, vol, amount
+        """
+        if trade_date is None:
+            trade_date = self.today_str
+            
+        # 检查是否为交易日
+        if not self.date_utils.is_trade_date(trade_date):
+            actual_date = self.date_utils.get_nearest_trade_date(trade_date)
+            if actual_date != trade_date:
+                logger.debug(f"[get_all_rt_k_data] {trade_date} 非交易日，使用最近交易日 {actual_date}")
+                trade_date = actual_date
+        
+        # 缓存文件路径
+        cache_file = self.cache_dir / f"rt_k_all_{trade_date}.csv"
+        
+        # 检查缓存是否存在且有效（缓存文件在当天交易时间内生成）
+        if cache_file.exists():
+            try:
+                df = pd.read_csv(cache_file)
+                if not df.empty:
+                    logger.info(f"[get_all_rt_k_data] 从缓存加载所有股票实时数据: {len(df)}条")
+                    return df
+            except Exception as e:
+                logger.warning(f"[get_all_rt_k_data] 读取缓存失败: {e}")
+        
+        # 判断当前时间是否在交易时间内（9:30-17:00）
+        now = datetime.now()
+        current_time = now.strftime("%H%M")
+        
+        if not ("0930" <= current_time <= "1700"):
+            logger.debug(f"[get_all_rt_k_data] 当前时间 {current_time} 不在交易时间内，跳过获取实时数据")
+            return pd.DataFrame()
+        
+        if not self.ts_pro:
+            logger.warning("[get_all_rt_k_data] Tushare未初始化")
+            return pd.DataFrame()
+        
+        try:
+            logger.info(f"[get_all_rt_k_data] 调用rt_k接口获取所有股票实时数据（不传入ts_code）")
+            # 不传入ts_code，获取所有股票的实时数据
+            df = self.ts_pro.rt_k()
+            
+            if df is None or df.empty:
+                logger.warning("[get_all_rt_k_data] rt_k返回空数据")
+                return pd.DataFrame()
+            
+            # 确保ts_code格式统一（6位数字）
+            if 'ts_code' in df.columns:
+                df['code'] = df['ts_code'].astype(str).str.replace(r'\.SH|\.SZ|\.BJ', '', regex=True).str.zfill(6)
+            
+            # 缓存结果
+            df.to_csv(cache_file, index=False)
+            logger.info(f"[get_all_rt_k_data] 成功获取并缓存所有股票实时数据: {len(df)}条")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"[get_all_rt_k_data] 获取所有股票实时数据失败: {e}")
+            return pd.DataFrame()
+    
     def get_stock_daily_price(self, ts_code: str, trade_date: str) -> Dict:
         """
         获取个股某日的开盘价、收盘价、昨收价
-        
+
         根据时间判断使用接口:
-        - 交易日盘中(9:30-17:00): 使用 rt_k 实时接口
+        - 交易日盘中(9:30-17:00): 优先从批量缓存的rt_k数据中获取，如果没有则使用 daily 接口
         - 17点之后: 使用 daily 历史接口
-        
+
         Args:
             ts_code: 股票代码（如 002218.SZ 或 002218）
             trade_date: 交易日期（YYYYMMDD）
-            
+
         Returns:
             Dict: 包含 open, close, pre_close 的字典，获取失败返回空字典
         """
         from datetime import datetime
-        
+
+        # 检查是否为交易日，如果不是则获取最近的交易日
+        if not self.date_utils.is_trade_date(trade_date):
+            actual_date = self.date_utils.get_nearest_trade_date(trade_date)
+            if actual_date != trade_date:
+                logger.debug(f"[get_stock_daily_price] {trade_date} 非交易日，使用最近交易日 {actual_date}")
+                trade_date = actual_date
+
         # 确保代码格式正确
-        code = str(ts_code).strip()
-        if '.' not in code:
-            code = code.zfill(6)
-            if code.startswith('6'):
-                code = f"{code}.SH"
-            else:
-                code = f"{code}.SZ"
-        
+        code = self.stock_code_utils.standardize_code(ts_code)
+
         # 检查缓存
         cache_file = self.cache_dir / f"daily_price_{code}_{trade_date}.json"
         if cache_file.exists():
@@ -590,38 +604,46 @@ class DataManager:
                     return json.load(f)
             except Exception as e:
                 logger.warning(f"读取日线价格缓存失败: {e}")
-        
+
         try:
             if not self.ts_pro:
                 logger.debug(f"[get_stock_daily_price] Tushare未初始化")
                 return {}
-            
+
             # 判断当前时间
             now = datetime.now()
             current_time = now.strftime("%H%M")
-            
-            # 交易日盘中(9:30-17:00)使用 rt_k 接口
+
+            # 交易日盘中(9:30-17:00)优先从批量缓存的rt_k数据中获取
             if "0930" <= current_time <= "1700":
-                logger.debug(f"[get_stock_daily_price] 盘中时间，使用 rt_k 接口: {code}")
-                df = self.ts_pro.rt_k(ts_code=code)
-                if df is not None and not df.empty:
-                    # rt_k 返回的列名可能不同，需要适配
-                    # rt_k 通常返回: ts_code, trade_date, open, high, low, close, pre_close, change, pct_change, vol, amount
-                    result = {
-                        'open': float(df.iloc[0].get('open', 0)),
-                        'close': float(df.iloc[0].get('close', 0)),
-                        'pre_close': float(df.iloc[0].get('pre_close', 0))
-                    }
-                    logger.debug(f"[get_stock_daily_price] rt_k 返回: {result}")
-                    
-                    # 缓存结果
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(result, f)
-                    return result
+                # 尝试从批量缓存的rt_k数据中获取
+                rt_k_cache_file = self.cache_dir / f"rt_k_all_{trade_date}.csv"
+                if rt_k_cache_file.exists():
+                    try:
+                        rt_k_df = pd.read_csv(rt_k_cache_file)
+                        # 查找指定股票的数据
+                        stock_data = rt_k_df[rt_k_df['code'] == code_6digit]
+                        if not stock_data.empty:
+                            row = stock_data.iloc[0]
+                            result = {
+                                'open': float(row.get('open', 0)),
+                                'close': float(row.get('close', 0)),
+                                'pre_close': float(row.get('pre_close', 0))
+                            }
+                            logger.debug(f"[get_stock_daily_price] 从批量rt_k缓存获取 {code}: {result}")
+
+                            # 缓存结果
+                            with open(cache_file, 'w', encoding='utf-8') as f:
+                                json.dump(result, f)
+                            return result
+                        else:
+                            logger.debug(f"[get_stock_daily_price] 批量rt_k缓存中未找到 {code}，尝试使用 daily 接口")
+                    except Exception as e:
+                        logger.debug(f"[get_stock_daily_price] 读取批量rt_k缓存失败: {e}")
                 else:
-                    logger.warning(f"[get_stock_daily_price] rt_k 返回空数据，尝试使用 daily 接口")
-            
-            # 17点之后或 rt_k 失败，使用 daily 接口
+                    logger.debug(f"[get_stock_daily_price] 批量rt_k缓存不存在，尝试使用 daily 接口")
+
+            # 17点之后或 rt_k 缓存中没有，使用 daily 接口
             logger.debug(f"[get_stock_daily_price] 使用 daily 接口: {code}, {trade_date}")
             df = self.ts_pro.daily(ts_code=code, start_date=trade_date, end_date=trade_date)
             
@@ -645,12 +667,7 @@ class DataManager:
             logger.error(f"[get_stock_daily_price] 获取 {code} {trade_date} 日线数据失败: {e}")
         
         return {}
-
-    def is_limit_up(self, pct_change: float) -> bool:
-        """判断是否涨停（考虑创业板20%）"""
-        # 主板10%，创业板科创板20%
-        return pct_change >= 9.5 or (pct_change >= 19.5)
-    
+  
     def get_stock_tick(self, code: str, trade_date: str) -> pd.DataFrame:
         """
         获取个股分时数据（1分钟线）
@@ -679,14 +696,7 @@ class DataManager:
         if self.ts_pro:
             try:
                 # 确保代码格式正确（添加后缀）
-                code_str = str(code).zfill(6)
-                if '.' not in code_str:
-                    if code_str.startswith('6'):
-                        ts_code = f"{code_str}.SH"
-                    else:
-                        ts_code = f"{code_str}.SZ"
-                else:
-                    ts_code = code_str
+                ts_code = self.stock_code_utils.standardize_code(code)
                 
                 logger.debug(f"[get_stock_tick] 使用Tushare rt_min接口: {ts_code}")
                 
@@ -739,56 +749,6 @@ class DataManager:
         else:
             logger.debug(f"[get_stock_tick] Tushare未初始化，使用AkShare: {code}")
         
-        # 备用：使用AkShare获取分钟数据
-        try:
-            code_str = str(code).zfill(6)
-            if code_str.startswith('6'):
-                symbol = f"sh{code_str}"
-            else:
-                symbol = f"sz{code_str}"
-            
-            logger.debug(f"[get_stock_tick] 使用AkShare获取分钟数据: {symbol}")
-            
-            df = ak.stock_zh_a_hist_min_em(symbol=symbol, period="1", adjust="qfq")
-            
-            if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-                logger.warning(f"[get_stock_tick] AkShare返回空数据: {code}")
-                return pd.DataFrame()
-            
-            # 检查必要的列是否存在
-            if '时间' not in df.columns:
-                logger.warning(f"[get_stock_tick] AkShare数据缺少'时间'列: {code}, 列={df.columns.tolist()}")
-                return pd.DataFrame()
-            
-            # 重命名列以统一格式
-            df = df.rename(columns={
-                '时间': 'time',
-                '开盘': 'open',
-                '收盘': 'close',
-                '最高': 'high',
-                '最低': 'low',
-                '成交量': 'volume',
-                '成交额': 'amount',
-                '均价': 'vwap'
-            })
-            
-            # 提取日期和时间
-            df['date'] = df['time'].str[:10]
-            df['time'] = df['time'].str[11:19]
-            
-            # 筛选指定日期的数据
-            target_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
-            df = df[df['date'] == target_date]
-            
-            if not df.empty:
-                df.to_csv(cache_file, index=False)
-                logger.debug(f"[get_stock_tick] 缓存分时数据: {code} {trade_date}, {len(df)}条")
-            
-            return df
-            
-        except Exception as e:
-            logger.error(f"[get_stock_tick] AkShare获取失败 {code} {trade_date}: {e}")
-            return pd.DataFrame()
     
     def get_auction_data(self, code: str, trade_date: str) -> Dict:
         """
@@ -900,13 +860,7 @@ class DataManager:
             return ''
         
         # 转换代码格式为tushare格式（添加后缀）
-        code = str(stock_code).zfill(6)
-        if not ('.' in code):
-            # 根据代码前缀判断交易所
-            if code.startswith('6'):
-                code = f"{code}.SH"
-            else:
-                code = f"{code}.SZ"
+        code = self.stock_code_utils.standardize_code(stock_code)
         
         cache_file = self.today_dir / f"stock_concepts_{code.replace('.', '_')}.csv"
         
@@ -992,21 +946,13 @@ class DataManager:
             概念字符串，用逗号分隔
         """
         # 标准化股票代码
-        code = str(stock_code).strip()
-        if '.' in code:
-            code_short = code.split('.')[0]
-        else:
-            code_short = code.zfill(6)
-            if code_short.startswith('6'):
-                code = f"{code_short}.SH"
-            else:
-                code = f"{code_short}.SZ"
+        code = self.stock_code_utils.standardize_code(stock_code)
         
         # 匹配股票代码
         matched = members_df[members_df['con_code'] == code]
         if matched.empty:
             # 尝试用纯数字代码匹配
-            matched = members_df[members_df['con_code'].str.contains(code_short, na=False)]
+            matched = members_df[members_df['con_code'].str.contains(code, na=False)]
         
         if matched.empty:
             return ''
@@ -1029,7 +975,7 @@ class DataManager:
             return pd.DataFrame()
         
         if not trade_date:
-            trade_date = datetime.now().strftime("%Y%m%d")
+            trade_date = self.date_utils.get_nearest_trade_date(self.date_utils.get_today_str())
         
         cache_file = self.today_dir / f"industry_sector_{trade_date}.csv"
         
@@ -1042,8 +988,8 @@ class DataManager:
             
             # 如果当日数据为空，尝试获取上一交易日数据
             if df.empty:
-                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
-                if prev_date != trade_date:
+                prev_date = self.date_utils.get_prev_trade_date(trade_date)
+                if prev_date and prev_date != trade_date:
                     logger.warning(f"{trade_date}行业板块数据为空，尝试获取上一交易日{prev_date}数据")
                     df = self.ts_pro.dc_index(idx_type='行业板块', trade_date=prev_date)
                     if not df.empty:
@@ -1150,6 +1096,70 @@ class DataManager:
         
         return {}
     
+    def get_limit_down_pool(self, date: str) -> pd.DataFrame:
+        """
+        获取跌停池数据
+        
+        使用Tushare limit_list_d接口获取跌停数据
+        
+        Args:
+            date: 日期，格式YYYYMMDD
+            
+        Returns:
+            跌停数据DataFrame
+        """
+        # 检查是否为交易日
+        actual_date = date
+        if not self.date_utils.is_trade_date(date):
+            actual_date = self.date_utils.get_nearest_trade_date(date)
+            if actual_date != date:
+                logger.debug(f"[get_limit_down_pool] {date} 非交易日，使用最近交易日 {actual_date}")
+                date = actual_date
+        
+        # 缓存文件路径
+        query_date_dir = self.cache_dir / date
+        query_date_dir.mkdir(exist_ok=True)
+        cache_file = query_date_dir / f"dt_pool_{date}.csv"
+        
+        if cache_file.exists():
+            logger.debug(f"[get_limit_down_pool] 从缓存加载 {date} 跌停池数据")
+            return pd.read_csv(cache_file)
+        
+        if not self.ts_pro:
+            logger.warning("[get_limit_down_pool] Tushare未初始化")
+            return pd.DataFrame()
+        
+        try:
+            # 使用limit_list_d接口获取涨跌停数据
+            df = self.ts_pro.limit_list_d(trade_date=date)
+            
+            if df.empty:
+                logger.warning(f"[get_limit_down_pool] {date} 未获取到数据")
+                return pd.DataFrame()
+            
+            # 筛选跌停数据（limit='D'表示跌停）
+            df = df[df['limit'] == 'D'].copy()
+            
+            if df.empty:
+                logger.info(f"[get_limit_down_pool] {date} 无跌停股票")
+                return pd.DataFrame()
+            
+            # 标准化格式
+            df['代码'] = df['ts_code'].astype(str).str.replace(r'\.SH|\.SZ|\.BJ', '', regex=True).str.zfill(6)
+            df['名称'] = df['name']
+            df['涨跌幅'] = df['pct_chg']
+            df['最新价'] = df['close']
+            
+            # 缓存结果
+            df.to_csv(cache_file, index=False)
+            logger.info(f"[get_limit_down_pool] 获取 {date} 跌停池数据: {len(df)}条")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"[get_limit_down_pool] 获取 {date} 跌停池数据失败: {e}")
+            return pd.DataFrame()
+    
     def get_concept_members(self, trade_date: str = None) -> pd.DataFrame:
         """
         获取所有概念板块的成分股数据（使用tushare dc_member接口）
@@ -1186,8 +1196,8 @@ class DataManager:
             
             if concepts_df.empty:
                 # 尝试获取上一交易日数据（使用交易日历）
-                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
-                if prev_date != trade_date:
+                prev_date = self.date_utils.get_prev_trade_date(trade_date)
+                if prev_date and prev_date != trade_date:
                     logger.warning(f"{trade_date}概念板块数据为空，尝试获取上一交易日{prev_date}数据")
                     concepts_df = self.ts_pro.dc_index(idx_type='概念板块', trade_date=prev_date)
                     if not concepts_df.empty:
@@ -1247,17 +1257,7 @@ class DataManager:
             概念字符串，用逗号分隔
         """
         # 标准化股票代码
-        code = str(stock_code).strip()
-        if '.' in code:
-            # 提取纯数字代码用于匹配
-            code_short = code.split('.')[0]
-        else:
-            code_short = code.zfill(6)
-            # 添加后缀用于匹配
-            if code_short.startswith('6'):
-                code = f"{code_short}.SH"
-            else:
-                code = f"{code_short}.SZ"
+        code = self.stock_code_utils.standardize_code(stock_code)
         
         # 获取概念成分股数据
         members_df = self.get_concept_members(trade_date)
@@ -1268,7 +1268,7 @@ class DataManager:
         matched = members_df[members_df['con_code'] == code]
         if matched.empty:
             # 尝试用纯数字代码匹配
-            matched = members_df[members_df['con_code'].str.contains(code_short, na=False)]
+            matched = members_df[members_df['con_code'].str.contains(code, na=False)]
         
         if matched.empty:
             return ''
@@ -1321,8 +1321,8 @@ class DataManager:
             if df.empty:
                 logger.warning(f"{trade_date}板块资金流向数据为空")
                 # 尝试获取上一交易日数据
-                prev_date = self.get_nearest_trade_date(trade_date, direction="backward")
-                if prev_date != trade_date:
+                prev_date = self.date_utils.get_prev_trade_date(trade_date)
+                if prev_date and prev_date != trade_date:
                     logger.info(f"尝试获取上一交易日{prev_date}数据")
                     df = self.ts_pro.moneyflow_ind_dc(trade_date=prev_date, type=sector_type)
                     if not df.empty:
@@ -1446,62 +1446,6 @@ class DataManager:
             'pct_change': sector_data.get('pct_change', 0)
         }
 
-    def get_stock_float_shares(self, symbol: str) -> float:
-        """
-        获取股票流通股本（使用akshare）
-
-        Args:
-            symbol: 股票代码（如 000001 或 000001.SZ）
-
-        Returns:
-            流通股本（万股），获取失败返回0
-        """
-        # 标准化代码格式
-        code = str(symbol).strip().replace('.SH', '').replace('.SZ', '').replace('.BJ', '').zfill(6)
-
-        # 检查缓存
-        cache_file = self.cache_dir / f"float_shares_{code}.json"
-        if cache_file.exists():
-            try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # 检查缓存是否过期（7天）
-                    cache_time = datetime.fromisoformat(data.get('cache_time', '2000-01-01'))
-                    if (datetime.now() - cache_time).days < 7:
-                        logger.debug(f"[get_stock_float_shares] 从缓存获取 {code} 流通股本: {data.get('float_shares', 0)}万股")
-                        return data.get('float_shares', 0)
-            except Exception as e:
-                logger.warning(f"[get_stock_float_shares] 读取缓存失败: {e}")
-
-        try:
-            # 使用akshare获取个股信息
-            df = ak.stock_individual_info_em(symbol=code)
-            if df is not None and not df.empty:
-                # 查找流通股字段
-                float_shares_row = df[df['item'] == '流通股']
-                if not float_shares_row.empty:
-                    # 流通股单位是股，转换为万股
-                    float_shares = float(float_shares_row.iloc[0]['value']) / 10000
-
-                    # 缓存结果
-                    cache_data = {
-                        'float_shares': float_shares,
-                        'cache_time': datetime.now().isoformat()
-                    }
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(cache_data, f)
-
-                    logger.debug(f"[get_stock_float_shares] 获取 {code} 流通股本: {float_shares:.2f}万股")
-                    return float_shares
-                else:
-                    logger.warning(f"[get_stock_float_shares] {code} 未找到流通股数据")
-            else:
-                logger.warning(f"[get_stock_float_shares] {code} 获取个股信息失败")
-        except Exception as e:
-            logger.error(f"[get_stock_float_shares] 获取 {code} 流通股本异常: {e}")
-
-        return 0
-
     def get_stock_daily_data(self, symbol: str, trade_date: str) -> Dict:
         """
         获取股票日行情数据（使用tushare daily接口）
@@ -1524,10 +1468,15 @@ class DataManager:
                 - vol: 成交量（手）
                 - amount: 成交额（千元）
         """
+        # 检查是否为交易日，如果不是则获取最近的交易日
+        if not self.date_utils.is_trade_date(trade_date):
+            actual_date = self.date_utils.get_nearest_trade_date(trade_date)
+            if actual_date != trade_date:
+                logger.debug(f"[get_stock_daily_data] {trade_date} 非交易日，使用最近交易日 {actual_date}")
+                trade_date = actual_date
+
         # 标准化代码格式
-        code = str(symbol).strip().replace('.SH', '').replace('.SZ', '').replace('.BJ', '').zfill(6)
-        if '.' not in code:
-            code = f"{code}.SH" if code.startswith('6') else f"{code}.SZ"
+        code = self.stock_code_utils.standardize_code(symbol)
 
         # 检查缓存
         cache_file = self.cache_dir / f"daily_data_{code}_{trade_date}.json"
@@ -1596,10 +1545,15 @@ class DataManager:
                 - circ_mv: 流通市值（万元）
                 - total_mv: 总市值（万元）
         """
+        # 检查是否为交易日，如果不是则获取最近的交易日
+        if not self.date_utils.is_trade_date(trade_date):
+            actual_date = self.date_utils.get_nearest_trade_date(trade_date)
+            if actual_date != trade_date:
+                logger.debug(f"[get_stock_daily_basic] {trade_date} 非交易日，使用最近交易日 {actual_date}")
+                trade_date = actual_date
+
         # 标准化代码格式
-        code = str(symbol).strip().replace('.SH', '').replace('.SZ', '').replace('.BJ', '').zfill(6)
-        if '.' not in code:
-            code = f"{code}.SH" if code.startswith('6') else f"{code}.SZ"
+        code = self.stock_code_utils.standardize_code(symbol)
 
         # 检查缓存
         cache_file = self.cache_dir / f"daily_basic_{code}_{trade_date}.json"
@@ -1646,6 +1600,320 @@ class DataManager:
             logger.error(f"[get_stock_daily_basic] 获取 {code} {trade_date} 基本面数据异常: {e}")
 
         return {}
+
+    def get_limit_step(self, trade_date: str = None, ts_code: str = None) -> pd.DataFrame:
+        """
+        获取连板天梯数据
+        
+        接口：limit_step
+        描述：获取每天连板个数晋级的股票，可以分析出每天连续涨停进阶个数，判断强势热度
+        限量：单次最大2000行数据，可根据股票代码或者日期循环提取全部
+        积分：8000积分以上每分钟500次，每天总量不限制
+        
+        Args:
+            trade_date: 交易日期（YYYYMMDD），默认使用最近交易日
+            ts_code: 股票代码（如 000001.SZ），可选，用于查询特定股票
+            
+        Returns:
+            连板天梯数据DataFrame，包含字段：
+            - ts_code: 股票代码
+            - name: 股票名称
+            - trade_date: 交易日期
+            - limit_up_nums: 连板个数
+            - up_stat: 涨停统计（如 3/5 表示5天3板）
+            - cons_nums: 连续涨停天数
+            - turnover_rate: 换手率
+            - amount: 成交金额（万元）
+            - float_mv: 流通市值（万元）
+            - total_mv: 总市值（万元）
+        """
+        if not self.ts_pro:
+            logger.warning("[get_limit_step] Tushare未初始化")
+            return pd.DataFrame()
+        
+        # 使用最近交易日
+        if not trade_date:
+            trade_date = self.date_utils.get_nearest_trade_date(self.today_str)
+        
+        # 确保是交易日
+        if not self.date_utils.is_trade_date(trade_date):
+            trade_date = self.date_utils.get_nearest_trade_date(trade_date)
+        
+        # 缓存文件路径
+        cache_file = self.cache_dir / f"limit_step_{trade_date}.csv"
+        if cache_file.exists():
+            logger.debug(f"[get_limit_step] 从缓存加载 {trade_date} 连板天梯数据")
+            return pd.read_csv(cache_file)
+        
+        try:
+            # 构建请求参数
+            params = {'trade_date': trade_date}
+            if ts_code:
+                params['ts_code'] = self.stock_code_utils.standardize_code(ts_code)
+            
+            # 调用Tushare接口
+            df = self.ts_pro.limit_step(**params)
+            
+            if df is not None and not df.empty:
+                # 标准化代码格式
+                if 'ts_code' in df.columns:
+                    df['code'] = df['ts_code'].astype(str).str.replace(r'\.SH|\.SZ|\.BJ', '', regex=True).str.zfill(6)
+                
+                # 缓存结果
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_limit_step] 获取 {trade_date} 连板天梯数据: {len(df)}条")
+                return df
+            else:
+                logger.warning(f"[get_limit_step] {trade_date} 返回空数据")
+                
+        except Exception as e:
+            logger.error(f"[get_limit_step] 获取 {trade_date} 连板天梯数据异常: {e}")
+        
+        return pd.DataFrame()
+    
+    def get_limit_cpt_list(self, trade_date: str = None) -> pd.DataFrame:
+        """
+        获取最强板块统计数据
+        
+        接口：limit_cpt_list
+        描述：获取每天涨停股票最多最强的概念板块，可以分析强势板块的轮动，判断资金动向
+        限量：单次最大2000行数据，可根据股票代码或者日期循环提取全部
+        积分：8000积分以上每分钟500次，每天总量不限制
+        
+        Args:
+            trade_date: 交易日期（YYYYMMDD），默认使用最近交易日
+            
+        Returns:
+            最强板块统计DataFrame，包含字段：
+            - trade_date: 交易日期
+            - concept: 概念板块名称
+            - name: 板块名称
+            - up_nums: 涨停股票数量
+            - cons_nums: 连续涨停数量
+            - turnover_rate: 板块平均换手率
+            - amount: 板块成交金额（万元）
+            - float_mv: 板块流通市值（万元）
+        """
+        if not self.ts_pro:
+            logger.warning("[get_limit_cpt_list] Tushare未初始化")
+            return pd.DataFrame()
+        
+        # 使用最近交易日
+        if not trade_date:
+            trade_date = self.date_utils.get_nearest_trade_date(self.today_str)
+        
+        # 确保是交易日
+        if not self.date_utils.is_trade_date(trade_date):
+            trade_date = self.date_utils.get_nearest_trade_date(trade_date)
+        
+        # 缓存文件路径
+        cache_file = self.cache_dir / f"limit_cpt_list_{trade_date}.csv"
+        if cache_file.exists():
+            logger.debug(f"[get_limit_cpt_list] 从缓存加载 {trade_date} 最强板块数据")
+            return pd.read_csv(cache_file)
+        
+        try:
+            # 调用Tushare接口
+            df = self.ts_pro.limit_cpt_list(trade_date=trade_date)
+            
+            if df is not None and not df.empty:
+                # 缓存结果
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_limit_cpt_list] 获取 {trade_date} 最强板块数据: {len(df)}条")
+                return df
+            else:
+                logger.warning(f"[get_limit_cpt_list] {trade_date} 返回空数据")
+                
+        except Exception as e:
+            logger.error(f"[get_limit_cpt_list] 获取 {trade_date} 最强板块数据异常: {e}")
+        
+        return pd.DataFrame()
+    
+    def get_ths_index(self, index_type: str = None) -> pd.DataFrame:
+        """
+        获取同花顺板块指数列表
+        
+        接口：ths_index
+        描述：获取同花顺板块指数，包括概念、行业、特色指数
+        权限：需有6000积分，单次最大返回5000行数据，一次可提取全部数据，请勿循环提取
+        
+        Args:
+            index_type: 指数类型，可选 '概念指数'/'行业指数'/'特色指数'，默认返回全部
+            
+        Returns:
+            同花顺板块指数DataFrame，包含字段：
+            - ts_code: 指数代码
+            - name: 指数名称
+            - type: 指数类型（概念/行业/特色）
+            - market: 市场分类
+        """
+        if not self.ts_pro:
+            logger.warning("[get_ths_index] Tushare未初始化")
+            return pd.DataFrame()
+        
+        # 缓存文件路径（按类型缓存）
+        type_suffix = f"_{index_type}" if index_type else "_all"
+        cache_file = self.cache_dir / f"ths_index{type_suffix}.csv"
+        
+        # 缓存有效期为1天
+        if cache_file.exists():
+            file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+            if (datetime.now() - file_time).days < 1:
+                logger.debug(f"[get_ths_index] 从缓存加载同花顺板块指数")
+                return pd.read_csv(cache_file)
+        
+        try:
+            # 构建请求参数
+            params = {}
+            if index_type:
+                params['type'] = index_type
+            
+            # 调用Tushare接口
+            df = self.ts_pro.ths_index(**params)
+            
+            if df is not None and not df.empty:
+                # 缓存结果
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_ths_index] 获取同花顺板块指数: {len(df)}条，类型={index_type or '全部'}")
+                return df
+            else:
+                logger.warning(f"[get_ths_index] 返回空数据")
+                
+        except Exception as e:
+            logger.error(f"[get_ths_index] 获取同花顺板块指数异常: {e}")
+        
+        return pd.DataFrame()
+    
+    def get_ths_daily(self, ts_code: str = None, trade_date: str = None, 
+                      start_date: str = None, end_date: str = None) -> pd.DataFrame:
+        """
+        获取同花顺板块指数行情
+        
+        接口：ths_daily
+        描述：获取同花顺板块指数行情数据
+        限量：单次最大3000行数据（需6000积分），可根据指数代码、日期参数循环提取
+        
+        Args:
+            ts_code: 指数代码（如'885001.TI'），可选
+            trade_date: 交易日期（YYYYMMDD），可选，与start_date/end_date互斥
+            start_date: 开始日期（YYYYMMDD），可选
+            end_date: 结束日期（YYYYMMDD），可选
+            
+        Returns:
+            同花顺板块指数行情DataFrame，包含字段：
+            - ts_code: 指数代码
+            - trade_date: 交易日期
+            - close: 收盘价
+            - open: 开盘价
+            - high: 最高价
+            - low: 最低价
+            - pre_close: 昨收价
+            - avg_price: 平均价
+            - change: 涨跌额
+            - pct_change: 涨跌幅
+            - vol: 成交量（手）
+            - amount: 成交额（千元）
+        """
+        if not self.ts_pro:
+            logger.warning("[get_ths_daily] Tushare未初始化")
+            return pd.DataFrame()
+        
+        # 参数校验
+        if trade_date and (start_date or end_date):
+            logger.warning("[get_ths_daily] trade_date与start_date/end_date互斥，优先使用trade_date")
+            start_date = None
+            end_date = None
+        
+        # 构建缓存文件名
+        if trade_date:
+            cache_key = f"{ts_code}_{trade_date}" if ts_code else f"all_{trade_date}"
+        else:
+            cache_key = f"{ts_code}_{start_date}_{end_date}" if ts_code else f"all_{start_date}_{end_date}"
+        cache_file = self.cache_dir / f"ths_daily_{cache_key}.csv"
+        
+        if cache_file.exists():
+            logger.debug(f"[get_ths_daily] 从缓存加载同花顺板块行情")
+            return pd.read_csv(cache_file)
+        
+        try:
+            # 构建请求参数
+            params = {}
+            if ts_code:
+                params['ts_code'] = ts_code
+            if trade_date:
+                params['trade_date'] = trade_date
+            if start_date:
+                params['start_date'] = start_date
+            if end_date:
+                params['end_date'] = end_date
+            
+            # 调用Tushare接口
+            df = self.ts_pro.ths_daily(**params)
+            
+            if df is not None and not df.empty:
+                # 缓存结果
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_ths_daily] 获取同花顺板块行情: {len(df)}条")
+                return df
+            else:
+                logger.warning(f"[get_ths_daily] 返回空数据")
+                
+        except Exception as e:
+            logger.error(f"[get_ths_daily] 获取同花顺板块行情异常: {e}")
+        
+        return pd.DataFrame()
+    
+    def get_ths_member(self, ts_code: str) -> pd.DataFrame:
+        """
+        获取同花顺概念板块成分列表
+        
+        接口：ths_member
+        描述：获取同花顺概念板块成分列表
+        限量：用户积累6000积分可调取，每分钟可调取200次，可按概念板块代码循环提取所有成分
+        
+        Args:
+            ts_code: 同花顺概念板块代码（如'885001.TI'）
+            
+        Returns:
+            同花顺概念板块成分DataFrame，包含字段：
+            - ts_code: 概念板块代码
+            - code: 股票代码
+            - name: 股票名称
+        """
+        if not self.ts_pro:
+            logger.warning("[get_ths_member] Tushare未初始化")
+            return pd.DataFrame()
+        
+        if not ts_code:
+            logger.warning("[get_ths_member] 必须提供ts_code参数")
+            return pd.DataFrame()
+        
+        # 缓存文件路径
+        cache_file = self.cache_dir / f"ths_member_{ts_code}.csv"
+        
+        # 缓存有效期为7天（成分相对稳定）
+        if cache_file.exists():
+            file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+            if (datetime.now() - file_time).days < 7:
+                logger.debug(f"[get_ths_member] 从缓存加载同花顺板块成分")
+                return pd.read_csv(cache_file)
+        
+        try:
+            # 调用Tushare接口
+            df = self.ts_pro.ths_member(ts_code=ts_code)
+            
+            if df is not None and not df.empty:
+                # 缓存结果
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_ths_member] 获取同花顺板块{ts_code}成分: {len(df)}只股票")
+                return df
+            else:
+                logger.warning(f"[get_ths_member] {ts_code} 返回空数据")
+                
+        except Exception as e:
+            logger.error(f"[get_ths_member] 获取同花顺板块{ts_code}成分异常: {e}")
+        
+        return pd.DataFrame()
 
 if __name__ == "__main__":
     # 测试

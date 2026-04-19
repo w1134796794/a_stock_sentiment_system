@@ -9,6 +9,8 @@ import xlsxwriter
 import loguru
 from datetime import datetime
 
+from core.utils import format_time, is_time_before
+
 # 可选的图表功能（需要mplfinance）
 try:
     import matplotlib.pyplot as plt
@@ -234,12 +236,7 @@ class ReportGenerator:
 
     def _format_time(self, time_val):
         """格式化时间字符串"""
-        time_str = str(time_val)
-        if time_str.isdigit():
-            time_str = time_str.zfill(6)
-        if len(time_str) == 6:
-            time_str = f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:]}"
-        return time_str
+        return format_time(str(time_val), input_fmt="auto", output_fmt="HH:MM:SS")
 
     def _write_core_stocks(self, writer, hierarchy_df: pd.DataFrame,
                            header_fmt, cell_fmt, highlight_fmt, new_flag_fmt):

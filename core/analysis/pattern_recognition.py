@@ -265,6 +265,21 @@ class PatternRecognition:
             logger.debug(f"[二板定龙] 今日数据为空")
             return signals
 
+        # 检查昨日涨停池是否为空
+        if yesterday_df.empty:
+            logger.debug(f"[二板定龙] 昨日数据为空，无法确认二板")
+            return signals
+
+        # 确保昨日涨停池有代码列
+        code_col = None
+        for col in ['代码', 'code', 'ts_code', 'Code']:
+            if col in yesterday_df.columns:
+                code_col = col
+                break
+        if code_col is None:
+            logger.warning(f"[二板定龙] 昨日涨停池缺少代码列，可用列: {list(yesterday_df.columns)}")
+            return signals
+
         try:
             total_checked = 0
             total_passed = 0
@@ -284,7 +299,7 @@ class PatternRecognition:
                 logger.debug(f"[二板定龙] 检测 {name}({code})，确认二板...")
 
                 # 获取昨日数据用于分析首板质量
-                yest_match = yesterday_df[yesterday_df['代码'].astype(str).str.zfill(6) == code]
+                yest_match = yesterday_df[yesterday_df[code_col].astype(str).str.zfill(6) == code]
                 if yest_match.empty:
                     logger.debug(f"[二板定龙]   {name} 昨日未涨停，跳过")
                     continue
@@ -1490,6 +1505,9 @@ class PatternRecognition:
             df = self.dm.get_limit_up_pool(date_str_ymd)
             if not df.empty:
                 recent_zt_pools[date_str_ymd] = df
+                logger.debug(f"  [{i}] {date_str_ymd}: {len(df)}只涨停")
+            else:
+                logger.debug(f"  [{i}] {date_str_ymd}: 无数据或空数据")
         
         logger.info(f"今日涨停: {len(today_df)}只, 昨日涨停: {len(yesterday_df)}只, 前日涨停: {len(day_before_yesterday_df)}只, 历史池: {len(recent_zt_pools)}天")
         

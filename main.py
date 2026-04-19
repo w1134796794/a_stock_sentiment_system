@@ -6,7 +6,7 @@ import sys
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 import pandas as pd
 import numpy as np
 import loguru
@@ -20,12 +20,13 @@ from config.settings import (
 )
 from core.data.data_manager import DataManager
 from core.data.industry_mapper import IndustryMapper
-from core.analysis.sentiment_engine import SentimentEngine
 from core.analysis.pattern_recognition import PatternRecognition
+from core.analysis.emotion_cycle_engine import EmotionCycleEngine
+from core.analysis.sector_rotation_tracker import SectorRotationTracker
 from core.report.report_generator import ReportGenerator
-from core.analysis.sector_heat_v2 import SectorHeatCalculatorV2
 from core.execution.execution_engine import UnifiedExecutionEngine
 from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
+from core.utils import DateUtils
 
 logger = loguru.logger
 
@@ -33,7 +34,8 @@ class SentimentSystem:
     def __init__(self):
         self.dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
         self.mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
-        self.engine = SentimentEngine()
+        self.emotion_engine = EmotionCycleEngine(dm=self.dm)  # 情绪周期引擎，传入DataManager用于计算溢价率
+        self.sector_tracker = SectorRotationTracker(self.dm)  # 板块轮动追踪器
         self.reporter = ReportGenerator(OUTPUT_DIR)
         self.execution_engine = None  # 延迟初始化
         self.retail_support = None  # 散户支持模块延迟初始化
@@ -48,15 +50,12 @@ class SentimentSystem:
         if date is None:
             date = self.today
         
-        # 验证交易日，非交易日自动关联最近交易日
-        is_valid, actual_date, message = self.dm.validate_trade_date(date)
-        if not is_valid:
-            logger.info(f"交易日验证: {message}")
-            date = actual_date
-            # 更新yesterday为实际日期的前一天
-            date_obj = datetime.strptime(date, "%Y%m%d")
-            yesterday_obj = date_obj - timedelta(days=1)
-            self.yesterday = self.dm.get_nearest_trade_date(yesterday_obj.strftime("%Y%m%d"), "backward")
+        # 使用DateUtils获取最近交易日（自动处理非交易日）
+        date_utils = DateUtils()
+        date = date_utils.get_nearest_trade_date(date)
+        
+        # 获取上一个交易日
+        self.yesterday = date_utils.get_prev_trade_date(date)
         
         logger.info(f"开始执行 {date} 的日度分析...")
         logger.info(f"对比日期: {self.yesterday}")
@@ -76,52 +75,162 @@ class SentimentSystem:
         if not hierarchy_df.empty:
             logger.info(f"层级映射完成，覆盖 {hierarchy_df['L2_Industry'].nunique()} 个二级行业")
         
-        # 3. 情绪分析
-        logger.info("[3/5] 计算情绪指标...")
-        mainline_df = self.engine.calculate_mainline_strength(hierarchy_df)
-        gradient = self.engine.track_gradient(hierarchy_df)
-        sentiment = self.engine.calculate_market_sentiment(hierarchy_df)
+        # 3. 情绪周期分析
+        logger.info("[3/6] 分析情绪周期...")
         
-        logger.info(f"市场温度: {sentiment.get('temperature', '未知')}")
-        logger.info(f"最高板: {gradient.get('highest_board', 0)}板 - {gradient.get('highest_stock', '')}")
+        # 获取跌停数据（用于计算核按钮）
+        limit_down_df = self.dm.get_limit_down_pool(date)
         
-        # 4. 综合当日数据和20日数据计算板块权重
-        logger.info("[4/5] 计算综合板块权重（当日+20日）...")
-        display_mainline_df = self._calculate_combined_mainline(mainline_df, hierarchy_df)
+        # 获取昨日涨停数据（用于计算溢价）
+        prev_limit_up_df = self.dm.get_limit_up_pool(self.yesterday)
         
-        # 5. 多维度板块热度计算 V2（散户聚焦版）
-        logger.info("[5/6] 计算多维度板块热度 V2（散户聚焦版）...")
-        heat_calculator = SectorHeatCalculatorV2()
-        sector_heat_df = self._calculate_sector_heat(heat_calculator, date, hierarchy_df)
+        # 使用情绪周期引擎分析
+        emotion_result = self.emotion_engine.analyze_market_data(
+            limit_up_df=zt_pool,
+            limit_down_df=limit_down_df,
+            prev_limit_up_df=prev_limit_up_df
+        )
         
-        # 输出板块信号（V2版本输出优先级、行动建议等）
-        if not sector_heat_df.empty:
-            logger.info(f"✓ 板块热度分析完成，发现 {len(sector_heat_df)} 个 actionable 信号")
-            for _, row in sector_heat_df.iterrows():
-                priority = row['优先级']
-                trend = row['趋势阶段']
-                l3 = row['二级行业']
-                action = row['行动建议']
-                confidence = row['置信度']
-                logger.info(f"  [优先级{priority}] {trend} - {l3}: {action} (置信度{confidence})")
+        # ========== DEBUG: 情绪周期详细数据 ==========
+        logger.info("=" * 60)
+        logger.info("【DEBUG】情绪周期分析详细数据")
+        logger.info("=" * 60)
+        logger.info(f"情绪周期: {emotion_result['cycle_name']}")
+        logger.info(f"策略建议: {emotion_result['strategy'].strategy}")
+        logger.info(f"仓位控制: {emotion_result['strategy'].position}")
+        logger.info(f"禁忌操作: {emotion_result['strategy'].forbidden_actions}")
+        
+        # 打印原始数据 (从metrics字段获取)
+        metrics = emotion_result.get('metrics', {})
+        logger.info("\n【DEBUG】原始统计数据:")
+        logger.info(f"  涨停家数: {metrics.get('limit_up_count', 'N/A')}")
+        logger.info(f"  跌停家数: {metrics.get('nuclear_button_count', 'N/A')}")
+        logger.info(f"  炸板率: {metrics.get('broken_rate', 'N/A')}%")
+        logger.info(f"  最高连板: {metrics.get('max_board_height', 'N/A')}板")
+        
+        # 昨日涨停表现（基于开盘价）
+        logger.info("\n【DEBUG】昨日涨停今日开盘表现:")
+        logger.info(f"  平均溢价率: {metrics.get('prev_limit_up_premium', 'N/A')}%")
+        logger.info(f"  开盘卖出胜率: {metrics.get('win_rate', 'N/A')}%")
+        logger.info(f"  平均赢面: {metrics.get('avg_profit', 'N/A')}%")
+        logger.info("  (说明: 昨日涨停股票，今日开盘卖出的统计)")
+        
+        # 连板分布
+        board_distribution = metrics.get('board_distribution', {})
+        if board_distribution:
+            logger.info(f"\n【DEBUG】连板分布: {board_distribution}")
+            # 计算连板家数和首板家数
+            consecutive_count = sum(v for k, v in board_distribution.items() if k >= 2)
+            first_board_count = board_distribution.get(1, 0)
+            logger.info(f"  连板家数: {consecutive_count}")
+            logger.info(f"  首板家数: {first_board_count}")
+        
+        # 打印评分详情 (从scores字段获取)
+        scores = emotion_result.get('scores', {})
+        logger.info("\n【DEBUG】情绪周期评分详情:")
+        if scores:
+            logger.info(f"  高潮期(boom)得分: {scores.get('boom', 'N/A')}")
+            logger.info(f"  上升期(rise)得分: {scores.get('rise', 'N/A')}")
+            logger.info(f"  震荡期(shake)得分: {scores.get('shake', 'N/A')}")
+            logger.info(f"  退潮期(decline)得分: {scores.get('decline', 'N/A')}")
+            logger.info(f"  冰点期(freeze)得分: {scores.get('freeze', 'N/A')}")
         else:
-            logger.info("  无明确板块信号，建议观望")
+            logger.info("  暂无评分数据")
+        logger.info("=" * 60)
         
-        # 6. 模式识别（传入已计算的板块热度数据，避免重复计算）
-        logger.info("[6/6] 识别交易模式...")
+        # 4. 主线板块分析（使用带交叉验证的新方法）
+        logger.info("[4/6] 计算主线板块强度...")
+        # 获取limit_cpt_list数据用于概念分析
+        limit_cpt_df = self.dm.get_limit_cpt_list(date)
+        
+        # ========== DEBUG: 原始概念板块数据 ==========
+        logger.info("=" * 60)
+        logger.info("【DEBUG】原始概念板块数据 (limit_cpt_list)")
+        logger.info("=" * 60)
+        if not limit_cpt_df.empty:
+            logger.info(f"获取到 {len(limit_cpt_df)} 个概念板块")
+            for i, row in limit_cpt_df.head(5).iterrows():
+                name = row.get('name', row.get('concept', 'N/A'))
+                up_nums = row.get('up_nums', 'N/A')
+                cons_nums = row.get('cons_nums', 'N/A')
+                rank = row.get('rank', i+1)
+                logger.info(f"  排名{rank}: {name} (涨停{up_nums}家, 连板{cons_nums}家)")
+        else:
+            logger.info("  未获取到概念板块数据")
+        logger.info("=" * 60)
+        
+        # 使用带交叉验证的分析方法
+        mainline_df = self.sector_tracker.analyze_with_validation(date, top_n=10)
+        
+        # ========== DEBUG: 热点主线详细数据 ==========
+        logger.info("=" * 60)
+        logger.info("【DEBUG】热点主线分析详细数据 (带交叉验证)")
+        logger.info("=" * 60)
+        if not mainline_df.empty:
+            logger.info(f"✓ 分析完成，共 {len(mainline_df)} 个板块\n")
+            for i, row in mainline_df.iterrows():
+                logger.info(f"【Top{i+1}】{row['板块名称']}")
+                logger.info(f"  基础数据:")
+                logger.info(f"    - 当前排名: {row['当前排名']}")
+                logger.info(f"    - 涨停家数: {row['涨停家数']}")
+                logger.info(f"    - 综合评分: {row['综合评分']}")
+                logger.info(f"    - 所处阶段: {row['所处阶段']}")
+                logger.info(f"    - 市场周期: {row['市场周期']}")
+                logger.info(f"  资金因子:")
+                logger.info(f"    - 成交额变化: {row['成交额变化']}")
+                logger.info(f"    - 换手率: {row['换手率']}")
+                logger.info(f"  趋势因子:")
+                logger.info(f"    - 排名动量: {row['排名动量']}")
+                logger.info(f"    - 涨停趋势: {row['涨停趋势']}")
+                logger.info(f"    - 持续性评分: {row['持续性评分']}")
+                logger.info(f"  交叉验证:")
+                logger.info(f"    - 主要行业: {row.get('主要行业', 'N/A')}")
+                logger.info(f"    - 行业集中度: {row.get('行业集中度', 'N/A')}")
+                logger.info(f"    - 信号类型: {row.get('信号类型', 'N/A')}")
+                logger.info(f"    - 信号强度: {row.get('信号强度', 'N/A')}")
+                logger.info(f"    - 共振得分: {row.get('共振得分', 'N/A')}")
+                logger.info(f"  策略建议:")
+                logger.info(f"    - 操作建议: {row['操作建议']}")
+                logger.info(f"    - 建议仓位: {row['建议仓位']}")
+                logger.info(f"    - 调整后仓位: {row.get('调整后仓位', row['建议仓位'])}")
+                logger.info(f"    - 紧急度: {row['紧急度']}")
+                logger.info(f"    - 策略理由: {row['策略理由']}")
+                logger.info(f"    - 验证理由: {row.get('验证理由', 'N/A')}")
+                logger.info("")
+        else:
+            logger.info("  无主线板块数据")
+        logger.info("=" * 60)
+        
+        # 5. 板块持续性分析
+        logger.info("[5/6] 分析板块持续性...")
+        sector_persistence_df = self.sector_tracker.analyze_sectors_persistence(date, top_n=10)
+        if not sector_persistence_df.empty:
+            logger.info(f"✓ 板块持续性分析完成，发现 {len(sector_persistence_df)} 个板块")
+            for _, row in sector_persistence_df.head(5).iterrows():
+                logger.info(f"  {row['板块名称']}: 评分{row['持续性评分']}, 阶段[{row['所处阶段']}], {row['操作建议']}")
+        else:
+            logger.info("  无板块持续性数据")
+        
+        # 6. 综合当日数据和20日数据计算板块权重
+        logger.info("[6/6] 计算综合板块权重（当日+20日）...")
+        display_mainline_df = self._calculate_combined_mainline(hierarchy_df)
+        
+        # 7. 模式识别
+        logger.info("[7/7] 识别交易模式...")
         pr = PatternRecognition(self.dm, sector_engine=None, mapper=self.mapper)
-        # 从sector_heat_df提取热点板块信息
+        
+        # 从板块持续性分析中提取热点板块信息
         hot_sectors = []
-        if not sector_heat_df.empty:
-            for _, row in sector_heat_df.iterrows():
-                trend_stage = row.get('趋势阶段', '')
-                if trend_stage in ['爆发期', '加速期', '确认期', '启动期']:
+        if not sector_persistence_df.empty:
+            for _, row in sector_persistence_df.iterrows():
+                stage = row.get('所处阶段', '')
+                if stage in ['加速期', '高潮期', '萌芽期']:
                     hot_sectors.append({
-                        'sector_name': row.get('二级行业', ''),
-                        'stats': row.get('核心指标', {}),
-                        'trend_stage': trend_stage,
-                        'action': row.get('行动建议', ''),
-                        'confidence': float(row.get('置信度', '0%').replace('%', '')) / 100
+                        'sector_name': row.get('板块名称', ''),
+                        'stats': {'涨停家数': row.get('涨停家数', 0)},
+                        'trend_stage': stage,
+                        'action': row.get('操作建议', ''),
+                        'confidence': row.get('持续性评分', 50) / 100
                     })
         
         # 调试日志：显示传递的热点板块
@@ -155,11 +264,10 @@ class SentimentSystem:
         logger.info("[8/8] 生成分析报告...")
         report_data = {
             'mainline_df': display_mainline_df,
-            'gradient': gradient,
-            'sentiment': sentiment,
+            'emotion_result': emotion_result,
+            'sector_persistence_df': sector_persistence_df,
             'patterns': patterns,
-            'hierarchy_df': hierarchy_df,
-            'sector_heat_df': sector_heat_df  # 新增板块热度数据
+            'hierarchy_df': hierarchy_df
         }
         
         # 使用带时间戳的文件名避免文件被占用
@@ -170,30 +278,59 @@ class SentimentSystem:
         
         # 9. 生成交易计划（复盘后生成次日计划）
         logger.info("[9/9] 生成次日交易计划...")
-        self._generate_trade_plans(date, patterns)
+        self._generate_trade_plans(date, patterns, display_mainline_df, emotion_result)
         
         # 10. 生成散户支持报告（隔夜预判、三阶过滤、剧本推演等）
         logger.info("[10/10] 生成散户决策支持报告...")
-        self._generate_retail_support_report(date, zt_pool, hierarchy_df, patterns, sentiment)
+        self._generate_retail_support_report(date, zt_pool, hierarchy_df, patterns, emotion_result)
         
         # 11. 输出交易建议
-        self._print_trading_advice(display_mainline_df, patterns, sentiment, getattr(self, 'sector_analysis', None))
+        self._print_trading_advice(display_mainline_df, patterns, emotion_result, sector_persistence_df)
     
-    def _generate_trade_plans(self, date: str, patterns: Dict):
+    def _generate_trade_plans(self, date: str, patterns: Dict, mainline_df: pd.DataFrame, emotion_result: Dict):
         """
         生成次日交易计划
         整合所有模式信号，生成可执行的交易计划
+        
+        筛选逻辑：
+        1. 必须是模式选股选出来的标的
+        2. 必须与热点主线共振（属于主线板块或概念相关）
+        3. 考虑情绪周期调整仓位
         """
         try:
             # 初始化执行引擎
             if self.execution_engine is None:
                 self.execution_engine = UnifiedExecutionEngine(self.dm, None)
             
+            # 获取热点主线板块名称列表
+            hot_sectors = []
+            if not mainline_df.empty:
+                # 使用正确的列名 L2_Industry
+                column_name = 'L2_Industry' if 'L2_Industry' in mainline_df.columns else '板块名称'
+                hot_sectors = mainline_df[column_name].tolist()
+                logger.info(f"【交易计划】热点主线板块: {hot_sectors}")
+            
+            # 获取情绪周期建议仓位
+            emotion_cycle = emotion_result.get('cycle_name', '震荡期')
+            suggested_position = emotion_result.get('strategy', {}).position if hasattr(emotion_result.get('strategy'), 'position') else "30-50%"
+            logger.info(f"【交易计划】当前情绪周期: {emotion_cycle}, 建议仓位: {suggested_position}")
+            
+            # 过滤与热点共振的模式信号
+            filtered_patterns = self._filter_resonance_signals(patterns, mainline_df)
+            
+            # 统计过滤结果
+            total_before = sum(len(signals) for signals in patterns.values())
+            total_after = sum(len(signals) for signals in filtered_patterns.values())
+            logger.info(f"【交易计划】模式信号过滤: {total_before} -> {total_after} (保留与热点共振的标的)")
+            
             # 生成并保存交易计划
+            trade_plans_dir = Path(OUTPUT_DIR) / "trade_plans"
+            trade_plans_dir.mkdir(parents=True, exist_ok=True)
+
             plans_df, report = self.execution_engine.generate_and_save_plans(
                 analysis_date=date,
-                all_signals=patterns,
-                output_dir=OUTPUT_DIR
+                all_signals=filtered_patterns,
+                output_dir=str(trade_plans_dir)
             )
             
             if not plans_df.empty:
@@ -201,13 +338,16 @@ class SentimentSystem:
                 # 打印交易报告摘要
                 print("\n" + "="*60)
                 print("【次日交易计划摘要】")
+                print(f"情绪周期: {emotion_cycle} | 建议仓位: {suggested_position}")
+                print(f"热点主线: {', '.join(hot_sectors[:3])}")
                 print("="*60)
                 # 按介入时机分组显示
                 for timing in plans_df['介入时机'].unique():
                     group = plans_df[plans_df['介入时机'] == timing]
                     print(f"\n【{timing}】{len(group)}只")
-                    for _, row in group.head(2).iterrows():
-                        print(f"  - {row['名称']}({row['代码']}) - {row['模式']}")
+                    for _, row in group.head(3).iterrows():
+                        resonance_tag = "🔥共振" if row.get('热点共振', False) else ""
+                        print(f"  - {row['名称']}({row['代码']}) - {row['模式']} {resonance_tag}")
                         print(f"    目标价:{row['目标价']:.2f} 止损:{row['止损价']:.2f} 仓位:{row['仓位']}")
                 print("="*60)
             else:
@@ -218,9 +358,99 @@ class SentimentSystem:
             import traceback
             logger.debug(traceback.format_exc())
     
+    def _filter_resonance_signals(self, patterns: Dict, mainline_df: pd.DataFrame) -> Dict:
+        """
+        过滤与热点主线共振的模式信号
+
+        Args:
+            patterns: 所有模式信号
+            mainline_df: 热点主线板块DataFrame，包含板块名称和热度评分
+
+        Returns:
+            过滤后的模式信号
+        """
+        if mainline_df.empty:
+            logger.warning("【_filter_resonance_signals】无热点主线数据，返回所有信号")
+            return patterns
+
+        # 构建板块名称到热度评分的映射
+        sector_column = 'L2_Industry' if 'L2_Industry' in mainline_df.columns else '板块名称'
+        score_column = 'Strength_Score' if 'Strength_Score' in mainline_df.columns else '综合评分'
+
+        hot_sectors = mainline_df[sector_column].tolist()
+        sector_heat_map = {}
+        for _, row in mainline_df.iterrows():
+            sector_name = row[sector_column]
+            heat_score = row.get(score_column, 0)
+            sector_heat_map[sector_name] = heat_score
+
+        filtered = {}
+
+        for pattern_name, signals in patterns.items():
+            filtered_signals = []
+
+            for signal in signals:
+                # 检查信号是否与热点共振
+                is_resonance = False
+                resonance_sectors = []
+                max_heat_score = 0
+
+                # 检查股票所属行业/概念是否在热点主线中
+                signal_industry = getattr(signal, 'l2_industry', '') or getattr(signal, 'industry', '')
+                signal_concepts = getattr(signal, 'concepts', []) or getattr(signal, 'concept', '')
+
+                # 将concepts转换为列表
+                if isinstance(signal_concepts, str):
+                    signal_concepts = [c.strip() for c in signal_concepts.split(',') if c.strip()]
+
+                # 检查行业匹配
+                if signal_industry and any(sector in signal_industry or signal_industry in sector
+                                           for sector in hot_sectors):
+                    is_resonance = True
+                    resonance_sectors.append(signal_industry)
+                    # 获取该板块的热度评分
+                    for sector in hot_sectors:
+                        if sector in signal_industry or signal_industry in sector:
+                            heat_score = sector_heat_map.get(sector, 0)
+                            max_heat_score = max(max_heat_score, heat_score)
+
+                # 检查概念匹配
+                for concept in signal_concepts:
+                    if any(sector in concept or concept in sector for sector in hot_sectors):
+                        is_resonance = True
+                        if concept not in resonance_sectors:
+                            resonance_sectors.append(concept)
+                        # 获取该概念对应板块的热度评分
+                        for sector in hot_sectors:
+                            if sector in concept or concept in sector:
+                                heat_score = sector_heat_map.get(sector, 0)
+                                max_heat_score = max(max_heat_score, heat_score)
+
+                # 如果与热点共振，添加到过滤后的信号
+                if is_resonance:
+                    # 给信号添加共振标记和热度评分
+                    signal.hot_resonance = True
+                    signal.resonance_sectors = resonance_sectors
+                    signal.sector_heat_score = max_heat_score
+                    filtered_signals.append(signal)
+                    logger.debug(f"【共振】{signal.stock_name}({signal.stock_code}) 与热点共振: {resonance_sectors}, 热度:{max_heat_score:.1f}")
+                else:
+                    # 如果不共振但置信度>=0.9，也保留（优质独立逻辑）
+                    if getattr(signal, 'confidence', 0) >= 0.9:
+                        signal.hot_resonance = False
+                        signal.resonance_sectors = []
+                        signal.sector_heat_score = 0
+                        filtered_signals.append(signal)
+                        logger.debug(f"【高置信】{signal.stock_name}({signal.stock_code}) 置信度{signal.confidence}，虽非热点但保留")
+
+            if filtered_signals:
+                filtered[pattern_name] = filtered_signals
+
+        return filtered
+    
     def _generate_retail_support_report(self, date: str, today_zt: pd.DataFrame,
                                         hierarchy_df: pd.DataFrame, patterns: Dict,
-                                        sentiment: Dict):
+                                        emotion_result: Dict):
         """
         生成散户决策支持报告 - V2版本
         包含：隔夜预判、板块分析、散户指标、剧本推演等
@@ -245,14 +475,20 @@ class SentimentSystem:
             
             # 2. 生成隔夜决策清单
             decisions = self.retail_support.generate_overnight_decisions_v2(
-                today_zt, yesterday_zt, sector_analysis
+                today_zt, yesterday_zt, sector_analysis, date
             )
             
             # 3. 计算散户特供指标（简化版）
+            # 从emotion_result获取策略信息
+            strategy = emotion_result.get('strategy', None)
+            temperature = '稳健'
+            if strategy:
+                temperature = strategy.position if hasattr(strategy, 'position') else '稳健'
+            
             indicators = {
                 '昨日涨停溢价率': 10.0,  # 简化，实际需要计算
                 '一字板占比': 0.0,       # 简化，实际需要计算
-                '次日策略建议': sentiment.get('temperature', '稳健')
+                '次日策略建议': temperature
             }
             
             # 4. 推演次日剧本
@@ -312,36 +548,40 @@ class SentimentSystem:
             import traceback
             logger.debug(traceback.format_exc())
     
-    def _print_trading_advice(self, mainline_df, patterns, sentiment, sector_analysis=None):
-        """输出简明的交易建议 - V2版本支持板块分析"""
+    def _print_trading_advice(self, mainline_df, patterns, emotion_result, sector_persistence_df=None):
+        """输出简明的交易建议"""
         print("\n" + "="*60)
         print("【今日交易决策辅助】")
         print("="*60)
         
-        # 情绪判断
-        temp = sentiment.get('temperature', '')
-        if '高潮' in temp:
-            print("[!] 市场情绪高潮，建议减仓观望，避免高位接盘")
-        elif '冰点' in temp:
-            print("[i] 市场情绪冰点，轻仓试错或空仓等待")
-        elif '活跃' in temp:
-            print("[+] 市场活跃，积极参与主线板块")
+        # 情绪周期判断
+        cycle_name = emotion_result.get('cycle_name', '未知')
+        strategy = emotion_result.get('strategy', None)
         
-        # 主线推荐 - 优先使用V2板块分析
-        if sector_analysis:
-            print("\n[重点关注的板块 - T+0视角Top3]:")
-            # 按优先级和当日涨停数排序
-            sorted_sectors = sorted(
-                sector_analysis.values(),
-                key=lambda x: (x.today_limit_up, x.growth_3d),
-                reverse=True
-            )
-            for i, sector in enumerate(sorted_sectors[:3], 1):
-                trend_icon = "↑" if sector.growth_3d > 20 else "→" if sector.growth_3d > 0 else "↓"
-                print(f"  {i}. {sector.sector_name} (涨停{sector.today_limit_up}家, 3日增长{sector.growth_3d:+.0f}% {trend_icon})")
-                print(f"     建议: {sector.retail_suggestion}")
+        if cycle_name == '高潮期':
+            print("[!] 市场情绪高潮，建议减仓观望，避免高位接盘")
+        elif cycle_name == '冰点期':
+            print("[i] 市场情绪冰点，轻仓试错或空仓等待")
+        elif cycle_name == '上升期':
+            print("[+] 市场上升期，积极参与主线板块")
+        elif cycle_name == '震荡期':
+            print("[~] 市场震荡期，快进快出，严格止损")
+        elif cycle_name == '退潮期':
+            print("[-] 市场退潮期，空仓或极小仓位试错")
+        
+        if strategy:
+            print(f"\n[策略建议] {strategy.strategy}")
+            print(f"[仓位控制] {strategy.position}")
+        
+        # 主线推荐 - 优先使用板块持续性分析
+        if sector_persistence_df is not None and not sector_persistence_df.empty:
+            print("\n[重点关注的板块 - 持续性Top5]:")
+            for i, row in sector_persistence_df.head(5).iterrows():
+                stage_icon = "🔥" if row['所处阶段'] == '高潮期' else "📈" if row['所处阶段'] == '加速期' else "🌱"
+                print(f"  {i+1}. {stage_icon} {row['板块名称']} (涨停{row['涨停家数']}家, 评分{row['持续性评分']})")
+                print(f"     阶段: {row['所处阶段']} | {row['操作建议']}")
         elif not mainline_df.empty:
-            print("\n[重点关注的L3板块 - 主线Top3]:")
+            print("\n[重点关注的板块 - 主线Top3]:")
             for i, row in mainline_df.head(3).iterrows():
                 print(f"  {i+1}. {row['L2_Industry']} (涨停{row['LimitUp_Count']}家, 强度{row['Strength_Score']})")
         
@@ -364,11 +604,15 @@ class SentimentSystem:
         # 实现多日期回测逻辑
         pass
     
-    def _calculate_combined_mainline(self, mainline_df: pd.DataFrame, hierarchy_df: pd.DataFrame) -> pd.DataFrame:
+    def _calculate_combined_mainline(self, hierarchy_df: pd.DataFrame) -> pd.DataFrame:
         """
         计算综合板块权重（当日数据 + 20日统计数据 + 东财行业板块因子）
         权重公式: 综合强度 = 20日涨停数×0.35 + 当日涨停数×0.35 + 最高连板×0.15 + 东财综合强度×0.15
         """
+        # 如果没有hierarchy数据，返回空DataFrame
+        if hierarchy_df.empty:
+            logger.warning("[_calculate_combined_mainline] hierarchy_df为空，无法计算主线")
+            return pd.DataFrame()
         # 0. 获取东财行业板块数据
         sector_data = self.dm.get_industry_sector_data()
         sector_dict = {}
@@ -541,65 +785,6 @@ class SentimentSystem:
         
         return result_df
     
-    def _calculate_sector_heat(self, calculator, date: str, today_zt: pd.DataFrame) -> pd.DataFrame:
-        """
-        计算多维度板块热度 V2（修复版）
-        
-        修复：正确处理非交易日，确保拿满20个交易日数据
-        """
-        
-        limit_up_history = {}
-        current_date = datetime.strptime(date, "%Y%m%d")
-        days_checked = 0  # 已检查的日历天数
-        max_calendar_days = 60  # 最多检查60个日历日（约3个月）
-        
-        while len(limit_up_history) < 20 and days_checked < max_calendar_days:
-            # 从昨天开始，逐日往前检查
-            check_date = (current_date - timedelta(days=days_checked + 1)).strftime("%Y%m%d")
-            days_checked += 1
-            
-            # 验证是否为交易日
-            is_valid, actual_date, message = self.dm.validate_trade_date(check_date)
-
-            # 如果不是交易日，跳过（不加入history，但days_checked已+1）
-            if not is_valid:
-                logger.debug(f"  {check_date} 非交易日，跳过: {message}")
-                continue
-            
-            # 已经获取过该日期，跳过（防止重复）
-            if actual_date in limit_up_history:
-                continue
-            
-            # 获取该交易日涨停数据
-            zt_pool = self.dm.get_limit_up_pool(actual_date)
-            
-            if not zt_pool.empty:
-                # 构建层级数据
-                hierarchy = self.mapper.build_hierarchy_dataframe(zt_pool)
-                limit_up_history[actual_date] = hierarchy
-                logger.info(f"  ✅ 获取交易日数据: {actual_date}, "
-                        f"进度 {len(limit_up_history)}/20")
-            
-            # 即使数据为空，也算作一个交易日（记录存在但无涨停）
-            else:
-                limit_up_history[actual_date] = pd.DataFrame()  # 空数据占位
-                logger.info(f"  ⚠️ {actual_date} 无涨停数据, "
-                        f"进度 {len(limit_up_history)}/20")
-        
-        # 检查是否拿满20个交易日
-        if len(limit_up_history) < 20:
-            logger.warning(f"仅获取到 {len(limit_up_history)} 个交易日数据"
-                        f"（目标20个），可能数据不足")
-        
-        logger.info(f"历史数据获取完成：共 {len(limit_up_history)} 个交易日")
-        
-        # 使用V2计算器分析（传入data_manager和date参数）
-        sector_heat_df = calculator.analyze_all_sectors_v2(
-            today_zt, limit_up_history, self.mapper, self.dm, date
-        )
-        
-        return sector_heat_df
-
     def _is_core_stock(self, row) -> bool:
         """
         判断是否为10点半前封板的核心标的
@@ -695,18 +880,153 @@ def setup_logging():
     return LOG_DIR
 
 
+def run_backtest(start_date: str = None, end_date: str = None):
+    """运行策略回测"""
+    from backtest import BacktestEngine
+    from backtest.backtest_engine import BacktestConfig
+    from backtest.performance_analyzer import PerformanceAnalyzer
+
+    logger.info("=" * 60)
+    logger.info("开始运行策略回测")
+    logger.info("=" * 60)
+
+    # 设置默认日期
+    if end_date is None:
+        end_date = datetime.now().strftime("%Y%m%d")
+    if start_date is None:
+        start_date = (datetime.now() - timedelta(days=90)).strftime("%Y%m%d")
+
+    logger.info(f"回测区间: {start_date} 至 {end_date}")
+
+    # 初始化
+    dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+
+    config = BacktestConfig(
+        initial_capital=100000.0,
+        max_position_per_stock=0.20,
+        max_total_position=0.80,
+        stop_loss_pct=0.05,
+        take_profit_pct=0.10
+    )
+
+    backtest = BacktestEngine(dm, config)
+
+    # 运行回测
+    trade_plans_dir = Path(OUTPUT_DIR) / "trade_plans"
+
+    if not trade_plans_dir.exists():
+        logger.warning(f"交易计划目录不存在: {trade_plans_dir}")
+        logger.info("请先运行每日分析生成交易计划: python main.py")
+        return
+
+    result = backtest.run_backtest(
+        start_date=start_date,
+        end_date=end_date,
+        trade_plans_dir=str(trade_plans_dir)
+    )
+
+    # 生成报告
+    analyzer = PerformanceAnalyzer()
+    report = analyzer.generate_performance_report(result)
+    print("\n" + report)
+
+    # 保存详细结果
+    _save_backtest_results(result, OUTPUT_DIR)
+
+    logger.info("回测完成！")
+
+
+def _save_backtest_results(result: dict, output_dir: str):
+    """保存回测结果到文件"""
+    output_path = Path(output_dir) / "backtest_results"
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # 保存交易记录
+    if result.get('trade_history'):
+        trades_df = pd.DataFrame([{
+            'date': t.date,
+            'stock_code': t.stock_code,
+            'stock_name': t.stock_name,
+            'pattern_type': t.pattern_type,
+            'action': t.action,
+            'entry_price': t.entry_price,
+            'exit_price': t.exit_price,
+            'shares': t.shares,
+            'pnl': t.pnl,
+            'pnl_pct': t.pnl_pct,
+            'holding_days': t.holding_days,
+            'hot_resonance': t.hot_resonance,
+            'resonance_sectors': t.resonance_sectors,
+            'stop_loss_triggered': t.stop_loss_triggered,
+            'take_profit_triggered': t.take_profit_triggered
+        } for t in result['trade_history']])
+
+        trades_file = output_path / f"backtest_trades_{timestamp}.csv"
+        trades_df.to_csv(trades_file, index=False)
+        logger.info(f"交易记录已保存: {trades_file}")
+
+    # 保存净值曲线
+    if result.get('daily_nav'):
+        nav_df = pd.DataFrame(result['daily_nav'])
+        nav_file = output_path / f"backtest_nav_{timestamp}.csv"
+        nav_df.to_csv(nav_file, index=False)
+        logger.info(f"净值曲线已保存: {nav_file}")
+
+    # 保存汇总报告
+    summary = {
+        'total_return': result.get('total_return', 0),
+        'annualized_return': result.get('annualized_return', 0),
+        'sharpe_ratio': result.get('sharpe_ratio', 0),
+        'max_drawdown': result.get('max_drawdown', 0),
+        'win_rate': result.get('win_rate', 0),
+        'profit_loss_ratio': result.get('profit_loss_ratio', 0),
+        'total_trades': result.get('total_trades', 0),
+        'initial_capital': result.get('initial_capital', 0),
+        'final_capital': result.get('final_capital', 0)
+    }
+
+    summary_df = pd.DataFrame([summary])
+    summary_file = output_path / f"backtest_summary_{timestamp}.csv"
+    summary_df.to_csv(summary_file, index=False)
+    logger.info(f"汇总报告已保存: {summary_file}")
+
+
 if __name__ == "__main__":
     # 配置日志
     setup_logging()
-    
-    # 如果直接运行，执行今日分析
+
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='A股短线情绪量化系统')
+    parser.add_argument('--mode', choices=['analysis', 'backtest', 'risk', 'position'],
+                       default='analysis', help='运行模式')
+    parser.add_argument('--start-date', type=str, help='回测开始日期 (YYYYMMDD)')
+    parser.add_argument('--end-date', type=str, help='回测结束日期 (YYYYMMDD)')
+
+    args = parser.parse_args()
+
     print(">>> A股短线情绪量化系统启动...")
+    print(f"模式: {args.mode}")
     print("提示: 首次运行请先在 config/settings.py 中配置Tushare Token")
     print("-" * 60)
-    
+
     try:
-        system = SentimentSystem()
-        system.run_daily_analysis()
+        if args.mode == 'analysis':
+            # 执行每日分析
+            system = SentimentSystem()
+            system.run_daily_analysis()
+        elif args.mode == 'backtest':
+            # 运行回测
+            run_backtest(args.start_date, args.end_date)
+        elif args.mode == 'risk':
+            # 运行风险分析演示
+            from run_backtest import run_risk_analysis_demo
+            run_risk_analysis_demo()
+        elif args.mode == 'position':
+            # 运行仓位管理演示
+            from run_backtest import run_position_sizing_demo
+            run_position_sizing_demo()
     except Exception as e:
         logger.error(f"系统运行错误: {e}")
         print(f"[X] 运行出错: {e}")

@@ -88,12 +88,17 @@ class TradePlan:
     confidence: float = 0.0             # 置信度
     reason: str = ""                   # 交易理由
     add_to_watchlist: bool = False     # 是否加入观察池
+    hot_resonance: bool = False         # 是否与热点共振
+    resonance_sectors: List[str] = None # 共振的板块列表
+    sector_heat_score: float = 0.0      # 板块热度评分
     
     def __post_init__(self):
         if self.pre_conditions is None:
             self.pre_conditions = []
         if self.cancel_conditions is None:
             self.cancel_conditions = []
+        if self.resonance_sectors is None:
+            self.resonance_sectors = []
 
 class UnifiedExecutionEngine:
     """
@@ -135,12 +140,12 @@ class UnifiedExecutionEngine:
                 "position": "heavy"  # 高置信度，重仓
             },
             
-            # 首板突破：早盘秒封
+            # 首板突破：次日竞价介入（提前布局，不等涨停）
             "首板突破": {
-                "primary": TimeSlot.EARLY_MORNING,  # 9:40前涨停瞬间
-                "secondary": None,
-                "deadline": TimeSlot.EARLY_MORNING,
-                "price_type": "涨停价",
+                "primary": TimeSlot.AUCTION_END,    # 次日竞价末段介入
+                "secondary": TimeSlot.OPEN,          # 开盘第一笔（备选）
+                "deadline": TimeSlot.EARLY_MORNING,  # 最晚早盘10点前
+                "price_type": "开盘价",
                 "position": "light"
             },
             
@@ -245,8 +250,17 @@ class UnifiedExecutionEngine:
         
         return None
     
+    def _extract_resonance_info(self, signal) -> Dict:
+        """从信号中提取热点共振信息"""
+        return {
+            'hot_resonance': getattr(signal, 'hot_resonance', False),
+            'resonance_sectors': getattr(signal, 'resonance_sectors', []),
+            'sector_heat_score': getattr(signal, 'sector_heat_score', 0.0)
+        }
+    
     def _plan_second_board_dragon(self, signal, timing, date) -> TradePlan:
         """二板定龙计划"""
+        resonance = self._extract_resonance_info(signal)
         return TradePlan(
             pattern_type="二板定龙",
             stock_code=signal.stock_code,
@@ -269,7 +283,8 @@ class UnifiedExecutionEngine:
             ],
             confidence=signal.confidence,
             reason=signal.description,
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **resonance
         )
     
     def _plan_divergence_consensus(self, signal, timing, date) -> TradePlan:
@@ -296,7 +311,8 @@ class UnifiedExecutionEngine:
             ],
             confidence=signal.confidence,
             reason=signal.description,
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **self._extract_resonance_info(signal)
         )
     
     def _plan_weak_to_strong(self, signal, timing, date) -> TradePlan:
@@ -323,34 +339,38 @@ class UnifiedExecutionEngine:
             ],
             confidence=signal.confidence,
             reason=signal.description,
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **self._extract_resonance_info(signal)
         )
     
     def _plan_first_board_breakout(self, signal, timing, date) -> TradePlan:
-        """首板突破计划"""
+        """首板突破计划 - 次日竞价介入，提前布局"""
         return TradePlan(
             pattern_type="首板突破",
             stock_code=signal.stock_code,
             stock_name=signal.stock_name,
             action=TradeAction.BUY,
             entry_timing=timing["primary"],
-            entry_price=signal.entry_price,
+            entry_price=signal.entry_price,  # 昨日涨停价作为参考
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
             position_size=timing["position"],  # light
             pre_conditions=[
-                "9:40前涨停",
-                "封单持续增加",
-                "板块效应明显"
+                "次日高开3%-7%",
+                "竞价量>前日5%",
+                "竞价价格向上",
+                "板块热度持续"
             ],
             cancel_conditions=[
-                "涨停时间>10:00",
-                "反复炸板",
-                "板块跟风不足"
+                "低开或平开",
+                "竞价量<3%",
+                "竞价末端回落",
+                "开盘跌破昨日涨停价"
             ],
             confidence=signal.confidence,
             reason=signal.description,
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **self._extract_resonance_info(signal)
         )
     
     def _plan_auction_volume(self, signal, timing, date) -> TradePlan:
@@ -377,7 +397,8 @@ class UnifiedExecutionEngine:
             ],
             confidence=signal.confidence,
             reason=signal.description,
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **self._extract_resonance_info(signal)
         )
     
     def _plan_blast_reseal(self, signal, timing, date) -> TradePlan:
@@ -404,9 +425,10 @@ class UnifiedExecutionEngine:
             ],
             confidence=signal.confidence,
             reason=f"前日炸板回封，次日观察弱转强: {signal.description}",
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **self._extract_resonance_info(signal)
         )
-    
+
     def _plan_position_battle(self, signal, timing, date) -> TradePlan:
         """卡位板计划"""
         return TradePlan(
@@ -431,9 +453,10 @@ class UnifiedExecutionEngine:
             ],
             confidence=signal.confidence,
             reason=signal.description,
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **self._extract_resonance_info(signal)
         )
-    
+
     def _plan_second_wave(self, signal, timing, date) -> TradePlan:
         """龙二波计划"""
         # 判断是启动日还是次日
@@ -441,7 +464,7 @@ class UnifiedExecutionEngine:
             entry = timing["primary"]  # 早盘打板
         else:
             entry = timing["secondary"]  # 次日竞价
-        
+
         return TradePlan(
             pattern_type="龙二波",
             stock_code=signal.stock_code,
@@ -463,9 +486,10 @@ class UnifiedExecutionEngine:
             ],
             confidence=signal.confidence,
             reason=signal.description,
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **self._extract_resonance_info(signal)
         )
-    
+
     def _plan_dragon_pullback(self, signal, timing, date) -> TradePlan:
         """龙回头计划"""
         return TradePlan(
@@ -490,12 +514,13 @@ class UnifiedExecutionEngine:
             ],
             confidence=signal.confidence,
             reason=signal.description,
-            add_to_watchlist=True
+            add_to_watchlist=True,
+            **self._extract_resonance_info(signal)
         )
     
     def _plan_to_dict(self, plan: TradePlan) -> Dict:
         """转换为字典"""
-        return {
+        result = {
             "模式": plan.pattern_type,
             "代码": plan.stock_code,
             "名称": plan.stock_name,
@@ -509,8 +534,11 @@ class UnifiedExecutionEngine:
             "取消条件": "; ".join(plan.cancel_conditions),
             "置信度": plan.confidence,
             "理由": plan.reason,
-            "加入观察池": plan.add_to_watchlist
+            "加入观察池": plan.add_to_watchlist,
+            "热点共振": getattr(plan, 'hot_resonance', False),
+            "共振板块": ", ".join(getattr(plan, 'resonance_sectors', []))
         }
+        return result
     
     # ==================== 当日实时信号 ====================
     
@@ -602,7 +630,16 @@ class UnifiedExecutionEngine:
                 stop_loss = format_value(row['止损价'], 2)
                 confidence = format_value(row['置信度'] * 100, 0) if isinstance(row['置信度'], (int, float, np.number)) else row['置信度']
                 
-                report.append(f"\n{row['模式']} | {row['名称']}({row['代码']})")
+                # 热点共振信息
+                resonance_info = ""
+                if row.get('热点共振', False):
+                    sectors = row.get('共振板块', '')
+                    heat_score = row.get('板块热度评分', 0)
+                    resonance_info = f"🔥[{sectors}]热{heat_score:.0f}"
+                else:
+                    resonance_info = "⚠️无热点共振"
+                
+                report.append(f"\n{row['模式']} | {row['名称']}({row['代码']}) {resonance_info}")
                 report.append(f"  动作: {row['动作']} | 仓位: {row['仓位']}")
                 report.append(f"  目标价: {target_price} | 止损: {stop_loss}")
                 report.append(f"  前置: {row['前置条件']}")
@@ -670,9 +707,20 @@ class UnifiedExecutionEngine:
         
         # 保存CSV
         csv_file = output_path / f"交易计划_{date}.csv"
-        formatted_df.to_csv(csv_file, index=False, encoding='utf-8-sig')
-        logger.info(f"✓ 交易计划已保存: {csv_file}")
-        
+        try:
+            formatted_df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+            logger.info(f"✓ 交易计划已保存: {csv_file}")
+        except PermissionError:
+            # 文件被占用，尝试使用临时文件名
+            import time
+            timestamp = int(time.time())
+            csv_file = output_path / f"交易计划_{date}_{timestamp}.csv"
+            formatted_df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+            logger.info(f"✓ 交易计划已保存（文件被占用，使用新文件名）: {csv_file}")
+        except Exception as e:
+            logger.error(f"保存交易计划失败: {e}")
+            raise
+
         return str(csv_file)
     
     def generate_and_save_plans(self, 

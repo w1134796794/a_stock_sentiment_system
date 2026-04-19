@@ -8,13 +8,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR, INDUSTRY_MAPPING_FILE
 from core.data.data_manager import DataManager
 from core.data.industry_mapper import IndustryMapper
-from core.analysis.sentiment_engine import SentimentEngine
 from core.analysis.pattern_recognition import PatternRecognition
+from core.analysis.emotion_cycle_engine import EmotionCycleEngine
+from core.analysis.sector_rotation_tracker import SectorRotationTracker
 
 # 初始化
 dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
 mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
-engine = SentimentEngine()
+emotion_engine = EmotionCycleEngine()
+sector_tracker = SectorRotationTracker(dm)
 
 # 示例1: 获取今日涨停池并分析
 date = "20260321"
@@ -28,7 +30,8 @@ if not zt_pool.empty:
     
     # 构建层级映射
     hierarchy = mapper.build_hierarchy_dataframe(zt_pool)
-    print("\n=== 主线板块Top5 ===")
-    mainline = engine.calculate_mainline_strength(hierarchy)
+    print("\n=== 概念板块分析Top5 ===")
+    # 使用新的带交叉验证的分析方法
+    mainline = sector_tracker.analyze_with_validation(date, top_n=10)
     if not mainline.empty:
-        print(mainline[['L3_Industry', 'LimitUp_Count', 'Strength_Score']].head())
+        print(mainline[['板块名称', '涨停家数', '综合评分', '信号类型', '共振得分']].head())
