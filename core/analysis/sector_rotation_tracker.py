@@ -297,6 +297,74 @@ class SectorRotationTracker:
         
         return history
     
+    def _calculate_mainline_metrics(self, history: List[SectorStrength], current_rank: int) -> Dict:
+        """
+        计算概念主线特征指标
+        
+        用于判断概念是否具有主线特征（持续性强）还是一日游（突发性）
+        
+        Args:
+            history: 历史数据列表（最近10天）
+            current_rank: 当前排名
+            
+        Returns:
+            Dict: 主线特征指标
+                - top10_count_10d: 10日内进入前10的次数
+                - top5_count_10d: 10日内进入前5的次数
+                - top3_count_10d: 10日内进入前3的次数
+                - avg_rank_10d: 10日平均排名
+                - best_rank_10d: 10日内最好排名
+                - consecutive_top10: 连续进入前10的天数
+                - is_mainline: 是否具备主线特征（综合判断）
+        """
+        if not history:
+            # 没有历史数据，只有今天
+            return {
+                'top10_count_10d': 1 if current_rank <= 10 else 0,
+                'top5_count_10d': 1 if current_rank <= 5 else 0,
+                'top3_count_10d': 1 if current_rank <= 3 else 0,
+                'avg_rank_10d': current_rank,
+                'best_rank_10d': current_rank,
+                'consecutive_top10': 1 if current_rank <= 10 else 0,
+                'is_mainline': False  # 单日数据无法判断主线特征
+            }
+        
+        # 提取历史排名（包括今天）
+        historical_ranks = [h.rank for h in history]
+        historical_ranks.append(current_rank)  # 加入今天
+        
+        # 只取最近10天
+        historical_ranks = historical_ranks[-10:]
+        
+        # 计算各项指标
+        top10_count = sum(1 for r in historical_ranks if r <= 10)
+        top5_count = sum(1 for r in historical_ranks if r <= 5)
+        top3_count = sum(1 for r in historical_ranks if r <= 3)
+        avg_rank = sum(historical_ranks) / len(historical_ranks)
+        best_rank = min(historical_ranks)
+        
+        # 计算连续进入前10的天数（从最近一天往前数）
+        consecutive_top10 = 0
+        for r in reversed(historical_ranks):
+            if r <= 10:
+                consecutive_top10 += 1
+            else:
+                break
+        
+        # 判断是否具有主线特征
+        # 标准：10日内至少5次进入前10，且最近连续3天在前10
+        is_mainline = (top10_count >= 5 and consecutive_top10 >= 3)
+        
+        return {
+            'top10_count_10d': top10_count,
+            'top5_count_10d': top5_count,
+            'top3_count_10d': top3_count,
+            'avg_rank_10d': round(avg_rank, 1),
+            'best_rank_10d': best_rank,
+            'consecutive_top10': consecutive_top10,
+            'is_mainline': is_mainline
+        }
+    
     def calculate_weighted_momentum(self, values: List[float], weights: List[float] = None) -> float:
         """
         计算加权动量（加权移动平均变化率）
@@ -619,6 +687,9 @@ class SectorRotationTracker:
             # 获取历史数据
             history = self.fetch_sector_history(concept_name, trade_date, days=10)
             
+            # 计算主线特征指标
+            mainline_metrics = self._calculate_mainline_metrics(history, rank)
+            
             # 计算多因子指标
             metrics = self.calculate_sector_metrics(
                 concept_name, current_data, history, hierarchy_df
@@ -630,6 +701,13 @@ class SectorRotationTracker:
             results.append({
                 '板块名称': concept_name,
                 '当前排名': rank,
+                '10日进前10次数': mainline_metrics['top10_count_10d'],
+                '10日进前5次数': mainline_metrics['top5_count_10d'],
+                '10日进前3次数': mainline_metrics['top3_count_10d'],
+                '10日平均排名': mainline_metrics['avg_rank_10d'],
+                '10日最佳排名': mainline_metrics['best_rank_10d'],
+                '连续进前10天数': mainline_metrics['consecutive_top10'],
+                '是否主线': '是' if mainline_metrics['is_mainline'] else '否',
                 '涨停家数': metrics.up_nums,
                 '综合评分': metrics.composite_score,
                 '所处阶段': metrics.stage.value,

@@ -23,7 +23,7 @@ from core.data.industry_mapper import IndustryMapper
 from core.analysis.pattern_recognition import PatternRecognition
 from core.analysis.emotion_cycle_engine import EmotionCycleEngine
 from core.analysis.sector_rotation_tracker import SectorRotationTracker
-from core.report.report_generator import ReportGenerator
+from core.report.report_generator_v2 import ReportGeneratorV2
 from core.execution.execution_engine import UnifiedExecutionEngine
 from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
 from core.utils import DateUtils
@@ -36,7 +36,7 @@ class SentimentSystem:
         self.mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
         self.emotion_engine = EmotionCycleEngine(dm=self.dm)  # 情绪周期引擎，传入DataManager用于计算溢价率
         self.sector_tracker = SectorRotationTracker(self.dm)  # 板块轮动追踪器
-        self.reporter = ReportGenerator(OUTPUT_DIR)
+        self.reporter = ReportGeneratorV2(OUTPUT_DIR)
         self.execution_engine = None  # 延迟初始化
         self.retail_support = None  # 散户支持模块延迟初始化
         self.today = datetime.now().strftime("%Y%m%d")
@@ -160,7 +160,16 @@ class SentimentSystem:
         logger.info("=" * 60)
         
         # 使用带交叉验证的分析方法
-        mainline_df = self.sector_tracker.analyze_with_validation(date, top_n=10)
+        # 先获取热门行业数据（用于判断概念-行业共振）
+        hot_industries = self.sector_tracker.get_hot_industries_from_sectors(top_n=5)
+        if hot_industries:
+            logger.info(f"✓ 识别到热门行业: {hot_industries}")
+        else:
+            logger.info("⚠ 未能识别热门行业，信号类型可能默认为'弱势'")
+        
+        mainline_df = self.sector_tracker.analyze_with_validation(
+            date, top_n=10, hot_industries=hot_industries
+        )
         
         # ========== DEBUG: 热点主线详细数据 ==========
         logger.info("=" * 60)
@@ -260,28 +269,47 @@ class SentimentSystem:
                 hierarchy_df.loc[core_stocks_df.index, 'Concept'] = core_stocks_df['Concept']
                 logger.info(f"已获取{len(core_stocks_df)}只核心标的的概念数据")
         
-        # 8. 生成报告
-        logger.info("[8/8] 生成分析报告...")
+        # 8. 获取龙头池和走弱池数据
+        logger.info("[8/8] 获取龙头池和走弱池数据...")
+        dragon_pool_data = []
+        weakening_pool_data = []
+        if hasattr(pr, 'weak_to_strong') and pr.weak_to_strong:
+            try:
+                pool_summary = pr.weak_to_strong.get_pools_summary()
+                dragon_pool_data = pool_summary.get('dragon_pool', [])
+                weakening_pool_data = pool_summary.get('weakening_pool', [])
+                logger.info(f"✓ 龙头池: {len(dragon_pool_data)}只, 走弱池: {len(weakening_pool_data)}只")
+            except Exception as e:
+                logger.warning(f"获取龙头池数据失败: {e}")
+        
+        # 9. 生成报告
+        logger.info("[9/9] 生成分析报告...")
+        # 使用 mainline_df（来自 analyze_with_validation）作为热点概念数据
+        # 包含：当前排名、10日累计排名、共振得分、持续性评分等核心指标
         report_data = {
-            'mainline_df': display_mainline_df,
+            'date': date,
+            'mainline_df': mainline_df,  # 使用 sector_tracker.analyze_with_validation 的结果
             'emotion_result': emotion_result,
             'sector_persistence_df': sector_persistence_df,
             'patterns': patterns,
-            'hierarchy_df': hierarchy_df
+            'hierarchy_df': hierarchy_df,
+            'zt_pool': zt_pool,
+            'dragon_pool': dragon_pool_data,
+            'weakening_pool': weakening_pool_data
         }
         
         # 使用带时间戳的文件名避免文件被占用
         timestamp = datetime.now().strftime("%H%M%S")
-        report_file_name = f"A股情绪分析报告_{date}_{timestamp}.xlsx"
+        report_file_name = f"短线情绪分析报告_{date}_{timestamp}.xlsx"
         report_path = self.reporter.create_daily_report(report_data, file_name=report_file_name)
         logger.info(f"✅ 分析完成，报告保存至: {report_path}")
         
-        # 9. 生成交易计划（复盘后生成次日计划）
-        logger.info("[9/9] 生成次日交易计划...")
+        # 10. 生成交易计划（复盘后生成次日计划）
+        logger.info("[10/10] 生成次日交易计划...")
         self._generate_trade_plans(date, patterns, display_mainline_df, emotion_result)
         
-        # 10. 生成散户支持报告（隔夜预判、三阶过滤、剧本推演等）
-        logger.info("[10/10] 生成散户决策支持报告...")
+        # 11. 生成散户支持报告（隔夜预判、三阶过滤、剧本推演等）
+        logger.info("[11/11] 生成散户决策支持报告...")
         self._generate_retail_support_report(date, zt_pool, hierarchy_df, patterns, emotion_result)
         
         # 11. 输出交易建议

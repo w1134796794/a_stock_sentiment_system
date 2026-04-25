@@ -31,39 +31,69 @@ class TradeSignal:
     reason: str
     key_metrics: Dict
     validation_rules: List[str]
+    buy_timing: str = ""  # 买点时机
+    buy_strategy: str = ""  # 买点策略
+    next_day_expectation: str = ""  # 次日预期
 
 
 class SecondBoardDragonStrategy:
-    def __init__(self, data_manager, sector_engine):
+    def __init__(self, data_manager, sector_engine, mode="strict"):
+        """
+        data_manager: 数据管理器（DataManager）
+        sector_engine: 板块热度引擎（可选）
+        mode: 策略模式 - "strict"(严格模式) | "loose"(宽松模式)
+        """
         self.dm = data_manager
         self.sector_engine = sector_engine
+        self.mode = mode
         
-        # 核心参数（经过回测优化）
+        # 基础参数（新旧逻辑共用）
         self.params = {
             # 首板质量
-            "min_seal_ratio": 0.08,        # 封单额>流通市值8%（放宽到8%，10%太严）
-            "ideal_turnover": (8, 20),     # 理想换手8-20%（根据市值调整）
-            "min_concept_heat": 3,          # 首板当日概念涨停数≥3（有板块效应）
+            "min_seal_ratio": 0.08,        # 封单额>流通市值8%
+            "ideal_turnover": (8, 20),     # 理想换手8-20%
+            "min_concept_heat": 3,          # 首板当日概念涨停数≥3
             
-            # 次日态度（最关键）
-            "min_gap": 0.02,                # 最低高开2%（低开直接放弃）
-            "max_gap": 0.08,                # 最高高开8%（一字板不给机会）
+            # 次日态度
+            "min_gap": 0.02,                # 最低高开2%
+            "max_gap": 0.08,                # 最高高开8%
             "min_auction_vol": 0.08,        # 竞价量>8%
-            "min_auction_amount": 5000000,  # 竞价金额>500万（小盘股）
+            "min_auction_amount": 5000000,  # 竞价金额>500万
             
             # 分时坚决
             "max_time_to_limit": 15,        # 15分钟内涨停
             "min_seal_growth": 0.10,        # 封单持续增加，最终>10%
             
-            # 板块地位（新增核心）
-            "max_sector_second_board": 2    # 同板块最多2只二板，要做第一个
+            # 板块地位
+            "max_sector_second_board": 2    # 同板块最多2只二板
+        }
+        
+        # 严格模式参数（新逻辑）
+        self.strict_params = {
+            # 竞价强度
+            "min_gap": 0.05,                # 高开5%-8%
+            "max_gap": 0.08,
+            "min_auction_vol": 0.08,        # 竞价量能达首板成交量8%-15%
+            "max_auction_vol": 0.15,
+            
+            # 分时质量
+            "max_limit_up_time": "10:00",   # 10:00前封板
+            "min_turnover": 0.15,           # 实际换手>15%
+            
+            # 板块梯队
+            "min_sector_first_board": 1,    # 至少1家同板块首板助攻
+            
+            # 放弃信号阈值
+            "skip_first_board_seal": True,  # 首板一字板放弃
+            "skip_tail_board_time": "14:30", # 尾盘二板放弃
         }
     
     def detect_second_board_dragon(self,
                                    yesterday_zt: pd.DataFrame,      # 昨日首板池
                                    today_auction: pd.DataFrame,   # 今日竞价数据（9:25）
                                    today_tick: pd.DataFrame,      # 今日分时（实时）
-                                   sector_mapping: Dict            # 股票->板块映射
+                                   sector_mapping: Dict,           # 股票->板块映射
+                                   today_first_board: pd.DataFrame = None  # 今日首板池（用于板块梯队）
                                    ) -> List[TradeSignal]:
         """
         二板定龙头：竞价定生死，开盘定地位
@@ -73,6 +103,15 @@ class SecondBoardDragonStrategy:
         
         # 前置：统计各板块二板数量（判断板块地位）
         sector_second_board_count = {}
+        
+        # 严格模式：统计各板块首板数量（板块梯队）
+        sector_first_board_count = {}
+        if self.mode == "strict" and today_first_board is not None:
+            if '所属行业' in today_first_board.columns:
+                sector_first_board_count = today_first_board['所属行业'].value_counts().to_dict()
+            elif 'L2_Industry' in today_first_board.columns:
+                sector_first_board_count = today_first_board['L2_Industry'].value_counts().to_dict()
+            logger.info(f"[二板定龙] 板块首板统计: {len(sector_first_board_count)}个行业有首板")
         
         for _, yest_row in yesterday_zt.iterrows():
             code = str(yest_row['代码']).zfill(6)
@@ -85,13 +124,33 @@ class SecondBoardDragonStrategy:
             
             today_row = today_row.iloc[0]
             
+            # 获取板块信息
+            sector = sector_mapping.get(code, '未知')
+            first_board_count = sector_first_board_count.get(sector, 0)
+            
+            # ========== 严格模式：放弃信号检查 ==========
+            if self.mode == "strict":
+                skip_reason = self._should_skip_stock(yest_row, today_row, first_board_count)
+                if skip_reason:
+                    logger.debug(f"[{code}] 放弃信号: {skip_reason}")
+                    continue
+            
             # 必须高开（低开直接排除，资金不认可）
             open_price = today_row['开盘价']
             yest_close = yest_row['收盘价']
             gap_ratio = (open_price - yest_close) / yest_close
             
-            if gap_ratio < self.params["min_gap"]:
-                continue  # 低开=资金不认可，直接放弃
+            # 严格模式：高开5%-8%
+            if self.mode == "strict":
+                if gap_ratio < self.strict_params["min_gap"]:
+                    logger.debug(f"[{code}] 高开不足: {gap_ratio*100:.1f}% < {self.strict_params['min_gap']*100:.0f}%")
+                    continue
+                if gap_ratio > self.strict_params["max_gap"]:
+                    logger.debug(f"[{code}] 高开过多(一字板): {gap_ratio*100:.1f}% > {self.strict_params['max_gap']*100:.0f}%")
+                    continue
+            else:
+                if gap_ratio < self.params["min_gap"]:
+                    continue  # 低开=资金不认可，直接放弃
             
             # ========== 条件1：首板质量（硬逻辑） ==========
             quality = self._check_first_board_quality(yest_row)
@@ -103,9 +162,7 @@ class SecondBoardDragonStrategy:
             if not attitude['is_strong_attitude']:
                 continue
             
-            # ========== 条件3：板块地位（新增核心） ==========
-            sector = sector_mapping.get(code, '未知')
-            
+            # ========== 条件3：板块地位（卡位优势） ==========
             # 检查是否是板块内前2个二板
             current_count = sector_second_board_count.get(sector, 0)
             if current_count >= self.params["max_sector_second_board"]:
@@ -115,6 +172,25 @@ class SecondBoardDragonStrategy:
                 is_leader = True
                 sector_second_board_count[sector] = current_count + 1
             
+            # ========== 严格模式：分时质量检查 ==========
+            if self.mode == "strict":
+                limit_up_time = str(today_row.get('首次封板时间', '')).strip()
+                if limit_up_time:
+                    parsed = self._parse_time(limit_up_time)
+                    if parsed:
+                        hour, minute = parsed
+                        max_hour = int(self.strict_params['max_limit_up_time'][:2])
+                        max_minute = int(self.strict_params['max_limit_up_time'][3:5])
+                        if hour > max_hour or (hour == max_hour and minute > max_minute):
+                            logger.debug(f"[{code}] 封板过晚: {limit_up_time} > 10:00")
+                            continue
+                
+                # 换手检查
+                turnover = today_row.get('换手率', 0)
+                if turnover < self.strict_params['min_turnover'] * 100:  # 转换为百分比
+                    logger.debug(f"[{code}] 换手不足: {turnover:.1f}% < {self.strict_params['min_turnover']*100:.0f}%")
+                    continue
+            
             # ========== 条件4：分时坚决（开盘确认） ==========
             # 这里用tick数据实时监控，竞价阶段先标记候选
             tick_data = today_tick[today_tick['代码'] == code]
@@ -123,6 +199,21 @@ class SecondBoardDragonStrategy:
             entry_price, buy_timing = self._calculate_entry(
                 gap_ratio, attitude['auction_vol_ratio'], today_row
             )
+            
+            # 严格模式：确定买点策略
+            if self.mode == "strict":
+                if is_leader and gap_ratio >= 0.05 and first_board_count >= 2:
+                    buy_strategy = "主买点: 回封时扫板（确认资金态度）"
+                    next_day_expectation = "正常: 一字板或T字板（龙头溢价）"
+                elif is_leader:
+                    buy_strategy = "次买点: 确定为板块最强二板，可提前扫板"
+                    next_day_expectation = "正常: 高开5%+（龙头预期）"
+                else:
+                    buy_strategy = "观望: 跟风二板，谨慎参与"
+                    next_day_expectation = "低于预期: 低开或高开<3% → 立即止损"
+            else:
+                buy_strategy = "主买点: 回封时扫板"
+                next_day_expectation = "正常预期"
             
             # 构建信号（竞价阶段输出，盘中确认）
             signal = TradeSignal(
@@ -144,16 +235,22 @@ class SecondBoardDragonStrategy:
                     "竞价金额": f"{attitude['auction_amount']/1e4:.0f}万",
                     "板块地位": "龙头" if is_leader else "跟风",
                     "板块内排名": current_count + 1,
-                    "买点时机": buy_timing
+                    "首板助攻": f"{first_board_count}家",
+                    "买点时机": buy_timing,
+                    "买点策略": buy_strategy,
+                    "次日预期": next_day_expectation
                 },
                 validation_rules=[
                     f"首板硬逻辑: {quality['hard_logic']}",
                     f"次日高开{gap_ratio*100:.1f}%（资金表态）",
                     f"竞价量{attitude['auction_vol_ratio']*100:.1f}%（抢筹）",
                     f"板块地位: {'龙头' if is_leader else '跟风（谨慎）'}",
+                    f"首板助攻: {first_board_count}家",
                     "15分钟内涨停（盘中确认）"
                 ],
-                buy_timing=buy_timing
+                buy_timing=buy_timing,
+                buy_strategy=buy_strategy,
+                next_day_expectation=next_day_expectation
             )
             
             signals.append(signal)
@@ -163,6 +260,88 @@ class SecondBoardDragonStrategy:
         return signals[:3]
     
     # ==================== 核心判断方法 ====================
+    
+    def _should_skip_stock(self, yest_row: pd.Series, today_row: pd.Series, 
+                          sector_first_board_count: int = 0) -> Optional[str]:
+        """
+        检查放弃信号（严格模式）
+        
+        放弃信号（满足任一即放弃）：
+        1. 首板一字板（无换手，筹码断层）
+        2. 尾盘偷鸡二板（14:30后）
+        3. 板块无首板助攻（独龙难飞）
+        4. 竞价无量高开（诱多陷阱）- 无竞价数据时跳过
+        
+        Returns:
+            str: 放弃原因，None表示不放弃
+        """
+        if self.mode != "strict":
+            return None
+            
+        code = str(yest_row.get('代码', '')).zfill(6)
+        
+        # 1. 检查首板是否一字板
+        break_count = yest_row.get('开板次数', 0)
+        limit_type = yest_row.get('涨停类型', '')
+        turnover = yest_row.get('换手率', 0)
+        
+        if self.strict_params.get('skip_first_board_seal', True):
+            # 一字板特征：开板次数=0 且 涨停类型为1 且 换手极低
+            if break_count == 0 and ('一字' in str(limit_type) or limit_type == '1'):
+                return f"首板一字板(无换手)"
+            # 换手<3%视为无充分换手
+            if turnover < 3.0:
+                return f"首板换手不足({turnover:.1f}%<3%)"
+        
+        # 2. 检查是否尾盘二板
+        limit_up_time = str(today_row.get('首次封板时间', '')).strip()
+        if limit_up_time:
+            parsed = self._parse_time(limit_up_time)
+            if parsed:
+                hour, minute = parsed
+                skip_time = self.strict_params.get('skip_tail_board_time', '14:30')
+                skip_hour = int(skip_time[:2])
+                skip_minute = int(skip_time[3:5])
+                if hour > skip_hour or (hour == skip_hour and minute >= skip_minute):
+                    return f"尾盘二板({limit_up_time})"
+        
+        # 3. 检查板块是否有首板助攻
+        if sector_first_board_count < self.strict_params.get('min_sector_first_board', 1):
+            return f"板块无首板助攻({sector_first_board_count}家)"
+        
+        # 4. 检查竞价数据（如果有的话）
+        auction_vol = today_row.get('竞价成交量', 0)
+        if auction_vol > 0:  # 有竞价数据才检查
+            yest_vol = yest_row.get('成交量', 1)
+            auction_ratio = auction_vol / yest_vol if yest_vol > 0 else 0
+            if auction_ratio < self.strict_params.get('min_auction_vol', 0.08):
+                return f"竞价无量({auction_ratio*100:.1f}%<8%)"
+        
+        return None
+    
+    def _parse_time(self, time_str: str) -> Optional[Tuple[int, int]]:
+        """
+        统一解析时间字符串为 (hour, minute)
+        支持格式: HHMMSS, HMMSS, HHMM, HH:MM:SS, HH:MM
+        """
+        if not time_str or time_str == '-':
+            return None
+        
+        try:
+            cleaned = str(time_str).strip().replace(':', '')
+            
+            if len(cleaned) == 6:  # HHMMSS
+                return (int(cleaned[:2]), int(cleaned[2:4]))
+            elif len(cleaned) == 5:  # HMMSS
+                return (int(cleaned[0]), int(cleaned[1:3]))
+            elif len(cleaned) == 4:  # HHMM
+                return (int(cleaned[:2]), int(cleaned[2:4]))
+            elif len(cleaned) == 3:  # HMM
+                return (int(cleaned[0]), int(cleaned[1:3]))
+        except Exception as e:
+            logger.debug(f"解析时间失败: {time_str}, {e}")
+        
+        return None
     
     def _check_first_board_quality(self, row: pd.Series) -> Dict:
         """

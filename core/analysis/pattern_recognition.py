@@ -75,29 +75,33 @@ class PatternRecognition:
             logger.warning(f"✗ 首板突破策略加载失败: {e}")
             self.first_board_breakout = None
         
-        try:
-            from core.pattern.divergence_to_consensus import DivergenceToConsensusStrategy
-            self.divergence_to_consensus = DivergenceToConsensusStrategy(self.dm, self.se)
-            logger.info("✓ 分歧转一致策略加载成功")
-        except Exception as e:
-            logger.warning(f"✗ 分歧转一致策略加载失败: {e}")
-            self.divergence_to_consensus = None
+        # 注释掉不需要的策略：分歧转一致、卡位板、炸板回封
+        # try:
+        #     from core.pattern.divergence_to_consensus import DivergenceToConsensusStrategy
+        #     self.divergence_to_consensus = DivergenceToConsensusStrategy(self.dm, self.se)
+        #     logger.info("✓ 分歧转一致策略加载成功")
+        # except Exception as e:
+        #     logger.warning(f"✗ 分歧转一致策略加载失败: {e}")
+        #     self.divergence_to_consensus = None
+        self.divergence_to_consensus = None
         
-        try:
-            from core.pattern.position_battle import PositionBattleStrategy
-            self.position_battle = PositionBattleStrategy(self.dm)
-            logger.info("✓ 卡位板策略加载成功")
-        except Exception as e:
-            logger.warning(f"✗ 卡位板策略加载失败: {e}")
-            self.position_battle = None
+        # try:
+        #     from core.pattern.position_battle import PositionBattleStrategy
+        #     self.position_battle = PositionBattleStrategy(self.dm)
+        #     logger.info("✓ 卡位板策略加载成功")
+        # except Exception as e:
+        #     logger.warning(f"✗ 卡位板策略加载失败: {e}")
+        #     self.position_battle = None
+        self.position_battle = None
         
-        try:
-            from core.pattern.blast_reseal import BlastResealAnalyzer
-            self.blast_reseal = BlastResealAnalyzer(self.dm)
-            logger.info("✓ 炸板回封策略加载成功")
-        except Exception as e:
-            logger.warning(f"✗ 炸板回封策略加载失败: {e}")
-            self.blast_reseal = None
+        # try:
+        #     from core.pattern.blast_reseal import BlastResealAnalyzer
+        #     self.blast_reseal = BlastResealAnalyzer(self.dm)
+        #     logger.info("✓ 炸板回封策略加载成功")
+        # except Exception as e:
+        #     logger.warning(f"✗ 炸板回封策略加载失败: {e}")
+        #     self.blast_reseal = None
+        self.blast_reseal = None
         
         try:
             from core.pattern.dragon_second_wave import DragonSecondWaveStrategyV2
@@ -107,24 +111,17 @@ class PatternRecognition:
             logger.warning(f"✗ 龙二波策略加载失败: {e}")
             self.dragon_second_wave = None
         
-        # 初始化弱转强V2策略
-        try:
-            from core.pattern.weak_to_strong_v2 import WeakToStrongStrategyV2
-            # 从config获取token，如果没有则使用空字符串
-            tushare_token = getattr(self.dm, 'tushare_token', '') if self.dm else ''
-            self.weak_to_strong_v2 = WeakToStrongStrategyV2(tushare_token=tushare_token)
-            logger.info("✓ 弱转强策略V2加载成功")
-        except Exception as e:
-            logger.warning(f"✗ 弱转强策略V2加载失败: {e}")
-            self.weak_to_strong_v2 = None
+        # 删除弱转强V2策略初始化（已合并到V1）
+        self.weak_to_strong_v2 = None
     
     # ==================== 模式识别接口 ====================
     
     def detect_weak_to_strong(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
                               day_before_yesterday_df: pd.DataFrame = None,
-                              today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
+                              today_date: str = None, yest_date: str = None,
+                              history_pools: Dict[str, pd.DataFrame] = None) -> List[PatternSignal]:
         """
-        弱转强模式识别 - 完整策略逻辑
+        弱转强模式识别 - 动态龙头跟踪版本
         
         Args:
             today_df: 今日涨停池数据
@@ -132,6 +129,7 @@ class PatternRecognition:
             day_before_yesterday_df: 前日涨停池数据
             today_date: 今日日期 (YYYYMMDD)
             yest_date: 昨日日期 (YYYYMMDD)，用于获取准确的昨日收盘价
+            history_pools: 历史涨停池数据（用于趋势龙头识别）
         """
         signals = []
 
@@ -141,11 +139,69 @@ class PatternRecognition:
             logger.warning("[弱转强] 策略未加载")
             return signals
 
-        if today_df.empty or yesterday_df.empty:
-            logger.debug(f"[弱转强] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
+        if today_df.empty:
+            logger.debug(f"[弱转强] 今日数据为空")
             return signals
 
         try:
+            # ========== 阶段1：更新龙头池（识别新龙头 + 确认走弱）==========
+            logger.info("[弱转强] ========== 阶段1：更新龙头池 ==========")
+            
+            # 构建历史池子数据（用于趋势龙头识别）
+            logger.info(f"[弱转强] 传入的history_pools: {len(history_pools) if history_pools else 'None'}天")
+            if history_pools is None:
+                history_pools = {}
+                if yesterday_df is not None and not yesterday_df.empty:
+                    history_pools[yest_date] = yesterday_df
+                if day_before_yesterday_df is not None and not day_before_yesterday_df.empty:
+                    # 假设前日是昨天减1天
+                    try:
+                        from datetime import datetime, timedelta
+                        day_before_date = (datetime.strptime(yest_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+                        history_pools[day_before_date] = day_before_yesterday_df
+                    except:
+                        pass
+                logger.info(f"[弱转强] 构建的history_pools: {len(history_pools)}天")
+            
+            # 获取分时数据（用于走弱确认）
+            today_tick = {}
+            logger.debug(f"[弱转强] 准备获取分时数据...")
+            
+            # 调用新的龙头池更新方法
+            logger.info(f"[弱转强] 调用update_dragon_pools，当前日期: {today_date}")
+            pool_results = self.weak_to_strong.update_dragon_pools(
+                today_zt=today_df,
+                today_tick=today_tick,
+                history_pools=history_pools,
+                date_str=today_date or datetime.now().strftime("%Y%m%d")
+            )
+            
+            # 输出池子更新结果
+            logger.info(f"[弱转强] 龙头池更新完成:")
+            logger.info(f"[弱转强]   - 新识别龙头: {len(pool_results.get('new_dragons', []))}只")
+            for dragon in pool_results.get('new_dragons', []):
+                logger.info(f"[弱转强]     ✓ {dragon.stock_name}({dragon.stock_code}) - {dragon.dragon_type.value}")
+            
+            logger.info(f"[弱转强]   - 确认走弱: {len(pool_results.get('weakened', []))}只")
+            for weakening in pool_results.get('weakened', []):
+                logger.info(f"[弱转强]     ✓ {weakening.stock_name}({weakening.stock_code}) - {weakening.weakening_type}")
+            
+            logger.info(f"[弱转强]   - 过期清除: {len(pool_results.get('expired', []))}只")
+            
+            # 输出当前池子状态
+            pool_summary = self.weak_to_strong.get_pools_summary()
+            logger.info(f"[弱转强] 当前池子状态:")
+            logger.info(f"[弱转强]   - 龙头候选池: {pool_summary['dragon_pool_count']}只")
+            for dragon in pool_summary.get('dragon_pool', []):
+                logger.debug(f"[弱转强]     • {dragon['名称']}({dragon['代码']}) - {dragon['龙头类型']} - {dragon['当前状态']}")
+            
+            logger.info(f"[弱转强]   - 龙头走弱池: {pool_summary['weakening_pool_count']}只")
+            for weakening in pool_summary.get('weakening_pool', []):
+                logger.info(f"[弱转强]     • {weakening['名称']}({weakening['代码']}) - {weakening['走弱类型']} - 回调{weakening['回调幅度']}")
+            
+            # ========== 阶段2：从走弱池中检测转强信号 ==========
+            logger.info("[弱转强] ========== 阶段2：检测转强信号 ==========")
+            
             total_checked = 0
             total_passed = 0
 
@@ -156,30 +212,23 @@ class PatternRecognition:
 
                 logger.debug(f"[弱转强] 检测 {name}({code})...")
 
+                # 检查是否在走弱池中
+                if code not in self.weak_to_strong.weakening_pool:
+                    logger.debug(f"[弱转强]   {name} 不在走弱池中，跳过")
+                    continue
+                
+                weakening = self.weak_to_strong.weakening_pool[code]
+                logger.info(f"[弱转强]   {name} 在走弱池中，走弱类型={weakening.weakening_type}，开始分析转强...")
+
+                # 获取昨日数据
                 yest_match = yesterday_df[yesterday_df['代码'].astype(str).str.zfill(6) == code]
                 if yest_match.empty:
-                    logger.debug(f"[弱转强]   {name} 昨日未涨停，跳过")
-                    continue
+                    logger.debug(f"[弱转强]   {name} 昨日未涨停，无法计算高开")
+                    yest_row = None
+                else:
+                    yest_row = yest_match.iloc[0]
 
-                yest_row = yest_match.iloc[0]
-                logger.debug(f"[弱转强]   {name} 昨日已涨停，开始分析...")
-
-                board_height = self._calculate_board_height(code, today_row, yesterday_df, day_before_yesterday_df)
-                logger.debug(f"[弱转强]   {name} 连板高度={board_height}")
-
-                min_height = self.weak_to_strong.params.get("min_board_height", 3)
-                max_height = self.weak_to_strong.params.get("max_board_height", 8)
-                if not (min_height <= board_height <= max_height):
-                    logger.debug(f"[弱转强]   {name} 过滤: 连板高度{board_height}不在[{min_height},{max_height}]范围内")
-                    continue
-
-                weak_quality = self._analyze_yesterday_weak(yest_row)
-                logger.debug(f"[弱转强]   {name} 昨日弱类型={weak_quality.get('weak_type', '无')}, 质量分={weak_quality.get('score', 0)}")
-                
-                if not weak_quality.get('is_valid_weak', False):
-                    logger.debug(f"[弱转强]   {name} 过滤: 昨日不是有效弱板，原因={weak_quality.get('reason', '未知')}")
-                    continue
-
+                # 分析竞价数据
                 auction_analysis = {}
                 if today_date and self.dm:
                     try:
@@ -190,38 +239,65 @@ class PatternRecognition:
                     except Exception as e:
                         logger.debug(f"[弱转强]   {name} 获取竞价数据失败: {e}")
 
+                # 检查转强条件
+                gap = auction_analysis.get('gap', 0)
+                min_gap = self.weak_to_strong.params.get('min_gap', 0.03)
+                max_gap = self.weak_to_strong.params.get('max_gap', 0.08)
+                
+                logger.debug(f"[弱转强]   {name} 转强条件检查: 高开{gap*100:.1f}% (要求{min_gap*100:.0f}%-{max_gap*100:.0f}%)")
+                
+                if not (min_gap <= gap <= max_gap):
+                    logger.debug(f"[弱转强]   {name} 过滤: 高开{gap*100:.1f}%不在[{min_gap*100:.0f}%,{max_gap*100:.0f}%]范围内")
+                    continue
+                
+                # 竞价量检查
+                auction_vol_ratio = auction_analysis.get('auction_vol_ratio', 0)
+                min_vol_ratio = self.weak_to_strong.params.get('min_auction_vol_ratio', 0.10)
+                logger.debug(f"[弱转强]   {name} 竞价量比: {auction_vol_ratio*100:.1f}% (要求>{min_vol_ratio*100:.0f}%)")
+                
+                if auction_vol_ratio < min_vol_ratio:
+                    logger.debug(f"[弱转强]   {name} 过滤: 竞价量比{auction_vol_ratio*100:.1f}% < {min_vol_ratio*100:.0f}%")
+                    continue
+
                 limit_up_time = str(today_row.get('首次封板时间', '')).strip()
                 time_score = self._calculate_time_score(limit_up_time)
                 logger.debug(f"[弱转强]   {name} 涨停时间={limit_up_time}, 时间分={time_score}")
 
-                confidence = self._calculate_weak_to_strong_confidence(weak_quality, auction_analysis, time_score, board_height)
+                # 计算置信度
+                confidence = self._calculate_weak_to_strong_confidence_v2(weakening, auction_analysis, time_score)
                 logger.debug(f"[弱转强]   {name} 综合置信度={confidence:.2f}")
 
                 if confidence < 0.65:
                     logger.debug(f"[弱转强]   {name} 过滤: 置信度{confidence:.2f} < 0.65")
                     continue
 
+                # 从weakening对象获取龙头信息
+                peak_height = weakening.peak_board_height if weakening.dragon_type.value == "连板龙头" else 0
+                weakening_type = weakening.weakening_type
+                
                 signal = PatternSignal(
                     pattern_type="弱转强",
                     stock_code=code,
                     stock_name=name,
                     confidence=round(confidence, 2),
-                    description=f"{board_height}板{weak_quality.get('weak_type', '弱板')}后转强，次日高开{auction_analysis.get('gap', 0)*100:.1f}%竞价量{auction_analysis.get('auction_vol_ratio', 0)*100:.1f}%",
+                    description=f"{weakening.dragon_type.value}{peak_height}板后{weakening_type}转强，次日高开{auction_analysis.get('gap', 0)*100:.1f}%竞价量{auction_analysis.get('auction_vol_ratio', 0)*100:.1f}%",
                     key_metrics={
-                        "连板高度": board_height,
-                        "昨日弱类型": weak_quality.get('weak_type', ''),
-                        "昨日烂板质量": weak_quality.get('score', 0),
+                        "龙头类型": weakening.dragon_type.value,
+                        "最高连板": peak_height,
+                        "走弱类型": weakening_type,
+                        "走弱日期": weakening.weakening_date,
                         "次日高开": f"{auction_analysis.get('gap', 0)*100:.1f}%",
                         "竞价量比": f"{auction_analysis.get('auction_vol_ratio', 0)*100:.1f}%",
                         "涨停时间": limit_up_time,
+                        "回调幅度": f"{weakening.max_drawdown*100:.1f}%",
                     },
                     entry_price=today_row.get('涨停价', 0),
                     stop_loss=today_row.get('涨停价', 0) * 0.93,
                     take_profit=today_row.get('涨停价', 0) * 1.15,
                     position_size="heavy" if confidence >= 0.80 else "medium",
                     validation_rules=[
-                        f"{board_height}板高标（身份）",
-                        f"昨日{weak_quality.get('weak_type', '弱板')}（弱）",
+                        f"{weakening.dragon_type.value}{peak_height}板（身份）",
+                        f"{weakening_type}后走弱（弱）",
                         f"次日高开{auction_analysis.get('gap', 0)*100:.1f}%（超预期）",
                         f"竞价量{auction_analysis.get('auction_vol_ratio', 0)*100:.1f}%（资金抢筹）",
                         "开盘不回踩，快速上板（确认强）"
@@ -325,10 +401,14 @@ class PatternRecognition:
                 is_fast_limit = self._is_fast_limit(limit_up_time, max_time="09:40:00")
                 logger.debug(f"[二板定龙]   {name} 涨停时间={limit_up_time}, 是否快速={is_fast_limit}")
 
-                seal_amount = today_row.get('封单额', 0) or today_row.get('封板资金', 0)
+                # 获取封单金额，尝试多个可能的字段名
+                seal_amount = (today_row.get('封单额', 0) or 
+                              today_row.get('封板资金', 0) or 
+                              today_row.get('封单金额', 0) or
+                              today_row.get('封单量', 0) * today_row.get('涨停价', 0))
                 float_cap = today_row.get('流通市值', 1)
                 seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
-                logger.debug(f"[二板定龙]   {name} 封单强度: {seal_ratio*100:.2f}%")
+                logger.debug(f"[二板定龙]   {name} 封单额={seal_amount}, 流通市值={float_cap}, 封单强度: {seal_ratio*100:.2f}%")
 
                 confidence = self._calculate_second_board_confidence(first_board_quality, gap_ratio, is_fast_limit, seal_ratio)
                 logger.debug(f"[二板定龙]   {name} 综合置信度={confidence:.2f}")
@@ -669,36 +749,52 @@ class PatternRecognition:
         
         Args:
             auction: 竞价数据字典
-            yesterday: 昨日涨停池数据
+            yesterday: 昨日涨停池数据（可能为None）
             today: 今日涨停池数据
             yest_date: 昨日日期 (YYYYMMDD)，用于获取准确的昨日收盘价
         """
-        open_price = auction.get('开盘价', 0)
+        open_price = auction.get('开盘价', 0) if auction else 0
         
-        # 获取昨日收盘价（优先使用tushare日线数据）
-        yest_close = yesterday.get('收盘价', 0)
-        code = str(yesterday.get('代码', '')).zfill(6)
-        name = yesterday.get('名称', '')
+        # 从今日数据获取代码和名称
+        code = str(today.get('代码', '')).zfill(6) if today is not None else ''
+        name = today.get('名称', '') if today is not None else ''
         
-        if yest_close == 0 and self.dm and yest_date:
+        # 获取昨日收盘价
+        yest_close = 0
+        
+        # 1. 优先从昨日涨停池数据获取
+        if yesterday is not None and not isinstance(yesterday, type(None)):
+            yest_close = yesterday.get('收盘价', 0)
+            if yest_close == 0:
+                yest_close = yesterday.get('最新价', 0)
+        
+        # 2. 如果涨停池没有，使用tushare日线数据
+        if yest_close == 0 and self.dm and yest_date and code:
             try:
                 daily_price = self.dm.get_stock_daily_price(code, yest_date)
                 if daily_price:
                     yest_close = daily_price.get('close', 0)
-                    logger.debug(f"[_analyze_auction_data] {name} 从tushare获取昨日收盘价: {yest_close}")
+                    logger.debug(f"[_analyze_auction_data] {name}({code}) 从tushare获取昨日收盘价: {yest_close}")
             except Exception as e:
-                logger.debug(f"[_analyze_auction_data] {name} 从tushare获取收盘价失败: {e}")
+                logger.debug(f"[_analyze_auction_data] {name}({code}) 从tushare获取收盘价失败: {e}")
         
-        # 如果仍然没有，使用昨日最新价
-        if yest_close == 0:
-            yest_close = yesterday.get('最新价', 1)
-            logger.debug(f"[_analyze_auction_data] {name} 使用昨日最新价作为收盘价: {yest_close}")
+        # 3. 如果仍然没有，使用pre_close从今日数据推算
+        if yest_close == 0 and today is not None:
+            yest_close = today.get('昨收', 0) or today.get('pre_close', 0)
+            if yest_close > 0:
+                logger.debug(f"[_analyze_auction_data] {name}({code}) 使用今日数据的昨收价: {yest_close}")
         
-        gap = (open_price - yest_close) / yest_close if yest_close > 0 else 0
-        logger.debug(f"[_analyze_auction_data] {name} 高开计算: ({open_price} - {yest_close}) / {yest_close} = {gap*100:.2f}%")
+        # 计算高开幅度
+        if yest_close > 0 and open_price > 0:
+            gap = (open_price - yest_close) / yest_close
+            logger.debug(f"[_analyze_auction_data] {name}({code}) 高开计算: ({open_price} - {yest_close}) / {yest_close} = {gap*100:.2f}%")
+        else:
+            gap = 0
+            logger.debug(f"[_analyze_auction_data] {name}({code}) 数据不足无法计算高开: open={open_price}, yest_close={yest_close}")
 
-        auction_vol = auction.get('竞价成交量', 0)
-        yest_vol = yesterday.get('成交量', 1)
+        # 计算竞价量比
+        auction_vol = auction.get('竞价成交量', 0) if auction else 0
+        yest_vol = yesterday.get('成交量', 1) if yesterday is not None else 1
         auction_vol_ratio = auction_vol / yest_vol if yest_vol > 0 else 0
 
         return {
@@ -884,7 +980,9 @@ class PatternRecognition:
         if not limit_up_time:
             return False
         try:
-            return limit_up_time <= max_time
+            # 统一格式化时间
+            formatted_time = self._format_time(limit_up_time)
+            return formatted_time <= max_time
         except:
             return False
 
@@ -1202,13 +1300,27 @@ class PatternRecognition:
                     sector_hot = stock_sector in hot_sectors
 
                 # 日期已经是YYYYMMDD格式，直接使用
+                # 获取历史数据以启用双轨制判断（连板 或 涨幅）
+                hist_data = None
+                try:
+                    if hasattr(self.dm, 'get_stock_daily') and hasattr(self.dm, 'date_utils'):
+                        # 获取近20日历史数据用于涨幅统计
+                        # 使用 get_last_n_trade_dates 获取最近25个交易日
+                        last_n_dates = self.dm.date_utils.get_last_n_trade_dates(25, today_date)
+                        if last_n_dates:
+                            start_date = last_n_dates[-1]  # 最早的一个
+                            hist_data = self.dm.get_stock_daily(code, start_date, today_date)
+                except Exception as e:
+                    logger.debug(f"[龙二波] 获取{code}历史数据失败: {e}")
+                
                 trade_signal = self.dragon_second_wave.detect_second_wave(
                     stock_code=code,
                     stock_name=name,
                     today_str=today_date,
                     recent_zt_pools=recent_15d_pools,
                     today_data=today_row,
-                    sector_hot=sector_hot
+                    sector_hot=sector_hot,
+                    hist_data=hist_data  # 传入历史数据启用双轨制
                 )
 
                 if trade_signal:
@@ -1239,190 +1351,13 @@ class PatternRecognition:
 
         return signals
 
+    # 删除detect_weak_to_strong_v2方法（已合并到V1分层策略）
+    # 保留此方法占位，避免调用处报错
     def detect_weak_to_strong_v2(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
                                   today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
-        """
-        弱转强模式识别 V2 - 基于Tushare股东数据的实际换手率计算
-        
-        核心改进：
-        1. 连板高度分层：1-2板(低位) + 5板以上(高位)，排除3-4板中位股陷阱
-        2. 实际换手率计算：基于Tushare Pro股东数据，剔除大股东锁定筹码
-        3. 分层换手率阈值：低位实际换手>25%，高位实际换手>35%
-        
-        Args:
-            today_df: 今日涨停池数据
-            yesterday_df: 昨日涨停池数据
-            today_date: 今日日期 (YYYYMMDD)
-            yest_date: 昨日日期 (YYYYMMDD)
-        """
-        signals = []
-        
-        logger.debug(f"[弱转强V2] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
-        
-        if self.weak_to_strong_v2 is None:
-            logger.warning("[弱转强V2] 策略未加载")
-            return signals
-        
-        if today_df.empty or yesterday_df.empty:
-            logger.debug(f"[弱转强V2] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
-            return signals
-        
-        try:
-            total_checked = 0
-            total_passed = 0
-            
-            for _, today_row in today_df.iterrows():
-                code = str(today_row.get('代码', '')).zfill(6)
-                name = today_row.get('名称', '')
-                total_checked += 1
-                
-                logger.debug(f"[弱转强V2] 检测 {name}({code})...")
-                
-                # 检查昨日是否涨停
-                yest_match = yesterday_df[yesterday_df['代码'].astype(str).str.zfill(6) == code]
-                if yest_match.empty:
-                    logger.debug(f"[弱转强V2]   {name} 昨日未涨停，跳过")
-                    continue
-                
-                yest_row = yest_match.iloc[0]
-                
-                # 获取连板高度
-                board_height = today_row.get('连板数', 0)
-                if board_height == 0:
-                    # 如果没有连板数字段，尝试计算
-                    board_height = self._calculate_board_height(code, today_row, yesterday_df, None)
-                
-                logger.debug(f"[弱转强V2]   {name} 连板高度={board_height}")
-                
-                # 调用V2策略检测
-                try:
-                    # 获取实际字段值（涨停池数据字段名兼容）
-                    # 涨停池数据字段：最新价(close), 流通市值(float_mv), 成交额(amount), 换手率(turnover_ratio)
-                    yest_close = yest_row.get('最新价', yest_row.get('收盘价', 0))
-                    yest_turnover = yest_row.get('换手率', 0)
-
-                    logger.debug(f"[弱转强V2]   {name} 涨停池数据: 最新价={yest_close}, 换手率={yest_turnover}")
-
-                    # 使用tushare daily_basic接口获取实际换手率和流通股本
-                    # 优先使用传入的yest_date参数，否则尝试从today_date计算
-                    if yest_date:
-                        yest_date_str = yest_date
-                    elif today_date:
-                        yest_date_str = self.dm.get_date_offset(today_date, -1)
-                    else:
-                        logger.warning(f"[弱转强V2]   {name} 无法确定昨日日期，跳过")
-                        continue
-
-                    basic_data = self.dm.get_stock_daily_basic(code, yest_date_str)
-
-                    if not basic_data:
-                        logger.warning(f"[弱转强V2]   {name} 获取daily_basic数据失败，跳过")
-                        continue
-
-                    # 从daily_basic获取关键数据
-                    float_shares = basic_data.get('float_share', 0)  # 流通股本（万股）
-                    free_shares = basic_data.get('free_share', 0)  # 自由流通股本（万股）
-                    real_turnover = basic_data.get('turnover_rate_f', 0)  # 实际换手率（%）
-                    daily_close = basic_data.get('close', yest_close)
-
-                    if float_shares <= 0:
-                        logger.warning(f"[弱转强V2]   {name} 流通股本为0，跳过")
-                        continue
-
-                    logger.debug(f"[弱转强V2]   {name} daily_basic数据: 流通股本={float_shares:.2f}万股, "
-                                f"自由流通股本={free_shares:.2f}万股, 实际换手率={real_turnover:.2f}%")
-
-                    # 获取今日开盘价（使用daily接口）
-                    today_date_str = today_date if today_date else yest_date_str
-                    today_daily = self.dm.get_stock_daily_data(code, today_date_str)
-                    if today_daily:
-                        today_open = today_daily.get('open', today_row.get('最新价', 0))
-                        logger.debug(f"[弱转强V2]   {name} 今日开盘价: {today_open} (来自daily接口)")
-                    else:
-                        today_open = today_row.get('最新价', 0)
-                        logger.warning(f"[弱转强V2]   {name} 无法获取今日开盘价，使用涨停池最新价: {today_open}")
-
-                    # 准备昨日数据（转换为Series格式）
-                    yesterday_data = pd.Series({
-                        '代码': code,
-                        '名称': name,
-                        '收盘价': daily_close,
-                        '涨停价': yest_row.get('涨停价', daily_close * 1.1 if daily_close > 0 else 0),
-                        '炸板次数': yest_row.get('炸板次数', 0),
-                        '最后封板时间': yest_row.get('最后封板时间', ''),
-                        '涨跌幅': yest_row.get('涨跌幅', 0),
-                        '换手率': real_turnover,  # 使用实际换手率
-                        '流通股本': float_shares * 10000,  # 万股转回股，保持兼容性
-                    })
-
-                    # 准备竞价数据
-                    today_auction = {
-                        '开盘价': today_open,
-                        '竞价成交量': today_row.get('竞价成交量', 0),
-                        '竞价成交额': today_row.get('竞价成交额', 0),
-                    }
-
-                    # 流通股本（万股）
-                    total_float_shares = float_shares
-                    logger.debug(f"[弱转强V2]   {name} 流通股本={total_float_shares:.2f}万股, 实际换手率={real_turnover:.2f}%")
-                    
-                    # 判断是否板块龙头（简化判断：连板数>=2且属于热门板块）
-                    sector_leader = board_height >= 2
-                    
-                    logger.debug(f"[弱转强V2]   {name} 调用策略检测，流通股本={total_float_shares:.2f}万股")
-                    
-                    # 调用V2策略
-                    signal = self.weak_to_strong_v2.detect(
-                        stock_code=code,
-                        stock_name=name,
-                        board_height=board_height,
-                        yesterday_data=yesterday_data,
-                        yesterday_tick=pd.DataFrame(),  # 暂时传入空DataFrame
-                        today_auction=today_auction,
-                        today_tick=pd.DataFrame(),  # 暂时传入空DataFrame
-                        sector_leader=sector_leader,
-                        total_float_shares=total_float_shares
-                    )
-                    
-                    if signal:
-                        total_passed += 1
-                        
-                        # 转换为PatternSignal格式
-                        pattern_signal = PatternSignal(
-                            pattern_type=f"弱转强V2-{signal.pattern_type.value}",
-                            stock_code=signal.stock_code,
-                            stock_name=signal.stock_name,
-                            confidence=signal.confidence,
-                            description=signal.reason,
-                            key_metrics={
-                                **signal.key_metrics,
-                                '实际换手率': signal.turnover_data.get('real_turnover', 0) if signal.turnover_data else 0,
-                                '名义换手率': signal.turnover_data.get('nominal_turnover', 0) if signal.turnover_data else 0,
-                                '锁定筹码占比': signal.turnover_data.get('locked_ratio', 0) if signal.turnover_data else 0,
-                            },
-                            entry_price=signal.entry_price,
-                            stop_loss=signal.stop_loss,
-                            take_profit=signal.take_profit,
-                            position_size=signal.position_size,
-                            validation_rules=signal.validation_rules,
-                            l2_industry=today_row.get('所属行业', '')
-                        )
-                        
-                        signals.append(pattern_signal)
-                        logger.debug(f"[弱转强V2]   {name} 生成信号 (置信度{signal.confidence:.2f})")
-                    else:
-                        logger.debug(f"[弱转强V2]   {name} 未通过检测")
-                        
-                except Exception as e:
-                    logger.error(f"[弱转强V2]   {name} 检测异常: {e}")
-                    continue
-            
-            logger.info(f"[弱转强V2] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 通过{total_passed}只)")
-            
-        except Exception as e:
-            logger.error(f"[弱转强V2] 检测失败: {e}", exc_info=True)
-        
-        return signals
+        """弱转强V2已删除，请使用detect_weak_to_strong"""
+        logger.debug("[弱转强V2] 策略已删除，请使用分层弱转强策略(V1)")
+        return []
 
     def _normalize_date_to_ymd(self, date_str: str) -> str:
         """
@@ -1517,32 +1452,33 @@ class PatternRecognition:
         try:
             logger.info("-" * 40)
             results["弱转强"] = self.detect_weak_to_strong(
-                today_df, yesterday_df, day_before_yesterday_df, today_date_ymd, yesterday_date_ymd
+                today_df, yesterday_df, day_before_yesterday_df, today_date_ymd, yesterday_date_ymd,
+                history_pools=recent_zt_pools
             )
         except Exception as e:
             logger.error(f"弱转强检测失败: {e}")
             results["弱转强"] = []
         
-        # 1.5 弱转强V2检测（基于Tushare股东数据）
-        try:
-            logger.info("-" * 40)
-            logger.info("开始弱转强V2检测（基于实际换手率）...")
-            results["弱转强V2"] = self.detect_weak_to_strong_v2(
-                today_df, yesterday_df, today_date_ymd, yesterday_date_ymd
-            )
-        except Exception as e:
-            logger.error(f"弱转强V2检测失败: {e}")
-            results["弱转强V2"] = []
+        # 注释掉弱转强V2检测（基于Tushare股东数据）
+        # try:
+        #     logger.info("-" * 40)
+        #     logger.info("开始弱转强V2检测（基于实际换手率）...")
+        #     results["弱转强V2"] = self.detect_weak_to_strong_v2(
+        #         today_df, yesterday_df, today_date_ymd, yesterday_date_ymd
+        #     )
+        # except Exception as e:
+        #     logger.error(f"弱转强V2检测失败: {e}")
+        #     results["弱转强V2"] = []
         
-        # 2. 分歧转一致检测
-        try:
-            logger.info("-" * 40)
-            results["分歧转一致"] = self.detect_divergence_to_consensus(
-                today_df, yesterday_df, today_date_ymd, yesterday_date_ymd
-            )
-        except Exception as e:
-            logger.error(f"分歧转一致检测失败: {e}")
-            results["分歧转一致"] = []
+        # 注释掉分歧转一致检测
+        # try:
+        #     logger.info("-" * 40)
+        #     results["分歧转一致"] = self.detect_divergence_to_consensus(
+        #         today_df, yesterday_df, today_date_ymd, yesterday_date_ymd
+        #     )
+        # except Exception as e:
+        #     logger.error(f"分歧转一致检测失败: {e}")
+        #     results["分歧转一致"] = []
         
         # 3. 二板定龙检测
         try:
@@ -1582,25 +1518,25 @@ class PatternRecognition:
             logger.error(f"首板突破检测失败: {e}")
             results["首板突破"] = []
         
-        # 6. 卡位板检测
-        try:
-            logger.info("-" * 40)
-            results["卡位板"] = self.detect_position_battle(
-                today_df, yesterday_df, today_date_ymd
-            )
-        except Exception as e:
-            logger.error(f"卡位板检测失败: {e}")
-            results["卡位板"] = []
+        # 注释掉卡位板检测
+        # try:
+        #     logger.info("-" * 40)
+        #     results["卡位板"] = self.detect_position_battle(
+        #         today_df, yesterday_df, today_date_ymd
+        #     )
+        # except Exception as e:
+        #     logger.error(f"卡位板检测失败: {e}")
+        #     results["卡位板"] = []
         
-        # 7. 炸板回封检测（用于次日观察）
-        try:
-            logger.info("-" * 40)
-            results["炸板回封"] = self.detect_blast_reseal(
-                today_df, today_date_ymd
-            )
-        except Exception as e:
-            logger.error(f"炸板回封检测失败: {e}")
-            results["炸板回封"] = []
+        # 注释掉炸板回封检测（用于次日观察）
+        # try:
+        #     logger.info("-" * 40)
+        #     results["炸板回封"] = self.detect_blast_reseal(
+        #         today_df, today_date_ymd
+        #     )
+        # except Exception as e:
+        #     logger.error(f"炸板回封检测失败: {e}")
+        #     results["炸板回封"] = []
         
         # 汇总统计
         logger.info("=" * 60)
@@ -1658,3 +1594,55 @@ class PatternRecognition:
             if signal.l2_industry and signal.l2_industry in hot_sectors:
                 filtered.append(signal)
         return filtered
+
+    def _calculate_weak_to_strong_confidence_v2(self, weakening, auction: Dict, 
+                                                 time_score: int) -> float:
+        """
+        计算弱转强置信度（V2版本 - 基于龙头池）
+        
+        Args:
+            weakening: WeakeningDragon对象
+            auction: 竞价分析数据
+            time_score: 涨停时间得分
+            
+        Returns:
+            float: 置信度 0-1
+        """
+        confidence = 0.65
+        
+        # 基于走弱类型调整基础分
+        if weakening.weakening_type == "断板":
+            confidence += 0.05  # 断板后转强更有力
+        elif "烂板" in weakening.weakening_type:
+            confidence += 0.03
+        
+        # 基于回调幅度调整（回调适中更好）
+        if 0.03 <= weakening.max_drawdown <= 0.10:
+            confidence += 0.05
+        
+        # 高开幅度
+        gap = auction.get('gap', 0)
+        if gap >= 0.05:
+            confidence += 0.10
+        elif gap >= 0.03:
+            confidence += 0.05
+        
+        # 竞价量
+        vol_ratio = auction.get('auction_vol_ratio', 0)
+        if vol_ratio >= 0.15:
+            confidence += 0.10
+        elif vol_ratio >= 0.10:
+            confidence += 0.05
+        
+        # 涨停时间
+        if time_score >= 80:
+            confidence += 0.10
+        elif time_score >= 60:
+            confidence += 0.05
+        
+        # 龙头类型加成
+        if weakening.dragon_type.value == "连板龙头":
+            if weakening.peak_board_height >= 5:
+                confidence += 0.05
+        
+        return min(confidence, 0.95)

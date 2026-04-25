@@ -132,6 +132,18 @@ RETAIL_TRADER = {
 }
 
 # ============================================
+# 微信公众号配置
+# ============================================
+WECHAT_CONFIG = {
+    "enabled": True,  # 是否启用公众号发布
+    "app_id": os.getenv("WECHAT_APP_ID", ""),  # 公众号AppID
+    "app_secret": os.getenv("WECHAT_APP_SECRET", ""),  # 公众号AppSecret
+    "author": "A股情绪系统",  # 文章作者
+    "preview_wx": "gh_f1c18d75c665",  # 预览微信号（测试用）
+    "auto_publish": False,  # 是否自动发布（False则只生成预览）
+}
+
+# ============================================
 # 日志配置
 # ============================================
 LOG_CONFIG = {
