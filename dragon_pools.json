@@ -84,8 +84,8 @@
       "weakening_date": "20260420",
       "weakening_type": "烂板(3次)",
       "weakening_price": 18.79,
-      "current_price": 18.79,
-      "max_drawdown": 0.0,
+      "current_price": 16.75,
+      "max_drawdown": 0.10856838744012769,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -113,8 +113,8 @@
       "weakening_date": "20260420",
       "weakening_type": "烂板(2次)",
       "weakening_price": 19.46,
-      "current_price": 19.46,
-      "max_drawdown": 0.0,
+      "current_price": 22.3,
+      "max_drawdown": -0.1459403905447071,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -142,8 +142,8 @@
       "weakening_date": "20260423",
       "weakening_type": "断板",
       "weakening_price": 52.2,
-      "current_price": 52.2,
-      "max_drawdown": 0.0,
+      "current_price": 57.28,
+      "max_drawdown": -0.09731800766283522,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -171,8 +171,8 @@
       "weakening_date": "20260423",
       "weakening_type": "断板",
       "weakening_price": 24.37,
-      "current_price": 24.37,
-      "max_drawdown": 0.0,
+      "current_price": 22.85,
+      "max_drawdown": 0.062371768567911344,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -200,8 +200,8 @@
       "weakening_date": "20260420",
       "weakening_type": "烂板(2次)",
       "weakening_price": 8.57,
-      "current_price": 8.57,
-      "max_drawdown": 0.0,
+      "current_price": 8.07,
+      "max_drawdown": 0.058343057176196034,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -229,8 +229,8 @@
       "weakening_date": "20260420",
       "weakening_type": "尾盘板",
       "weakening_price": 91.69,
-      "current_price": 91.69,
-      "max_drawdown": 0.0,
+      "current_price": 91.07,
+      "max_drawdown": 0.006761915148871246,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -258,8 +258,8 @@
       "weakening_date": "20260423",
       "weakening_type": "断板",
       "weakening_price": 64.36,
-      "current_price": 64.36,
-      "max_drawdown": 0.0,
+      "current_price": 58.3,
+      "max_drawdown": 0.09415786202610321,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -287,8 +287,8 @@
       "weakening_date": "20260420",
       "weakening_type": "烂板(2次)",
       "weakening_price": 31.24,
-      "current_price": 31.24,
-      "max_drawdown": 0.0,
+      "current_price": 33.44,
+      "max_drawdown": -0.07042253521126758,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -316,8 +316,8 @@
       "weakening_date": "20260421",
       "weakening_type": "断板",
       "weakening_price": 6.81,
-      "current_price": 6.74,
-      "max_drawdown": 0.010279001468428693,
+      "current_price": 6.15,
+      "max_drawdown": 0.09691629955947126,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -345,8 +345,8 @@
       "weakening_date": "20260421",
       "weakening_type": "断板",
       "weakening_price": 40.96,
-      "current_price": 40.96,
-      "max_drawdown": 0.0,
+      "current_price": 38.4,
+      "max_drawdown": 0.06250000000000006,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -374,8 +374,8 @@
       "weakening_date": "20260421",
       "weakening_type": "断板",
       "weakening_price": 10.19,
-      "current_price": 10.19,
-      "max_drawdown": 0.0,
+      "current_price": 9.12,
+      "max_drawdown": 0.10500490677134448,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -403,8 +403,8 @@
       "weakening_date": "20260421",
       "weakening_type": "断板",
       "weakening_price": 23.9,
-      "current_price": 25.87,
-      "max_drawdown": -0.08242677824267793,
+      "current_price": 25.89,
+      "max_drawdown": -0.08326359832635992,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -432,8 +432,8 @@
       "weakening_date": "20260421",
       "weakening_type": "尾盘板",
       "weakening_price": 21.42,
-      "current_price": 21.42,
-      "max_drawdown": 0.0,
+      "current_price": 19.05,
+      "max_drawdown": 0.11064425770308127,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -461,8 +461,8 @@
       "weakening_date": "20260422",
       "weakening_type": "断板",
       "weakening_price": 24.3,
-      "current_price": 24.3,
-      "max_drawdown": 0.0,
+      "current_price": 30.22,
+      "max_drawdown": -0.24362139917695466,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -490,8 +490,8 @@
       "weakening_date": "20260422",
       "weakening_type": "断板",
       "weakening_price": 5.2,
-      "current_price": 5.2,
-      "max_drawdown": 0.0,
+      "current_price": 4.85,
+      "max_drawdown": 0.0673076923076924,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -519,8 +519,8 @@
       "weakening_date": "20260422",
       "weakening_type": "烂板(4次)",
       "weakening_price": 372.91,
-      "current_price": 372.91,
-      "max_drawdown": 0.0,
+      "current_price": 385.73,
+      "max_drawdown": -0.034378268214850745,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -548,8 +548,8 @@
       "weakening_date": "20260423",
       "weakening_type": "烂板(3次)",
       "weakening_price": 5.43,
-      "current_price": 5.43,
-      "max_drawdown": -0.09919028340080957,
+      "current_price": 4.89,
+      "max_drawdown": 0.010121457489878685,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -577,8 +577,8 @@
       "weakening_date": "20260423",
       "weakening_type": "断板",
       "weakening_price": 186.34,
-      "current_price": 186.34,
-      "max_drawdown": 0.0,
+      "current_price": 187.9,
+      "max_drawdown": -0.00837179349576045,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -606,8 +606,8 @@
       "weakening_date": "20260423",
       "weakening_type": "断板",
       "weakening_price": 13.15,
-      "current_price": 13.15,
-      "max_drawdown": 0.0,
+      "current_price": 13.71,
+      "max_drawdown": -0.04258555133079851,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -635,8 +635,8 @@
       "weakening_date": "20260423",
       "weakening_type": "断板",
       "weakening_price": 30.42,
-      "current_price": 30.42,
-      "max_drawdown": 0.0,
+      "current_price": 30.49,
+      "max_drawdown": -0.0023011176857329627,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -664,8 +664,8 @@
       "weakening_date": "20260424",
       "weakening_type": "断板",
       "weakening_price": 7.27,
-      "current_price": 7.27,
-      "max_drawdown": 0.0,
+      "current_price": 6.67,
+      "max_drawdown": 0.08253094910591467,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -693,8 +693,8 @@
       "weakening_date": "20260424",
       "weakening_type": "断板",
       "weakening_price": 9.83,
-      "current_price": 9.83,
-      "max_drawdown": 0.0,
+      "current_price": 9.2,
+      "max_drawdown": 0.06408952187182103,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -722,8 +722,8 @@
       "weakening_date": "20260424",
       "weakening_type": "断板",
       "weakening_price": 7.19,
-      "current_price": 7.19,
-      "max_drawdown": 0.0,
+      "current_price": 7.17,
+      "max_drawdown": 0.0027816411682893547,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -763,5 +763,5 @@
       }
     }
   },
-  "update_time": "20260425 08:25:54"
+  "update_time": "20260426 16:26:54"
 }

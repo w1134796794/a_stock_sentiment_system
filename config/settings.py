@@ -141,6 +141,14 @@ WECHAT_CONFIG = {
     "author": "A股情绪系统",  # 文章作者
     "preview_wx": "gh_f1c18d75c665",  # 预览微信号（测试用）
     "auto_publish": False,  # 是否自动发布（False则只生成预览）
+    
+    # LLM配置（用于生成描述性报告）
+    "use_llm": True,  # 是否使用LLM生成报告
+    "llm_api_key": os.getenv("DASHSCOPE_API_KEY", "your-api-key-here"),  # LLM API密钥
+    # 支持的模型：
+    # - OpenAI: "gpt-3.5-turbo", "gpt-4"
+    # - 通义千问: "qwen-turbo", "qwen-plus", "qwen-max"
+    "llm_model": "qwen-turbo",  # LLM模型名称
 }
 
 # ============================================

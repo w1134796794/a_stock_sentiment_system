@@ -322,9 +322,17 @@ class WeakToStrongStrategy:
                            today_zt: pd.DataFrame,
                            today_tick: Dict[str, pd.DataFrame],
                            history_pools: Dict[str, pd.DataFrame],
-                           date_str: str) -> Dict:
+                           date_str: str,
+                           today_daily: pd.DataFrame = None) -> Dict:
         """
         每日更新龙头池和走弱池
+        
+        Args:
+            today_zt: 当日涨停数据
+            today_tick: 当日tick数据
+            history_pools: 历史涨停池数据
+            date_str: 日期字符串
+            today_daily: 当日全市场日线数据（用于更新走弱池价格）
         
         Returns:
             Dict: {
@@ -369,13 +377,44 @@ class WeakToStrongStrategy:
         logger.info(f"[弱转强] ========== 阶段3: 更新走弱池 ==========")
         logger.info(f"[弱转强] 更新{len(self.weakening_pool)}只走弱股票数据")
         for code, weakening in list(self.weakening_pool.items()):
-            # 更新当前价格
-            stock_row = today_zt[today_zt['代码'].astype(str).str.zfill(6) == code]
-            if not stock_row.empty:
-                weakening.current_price = stock_row.iloc[0].get('最新价', 0)
+            # 更新当前价格 - 优先从全市场日线数据获取，其次从涨停池获取，最后通过data_manager获取
+            current_price = 0
+            if today_daily is not None and not today_daily.empty:
+                # 从全市场日线数据查找
+                stock_row = today_daily[today_daily['代码'].astype(str).str.zfill(6) == code]
+                if not stock_row.empty:
+                    current_price = stock_row.iloc[0].get('最新价', 0)
+                    if current_price == 0:
+                        current_price = stock_row.iloc[0].get('收盘', 0)
+                    if current_price == 0:
+                        current_price = stock_row.iloc[0].get('close', 0)
+            
+            # 如果在日线数据中没找到，尝试从涨停池查找
+            if current_price == 0:
+                stock_row = today_zt[today_zt['代码'].astype(str).str.zfill(6) == code]
+                if not stock_row.empty:
+                    current_price = stock_row.iloc[0].get('最新价', 0)
+            
+            # 如果仍然没有找到价格，通过data_manager获取该股票的日线数据
+            if current_price == 0 and self.dm is not None:
+                try:
+                    # 获取该股票当日的日线数据
+                    stock_daily = self.dm.get_stock_daily(code, date_str, date_str)
+                    if stock_daily is not None and not stock_daily.empty:
+                        current_price = stock_daily.iloc[0].get('close', 0)
+                        if current_price == 0:
+                            current_price = stock_daily.iloc[-1].get('close', 0)
+                        logger.debug(f"[弱转强] 通过data_manager获取{weakening.stock_name}({code})价格: {current_price}")
+                except Exception as e:
+                    logger.debug(f"[弱转强] 通过data_manager获取价格失败 {code}: {e}")
+            
+            if current_price > 0:
+                weakening.current_price = current_price
                 # 计算回调幅度
                 weakening.max_drawdown = (weakening.peak_price - weakening.current_price) / weakening.peak_price
-                logger.debug(f"[弱转强] 更新{weakening.stock_name}({code})价格: {weakening.current_price}, 回调{weakening.max_drawdown*100:.1f}%")
+                logger.info(f"[弱转强] 更新{weakening.stock_name}({code})价格: {weakening.current_price:.2f}, 回调{weakening.max_drawdown*100:.1f}%")
+            else:
+                logger.warning(f"[弱转强] 无法获取{weakening.stock_name}({code})的当前价格")
             
             # 检查是否A杀（回调超过15%）
             if weakening.max_drawdown > self.params['max_drawdown_for_recovery']:
@@ -453,6 +492,10 @@ class WeakToStrongStrategy:
                 # 检查是否已经是连板龙头（连板数>=4）
                 if board_height >= self.params['min_board_height']:
                     logger.info(f"[弱转强-龙头识别] ✓ 连板龙头: {name}({code}) - {board_height}板，所属板块:{sector}")
+                    
+                    # 计算10日涨幅和涨停次数
+                    total_rise_10d, limit_up_count = self._calc_10d_stats(code, date_str)
+                    
                     dragon = DragonCandidate(
                         stock_code=code,
                         stock_name=name,
@@ -462,8 +505,8 @@ class WeakToStrongStrategy:
                         peak_date=date_str,
                         entry_date=date_str,
                         sector_name=sector,
-                        total_rise_10d=0.0,
-                        limit_up_count=board_height
+                        total_rise_10d=total_rise_10d,
+                        limit_up_count=limit_up_count if limit_up_count > 0 else board_height
                     )
                     new_dragons.append(dragon)
                     continuous_count += 1
@@ -666,6 +709,52 @@ class WeakToStrongStrategy:
             logger.debug(f"[弱转强-趋势龙头] 检查失败 {code}: {e}")
         
         return None
+    
+    def _calc_10d_stats(self, code: str, date_str: str) -> Tuple[float, int]:
+        """
+        计算股票近10日涨幅和涨停次数
+        
+        Args:
+            code: 股票代码
+            date_str: 日期字符串
+            
+        Returns:
+            Tuple[10日涨幅, 涨停次数]
+        """
+        try:
+            # 获取近15个交易日数据（确保有足够数据）
+            if hasattr(self.dm, 'date_utils'):
+                last_n_dates = self.dm.date_utils.get_last_n_trade_dates(15, date_str)
+                if not last_n_dates or len(last_n_dates) < 10:
+                    return 0.0, 0
+                start_date = last_n_dates[-1]
+            else:
+                from datetime import datetime, timedelta
+                start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=20)).strftime("%Y%m%d")
+            
+            # 获取日线数据
+            daily_df = self.dm.get_stock_daily(code, start_date, date_str)
+            
+            if daily_df is None or daily_df.empty or len(daily_df) < 5:
+                return 0.0, 0
+            
+            # 取最近10个交易日
+            daily_df = daily_df.sort_values('trade_date').tail(10)
+            
+            # 计算累计涨幅
+            first_close = daily_df.iloc[0]['close']
+            last_close = daily_df.iloc[-1]['close']
+            total_rise = (last_close - first_close) / first_close if first_close > 0 else 0
+            
+            # 统计涨停次数（涨幅>=9.5%）
+            pct_col = 'pct_chg' if 'pct_chg' in daily_df.columns else 'pct_change'
+            limit_up_count = len(daily_df[daily_df[pct_col] >= 9.5])
+            
+            return total_rise, limit_up_count
+            
+        except Exception as e:
+            logger.debug(f"[弱转强] 计算10日统计失败 {code}: {e}")
+            return 0.0, 0
     
     def _check_trend_dragon_by_daily(self,
                                      code: str,

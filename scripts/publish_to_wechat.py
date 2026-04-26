@@ -224,9 +224,27 @@ def publish_report(date: str, preview: bool = True, preview_wx: str = None):
     if not report_data:
         return False
     
-    # 格式化报告
-    formatter = ReportFormatter()
-    html_content = formatter.format_sentiment_report(report_data)
+    # 检查是否使用LLM生成报告
+    use_llm = WECHAT_CONFIG.get('use_llm', False)
+    llm_api_key = WECHAT_CONFIG.get('llm_api_key')
+    
+    if use_llm and llm_api_key:
+        logger.info("使用LLM生成描述性报告...")
+        try:
+            from core.publish.llm_report_generator import LLMReportGenerator
+            llm_model = WECHAT_CONFIG.get('llm_model', 'qwen-turbo')
+            llm_generator = LLMReportGenerator(api_key=llm_api_key, model=llm_model)
+            html_content = llm_generator.generate_report(report_data)
+            logger.info("✓ LLM报告生成完成")
+        except Exception as e:
+            logger.warning(f"LLM报告生成失败，使用默认格式: {e}")
+            # 降级为默认格式
+            formatter = ReportFormatter()
+            html_content = formatter.format_sentiment_report(report_data)
+    else:
+        # 使用默认格式
+        formatter = ReportFormatter()
+        html_content = formatter.format_sentiment_report(report_data)
     
     # 保存HTML文件
     html_file = OUTPUT_DIR / f"公众号报告_{date}.html"
@@ -295,6 +313,85 @@ def publish_report(date: str, preview: bool = True, preview_wx: str = None):
         return result
 
 
+def publish_report_draft_only(date: str) -> bool:
+    """
+    仅生成草稿，不发送预览
+    
+    用于JS接口安全域名未配置时，生成草稿后可在公众号后台手动预览
+    
+    Args:
+        date: 报告日期 (YYYYMMDD)
+        
+    Returns:
+        是否成功
+    """
+    # 检查配置
+    app_id = WECHAT_CONFIG.get('app_id')
+    app_secret = WECHAT_CONFIG.get('app_secret')
+    
+    if not app_id or not app_secret:
+        logger.error("未配置微信公众号AppID或AppSecret")
+        return False
+    
+    # 加载报告数据
+    report_data = load_report_data(date)
+    if not report_data:
+        return False
+    
+    # 检查是否使用LLM生成报告
+    use_llm = WECHAT_CONFIG.get('use_llm', False)
+    llm_api_key = WECHAT_CONFIG.get('llm_api_key')
+    
+    if use_llm and llm_api_key:
+        logger.info("使用LLM生成描述性报告...")
+        try:
+            from core.publish.llm_report_generator import LLMReportGenerator
+            llm_model = WECHAT_CONFIG.get('llm_model', 'qwen-turbo')
+            llm_generator = LLMReportGenerator(api_key=llm_api_key, model=llm_model)
+            html_content = llm_generator.generate_report(report_data)
+            logger.info("✓ LLM报告生成完成")
+        except Exception as e:
+            logger.warning(f"LLM报告生成失败，使用默认格式: {e}")
+            formatter = ReportFormatter()
+            html_content = formatter.format_sentiment_report(report_data)
+    else:
+        formatter = ReportFormatter()
+        html_content = formatter.format_sentiment_report(report_data)
+    
+    # 保存HTML文件
+    html_file = OUTPUT_DIR / f"公众号报告_{date}.html"
+    with open(html_file, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    logger.info(f"HTML报告已保存: {html_file}")
+    
+    # 初始化发布器
+    publisher = WechatPublisher(
+        app_id=app_id,
+        app_secret=app_secret,
+        token_cache_file="data/wechat_token.json"
+    )
+    
+    # 生成草稿
+    title = f"📊 A股情绪分析报告 - {date[:4]}年{date[4:6]}月{date[6:]}日"
+    author = WECHAT_CONFIG.get('author', 'A股情绪系统')
+    
+    logger.info("正在生成草稿...")
+    media_id = publisher.publish_report(
+        title=title,
+        content=html_content,
+        author=author,
+        preview_wx=None  # 不发送预览，只生成草稿
+    )
+    
+    if media_id:
+        logger.info(f"✓ 草稿已生成: {media_id}")
+        logger.info("请登录公众号后台 → 内容与互动 → 草稿箱 → 找到草稿进行预览")
+        return True
+    else:
+        logger.error("✗ 草稿生成失败")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description='发布A股情绪分析报告到微信公众号')
     parser.add_argument('--date', type=str, default='20260424',
@@ -303,27 +400,40 @@ def main():
                        help='预览模式（发送给指定微信号预览）')
     parser.add_argument('--publish', action='store_true',
                        help='正式发布（群发给所有粉丝）')
+    parser.add_argument('--draft-only', action='store_true',
+                       help='仅生成草稿，不发送预览（用于JS接口安全域名未配置时）')
     parser.add_argument('--wx', type=str, default=None,
                        help='预览微信号（覆盖配置中的preview_wx）')
     
     args = parser.parse_args()
     
-    if not args.preview and not args.publish:
+    if not args.preview and not args.publish and not args.draft_only:
         # 默认预览模式
         args.preview = True
     
-    if args.publish and not WECHAT_CONFIG.get('auto_publish'):
+    if args.draft_only:
+        # 仅生成草稿模式
+        success = publish_report_draft_only(
+            date=args.date
+        )
+    elif args.publish and not WECHAT_CONFIG.get('auto_publish'):
         # 安全确认
         confirm = input("⚠️  确认要正式发布吗？粉丝将收到推送。(yes/no): ")
         if confirm.lower() != 'yes':
             logger.info("已取消发布")
             return
-    
-    success = publish_report(
-        date=args.date,
-        preview=args.preview,
-        preview_wx=args.wx
-    )
+        
+        success = publish_report(
+            date=args.date,
+            preview=False,
+            preview_wx=args.wx
+        )
+    else:
+        success = publish_report(
+            date=args.date,
+            preview=args.preview,
+            preview_wx=args.wx
+        )
     
     sys.exit(0 if success else 1)
 

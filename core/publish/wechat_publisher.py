@@ -459,7 +459,11 @@ class WechatPublisher:
             media_id = self.add_draft([article])
             
             # 4. 预览或发布
-            if preview_wx:
+            if preview_wx is None:
+                # 仅生成草稿，不发布也不预览
+                logger.info(f"[WechatPublisher] 草稿已生成: {media_id}")
+                return True
+            elif preview_wx:
                 return self.preview_news(media_id, preview_wx)
             else:
                 return self.publish_news(media_id)

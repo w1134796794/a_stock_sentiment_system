@@ -77,6 +77,11 @@ class SectorMetrics:
     divergence_index: float = 0.0       # 板块内部分化度（0-1，越小越一致）
     leader_strength: float = 0.0        # 龙头强度
     
+    # 情绪因子（新增）
+    continuous_rate: float = 0.0        # 连板率 (连板股数/涨停股数 %)
+    limit_down_count: int = 0           # 跌停家数
+    limit_down_ratio: float = 0.0       # 跌停惩罚比 (跌停/涨停)
+    
     # 综合评分
     composite_score: float = 0.0        # 综合评分
     stage: SectorStage = SectorStage.EMERGING  # 所处阶段
@@ -211,6 +216,11 @@ class SectorRotationTracker:
         if not self.dm:
             return
         
+        # 如果 trade_date 为 None，使用当前日期
+        if trade_date is None:
+            from datetime import datetime
+            trade_date = datetime.now().strftime('%Y%m%d')
+        
         try:
             limit_up_df = self.dm.get_limit_up_pool(trade_date)
             limit_down_df = self.dm.get_limit_down_pool(trade_date)
@@ -223,13 +233,16 @@ class SectorRotationTracker:
             dt_count = len(limit_down_df) if not limit_down_df.empty else 0
             
             # 计算连板高度分布
+            high_board_count = 0
+            mid_board_count = 0
             if '连板数' in limit_up_df.columns:
-                board_heights = limit_up_df['连板数'].fillna(1).astype(int)
-                high_board_count = len(board_heights[board_heights >= 5])
-                mid_board_count = len(board_heights[(board_heights >= 3) & (board_heights < 5)])
-            else:
-                high_board_count = 0
-                mid_board_count = 0
+                try:
+                    # 确保数据为数值类型
+                    board_heights = pd.to_numeric(limit_up_df['连板数'], errors='coerce').fillna(1).astype(int)
+                    high_board_count = int(len(board_heights[board_heights >= 5]))
+                    mid_board_count = int(len(board_heights[(board_heights >= 3) & (board_heights < 5)]))
+                except Exception as e:
+                    logger.debug(f"[_detect_cycle_by_data] 连板高度计算失败: {e}")
             
             # 判断市场周期
             if zt_count < 30 or dt_count > zt_count * 0.3:
@@ -487,12 +500,31 @@ class SectorRotationTracker:
             if not sector_stocks.empty and 'BoardHeight' in sector_stocks.columns:
                 board_heights = sector_stocks['BoardHeight'].fillna(1).astype(int)
                 metrics.max_board_height = board_heights.max()
-            
+
+                # 计算连板率 (连板数>=2的股票数 / 总涨停股数)
+                continuous_count = len(board_heights[board_heights >= 2])
+                total_count = len(board_heights)
+                metrics.continuous_rate = (continuous_count / total_count * 100) if total_count > 0 else 0
+
             # 计算分化度
             metrics.divergence_index, metrics.leader_strength = self.calculate_divergence_index(
                 concept_name, hierarchy_df
             )
-        
+
+            # 计算跌停因子（从hierarchy_df中筛选跌停股票）
+            if 'LimitDown' in sector_stocks.columns:
+                limit_down_stocks = sector_stocks[sector_stocks['LimitDown'] == True]
+                metrics.limit_down_count = len(limit_down_stocks)
+            elif 'pct_chg' in sector_stocks.columns:
+                limit_down_stocks = sector_stocks[sector_stocks['pct_chg'] <= -9.5]
+                metrics.limit_down_count = len(limit_down_stocks)
+            else:
+                metrics.limit_down_count = 0
+
+            # 跌停惩罚比
+            up_count = len(sector_stocks)
+            metrics.limit_down_ratio = (metrics.limit_down_count / up_count) if up_count > 0 else 0
+
         # 5. 计算综合评分（多因子加权）
         metrics.composite_score = self._calculate_composite_score(metrics)
         
@@ -509,34 +541,43 @@ class SectorRotationTracker:
             min(metrics.cons_nums / 5, 1.0) * 0.3 +
             min(metrics.max_board_height / 5, 1.0) * 0.2
         ) * 100
-        
+
         # 资金因子得分
         capital_score = (
             min(max(metrics.amount_change, -0.5) / 0.5 + 1, 1.0) * 0.6 +  # 成交额变化
             min(metrics.turnover_rate / 5, 1.0) * 0.4  # 换手率
         ) * 100
-        
+
         # 趋势因子得分
         trend_score = (
             min(max(metrics.rank_momentum + 1, 0) / 2, 1.0) * 0.5 +  # 排名动量
             min(max(metrics.up_nums_trend + 0.5, 0) / 1.5, 1.0) * 0.3 +  # 涨停趋势
             min(metrics.persistence_score / 80, 1.0) * 0.2  # 持续性
         ) * 100
-        
+
         # 分化因子得分（分化度越小越好，龙头强度越大越好）
         divergence_score = (
             (1 - metrics.divergence_index) * 0.6 +  # 一致性
             min(metrics.leader_strength / 3, 1.0) * 0.4  # 龙头强度
         ) * 100
-        
-        # 动态加权
+
+        # 情绪因子得分（连板率奖赏 + 跌停惩罚）
+        # 连板率越高越好（资金接力意愿强）
+        continuous_score = min(metrics.continuous_rate / 30, 1.0) * 100
+        # 跌停惩罚（跌停比越高惩罚越大）
+        limit_down_penalty = min(metrics.limit_down_ratio * 100, 50)  # 最多扣50分
+        emotion_score = max(continuous_score - limit_down_penalty, 0)
+
+        # 动态加权（加入情绪因子权重）
+        # 调整原有权重，腾出10%给情绪因子
         composite = (
-            strength_score * self.weights.strength_weight +
-            capital_score * self.weights.capital_weight +
-            trend_score * self.weights.trend_weight +
-            divergence_score * self.weights.divergence_weight
+            strength_score * (self.weights.strength_weight * 0.9) +
+            capital_score * (self.weights.capital_weight * 0.9) +
+            trend_score * (self.weights.trend_weight * 0.9) +
+            divergence_score * (self.weights.divergence_weight * 0.9) +
+            emotion_score * 0.1  # 情绪因子权重10%
         )
-        
+
         return round(composite, 2)
     
     def _determine_stage(self, metrics: SectorMetrics, current_rank: int) -> SectorStage:

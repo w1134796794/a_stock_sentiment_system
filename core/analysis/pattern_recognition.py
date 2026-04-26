@@ -119,7 +119,8 @@ class PatternRecognition:
     def detect_weak_to_strong(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
                               day_before_yesterday_df: pd.DataFrame = None,
                               today_date: str = None, yest_date: str = None,
-                              history_pools: Dict[str, pd.DataFrame] = None) -> List[PatternSignal]:
+                              history_pools: Dict[str, pd.DataFrame] = None,
+                              today_daily: pd.DataFrame = None) -> List[PatternSignal]:
         """
         弱转强模式识别 - 动态龙头跟踪版本
         
@@ -130,6 +131,7 @@ class PatternRecognition:
             today_date: 今日日期 (YYYYMMDD)
             yest_date: 昨日日期 (YYYYMMDD)，用于获取准确的昨日收盘价
             history_pools: 历史涨停池数据（用于趋势龙头识别）
+            today_daily: 今日全市场日线数据（用于更新走弱池价格）
         """
         signals = []
 
@@ -173,7 +175,8 @@ class PatternRecognition:
                 today_zt=today_df,
                 today_tick=today_tick,
                 history_pools=history_pools,
-                date_str=today_date or datetime.now().strftime("%Y%m%d")
+                date_str=today_date or datetime.now().strftime("%Y%m%d"),
+                today_daily=today_daily
             )
             
             # 输出池子更新结果
@@ -1446,6 +1449,15 @@ class PatternRecognition:
         
         logger.info(f"今日涨停: {len(today_df)}只, 昨日涨停: {len(yesterday_df)}只, 前日涨停: {len(day_before_yesterday_df)}只, 历史池: {len(recent_zt_pools)}天")
         
+        # 获取今日全市场日线数据（用于更新走弱池价格）
+        logger.info("获取今日全市场日线数据...")
+        try:
+            today_daily = self.dm.get_daily_basic(today_date_ymd)
+            logger.info(f"获取到全市场日线数据: {len(today_daily)}只股票")
+        except Exception as e:
+            logger.warning(f"获取全市场日线数据失败: {e}")
+            today_daily = None
+        
         results = {}
         
         # 1. 弱转强检测
@@ -1453,7 +1465,8 @@ class PatternRecognition:
             logger.info("-" * 40)
             results["弱转强"] = self.detect_weak_to_strong(
                 today_df, yesterday_df, day_before_yesterday_df, today_date_ymd, yesterday_date_ymd,
-                history_pools=recent_zt_pools
+                history_pools=recent_zt_pools,
+                today_daily=today_daily
             )
         except Exception as e:
             logger.error(f"弱转强检测失败: {e}")

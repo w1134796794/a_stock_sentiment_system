@@ -64,6 +64,16 @@ class CycleThresholds:
     premium_high: float = 3.0         # 高溢价
     premium_mid: float = 1.0          # 中等溢价
     premium_low: float = -1.0         # 负溢价
+    
+    # 连板率阈值 (连板股数/涨停股总数 %)
+    continuous_rate_high: float = 30.0    # 高连板率（情绪高涨）
+    continuous_rate_mid: float = 20.0     # 中等连板率
+    continuous_rate_low: float = 10.0     # 低连板率（情绪低迷）
+    
+    # 跌停惩罚阈值 (跌停家数/涨停家数 比例)
+    limit_down_ratio_low: float = 0.1     # 跌停少（健康）
+    limit_down_ratio_mid: float = 0.3     # 中等跌停
+    limit_down_ratio_high: float = 0.5    # 跌停多（危险）
 
 
 @dataclass
@@ -148,16 +158,18 @@ class EmotionCycleEngine:
         self.history_cycles: List[Dict] = []  # 历史周期记录
         self.dm = dm  # DataManager实例，用于获取价格数据
         
-    def detect_cycle(self, 
+    def detect_cycle(self,
                      limit_up_count: int,
                      max_board_height: int,
                      broken_rate: float,
                      nuclear_button_count: int = 0,
                      prev_limit_up_premium: float = None,
-                     board_distribution: Dict[int, int] = None) -> EmotionCycle:
+                     board_distribution: Dict[int, int] = None,
+                     continuous_rate: float = None,
+                     limit_down_count: int = 0) -> EmotionCycle:
         """
         识别当前情绪周期
-        
+
         Args:
             limit_up_count: 涨停家数
             max_board_height: 最高连板高度
@@ -165,14 +177,17 @@ class EmotionCycleEngine:
             nuclear_button_count: 核按钮数量（跌停家数）
             prev_limit_up_premium: 昨日涨停溢价 (%)
             board_distribution: 连板分布 {1: 20, 2: 10, 3: 5, ...}
-            
+            continuous_rate: 连板率 (连板股数/涨停股总数 %)
+            limit_down_count: 跌停家数
+
         Returns:
             EmotionCycle: 情绪周期枚举
         """
         # 计算综合得分
         scores = self._calculate_cycle_scores(
             limit_up_count, max_board_height, broken_rate,
-            nuclear_button_count, prev_limit_up_premium, board_distribution
+            nuclear_button_count, prev_limit_up_premium, board_distribution,
+            continuous_rate, limit_down_count
         )
         
         # 根据得分判断周期
@@ -189,7 +204,9 @@ class EmotionCycleEngine:
                                broken_rate: float,
                                nuclear_button_count: int,
                                prev_limit_up_premium: Optional[float],
-                               board_distribution: Optional[Dict[int, int]]) -> Dict[str, float]:
+                               board_distribution: Optional[Dict[int, int]],
+                               continuous_rate: Optional[float] = None,
+                               limit_down_count: int = 0) -> Dict[str, float]:
         """计算各周期维度的匹配得分"""
         scores = {
             'boom': 0,      # 高潮期得分
@@ -198,9 +215,9 @@ class EmotionCycleEngine:
             'decline': 0,   # 退潮期得分
             'freeze': 0     # 冰点期得分
         }
-        
+
         th = self.thresholds
-        
+
         # 1. 涨停家数评分
         if limit_up_count >= th.limit_up_high:
             scores['boom'] += 3
@@ -220,7 +237,7 @@ class EmotionCycleEngine:
         else:
             scores['freeze'] += 3
             scores['decline'] += 1
-        
+
         # 2. 连板高度评分
         if max_board_height >= th.board_height_boom:
             scores['boom'] += 3
@@ -236,7 +253,7 @@ class EmotionCycleEngine:
         else:
             scores['freeze'] += 2
             scores['decline'] += 1
-        
+
         # 3. 炸板率评分
         if broken_rate <= th.broken_rate_low:
             scores['boom'] += 1
@@ -250,7 +267,7 @@ class EmotionCycleEngine:
         else:
             scores['decline'] += 3
             scores['freeze'] += 1
-        
+
         # 4. 核按钮评分
         if nuclear_button_count <= th.nuclear_button_low:
             scores['boom'] += 1
@@ -260,7 +277,7 @@ class EmotionCycleEngine:
         else:
             scores['decline'] += 3
             scores['freeze'] += 1
-        
+
         # 5. 昨日涨停溢价评分
         if prev_limit_up_premium is not None:
             if prev_limit_up_premium >= th.premium_high:
@@ -275,7 +292,7 @@ class EmotionCycleEngine:
             else:
                 scores['decline'] += 2
                 scores['freeze'] += 1
-        
+
         # 6. 连板梯队完整性评分
         if board_distribution:
             echelon_score = self._calculate_echelon_score(board_distribution)
@@ -288,7 +305,45 @@ class EmotionCycleEngine:
             else:
                 scores['decline'] += 1
                 scores['freeze'] += 1
-        
+
+        # 7. 连板率奖赏因子 (连板股数/涨停股总数)
+        if continuous_rate is not None and limit_up_count > 0:
+            if continuous_rate >= th.continuous_rate_high:
+                # 高连板率 - 情绪高涨，资金接力意愿强
+                scores['boom'] += 2
+                scores['rise'] += 2
+            elif continuous_rate >= th.continuous_rate_mid:
+                # 中等连板率 - 情绪健康
+                scores['rise'] += 2
+                scores['shake'] += 1
+            elif continuous_rate >= th.continuous_rate_low:
+                # 低连板率 - 情绪低迷，首板多连板少
+                scores['shake'] += 1
+                scores['decline'] += 2
+            else:
+                # 极低连板率 - 情绪冰点
+                scores['decline'] += 1
+                scores['freeze'] += 2
+
+        # 8. 跌停惩罚因子 (跌停家数/涨停家数比例)
+        if limit_up_count > 0:
+            limit_down_ratio = limit_down_count / limit_up_count
+            if limit_down_ratio <= th.limit_down_ratio_low:
+                # 跌停很少 - 市场健康
+                scores['boom'] += 1
+                scores['rise'] += 1
+            elif limit_down_ratio <= th.limit_down_ratio_mid:
+                # 中等跌停 - 市场分歧
+                scores['shake'] += 2
+            elif limit_down_ratio <= th.limit_down_ratio_high:
+                # 跌停较多 - 风险信号
+                scores['decline'] += 3
+                scores['shake'] += 1
+            else:
+                # 跌停极多 - 恐慌情绪
+                scores['decline'] += 2
+                scores['freeze'] += 3
+
         return scores
     
     def _calculate_echelon_score(self, board_distribution: Dict[int, int]) -> float:
@@ -415,7 +470,17 @@ class EmotionCycleEngine:
         limit_times_col = 'limit_times' if 'limit_times' in limit_up_df.columns else '连板数'
         if limit_times_col in limit_up_df.columns:
             board_distribution = limit_up_df[limit_times_col].value_counts().to_dict()
-        
+
+        # 计算连板率 (连板股数/涨停股总数)
+        continuous_count = 0
+        if limit_times_col in limit_up_df.columns:
+            # 连板数>=2的认为是连板股
+            continuous_count = len(limit_up_df[limit_up_df[limit_times_col] >= 2])
+        continuous_rate = (continuous_count / limit_up_count * 100) if limit_up_count > 0 else 0
+
+        # 跌停家数
+        limit_down_count = len(limit_down_df) if limit_down_df is not None else 0
+
         # 识别情绪周期
         cycle = self.detect_cycle(
             limit_up_count=limit_up_count,
@@ -423,12 +488,14 @@ class EmotionCycleEngine:
             broken_rate=broken_rate,
             nuclear_button_count=nuclear_button_count,
             prev_limit_up_premium=prev_limit_up_premium,
-            board_distribution=board_distribution
+            board_distribution=board_distribution,
+            continuous_rate=continuous_rate,
+            limit_down_count=limit_down_count
         )
-        
+
         # 获取策略
         strategy = self.get_strategy(cycle)
-        
+
         return {
             'cycle': cycle,
             'cycle_name': cycle.value,
@@ -441,7 +508,10 @@ class EmotionCycleEngine:
                 'prev_limit_up_premium': prev_limit_up_premium,
                 'win_rate': win_rate,
                 'avg_profit': avg_profit,
-                'board_distribution': board_distribution
+                'board_distribution': board_distribution,
+                'continuous_rate': round(continuous_rate, 2),
+                'limit_down_count': limit_down_count,
+                'limit_down_ratio': round(limit_down_count / limit_up_count, 2) if limit_up_count > 0 else 0
             },
             'scores': self.history_cycles[-1]['scores'] if self.history_cycles else {}
         }
