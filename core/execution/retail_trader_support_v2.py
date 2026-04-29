@@ -133,58 +133,54 @@ class RetailTraderSupportV2:
         }
     
     # ==================== 1. 隔夜决策清单（修复版）====================
-
+    
     def generate_overnight_decisions_v2(self,
                                        today_zt_pool: pd.DataFrame,
                                        yesterday_zt_pool: pd.DataFrame,
-                                       sector_analysis: Dict[str, SectorAnalysis],
-                                       today_date: str = None) -> List[OvernightDecision]:
+                                       sector_analysis: Dict[str, SectorAnalysis]) -> List[OvernightDecision]:
         """
         生成隔夜决策清单 - 修复版
-
+        
         Args:
             today_zt_pool: 当日涨停池（必须包含：代码、名称、连板高度、炸板次数、首次封板时间）
             yesterday_zt_pool: 昨日涨停池（同上）
             sector_analysis: 板块分析结果
-            today_date: 当日日期（YYYYMMDD格式，用于获取行情数据）
-
+        
         Returns:
             List[OvernightDecision]
         """
         decisions = []
-
+        
         # 数据验证
         if today_zt_pool is None or today_zt_pool.empty:
             logger.warning("当日涨停池为空，尝试从data_manager获取")
             today_zt_pool = self.dm.get_limit_up_pool(datetime.now().strftime('%Y%m%d'))
-
+        
         if today_zt_pool is None or today_zt_pool.empty:
             logger.error("无法获取当日涨停池，返回空决策清单")
             return []
-
+        
         logger.info(f"当日涨停池：{len(today_zt_pool)}只股票")
-
+        
         # 标准化列名（处理可能的中文/英文列名）
         today_zt_pool = self._standardize_columns(today_zt_pool)
         yesterday_zt_pool = self._standardize_columns(yesterday_zt_pool) if yesterday_zt_pool is not None else pd.DataFrame()
-
+        
         # 1. 最高标决策
         highest_decision = self._create_highest_board_decision_v2(today_zt_pool, sector_analysis)
         if highest_decision:
             decisions.append(highest_decision)
-
+        
         # 2. 2板梯队决策
         second_board_decisions = self._create_second_board_decisions_v2(today_zt_pool, yesterday_zt_pool, sector_analysis)
         decisions.extend(second_board_decisions)
-
+        
         # 3. 1板套利决策（放宽条件）
         first_board_decisions = self._create_first_board_decisions_v2(today_zt_pool, yesterday_zt_pool, sector_analysis)
         decisions.extend(first_board_decisions)
-
+        
         # 4. 弱转强标的（从昨日烂板中筛选）
-        weak_to_strong_decisions = self._create_weak_to_strong_decisions_v2(
-            today_zt_pool, yesterday_zt_pool, today_date
-        )
+        weak_to_strong_decisions = self._create_weak_to_strong_decisions_v2(today_zt_pool, yesterday_zt_pool)
         decisions.extend(weak_to_strong_decisions)
         
         logger.info(f"生成隔夜决策清单: {len(decisions)}项")
@@ -300,39 +296,29 @@ class RetailTraderSupportV2:
                                          today_df: pd.DataFrame,
                                          yesterday_df: pd.DataFrame,
                                          sector_analysis: Dict) -> List[OvernightDecision]:
-        """创建2板梯队决策 - 直接从涨停池中取连板数=2的标的"""
+        """创建2板梯队决策 - 修复版"""
         decisions = []
-
-        # 直接从今日涨停池中筛选连板数=2的标的
-        if 'board_height' not in today_df.columns:
-            logger.warning("今日涨停池缺少board_height列，无法识别2板")
-            return decisions
-
-        second_board_df = today_df[today_df['board_height'] == 2]
-        second_board_codes = second_board_df['code'].tolist()
-
-        logger.info(f"识别到{len(second_board_codes)}只2板股票（从涨停池直接筛选）")
-
-        # 检查昨日涨停池是否为空
+        
         if yesterday_df.empty:
-            logger.warning("昨日涨停池为空，无法确认2板")
+            logger.warning("昨日涨停池为空，无法识别2板")
             return decisions
-
-        # 确保昨日涨停池有code列
-        if 'code' not in yesterday_df.columns:
-            logger.warning(f"昨日涨停池缺少code列，可用列: {list(yesterday_df.columns)}")
-            return decisions
-
+        
+        # 找出今日2板（今日涨停且昨日涨停且昨日1板）
+        today_codes = set(today_df['code'].tolist())
+        yesterday_codes = set(yesterday_df['code'].tolist())
+        
+        # 昨日1板的股票
+        yesterday_1board = yesterday_df[yesterday_df['board_height'] == 1]['code'].tolist()
+        
+        # 今日2板 = 今日涨停 & 昨日1板
+        second_board_codes = list(set(yesterday_1board) & today_codes)
+        
+        logger.info(f"识别到{len(second_board_codes)}只2板股票")
+        
         for code in second_board_codes[:5]:  # 最多5只
             today_row = today_df[today_df['code'] == code].iloc[0]
-
-            # 检查昨日涨停池中是否存在该股票
-            yesterday_match = yesterday_df[yesterday_df['code'] == code]
-            if yesterday_match.empty:
-                logger.debug(f"2板股票 {code} 昨日未涨停，跳过")
-                continue
-            yesterday_row = yesterday_match.iloc[0]
-
+            yesterday_row = yesterday_df[yesterday_df['code'] == code].iloc[0]
+            
             name = today_row.get('name', '')
             blast_times = self._safe_int(today_row.get('blast_times', 0))
             first_seal = today_row.get('first_seal_time', '')
@@ -483,87 +469,36 @@ class RetailTraderSupportV2:
     
     def _create_weak_to_strong_decisions_v2(self,
                                            today_df: pd.DataFrame,
-                                           yesterday_df: pd.DataFrame,
-                                           today_date: str = None) -> List[OvernightDecision]:
-        """创建弱转强决策（基于昨日烂板）- 复盘版，包含今日行情数据"""
+                                           yesterday_df: pd.DataFrame) -> List[OvernightDecision]:
+        """创建弱转强决策（基于昨日烂板）"""
         decisions = []
-
+        
         if yesterday_df.empty:
             return decisions
-
+        
         # 昨日烂板（炸板次数>=2）
         yesterday_blast = yesterday_df[yesterday_df['blast_times'] >= 2]
-
+        
         for _, row in yesterday_blast.iterrows():
             code = row.get('code', '')
             name = row.get('name', '')
             blast_times = self._safe_int(row.get('blast_times', 0))
-
-            # 获取今日行情数据（复盘用）
-            today_price_data = {}
-            if today_date and hasattr(self.dm, 'get_stock_daily_data'):
-                try:
-                    today_price_data = self.dm.get_stock_daily_data(code, today_date)
-                except Exception as e:
-                    logger.debug(f"获取 {code} 今日行情数据失败: {e}")
-
+            
             # 检查今日是否涨停（已实现弱转强）或纳入观察
             if code in today_df['code'].values:
                 # 今日已涨停，说明已实现弱转强
                 continue
-
-            # 构建历史数据（包含今日复盘数据）
-            historical_data = {
-                '昨日炸板次数': blast_times,
-                '昨日最后封板时间': str(row.get('last_seal_time', ''))
-            }
-
-            # 添加今日行情数据（如果有）
-            if today_price_data:
-                historical_data.update({
-                    '今日开盘价': f"{today_price_data.get('open', 0):.2f}",
-                    '今日收盘价': f"{today_price_data.get('close', 0):.2f}",
-                    '今日最低价': f"{today_price_data.get('low', 0):.2f}",
-                    '今日涨跌幅': f"{today_price_data.get('pct_chg', 0):.2f}%",
-                    '今日成交额': f"{today_price_data.get('amount', 0)/100000:.0f}万"
-                })
-
-                # 根据今日走势评估弱转强信号
-                pct_chg = today_price_data.get('pct_chg', 0)
-                open_price = today_price_data.get('open', 0)
-                close_price = today_price_data.get('close', 0)
-                low_price = today_price_data.get('low', 0)
-
-                # 判断今日走势特征
-                if pct_chg > 5:
-                    trend = "强势反弹"
-                    suitability = RetailSuitability.GOOD.value
-                    action = "明日可积极关注"
-                elif pct_chg > 0:
-                    trend = "温和上涨"
-                    suitability = RetailSuitability.FAIR.value
-                    action = "观察明日竞价"
-                elif pct_chg > -3:
-                    trend = "震荡整理"
-                    suitability = RetailSuitability.POOR.value
-                    action = "暂不关注"
-                else:
-                    trend = "继续弱势"
-                    suitability = RetailSuitability.AVOID.value
-                    action = "回避"
-
-                historical_data['今日走势'] = trend
-            else:
-                suitability = RetailSuitability.FAIR.value
-                action = "仅超预期时参与"
-
+            
             decisions.append(OvernightDecision(
                 stock_code=code,
                 stock_name=name,
                 current_board=0,  # 今日未涨停
                 yesterday_board_type=f"烂板({blast_times}次)",
                 decision_type="弱转强观察",
-                historical_data=historical_data,
+                historical_data={
+                    '昨日炸板次数': blast_times,
+                    '昨日最后封板时间': str(row.get('last_seal_time', ''))
+                },
                 entry_conditions=[
                     "次日竞价高开>2%（超预期）",
                     "竞价量>昨日成交量8%（资金抢筹）",
@@ -580,11 +515,11 @@ class RetailTraderSupportV2:
                     '止损': '昨日最低价或-7%',
                     '止盈': '+15%'
                 },
-                retail_suitability=suitability,
-                suggested_action=action,
+                retail_suitability=RetailSuitability.FAIR.value,
+                suggested_action="仅超预期时参与",
                 risk_level="高"
             ))
-
+        
         return decisions[:2]  # 最多2只
     
     # ==================== 2. 剧本推演（基于真实数据）====================
@@ -812,6 +747,14 @@ class RetailTraderSupportV2:
         # 标准化列名
         today_zt_pool = self._standardize_columns(today_zt_pool)
         
+        # 标准化history_pools中的列名
+        standardized_history_pools = {}
+        for date, df in history_pools.items():
+            if not df.empty:
+                standardized_history_pools[date] = self._standardize_columns(df)
+            else:
+                standardized_history_pools[date] = df
+        
         # 按板块统计
         sector_stats = {}
         
@@ -835,14 +778,13 @@ class RetailTraderSupportV2:
                     ladder[int(height)] = int(count)
             
             # 3日趋势
-            growth_3d = self._calculate_3d_growth(sector, history_pools)
+            growth_3d = self._calculate_3d_growth(sector, standardized_history_pools)
             
             # 20日数据（仅用于判断退潮）
-            history_20d = sum([
-                len(df[df['sector'] == sector]) 
-                for df in history_pools.values() 
-                if not df.empty and 'sector' in df.columns
-            ])
+            history_20d = 0
+            for df in standardized_history_pools.values():
+                if not df.empty and 'sector' in df.columns:
+                    history_20d += len(df[df['sector'] == sector])
             is_declining = (history_20d > 50) and (today_count < 5)  # 历史多但当前少
             
             # 确定优先级
@@ -957,7 +899,7 @@ class RetailTraderSupportV2:
                 report.append(f"     ⚠️  退潮预警: 20日涨停多但当前仅{sector.today_limit_up}家")
         
         # 3. 隔夜决策清单
-        report.append("\n📝 【隔夜决策清单】")
+        report.append("\n\n📝 【隔夜决策清单】")
         report.append("-" * 70)
         
         if not decisions:
@@ -986,7 +928,7 @@ class RetailTraderSupportV2:
                         report.append(f"       • {k}: {v}")
         
         # 4. 剧本推演
-        report.append("\n🔮 【次日剧本推演（基于真实数据）】")
+        report.append("\n\n🔮 【次日剧本推演（基于真实数据）】")
         report.append("-" * 70)
         
         for i, scenario in enumerate(scenarios[:3], 1):
@@ -1023,7 +965,7 @@ if __name__ == "__main__":
     print("2. 剧本推演无效 → 基于真实数据的动态推演")
     print("3. 板块关注逻辑错误 → T+0短期视角替代20日滞后数据")
     print("4. 标的描述不精准 → 明确历史数据vs预判条件")
-    print("\n 核心改进：")
+    print("\n核心改进：")
     print("• 板块优先级：S/A/B/C/D五级（基于当日涨停+3日趋势）")
     print("• 剧本推演：基于溢价率/一字板占比/炸板率动态计算概率")
     print("• 决策清单：每项包含历史数据+次日条件+执行计划+取消条件")

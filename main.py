@@ -22,7 +22,8 @@ from core.data.data_manager import DataManager
 from core.data.industry_mapper import IndustryMapper
 from core.analysis.pattern_recognition import PatternRecognition
 from core.analysis.emotion_cycle_engine import EmotionCycleEngine
-from core.analysis.sector_rotation_tracker import SectorRotationTracker
+# 使用新版同花顺板块追踪器
+from core.analysis.ths_sector_tracker import THSSectorTracker as SectorRotationTracker
 from core.report.report_generator_v2 import ReportGeneratorV2
 from core.execution.execution_engine import UnifiedExecutionEngine
 from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
@@ -62,11 +63,12 @@ class SentimentSystem:
         
         # 1. 数据获取
         logger.info("[1/5] 获取涨停池数据...")
+
         zt_pool = self.dm.get_limit_up_pool(date)
         if zt_pool.empty:
             logger.warning(f"未获取到 {date} 的涨停数据，可能非交易日")
             return
-        
+
         logger.info(f"获取到 {len(zt_pool)} 只涨停股票")
         
         # 2. 构建层级结构
@@ -139,7 +141,7 @@ class SentimentSystem:
         logger.info("=" * 60)
         
         # 4. 主线板块分析（使用带交叉验证的新方法）
-        logger.info("[4/6] 计算主线板块强度...")
+        logger.info("[4/6] 计算主线板块强度...(剔除ST板块)")
         # 获取limit_cpt_list数据用于概念分析
         limit_cpt_df = self.dm.get_limit_cpt_list(date)
         
@@ -222,7 +224,7 @@ class SentimentSystem:
         
         # 6. 综合当日数据和20日数据计算板块权重
         logger.info("[6/6] 计算综合板块权重（当日+20日）...")
-        display_mainline_df = self._calculate_combined_mainline(hierarchy_df)
+        display_mainline_df = self._calculate_combined_mainline(hierarchy_df, date)
         
         # 7. 模式识别
         logger.info("[7/7] 识别交易模式...")
@@ -263,11 +265,7 @@ class SentimentSystem:
             core_stocks_df = hierarchy_df[core_stocks_mask].copy()
             
             if not core_stocks_df.empty:
-                # 获取概念数据（使用当前分析日期）
-                core_stocks_df = self.dm.enrich_core_stocks_concepts(core_stocks_df, date)
-                # 更新hierarchy_df中的概念数据
-                hierarchy_df.loc[core_stocks_df.index, 'Concept'] = core_stocks_df['Concept']
-                logger.info(f"已获取{len(core_stocks_df)}只核心标的的概念数据")
+                logger.info(f"核心标的: {len(core_stocks_df)}只")
         
         # 8. 获取龙头池和走弱池数据
         logger.info("[8/8] 获取龙头池和走弱池数据...")
@@ -503,7 +501,7 @@ class SentimentSystem:
             
             # 2. 生成隔夜决策清单
             decisions = self.retail_support.generate_overnight_decisions_v2(
-                today_zt, yesterday_zt, sector_analysis, date
+                today_zt, yesterday_zt, sector_analysis
             )
             
             # 3. 计算散户特供指标（简化版）
@@ -632,7 +630,7 @@ class SentimentSystem:
         # 实现多日期回测逻辑
         pass
     
-    def _calculate_combined_mainline(self, hierarchy_df: pd.DataFrame) -> pd.DataFrame:
+    def _calculate_combined_mainline(self, hierarchy_df: pd.DataFrame, trade_date: str) -> pd.DataFrame:
         """
         计算综合板块权重（当日数据 + 20日统计数据 + 东财行业板块因子）
         权重公式: 综合强度 = 20日涨停数×0.35 + 当日涨停数×0.35 + 最高连板×0.15 + 东财综合强度×0.15
@@ -642,7 +640,7 @@ class SentimentSystem:
             logger.warning("[_calculate_combined_mainline] hierarchy_df为空，无法计算主线")
             return pd.DataFrame()
         # 0. 获取东财行业板块数据
-        sector_data = self.dm.get_industry_sector_data()
+        sector_data = self.dm.get_industry_sector_data(trade_date)
         sector_dict = {}
         if not sector_data.empty:
             # 构建行业名称到因子数据的映射

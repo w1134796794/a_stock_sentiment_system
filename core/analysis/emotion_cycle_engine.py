@@ -166,7 +166,7 @@ class EmotionCycleEngine:
                      prev_limit_up_premium: float = None,
                      board_distribution: Dict[int, int] = None,
                      continuous_rate: float = None,
-                     limit_down_count: int = 0) -> EmotionCycle:
+                     limit_down_count: int = 0) -> Tuple[EmotionCycle, Dict[str, float]]:
         """
         识别当前情绪周期
 
@@ -181,7 +181,7 @@ class EmotionCycleEngine:
             limit_down_count: 跌停家数
 
         Returns:
-            EmotionCycle: 情绪周期枚举
+            Tuple[EmotionCycle, Dict]: (情绪周期枚举, 各周期得分)
         """
         # 计算综合得分
         scores = self._calculate_cycle_scores(
@@ -189,14 +189,14 @@ class EmotionCycleEngine:
             nuclear_button_count, prev_limit_up_premium, board_distribution,
             continuous_rate, limit_down_count
         )
-        
+
         # 根据得分判断周期
         cycle = self._determine_cycle(scores)
-        
+
         # 记录历史
         self._record_cycle(cycle, scores)
-        
-        return cycle
+
+        return cycle, scores
     
     def _calculate_cycle_scores(self,
                                limit_up_count: int,
@@ -482,7 +482,7 @@ class EmotionCycleEngine:
         limit_down_count = len(limit_down_df) if limit_down_df is not None else 0
 
         # 识别情绪周期
-        cycle = self.detect_cycle(
+        cycle, scores = self.detect_cycle(
             limit_up_count=limit_up_count,
             max_board_height=max_board_height,
             broken_rate=broken_rate,
@@ -513,7 +513,7 @@ class EmotionCycleEngine:
                 'limit_down_count': limit_down_count,
                 'limit_down_ratio': round(limit_down_count / limit_up_count, 2) if limit_up_count > 0 else 0
             },
-            'scores': self.history_cycles[-1]['scores'] if self.history_cycles else {}
+            'scores': scores
         }
     
     def _calculate_prev_limit_up_performance(self, prev_limit_up_df: pd.DataFrame) -> Dict:
@@ -628,38 +628,8 @@ class EmotionCycleEngine:
                 
         except Exception as e:
             logger.error(f"[_calculate_prev_limit_up_performance] 计算失败: {e}")
-        
+
         return result
-    
-    def get_cycle_transition_probability(self) -> Dict[str, float]:
-        """
-        基于历史数据计算周期转换概率
-        
-        Returns:
-            当前周期转移到其他周期的概率
-        """
-        if len(self.history_cycles) < 2:
-            return {}
-        
-        current_cycle = self.history_cycles[-1]['cycle']
-        
-        # 统计历史转换情况
-        transitions = {}
-        for i in range(1, len(self.history_cycles)):
-            prev = self.history_cycles[i-1]['cycle']
-            curr = self.history_cycles[i]['cycle']
-            if prev not in transitions:
-                transitions[prev] = {}
-            if curr not in transitions[prev]:
-                transitions[prev][curr] = 0
-            transitions[prev][curr] += 1
-        
-        # 计算当前周期的转移概率
-        if current_cycle in transitions:
-            total = sum(transitions[current_cycle].values())
-            return {k: v/total for k, v in transitions[current_cycle].items()}
-        
-        return {}
 
 
 if __name__ == "__main__":
@@ -667,7 +637,7 @@ if __name__ == "__main__":
     engine = EmotionCycleEngine()
     
     # 模拟上升期数据
-    result = engine.detect_cycle(
+    cycle, scores = engine.detect_cycle(
         limit_up_count=65,
         max_board_height=5,
         broken_rate=18,
@@ -675,10 +645,11 @@ if __name__ == "__main__":
         prev_limit_up_premium=2.5,
         board_distribution={1: 35, 2: 18, 3: 8, 4: 3, 5: 1}
     )
-    
-    print(f"识别到的情绪周期: {result.value}")
-    
-    strategy = engine.get_strategy(result)
+
+    print(f"识别到的情绪周期: {cycle.value}")
+    print(f"各周期得分: {scores}")
+
+    strategy = engine.get_strategy(cycle)
     print(f"\n策略建议:")
     print(f"  描述: {strategy.description}")
     print(f"  策略: {strategy.strategy}")

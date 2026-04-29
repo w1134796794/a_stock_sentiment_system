@@ -10,7 +10,8 @@ from core.data.data_manager import DataManager
 from core.data.industry_mapper import IndustryMapper
 from core.analysis.pattern_recognition import PatternRecognition
 from core.analysis.emotion_cycle_engine import EmotionCycleEngine
-from core.analysis.sector_rotation_tracker import SectorRotationTracker
+# 使用新版同花顺板块追踪器
+from core.analysis.ths_sector_tracker import THSSectorTracker as SectorRotationTracker
 
 # 初始化
 dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)

@@ -256,6 +256,20 @@ class WeakToStrongStrategy:
         # 加载已有池子
         self._load_pools()
     
+    def _get_code_col(self, df: pd.DataFrame) -> str:
+        """获取代码列名，处理不同命名"""
+        for col in ['代码', 'code', 'ts_code', 'Code', 'stock_code']:
+            if col in df.columns:
+                return col
+        return None
+    
+    def _get_name_col(self, df: pd.DataFrame) -> str:
+        """获取名称列名，处理不同命名"""
+        for col in ['名称', 'name', 'Name', 'stock_name']:
+            if col in df.columns:
+                return col
+        return None
+    
     def _parse_enum(self, enum_class, value):
         """解析枚举值，支持多种格式"""
         if value is None:
@@ -376,12 +390,19 @@ class WeakToStrongStrategy:
         # 3. 更新走弱池中的股票数据
         logger.info(f"[弱转强] ========== 阶段3: 更新走弱池 ==========")
         logger.info(f"[弱转强] 更新{len(self.weakening_pool)}只走弱股票数据")
+        
+        # 获取代码列名
+        daily_code_col = self._get_code_col(today_daily) if today_daily is not None else None
+        zt_code_col = self._get_code_col(today_zt) if today_zt is not None else None
+        
         for code, weakening in list(self.weakening_pool.items()):
             # 更新当前价格 - 优先从全市场日线数据获取，其次从涨停池获取，最后通过data_manager获取
             current_price = 0
-            if today_daily is not None and not today_daily.empty:
+            if today_daily is not None and not today_daily.empty and daily_code_col:
                 # 从全市场日线数据查找
-                stock_row = today_daily[today_daily['代码'].astype(str).str.zfill(6) == code]
+                # 处理不同格式的代码列（如 ts_code: 002787.SZ -> 002787）
+                daily_codes = today_daily[daily_code_col].astype(str).str.replace(r'\.\w+$', '', regex=True).str.zfill(6)
+                stock_row = today_daily[daily_codes == code]
                 if not stock_row.empty:
                     current_price = stock_row.iloc[0].get('最新价', 0)
                     if current_price == 0:
@@ -390,8 +411,10 @@ class WeakToStrongStrategy:
                         current_price = stock_row.iloc[0].get('close', 0)
             
             # 如果在日线数据中没找到，尝试从涨停池查找
-            if current_price == 0:
-                stock_row = today_zt[today_zt['代码'].astype(str).str.zfill(6) == code]
+            if current_price == 0 and zt_code_col:
+                # 处理不同格式的代码列
+                zt_codes = today_zt[zt_code_col].astype(str).str.replace(r'\.\w+$', '', regex=True).str.zfill(6)
+                stock_row = today_zt[zt_codes == code]
                 if not stock_row.empty:
                     current_price = stock_row.iloc[0].get('最新价', 0)
             
@@ -866,7 +889,14 @@ class WeakToStrongStrategy:
                 if pool.empty:
                     continue
                 
-                stock_row = pool[pool['代码'].astype(str).str.zfill(6) == code]
+                # 获取代码列名
+                pool_code_col = self._get_code_col(pool)
+                if not pool_code_col:
+                    continue
+                
+                # 处理不同格式的代码列
+                pool_codes = pool[pool_code_col].astype(str).str.replace(r'\.\w+$', '', regex=True).str.zfill(6)
+                stock_row = pool[pool_codes == code]
                 if not stock_row.empty:
                     price = stock_row.iloc[0].get('最新价', 0)
                     change = stock_row.iloc[0].get('涨跌幅', 0)
@@ -916,8 +946,15 @@ class WeakToStrongStrategy:
         
         logger.debug(f"[弱转强-走弱检查] 检查 {name}({code}) {dragon.dragon_type.value}...")
         
-        # 在今日涨停池中查找
-        stock_row = today_zt[today_zt['代码'].astype(str).str.zfill(6) == code]
+        # 获取代码列名
+        zt_code_col = self._get_code_col(today_zt)
+        if not zt_code_col:
+            logger.warning(f"[弱转强-走弱检查] 涨停池缺少代码列，可用列: {list(today_zt.columns)}")
+            return None
+        
+        # 在今日涨停池中查找（处理不同格式的代码列）
+        zt_codes = today_zt[zt_code_col].astype(str).str.replace(r'\.\w+$', '', regex=True).str.zfill(6)
+        stock_row = today_zt[zt_codes == code]
         
         if stock_row.empty:
             # 不在涨停池中 = 断板

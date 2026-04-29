@@ -273,7 +273,7 @@ def publish_report(date: str, preview: bool = True, preview_wx: str = None):
     )
     
     # 发布
-    title = f"📊 A股情绪分析报告 - {date[:4]}年{date[4:6]}月{date[6:]}日"
+    title = f"情绪分析报告 - {date[:4]}年{date[4:6]}月{date[6:]}日"
     author = WECHAT_CONFIG.get('author', 'A股情绪系统')
     
     if preview:
@@ -372,7 +372,7 @@ def publish_report_draft_only(date: str) -> bool:
     )
     
     # 生成草稿
-    title = f"📊 A股情绪分析报告 - {date[:4]}年{date[4:6]}月{date[6:]}日"
+    title = f"情绪分析报告 - {date[:4]}年{date[4:6]}月{date[6:]}日"
     author = WECHAT_CONFIG.get('author', 'A股情绪系统')
     
     logger.info("正在生成草稿...")
@@ -394,7 +394,7 @@ def publish_report_draft_only(date: str) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description='发布A股情绪分析报告到微信公众号')
-    parser.add_argument('--date', type=str, default='20260424',
+    parser.add_argument('--date', type=str, default=datetime.now().strftime('%Y%m%d'),
                        help='报告日期 (YYYYMMDD)，默认今天')
     parser.add_argument('--preview', action='store_true',
                        help='预览模式（发送给指定微信号预览）')

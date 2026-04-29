@@ -17,7 +17,8 @@ import sys
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from core.analysis.sector_rotation_tracker import SectorRotationTracker
+# 使用新版同花顺板块追踪器
+from core.analysis.ths_sector_tracker import THSSectorTracker as SectorRotationTracker
 
 logger = loguru.logger
 
@@ -46,47 +47,95 @@ class TradeSignal:
 
 
 class HotspotFirstBoardStrategy:
-    def __init__(self, data_manager, sector_engine=None, mapper=None, mode="loose"):
+    def __init__(self, data_manager, sector_engine=None, mapper=None):
         """
-        data_manager: 数据管理器（DataManager）
-        sector_engine: 板块热度引擎（可选）
-        mapper: 行业映射器（可选）
-        mode: 策略模式 - "strict"(严格模式) | "loose"(宽松模式)
+        热点首板突破策略 - 基于套牢盘动态调整因子要求
+
+        核心逻辑：
+        - 上方套牢盘多时，量能、封单等因子要求更高
+        - 上方套牢盘少时，相关要求降低
+
+        Args:
+            data_manager: 数据管理器（DataManager）
+            sector_engine: 板块热度引擎（可选）
+            mapper: 行业映射器（可选）
         """
         self.dm = data_manager
         self.sector_engine = sector_engine
         self.mapper = mapper
-        self.mode = mode
 
-        # 基础参数（新旧逻辑共用）
+        # 基础参数
         self.params = {
             "max_5d_rise": 0.15,           # 近5日涨幅<15%（低位要求）
-            "min_volume_ratio": 1.8,       # 量比>1.8（资金突然介入）
-            "max_limit_up_time": "14:30",  # 最晚14:30前涨停（拒绝偷袭板）
+            "max_float_cap": 100.0,        # 流通市值上限<100亿
             "hot_sector_heat_threshold": 5,   # 板块3日涨停数>=5（确认是热点）
             "fast_limit_max_time": "0940",    # 早盘秒封最长时间（9:40）
-            "max_float_cap": 100.0         # 流通市值<100亿（小盘偏好）
+            "max_break_count": 1,          # 开板次数≤1
+            "min_sector_limit_up": 3,      # 板块涨停≥3家（避免独狼板）
+            "skip_tail_board_time": "14:30", # 尾盘板时间（14:30后放弃）
+            "volume_max_ratio": 3.0,       # 量能上限<300%
+            "volume_abs_max": 5.0,         # 绝对上限<5倍
+            "platform_days_min": 7,        # 横盘≥7天
+            "platform_days_max": 15,       # 横盘≤15天
+            "max_distance_from_high": 0.25,  # 距前高<25%
         }
 
-        # 严格模式参数（新逻辑）
-        self.strict_params = {
-            "max_float_cap": 50.0,           # 流通市值<50亿（最佳）
-            "max_float_cap_loose": 100.0,    # 宽松上限<100亿
-            "max_limit_up_time": "10:30",    # 最晚10:30前涨停
-            "max_break_count": 1,            # 开板次数≤1
-            "min_sector_limit_up": 3,        # 板块涨停≥3家
-            "volume_min_ratio": 1.5,         # 标准量能>150%
-            "volume_min_ratio_relaxed": 1.2, # 套牢盘少时量能>120%（距前高<10%）
-            "volume_min_ratio_break_high": 0.8,  # 突破前高时量能>80%（所有套牢盘已解放）
-            "volume_max_ratio": 3.0,         # 量能<300%
-            "volume_abs_max": 5.0,           # 绝对上限<5倍
-            "platform_days_min": 7,          # 横盘≥7天
-            "platform_days_max": 15,         # 横盘≤15天
-            "max_distance_from_high": 0.20,  # 距前高<20%
-            "relaxed_distance_threshold": 0.10,  # 距前高<10%视为套牢盘很少，可降低量能要求
-            "skip_tail_board_time": "14:30", # 尾盘板时间（14:30后放弃）
-            "min_seal_ratio": 0.05,          # 封单强度>5%
+    def _get_dynamic_thresholds(self, distance_from_high_pct: float, breakout_type: str) -> Dict:
+        """
+        根据套牢盘情况获取动态阈值
+
+        套牢盘判断标准（距前高距离）：
+        - 突破前高：套牢盘已完全解放，要求最低
+        - <10%：套牢盘很少，要求较低
+        - 10%-20%：套牢盘适中，标准要求
+        - >=20%：套牢盘较多，要求最高（但本策略最大允许20%）
+
+        Args:
+            distance_from_high_pct: 距前高距离（0.0-1.0）
+            breakout_type: 突破类型（"前高突破"/"平台突破"）
+
+        Returns:
+            Dict: 动态阈值配置
+        """
+        # 判断套牢盘等级
+        if breakout_type == "前高突破":
+            chip_level = "break_high"  # 突破前高，无套牢盘
+        elif distance_from_high_pct < 0.10:
+            chip_level = "low"         # 套牢盘很少
+        elif distance_from_high_pct < 0.25:
+            chip_level = "medium"      # 套牢盘适中
+        else:
+            chip_level = "high"        # 套牢盘较多（理论上不会进入，因为max_distance_from_high=0.25）
+
+        # 根据套牢盘等级返回动态阈值
+        thresholds = {
+            "break_high": {
+                "min_volume_ratio": 0.8,      # 量能>80%（无套牢盘，要求最低）
+                "max_limit_up_time": "11:00", # 最晚11:00前涨停
+                "min_seal_ratio": 0.015,       # 封单>1.5%
+                "volume_desc": "突破前高，无套牢盘"
+            },
+            "low": {
+                "min_volume_ratio": 1.15,      # 量能>115%（套牢盘少，要求较低）
+                "max_limit_up_time": "10:30", # 最晚10:30前涨停
+                "min_seal_ratio": 0.025,       # 封单>2.5%
+                "volume_desc": f"距前高{distance_from_high_pct*100:.1f}%<10%，套牢盘少"
+            },
+            "medium": {
+                "min_volume_ratio": 1.5,      # 量能>150%（标准要求）
+                "max_limit_up_time": "10:00", # 最晚10:00前涨停
+                "min_seal_ratio": 0.035,       # 封单>3.5%
+                "volume_desc": f"距前高{distance_from_high_pct*100:.1f}%<25%，套牢盘适中"
+            },
+            "high": {
+                "min_volume_ratio": 2.0,      # 量能>200%（套牢盘多，要求最高）
+                "max_limit_up_time": "09:40", # 最晚9:40前涨停
+                "min_seal_ratio": 0.04,       # 封单>4%
+                "volume_desc": f"距前高{distance_from_high_pct*100:.1f}%>=25%，套牢盘多"
+            }
         }
+
+        return thresholds.get(chip_level, thresholds["medium"])
 
     def detect_first_board_by_sectors(self,
                                       today_zt: pd.DataFrame,
@@ -293,8 +342,8 @@ class HotspotFirstBoardStrategy:
         # 2. 检查独狼板（板块效应不足）
         sector_stats = sector_info.get('stats', {})
         sector_limit_up_count = sector_stats.get('涨停家数', 0)
-        if sector_limit_up_count < self.strict_params['min_sector_limit_up']:
-            return f"独狼板(板块涨停{sector_limit_up_count}家<{self.strict_params['min_sector_limit_up']}家)"
+        if sector_limit_up_count < self.params['min_sector_limit_up']:
+            return f"独狼板(板块涨停{sector_limit_up_count}家<{self.params['min_sector_limit_up']}家)"
         
         # 3. 检查一字板（无换手）
         # 通过开板次数和涨停类型判断
@@ -323,14 +372,9 @@ class HotspotFirstBoardStrategy:
         """
         分析单只股票是否为首板突破
 
-        筛选条件：
-        1. 今日涨停 + 昨日未涨停（首板确认）
-        2. 流通市值 < 100亿（小盘偏好）
-        3. 涨停时间 < 14:30（拒绝偷袭板）
-        4. 封单强度 > 5%
-        5. 近5日涨幅 < 15%（低位要求）- 需要日线数据
-        6. 量比 > 1.8（资金突然介入）- 需要日线数据
-        7. 当天日线穿过5日、10日线 - 需要日线数据
+        核心逻辑：根据套牢盘情况动态调整因子要求
+        - 套牢盘多（距前高近）→ 量能、封单、涨停时间等要求更高
+        - 套牢盘少（距前高远/突破前高）→ 相关要求降低
 
         Args:
             stock: 股票数据（来自涨停池）
@@ -343,21 +387,19 @@ class HotspotFirstBoardStrategy:
             TradeSignal or None: 符合条件的交易信号
         """
         code = stock.get('代码', '')
-        # 确保代码是6位字符串
         code = str(code).zfill(6)
         name = stock.get('名称', '')
         sector_name = sector_info['sector_name']
 
         logger.debug(f"[{code}] 开始分析首板 - 名称:{name}, 行业:{sector_name}, 热点:{is_hot_sector}")
 
-        # ===== 严格模式：先检查放弃信号 =====
-        if self.mode == "strict":
-            skip_reason = self._should_skip_stock(stock, sector_info, date_str)
-            if skip_reason:
-                logger.debug(f"[{code}] 放弃信号: {skip_reason}")
-                return None
+        # ===== 步骤1: 基础过滤（必检项）=====
+        skip_reason = self._should_skip_stock(stock, sector_info, date_str)
+        if skip_reason:
+            logger.debug(f"[{code}] 放弃信号: {skip_reason}")
+            return None
 
-        # 条件1: 今日涨停（涨停池中的股票默认已涨停）
+        # 条件1: 今日涨停确认
         change = stock.get('涨跌幅', 0)
         if isinstance(change, str):
             change = float(change.replace('%', ''))
@@ -379,42 +421,54 @@ class HotspotFirstBoardStrategy:
             float_cap = float(float_cap.replace('亿', ''))
         limit_up_time = str(stock.get('首次封板时间', '')).strip()
         break_count = stock.get('开板次数', 0)
-        
-        # ===== 严格模式：6大核心条件 =====
-        if self.mode == "strict":
-            # 严格条件1: 题材强度（板块涨停≥3家）- 已在放弃信号中检查
-            sector_stats = sector_info.get('stats', {})
-            sector_limit_up_count = sector_stats.get('涨停家数', 0)
-            logger.debug(f"[{code}] 严格条件1-题材强度: 板块涨停{sector_limit_up_count}家")
-            
-            # 严格条件2: 流通市值 < 50亿（最佳），<100亿可接受
-            if float_cap > self.strict_params['max_float_cap_loose']:
-                logger.debug(f"[{code}] 过滤: 流通市值过大 ({float_cap:.2f}亿 > {self.strict_params['max_float_cap_loose']}亿)")
-                return None
-            float_cap_pass = float_cap <= self.strict_params['max_float_cap']
-            logger.debug(f"[{code}] 严格条件2-市值: {float_cap:.2f}亿 (理想<50亿:{float_cap_pass})")
-            
-            # 严格条件3: 涨停时间 < 10:30，开板次数≤1
-            if not self._is_valid_limit_time_strict(limit_up_time):
-                logger.debug(f"[{code}] 过滤: 涨停时间过晚 ({limit_up_time} > {self.strict_params['max_limit_up_time']})")
-                return None
-            if break_count > self.strict_params['max_break_count']:
-                logger.debug(f"[{code}] 过滤: 开板次数过多 ({break_count} > {self.strict_params['max_break_count']})")
-                return None
-            logger.debug(f"[{code}] 严格条件3-分时质量: 涨停时间{limit_up_time}, 开板{break_count}次")
-        else:
-            # 宽松模式：使用旧逻辑
-            # 条件3: 流通市值 < 100亿
-            if float_cap > self.params['max_float_cap']:
-                logger.debug(f"[{code}] 过滤: 流通市值过大 ({float_cap:.2f}亿 > {self.params['max_float_cap']}亿)")
-                return None
-            logger.debug(f"[{code}] 通过: 流通市值 {float_cap:.2f}亿")
 
-            # 条件4: 涨停时间 < 14:30
-            if not self._is_valid_limit_time(limit_up_time):
-                logger.debug(f"[{code}] 过滤: 涨停时间过晚 ({limit_up_time} > {self.params['max_limit_up_time']})")
-                return None
-            logger.debug(f"[{code}] 通过: 涨停时间 {limit_up_time}")
+        # ===== 步骤2: 技术形态和筹码结构分析（用于动态阈值）=====
+        # 检查平台/前高突破
+        is_breakout, platform_info = self._check_platform_breakout(code, date_str)
+        if not is_breakout:
+            logger.debug(f"[{code}] 过滤: 未突破平台或前高 ({platform_info.get('reason', '')})")
+            return None
+        breakout_type = platform_info.get('breakout_type', '')
+        logger.debug(f"[{code}] 技术形态: {breakout_type}")
+
+        # 检查筹码结构（距前高距离）
+        chip_ok, chip_info = self._check_chip_structure(code, date_str)
+        if not chip_ok:
+            logger.debug(f"[{code}] 过滤: 筹码结构不佳 ({chip_info.get('distance_from_high', 'N/A')}距前高)")
+            return None
+
+        # 解析距前高距离
+        distance_str = chip_info.get('distance_from_high', '100%').replace('%', '')
+        try:
+            distance_from_high_pct = float(distance_str) / 100.0
+        except:
+            distance_from_high_pct = 1.0
+        logger.debug(f"[{code}] 筹码结构: {chip_info.get('distance_from_high', 'N/A')}距前高")
+
+        # 获取动态阈值（基于套牢盘情况）
+        thresholds = self._get_dynamic_thresholds(distance_from_high_pct, breakout_type)
+        logger.debug(f"[{code}] 动态阈值: 量能>{thresholds['min_volume_ratio']}, "
+                    f"涨停时间<{thresholds['max_limit_up_time']}, "
+                    f"封单>{thresholds['min_seal_ratio']*100:.0f}%")
+
+        # ===== 步骤3: 应用动态阈值进行筛选 =====
+        # 条件3: 流通市值 < 100亿
+        if float_cap > self.params['max_float_cap']:
+            logger.debug(f"[{code}] 过滤: 流通市值过大 ({float_cap:.2f}亿 > {self.params['max_float_cap']}亿)")
+            return None
+        logger.debug(f"[{code}] 通过: 流通市值 {float_cap:.2f}亿")
+
+        # 条件4: 涨停时间检查（动态阈值）
+        if not self._is_valid_limit_time_dynamic(limit_up_time, thresholds['max_limit_up_time']):
+            logger.debug(f"[{code}] 过滤: 涨停时间过晚 ({limit_up_time} > {thresholds['max_limit_up_time']})")
+            return None
+        logger.debug(f"[{code}] 通过: 涨停时间 {limit_up_time} (要求<{thresholds['max_limit_up_time']})")
+
+        # 条件5: 开板次数≤1
+        if break_count > self.params['max_break_count']:
+            logger.debug(f"[{code}] 过滤: 开板次数过多 ({break_count} > {self.params['max_break_count']})")
+            return None
+        logger.debug(f"[{code}] 通过: 开板次数 {break_count}次")
 
         # 条件4: 封单强度 > 2%
         # 尝试获取封单额（不同数据源可能使用不同列名）
@@ -453,19 +507,11 @@ class HotspotFirstBoardStrategy:
                     f"使用基数={base_cap/100000000:.2f}亿, "
                     f"封单强度={seal_ratio*100:.4f}%")
 
-        # 封单强度检查
-        if self.mode == "strict":
-            # 严格模式：封单强度>5%
-            if seal_ratio < self.strict_params['min_seal_ratio']:
-                logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.2f}% < {self.strict_params['min_seal_ratio']*100:.0f}%)")
-                return None
-            logger.debug(f"[{code}] 严格条件4-封单强度: {seal_ratio*100:.2f}%")
-        else:
-            # 宽松模式：封单强度>2%
-            if seal_ratio < 0.02:
-                logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.4f}% < 2%)")
-                return None
-            logger.debug(f"[{code}] 通过: 封单强度 {seal_ratio*100:.2f}%")
+        # 条件6: 封单强度检查（使用动态阈值）
+        if seal_ratio < thresholds['min_seal_ratio']:
+            logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.2f}% < {thresholds['min_seal_ratio']*100:.0f}%)")
+            return None
+        logger.debug(f"[{code}] 通过: 封单强度 {seal_ratio*100:.2f}% (要求>{thresholds['min_seal_ratio']*100:.0f}%)")
 
         # 获取日线数据进行进一步分析
         daily_data = self._get_daily_data(code, date_str)
@@ -474,71 +520,20 @@ class HotspotFirstBoardStrategy:
         else:
             logger.debug(f"[{code}] 未获取到日线数据")
 
-        # ===== 严格模式：先检查筹码结构（用于动态调整量能要求）=====
-        platform_breakout_info = {}
-        chip_structure_info = {}
-        distance_from_high_pct = 1.0  # 默认距前高100%（很远）
-        
-        if self.mode == "strict":
-            # 严格条件2: 技术形态（平台突破/前高突破）
-            is_breakout, platform_info = self._check_platform_breakout(code, date_str)
-            platform_breakout_info = platform_info
-            if not is_breakout:
-                logger.debug(f"[{code}] 过滤: 未突破平台或前高 ({platform_info.get('reason', '')})")
-                return None
-            logger.debug(f"[{code}] 严格条件6-技术形态: {platform_info.get('breakout_type', '突破')}")
-            
-            # 严格条件6: 筹码结构（距前高<20%）
-            chip_ok, chip_info = self._check_chip_structure(code, date_str)
-            chip_structure_info = chip_info
-            if not chip_ok:
-                logger.debug(f"[{code}] 过滤: 筹码结构不佳 ({chip_info.get('distance_from_high', 'N/A')}距前高)")
-                return None
-            logger.debug(f"[{code}] 严格条件6-筹码结构: {chip_info.get('distance_from_high', 'N/A')}距前高")
-            
-            # 解析距前高距离百分比
-            distance_str = chip_info.get('distance_from_high', '100%').replace('%', '')
-            try:
-                distance_from_high_pct = float(distance_str) / 100.0
-            except:
-                distance_from_high_pct = 1.0
-
-        # 量能检查（根据技术形态和距前高距离动态调整）
+        # ===== 步骤4: 量能检查（使用动态阈值）=====
         volume_pass = False
         if daily_data and 'volume_ratio' in daily_data:
             vol_ratio = daily_data['volume_ratio']
-            if self.mode == "strict":
-                # 获取突破类型
-                breakout_type = platform_breakout_info.get('breakout_type', '')
-                
-                # 根据突破类型和距前高距离动态调整量能要求
-                # 1. 突破前高：所有套牢盘已解放，量能要求降至100%
-                # 2. 距前高<10%：套牢盘很少，量能要求降至120%
-                # 3. 距前高10%-20%：标准量能要求150%
-                if breakout_type == "前高突破":
-                    min_vol_ratio = self.strict_params['volume_min_ratio_break_high']  # 1.0
-                    vol_reason = f"突破前高，所有套牢盘已解放，量能要求放宽至100%"
-                elif distance_from_high_pct < self.strict_params['relaxed_distance_threshold']:
-                    min_vol_ratio = self.strict_params['volume_min_ratio_relaxed']  # 1.2
-                    vol_reason = f"距前高{distance_from_high_pct*100:.1f}%<10%，量能要求放宽至120%"
-                else:
-                    min_vol_ratio = self.strict_params['volume_min_ratio']  # 1.5
-                    vol_reason = f"距前高{distance_from_high_pct*100:.1f}%>=10%，标准量能要求150%"
-                
-                if vol_ratio < min_vol_ratio:
-                    logger.debug(f"[{code}] 过滤: 量能不足 ({vol_ratio:.2f} < {min_vol_ratio}), {vol_reason}")
-                    return None
-                if vol_ratio > self.strict_params['volume_abs_max']:
-                    logger.debug(f"[{code}] 过滤: 量能过大 ({vol_ratio:.2f} > {self.strict_params['volume_abs_max']})")
-                    return None
-                volume_pass = vol_ratio <= self.strict_params['volume_max_ratio']
-                logger.debug(f"[{code}] 严格条件5-量能: 量比{vol_ratio:.2f} (最低{min_vol_ratio*100:.0f}%), {vol_reason}, 理想<3倍:{volume_pass}")
-            else:
-                # 宽松模式：量比>1.8
-                if vol_ratio < self.params['min_volume_ratio']:
-                    logger.debug(f"[{code}] 过滤: 量比过低 ({vol_ratio:.2f} < {self.params['min_volume_ratio']})")
-                    return None
-                logger.debug(f"[{code}] 通过: 量比 {vol_ratio:.2f}")
+            min_vol_ratio = thresholds['min_volume_ratio']
+
+            if vol_ratio < min_vol_ratio:
+                logger.debug(f"[{code}] 过滤: 量能不足 ({vol_ratio:.2f} < {min_vol_ratio}), {thresholds['volume_desc']}")
+                return None
+            if vol_ratio > self.params['volume_abs_max']:
+                logger.debug(f"[{code}] 过滤: 量能过大 ({vol_ratio:.2f} > {self.params['volume_abs_max']})")
+                return None
+            volume_pass = vol_ratio <= self.params['volume_max_ratio']
+            logger.debug(f"[{code}] 通过: 量比{vol_ratio:.2f} (最低{min_vol_ratio*100:.0f}%), {thresholds['volume_desc']}, 理想<3倍:{volume_pass}")
 
         # 涨幅检查
         if daily_data and 'rise_5d' in daily_data:
@@ -561,7 +556,10 @@ class HotspotFirstBoardStrategy:
         confidence = 0.70  # 基础置信度
         confidence += min(seal_ratio * 2, 0.15)  # 封单强度加成
         if daily_data and 'volume_ratio' in daily_data:
-            confidence += min((daily_data['volume_ratio'] - self.params['min_volume_ratio']) * 0.02, 0.10)  # 量比加成
+            # 使用动态阈值计算量比加成（超过最低要求越多，加成越高）
+            vol_ratio = daily_data['volume_ratio']
+            min_vol_ratio = thresholds['min_volume_ratio']
+            confidence += min((vol_ratio - min_vol_ratio) * 0.05, 0.10)  # 量比加成
         if ma_breakthrough:
             confidence += 0.05  # 均线突破加成
         if is_hot_sector:
@@ -607,8 +605,10 @@ class HotspotFirstBoardStrategy:
         validation_rules = [
             "今日涨停",
             "昨日未涨停（首板）",
-            f"涨停时间<{self.params['max_limit_up_time']}（非偷袭）",
-            "封单强度>5%",
+            f"涨停时间<{thresholds['max_limit_up_time']}（非偷袭）",
+            f"封单强度>{thresholds['min_seal_ratio']*100:.0f}%",
+            f"技术形态: {breakout_type}",
+            f"筹码结构: 距前高{chip_info.get('distance_from_high', 'N/A')}"
         ]
         if is_hot_sector:
             validation_rules.append(f"属于热点行业: {sector_name}")
@@ -617,33 +617,22 @@ class HotspotFirstBoardStrategy:
         if daily_data and 'rise_5d' in daily_data:
             validation_rules.append(f"近5日涨幅<{self.params['max_5d_rise']*100:.0f}%（低位）")
         if daily_data and 'volume_ratio' in daily_data:
-            validation_rules.append(f"量比>{self.params['min_volume_ratio']}（资金介入）")
-        
-        # 严格模式：添加额外验证规则
-        if self.mode == "strict":
-            if platform_breakout_info.get('breakout_type'):
-                validation_rules.append(f"技术形态: {platform_breakout_info['breakout_type']}")
-            if chip_structure_info.get('distance_from_high'):
-                validation_rules.append(f"筹码结构: 距前高{chip_structure_info['distance_from_high']}")
+            validation_rules.append(f"量比>{thresholds['min_volume_ratio']}（资金介入）")
 
-        # 确定买点策略
-        if self.mode == "strict":
-            # 严格模式：根据板块强度和封单质量确定买点
-            if is_hot_sector and seal_ratio > 0.08 and break_count <= 1:
-                buy_strategy = "主买点: 回封时扫板（防止假突破）"
-            else:
-                buy_strategy = "次买点: 次日排板（板块龙头已确定）"
-            
-            # 次日预期
-            if is_hot_sector and sector_limit_up_count >= 5:
-                next_day_expectation = "超预期: 一字板或T字板（板块发酵）"
-            elif is_hot_sector:
-                next_day_expectation = "正常: 高开3%-7%，竞价量能达昨日5%-10%"
-            else:
-                next_day_expectation = "低于预期: 低开或高开<3%（考虑竞价卖出）"
+        # 确定买点策略（基于动态阈值和板块强度）
+        if is_hot_sector and seal_ratio > 0.08 and break_count <= 1:
+            buy_strategy = "主买点: 回封时扫板（防止假突破）"
         else:
-            buy_strategy = "主买点: 回封时扫板"
-            next_day_expectation = "正常预期"
+            buy_strategy = "次买点: 次日排板（板块龙头已确定）"
+
+        # 次日预期
+        sector_limit_up_count = sector_info.get('stats', {}).get('涨停家数', 0)
+        if is_hot_sector and sector_limit_up_count >= 5:
+            next_day_expectation = "超预期: 一字板或T字板（板块发酵）"
+        elif is_hot_sector:
+            next_day_expectation = "正常: 高开3%-7%，竞价量能达昨日5%-10%"
+        else:
+            next_day_expectation = "低于预期: 低开或高开<3%（考虑竞价卖出）"
 
         return TradeSignal(
             pattern_type=PatternType.HOTSPOT_FIRST_BOARD,
@@ -858,7 +847,7 @@ class HotspotFirstBoardStrategy:
                     distance_from_high = (high_60d - close_price) / high_60d if high_60d > 0 else 1
                     
                     # 距前高<20%视为无巨量套牢盘
-                    no_trap = distance_from_high < self.strict_params['max_distance_from_high']
+                    no_trap = distance_from_high < self.params['max_distance_from_high']
                     
                     return no_trap, {
                         "distance_from_high": f"{distance_from_high*100:.1f}%",
@@ -917,35 +906,23 @@ class HotspotFirstBoardStrategy:
             logger.debug(f"解析时间失败: {time_str}, {e}")
             return None
 
-    def _is_valid_limit_time(self, limit_up_time: str) -> bool:
+    def _is_valid_limit_time_dynamic(self, limit_up_time: str, max_time_str: str) -> bool:
         """
-        检查涨停时间是否有效（非尾盘偷袭）
+        动态检查涨停时间是否有效
         支持格式: HH:MM:SS, HH:MM, HHMMSS, HHMM
-        """
-        parsed = self._parse_time(limit_up_time)
-        if not parsed:
-            return False
-        
-        hour, minute = parsed
-        max_hour = int(self.params['max_limit_up_time'][:2])
-        max_minute = int(self.params['max_limit_up_time'][3:5])
-        
-        return hour < max_hour or (hour == max_hour and minute <= max_minute)
 
-    def _is_valid_limit_time_strict(self, limit_up_time: str) -> bool:
-        """
-        严格模式：检查涨停时间是否有效（10:30前）
-        支持格式: HH:MM:SS, HH:MM, HHMMSS, HHMM
+        Args:
+            limit_up_time: 涨停时间
+            max_time_str: 最晚涨停时间（如 "10:00", "10:30", "11:00"）
         """
         parsed = self._parse_time(limit_up_time)
         if not parsed:
             return False
-        
+
         hour, minute = parsed
-        max_time = self.strict_params['max_limit_up_time']  # "10:30"
-        max_hour = int(max_time[:2])
-        max_minute = int(max_time[3:5])
-        
+        max_hour = int(max_time_str[:2])
+        max_minute = int(max_time_str[3:5])
+
         return hour < max_hour or (hour == max_hour and minute <= max_minute)
 
     def _get_date_offset(self, date_str: str, offset: int) -> str:
