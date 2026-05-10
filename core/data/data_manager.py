@@ -285,11 +285,10 @@ class DataManager:
             个股日线数据DataFrame
         """
         code = ts_code
-        logger.debug(f"[get_stock_daily] 获取 {code} 从 {start_date} 到 {end_date} 的日线数据")
 
         cache_file = self.stock_dir / "daily" / f"{code}_{start_date}_{end_date}.csv"
         if cache_file.exists():
-            logger.debug(f"[get_stock_daily] 从缓存加载: {cache_file}")
+            # logger.debug(f"[get_stock_daily] 从缓存加载: {cache_file}")
             return pd.read_csv(cache_file, parse_dates=['trade_date'])
 
         try:
@@ -300,7 +299,7 @@ class DataManager:
                 if not df.empty:
                     df['trade_date'] = pd.to_datetime(df['trade_date'])
                     df.to_csv(cache_file, index=False)
-                    logger.debug(f"[get_stock_daily] 从Tushare获取并缓存数据: {cache_file}")
+                    # logger.debug(f"[get_stock_daily] 从Tushare获取并缓存数据: {cache_file}")
                     return df
                 else:
                     logger.debug(f"[get_stock_daily] Tushare返回空数据")
@@ -1480,27 +1479,12 @@ class DataManager:
         if cache_file.exists():
             file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
             if (datetime.now() - file_time).days < 1:
-                logger.debug(f"[get_ths_index] 从缓存加载同花顺板块指数")
+                # logger.debug(f"[get_ths_index] 从缓存加载同花顺板块指数")
                 return pd.read_csv(cache_file)
 
         try:
-            # 构建请求参数
-            params = {}
-            if index_type:
-                # 转换中文类型为API需要的代码
-                type_mapping = {
-                    '概念指数': 'N',
-                    '行业指数': 'I',
-                    '特色指数': 'S',
-                    '地域指数': 'R',
-                    'ST板块': 'ST',
-                    '上市板指数': 'BB',
-                    '同花顺指数': 'TH'
-                }
-                params['type'] = type_mapping.get(index_type, index_type)
-
             # 调用Tushare接口
-            df = self.ts_pro.ths_index(**params)
+            df = self.ts_pro.ths_index(exchange='A', type=index_type).dropna()
 
             if df is not None and not df.empty:
                 # 缓存结果
@@ -1564,7 +1548,7 @@ class DataManager:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
 
         if cache_file.exists():
-            logger.debug(f"[get_ths_daily] 从缓存加载同花顺板块行情")
+            # logger.debug(f"[get_ths_daily] 从缓存加载同花顺板块行情")
             return pd.read_csv(cache_file)
 
         try:
@@ -1627,7 +1611,7 @@ class DataManager:
         if cache_file.exists():
             file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
             if (datetime.now() - file_time).days < 7:
-                logger.debug(f"[get_ths_member] 从缓存加载同花顺板块成分")
+                # logger.debug(f"[get_ths_member] 从缓存加载同花顺板块成分")
                 return pd.read_csv(cache_file)
 
         try:

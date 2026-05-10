@@ -25,7 +25,7 @@
 
 # 导出工具类
 from .date_utils import DateUtils
-from .stock_code_utils import StockCodeUtils
+from .stock_code_utils import StockCodeUtils, FieldNames, DataFrameFieldMapper
 from .time_utils import TimeUtils
 from .calculation_utils import CalculationUtils
 from .validation_utils import ValidationUtils

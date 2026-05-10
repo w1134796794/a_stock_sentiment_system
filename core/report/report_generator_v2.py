@@ -62,11 +62,14 @@ class ReportGeneratorV2:
             
             # Sheet 7: 涨停梯队
             self._write_limit_up_hierarchy(writer, data_dict, formats)
-            
-            # Sheet 8: 龙头池
+
+            # Sheet 8: 概念连板梯队
+            self._write_concept_hierarchy(writer, data_dict, formats)
+
+            # Sheet 9: 龙头池
             self._write_dragon_pool(writer, data_dict, formats)
-            
-            # Sheet 9: 走弱池
+
+            # Sheet 10: 走弱池
             self._write_weakening_pool(writer, data_dict, formats)
 
         logger.info(f"报告已生成: {file_path}")
@@ -182,6 +185,7 @@ class ReportGeneratorV2:
         # 主线特征指标优先，帮助识别真正的主线概念而非一日游
         core_concept_cols = {
             # 基础信息
+            'ts_code': '板块代码',
             '板块名称': '概念名称',
             '当前排名': '当日排名',
             # 主线特征指标（核心）
@@ -242,26 +246,27 @@ class ReportGeneratorV2:
         
         worksheet = writer.sheets['热点概念']
         # 设置列宽
-        worksheet.set_column('A:A', 16)  # 概念名称
-        worksheet.set_column('B:B', 10)  # 当日排名
+        worksheet.set_column('A:A', 12)  # 板块代码
+        worksheet.set_column('B:B', 16)  # 概念名称
+        worksheet.set_column('C:C', 10)  # 当日排名
         # 主线特征指标（核心列，稍宽以突出显示）
-        worksheet.set_column('C:C', 12)  # 10日进前10
-        worksheet.set_column('D:D', 12)  # 10日进前5
-        worksheet.set_column('E:E', 12)  # 10日进前3
-        worksheet.set_column('F:F', 12)  # 连续前10天
-        worksheet.set_column('G:G', 10)  # 是否主线
-        worksheet.set_column('H:I', 11)  # 10日均排名、10日最佳
+        worksheet.set_column('D:D', 12)  # 10日进前10
+        worksheet.set_column('E:E', 12)  # 10日进前5
+        worksheet.set_column('F:F', 12)  # 10日进前3
+        worksheet.set_column('G:G', 12)  # 连续前10天
+        worksheet.set_column('H:H', 10)  # 是否主线
+        worksheet.set_column('I:J', 11)  # 10日均排名、10日最佳
         # 其他数据
-        worksheet.set_column('J:K', 10)  # 涨停数量、最高连板
-        worksheet.set_column('L:N', 11)  # 综合评分、共振得分、持续性评分
-        worksheet.set_column('O:P', 10)  # 所处阶段、市场周期
-        worksheet.set_column('Q:R', 10)  # 排名动量、涨停趋势
-        worksheet.set_column('S:T', 11)  # 成交额变化、换手率
-        worksheet.set_column('U:V', 10)  # 信号类型、信号强度
-        worksheet.set_column('W:W', 14)  # 操作建议
-        worksheet.set_column('X:X', 10)  # 建议仓位
-        worksheet.set_column('Y:Y', 8)   # 紧急度
-        worksheet.set_column('Z:Z', 30)  # 策略理由
+        worksheet.set_column('K:L', 10)  # 涨停数量、最高连板
+        worksheet.set_column('M:O', 11)  # 综合评分、共振得分、持续性评分
+        worksheet.set_column('P:Q', 10)  # 所处阶段、市场周期
+        worksheet.set_column('R:S', 10)  # 排名动量、涨停趋势
+        worksheet.set_column('T:U', 11)  # 成交额变化、换手率
+        worksheet.set_column('V:W', 10)  # 信号类型、信号强度
+        worksheet.set_column('X:X', 14)  # 操作建议
+        worksheet.set_column('Y:Y', 10)  # 建议仓位
+        worksheet.set_column('Z:Z', 8)   # 紧急度
+        worksheet.set_column('AA:AA', 30)  # 策略理由
         
         # 应用表头格式
         for col_num in range(len(df_display.columns)):
@@ -500,8 +505,65 @@ class ReportGeneratorV2:
         for col_num in range(len(df_display.columns)):
             worksheet.write(0, col_num, df_display.columns[col_num], formats['header'])
 
+    def _write_concept_hierarchy(self, writer, data_dict: Dict, formats: Dict):
+        """Sheet 8: 概念连板梯队 - 各概念板块的涨停梯队分布"""
+        concept_hierarchy = data_dict.get('concept_hierarchy', {})
+        concept_hierarchy_report = data_dict.get('concept_hierarchy_report', '')
+
+        if not concept_hierarchy:
+            df = pd.DataFrame({'提示': ['暂无概念连板梯队数据']})
+            df.to_excel(writer, sheet_name='概念连板梯队', index=False)
+            return
+
+        # 按涨停家数排序
+        sorted_concepts = sorted(
+            concept_hierarchy.items(),
+            key=lambda x: x[1].total_limit_up,
+            reverse=True
+        )
+
+        rows = []
+        for concept_name, h in sorted_concepts:
+            # 构建梯队分布字符串
+            board_parts = []
+            for board in sorted(h.board_distribution.keys(), reverse=True):
+                count = h.board_distribution[board]
+                board_parts.append(f"{board}板{count}家")
+            board_str = ", ".join(board_parts)
+
+            rows.append({
+                '概念名称': concept_name,
+                '涨停总数': h.total_limit_up,
+                '最高连板': h.max_board_count,
+                '梯队分布': board_str,
+                '龙头股': f"{h.leader_stock['name']}({h.leader_stock['code']})" if h.leader_stock else '-',
+                '板块代码': h.ts_code,
+            })
+
+        df = pd.DataFrame(rows)
+        df.to_excel(writer, sheet_name='概念连板梯队', index=False)
+
+        worksheet = writer.sheets['概念连板梯队']
+        worksheet.set_column('A:A', 20)  # 概念名称
+        worksheet.set_column('B:B', 12)  # 涨停总数
+        worksheet.set_column('C:C', 12)  # 最高连板
+        worksheet.set_column('D:D', 40)  # 梯队分布
+        worksheet.set_column('E:E', 25)  # 龙头股
+        worksheet.set_column('F:F', 15)  # 板块代码
+
+        # 应用表头格式
+        for col_num in range(len(df.columns)):
+            worksheet.write(0, col_num, df.columns[col_num], formats['header_green'])
+
+        # 高亮涨停总数较多的行
+        for row_num in range(1, len(df) + 1):
+            limit_up_count = df.iloc[row_num - 1]['涨停总数']
+            if limit_up_count >= 20:
+                for col_num in range(len(df.columns)):
+                    worksheet.write(row_num, col_num, df.iloc[row_num - 1, col_num], formats['highlight_green'])
+
     def _write_dragon_pool(self, writer, data_dict: Dict, formats: Dict):
-        """Sheet 8: 龙头池 - 正在观察的龙头候选股"""
+        """Sheet 9: 龙头池 - 正在观察的龙头候选股"""
         dragon_pool = data_dict.get('dragon_pool', [])
         
         if not dragon_pool:
@@ -546,7 +608,7 @@ class ReportGeneratorV2:
             worksheet.write(0, col_num, df.columns[col_num], formats['header_purple'])
 
     def _write_weakening_pool(self, writer, data_dict: Dict, formats: Dict):
-        """Sheet 9: 走弱池 - 已确认走弱等待转强的龙头"""
+        """Sheet 10: 走弱池 - 已确认走弱等待转强的龙头"""
         weakening_pool = data_dict.get('weakening_pool', [])
         
         if not weakening_pool:

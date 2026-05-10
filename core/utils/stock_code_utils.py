@@ -249,6 +249,163 @@ class StockCodeUtils:
         return list(set(valid_codes))
 
 
+# ==================== 字段命名标准化 ====================
+
+class FieldNames:
+    """
+    统一字段命名规范
+    
+    规范说明：
+    1. 股票代码字段：
+       - 内部统一使用 'code'（6位数字，如 '000001'）
+       - Tushare API 使用 'ts_code'（带后缀，如 '000001.SZ'）
+       - 同花顺成分股使用 'con_code'（带后缀，如 '000001.SZ'）
+       - 中文报表使用 '代码'
+    
+    2. 股票名称字段：
+       - 内部统一使用 'name'
+       - 中文报表使用 '名称'
+    
+    3. 板块代码字段：
+       - 统一使用 'ts_code'（带后缀，如 '885001.TI'）
+    """
+
+    # 股票代码字段（按优先级排序）
+    STOCK_CODE_FIELDS = ['code', 'ts_code', 'con_code', '股票代码', '代码', 'stock_code']
+    
+    # 股票名称字段
+    STOCK_NAME_FIELDS = ['name', '股票名称', '名称', 'stock_name']
+    
+    # 板块代码字段
+    SECTOR_CODE_FIELDS = ['ts_code', 'sector_code', '板块代码']
+    
+    # 板块名称字段
+    SECTOR_NAME_FIELDS = ['name', 'sector_name', '板块名称']
+
+
+class DataFrameFieldMapper:
+    """DataFrame 字段映射工具"""
+
+    @staticmethod
+    def get_code_column(df, fields=None):
+        """
+        获取 DataFrame 中的股票代码列名
+        
+        Args:
+            df: DataFrame
+            fields: 候选字段列表，默认使用 FieldNames.STOCK_CODE_FIELDS
+        
+        Returns:
+            列名字符串，如果未找到返回 None
+        """
+        if df is None or df.empty:
+            return None
+        
+        if fields is None:
+            fields = FieldNames.STOCK_CODE_FIELDS
+        
+        for col in fields:
+            if col in df.columns:
+                return col
+        
+        return None
+
+    @staticmethod
+    def get_name_column(df, fields=None):
+        """
+        获取 DataFrame 中的股票名称列名
+        
+        Args:
+            df: DataFrame
+            fields: 候选字段列表，默认使用 FieldNames.STOCK_NAME_FIELDS
+        
+        Returns:
+            列名字符串，如果未找到返回 None
+        """
+        if df is None or df.empty:
+            return None
+        
+        if fields is None:
+            fields = FieldNames.STOCK_NAME_FIELDS
+        
+        for col in fields:
+            if col in df.columns:
+                return col
+        
+        return None
+
+    @staticmethod
+    def extract_codes(df, remove_suffix=True, fields=None):
+        """
+        从 DataFrame 中提取股票代码列表
+        
+        Args:
+            df: DataFrame
+            remove_suffix: 是否移除后缀
+            fields: 候选字段列表，默认使用 FieldNames.STOCK_CODE_FIELDS
+        
+        Returns:
+            代码列表（6位数字格式）
+        """
+        if df is None or df.empty:
+            return []
+        
+        code_col = DataFrameFieldMapper.get_code_column(df, fields)
+        if not code_col:
+            return []
+        
+        codes = df[code_col].astype(str).tolist()
+        
+        if remove_suffix:
+            codes = [StockCodeUtils.remove_suffix(c).zfill(6) for c in codes]
+        
+        return codes
+
+    @staticmethod
+    def standardize_column_names(df, mapping=None):
+        """
+        标准化 DataFrame 列名
+        
+        Args:
+            df: DataFrame
+            mapping: 自定义映射字典，如 {'ts_code': 'code'}
+        
+        Returns:
+            列名标准化后的 DataFrame
+        """
+        if df is None or df.empty:
+            return df
+        
+        df = df.copy()
+        
+        # 默认映射：将各种代码字段统一为 'code'
+        default_mapping = {
+            'ts_code': 'code',
+            'con_code': 'code',
+            '股票代码': 'code',
+            '代码': 'code',
+            'stock_code': 'code',
+            'name': 'name',
+            '股票名称': 'name',
+            '名称': 'name',
+            'stock_name': 'name',
+        }
+        
+        if mapping:
+            default_mapping.update(mapping)
+        
+        # 重命名列
+        rename_dict = {}
+        for old_col, new_col in default_mapping.items():
+            if old_col in df.columns and new_col not in df.columns:
+                rename_dict[old_col] = new_col
+        
+        if rename_dict:
+            df = df.rename(columns=rename_dict)
+        
+        return df
+
+
 # 保持向后兼容的函数接口
 standardize_code = StockCodeUtils.standardize_code
 remove_suffix = StockCodeUtils.remove_suffix

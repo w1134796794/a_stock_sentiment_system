@@ -152,6 +152,78 @@ WECHAT_CONFIG = {
 }
 
 # ============================================
+# 同花顺板块追踪器配置 (THSSectorTracker)
+# ============================================
+THS_SECTOR_CONFIG = {
+    # 板块分析参数
+    "analyze_sectors": {
+        "top_n": 20,  # 默认返回前N个板块
+        "use_limit_cpt": True,  # 是否使用limit_cpt_list数据
+        "min_member_count": 10,  # 最小成分股数量（过滤小板块）
+    },
+    
+    # 概念/行业差异化参数
+    "sector_params": {
+        "概念": {
+            "min_pct_change": 5.0,      # 概念涨幅阈值更高
+            "price_weight": 0.5,         # 概念价格权重更高（追热点）
+            "amount_weight": 0.2,        # 概念资金权重更低
+            "limit_weight": 0.3,         # 概念涨停权重
+            "hot_threshold_pct": 0.15,   # 概念前15%算热点（更严格）
+        },
+        "行业": {
+            "min_pct_change": 3.0,      # 行业涨幅阈值更低
+            "price_weight": 0.35,        # 行业价格权重更低
+            "amount_weight": 0.35,       # 行业资金权重更高（看资金）
+            "limit_weight": 0.3,         # 行业涨停权重
+            "hot_threshold_pct": 0.2,    # 行业前20%算热点
+        }
+    },
+    
+    # 板块关联分析参数
+    "sector_relation": {
+        "min_overlap": 0.05,  # 最小重叠度阈值（查找关联板块）
+        "default_overlap": 0.1,  # 默认重叠度阈值
+    },
+    
+    # 板块共振分析参数
+    "resonance": {
+        "top_n": 20,  # 分析前N个板块
+        "min_overlap": 0.1,  # 最小重叠度
+        "strong_resonance_threshold": 0.3,  # 强共振重叠度阈值
+        "medium_resonance_threshold": 0.1,  # 中共振重叠度阈值
+    },
+    
+    # 板块持续性分析参数
+    "persistence": {
+        "lookback_days": 10,  # 回溯交易日数量（增加历史数据分析天数，更准确判断持续性）
+        "hot_threshold_days": 3,  # 判定为持续热门的最少天数
+        "top_n": 10,  # 每日热点板块排名阈值
+    },
+    
+    # 板块内部结构分析参数
+    "internal_structure": {
+        # 梯队完整性评分权重
+        "hierarchy_weights": {
+            "has_leader": 20,  # 有最高板
+            "has_second_board": 20,  # 有2板
+            "multiple_second_board": 10,  # 多个2板
+            "has_third_plus": 20,  # 有3板及以上
+            "first_board_count_3": 20,  # 首板>=3
+            "first_board_count_5": 10,  # 首板>=5
+        },
+        # 龙头股评分
+        "leader_score": {
+            "space_leader": 10,  # 空间龙头
+            "strength_leader": 10,  # 强度龙头
+            "time_leader": 10,  # 时间龙头
+        },
+        # 中军股封单金额阈值（元）
+        "mid_cap_min_amount": 100000000,  # 1亿
+    },
+}
+
+# ============================================
 # 日志配置
 # ============================================
 LOG_CONFIG = {

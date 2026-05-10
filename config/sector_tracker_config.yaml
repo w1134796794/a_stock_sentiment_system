@@ -1,0 +1,140 @@
+# 板块追踪器配置
+# 同花顺板块分析统一配置
+
+# ============================================
+# 板块分析参数
+# ============================================
+analyze_sectors:
+  top_n: 20                    # 默认返回前N个板块
+  use_limit_cpt: true          # 是否使用limit_cpt_list数据
+  min_member_count: 10         # 最小成分股数量（过滤小板块）
+  score_threshold_pct: 0.15    # 综合得分前N%算热点
+
+# ============================================
+# 板块类型差异化参数
+# ============================================
+sector_params:
+  concept:
+    name: "概念"
+    min_pct_change: 5.0        # 最小涨幅阈值
+    price_weight: 0.5          # 价格强度权重
+    amount_weight: 0.2         # 资金强度权重
+    limit_weight: 0.3          # 涨停强度权重
+    hot_threshold_pct: 0.15    # 热点判断阈值（前15%）
+
+  industry:
+    name: "行业"
+    min_pct_change: 3.0        # 最小涨幅阈值（行业波动小，阈值更低）
+    price_weight: 0.35         # 价格强度权重
+    amount_weight: 0.35        # 资金强度权重（行业资金容量大）
+    limit_weight: 0.3          # 涨停强度权重
+    hot_threshold_pct: 0.2     # 热点判断阈值（前20%）
+
+# ============================================
+# 板块关联分析配置
+# ============================================
+sector_relation:
+  min_overlap: 0.05            # 最小重叠度阈值
+  default_overlap: 0.1         # 默认重叠度
+  strong_overlap: 0.3          # 强关联阈值
+
+# ============================================
+# 板块共振分析配置
+# ============================================
+resonance:
+  top_n: 20                    # 分析前N个板块
+  min_overlap: 0.1             # 最小重叠度阈值
+  strong_resonance: 0.3        # 强共振阈值
+  medium_resonance: 0.1        # 中共振阈值
+
+# ============================================
+# 板块持续性分析配置
+# ============================================
+persistence:
+  lookback_days: 10            # 回溯交易日数量
+  hot_threshold_days: 3        # 判定为持续热门的最少天数
+  top_n: 10                    # 每日热点板块排名阈值
+
+# ============================================
+# 市场主线分析配置
+# ============================================
+main_themes:
+  lookback_days: 10            # 回溯交易日数量（判断主线历史数据）
+  min_persistence_days: 3      # 概念/行业持续热门的最少天数
+  min_resonance_pct: 30        # 最小共振度阈值（%）
+  resonance_weight: 0.4        # 共振度权重
+  persistence_weight: 0.6      # 持续性权重
+
+# ============================================
+# 板块内部结构分析配置
+# ============================================
+internal_structure:
+  # 梯队完整性评分权重
+  hierarchy_weights:
+    has_leader: 20             # 有最高板
+    has_second_board: 20       # 有2板
+    multiple_second_board: 10  # 多个2板
+    has_third_plus: 20         # 有3板及以上
+    first_board_count_3: 20    # 首板>=3
+    first_board_count_5: 10    # 首板>=5
+
+  # 龙头评分权重
+  leader_score:
+    space_leader: 10           # 空间龙头
+    strength_leader: 10        # 强度龙头
+    time_leader: 10            # 时间龙头
+
+  # 中军判断阈值
+  mid_cap:
+    min_amount: 100000000      # 最小封单金额（1亿）
+
+  # 梯队结构分类阈值
+  hierarchy_classification:
+    super_high: 5              # 超级高位（>=5板）
+    high: 3                    # 高位（>=3板）
+    mid: 2                     # 中位（2板）
+    low: 1                     # 低位（1板）
+
+# ============================================
+# 热点板块识别规则
+# ============================================
+hot_sector_rules:
+  # 价格热点条件
+  price_hot:
+    rank_pct: 0.15             # 涨幅排名前15%
+    min_pct_change: 3.0        # 最小涨幅
+
+  # 涨停热点条件
+  limit_hot:
+    top_n: 10                  # 涨停榜前10
+
+  # 综合热点条件
+  composite_hot:
+    score_pct: 0.15            # 综合得分前15%
+
+# ============================================
+# 持续性阶段判定
+# ============================================
+persistence_stages:
+  启动期:
+    min_pct_change: 3.0
+    trend: "上升"
+    hot_days_ratio: 0.3
+
+  加速期:
+    min_pct_change: 5.0
+    trend: "快速上升"
+    hot_days_ratio: 0.5
+
+  高潮期:
+    min_pct_change: 7.0
+    trend: "高位震荡"
+    hot_days_ratio: 0.7
+
+  衰退期:
+    trend: "下降"
+    hot_days_ratio: 0.3
+
+  观察期:
+    trend: "不明"
+    hot_days_ratio: 0.0

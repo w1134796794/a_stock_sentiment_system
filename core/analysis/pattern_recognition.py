@@ -1133,7 +1133,7 @@ class PatternRecognition:
                                     hot_sectors: List[Dict] = None) -> List[PatternSignal]:
         """
         首板突破模式识别 - 调用HotspotFirstBoardStrategy
-        
+
         Args:
             hot_sectors: 预计算的热点板块列表（避免重复计算板块热度）
         """
@@ -1148,6 +1148,14 @@ class PatternRecognition:
             return signals
 
         try:
+            # 过滤：只保留首板股票（连板数=1）
+            first_board_df = today_df[today_df['连板数'] == 1].copy()
+            logger.info(f"[首板突破] 今日涨停{len(today_df)}只，首板{len(first_board_df)}只")
+
+            if first_board_df.empty:
+                logger.info("[首板突破] 没有首板股票，跳过检测")
+                return signals
+
             # history_pools的键已经是YYYYMMDD格式，只需排除今日数据（避免重复统计）
             history_pools_filtered = {}
             if history_pools:
@@ -1157,7 +1165,7 @@ class PatternRecognition:
                         history_pools_filtered[date_key] = pool_df
             logger.debug(f"[首板突破] 过滤后历史池: {len(history_pools_filtered)}天 (排除今日)")
             trade_signals = self.first_board_breakout.detect_first_board_by_sectors(
-                today_df, history_pools_filtered, date_str, hot_sectors=hot_sectors
+                first_board_df, history_pools_filtered, date_str, hot_sectors=hot_sectors
             )
 
             for ts in trade_signals:
@@ -1181,61 +1189,6 @@ class PatternRecognition:
 
         except Exception as e:
             logger.error(f"[首板突破] 检测失败: {e}", exc_info=True)
-
-        return signals
-
-    def detect_position_battle(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
-                               sector_mapping: Dict[str, str] = None) -> List[PatternSignal]:
-        """
-        卡位板模式识别 - 调用PositionBattleStrategy
-        """
-        signals = []
-
-        logger.debug(f"[卡位板] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
-
-        if self.position_battle is None:
-            logger.warning("[卡位板] 策略未加载")
-            return signals
-
-        if today_df.empty or yesterday_df.empty:
-            logger.debug(f"[卡位板] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
-            return signals
-
-        try:
-            logger.debug(f"[卡位板] 调用PositionBattleStrategy.detect_position_battle...")
-            battle_signals = self.position_battle.detect_position_battle(
-                today_df, today_df, yesterday_df
-            )
-
-            logger.debug(f"[卡位板] 策略返回 {len(battle_signals)} 个原始信号")
-
-            for bs in battle_signals:
-                signal = PatternSignal(
-                    pattern_type="卡位板",
-                    stock_code=bs.low_stock_code,
-                    stock_name=bs.low_stock_name,
-                    confidence=bs.confidence,
-                    description=f"卡位{bs.high_stock_name}，领先{bs.lead_time}分钟",
-                    key_metrics={
-                        "卡位类型": bs.battle_type.value if hasattr(bs.battle_type, 'value') else str(bs.battle_type),
-                        "高位股": bs.high_stock_name,
-                        "领先时间": f"{bs.lead_time}分钟",
-                        "操作建议": bs.action
-                    },
-                    entry_price=None,
-                    stop_loss=None,
-                    take_profit=None,
-                    position_size="medium",
-                    validation_rules=["低位抢先涨停", "封单质量优势"],
-                    l2_industry=""
-                )
-                signals.append(signal)
-                logger.debug(f"[卡位板] 转换信号: {bs.low_stock_name} 卡位 {bs.high_stock_name} (置信度{bs.confidence:.2f})")
-
-            logger.info(f"[卡位板] 检测完成: 共{len(signals)}个信号")
-
-        except Exception as e:
-            logger.error(f"[卡位板] 检测失败: {e}", exc_info=True)
 
         return signals
 
@@ -1472,26 +1425,6 @@ class PatternRecognition:
             logger.error(f"弱转强检测失败: {e}")
             results["弱转强"] = []
         
-        # 注释掉弱转强V2检测（基于Tushare股东数据）
-        # try:
-        #     logger.info("-" * 40)
-        #     logger.info("开始弱转强V2检测（基于实际换手率）...")
-        #     results["弱转强V2"] = self.detect_weak_to_strong_v2(
-        #         today_df, yesterday_df, today_date_ymd, yesterday_date_ymd
-        #     )
-        # except Exception as e:
-        #     logger.error(f"弱转强V2检测失败: {e}")
-        #     results["弱转强V2"] = []
-        
-        # 注释掉分歧转一致检测
-        # try:
-        #     logger.info("-" * 40)
-        #     results["分歧转一致"] = self.detect_divergence_to_consensus(
-        #         today_df, yesterday_df, today_date_ymd, yesterday_date_ymd
-        #     )
-        # except Exception as e:
-        #     logger.error(f"分歧转一致检测失败: {e}")
-        #     results["分歧转一致"] = []
         
         # 3. 二板定龙检测
         try:
@@ -1530,26 +1463,6 @@ class PatternRecognition:
         except Exception as e:
             logger.error(f"首板突破检测失败: {e}")
             results["首板突破"] = []
-        
-        # 注释掉卡位板检测
-        # try:
-        #     logger.info("-" * 40)
-        #     results["卡位板"] = self.detect_position_battle(
-        #         today_df, yesterday_df, today_date_ymd
-        #     )
-        # except Exception as e:
-        #     logger.error(f"卡位板检测失败: {e}")
-        #     results["卡位板"] = []
-        
-        # 注释掉炸板回封检测（用于次日观察）
-        # try:
-        #     logger.info("-" * 40)
-        #     results["炸板回封"] = self.detect_blast_reseal(
-        #         today_df, today_date_ymd
-        #     )
-        # except Exception as e:
-        #     logger.error(f"炸板回封检测失败: {e}")
-        #     results["炸板回封"] = []
         
         # 汇总统计
         logger.info("=" * 60)

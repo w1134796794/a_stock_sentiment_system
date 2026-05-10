@@ -24,11 +24,11 @@ logger = loguru.logger
 
 class RetailSuitability(Enum):
     """散户适配度等级"""
-    EXCELLENT = "⭐⭐⭐⭐⭐"  # 5星 - 闭眼参与
-    GOOD = "⭐⭐⭐⭐"       # 4星 - 积极参与
-    FAIR = "⭐⭐⭐"         # 3星 - 谨慎参与
-    POOR = "⭐⭐"           # 2星 - 回避
-    AVOID = "⭐"            # 1星 - 坚决回避
+    EXCELLENT = "[5星]"  # 5星 - 闭眼参与
+    GOOD = "[4星]"       # 4星 - 积极参与
+    FAIR = "[3星]"       # 3星 - 谨慎参与
+    POOR = "[2星]"       # 2星 - 回避
+    AVOID = "[1星]"      # 1星 - 坚决回避
 
 
 class SectorPriority(Enum):
@@ -896,10 +896,10 @@ class RetailTraderSupportV2:
             report.append(f"     建议: {sector.retail_suggestion}")
             
             if sector.is_declining:
-                report.append(f"     ⚠️  退潮预警: 20日涨停多但当前仅{sector.today_limit_up}家")
+                report.append(f"     [警告] 退潮预警: 20日涨停多但当前仅{sector.today_limit_up}家")
         
         # 3. 隔夜决策清单
-        report.append("\n\n📝 【隔夜决策清单】")
+        report.append("\n\n[清单] 【隔夜决策清单】")
         report.append("-" * 70)
         
         if not decisions:
@@ -916,11 +916,11 @@ class RetailTraderSupportV2:
                 
                 report.append(f"     次日介入条件:")
                 for cond in d.entry_conditions:
-                    report.append(f"       ✓ {cond}")
+                    report.append(f"       [OK] {cond}")
                 
                 report.append(f"     取消条件:")
                 for cond in d.cancel_conditions:
-                    report.append(f"       ✗ {cond}")
+                    report.append(f"       [NO] {cond}")
                 
                 if d.execution_plan:
                     report.append(f"     执行计划:")
@@ -928,7 +928,7 @@ class RetailTraderSupportV2:
                         report.append(f"       • {k}: {v}")
         
         # 4. 剧本推演
-        report.append("\n\n🔮 【次日剧本推演（基于真实数据）】")
+        report.append("\n\n[推演] 【次日剧本推演（基于真实数据）】")
         report.append("-" * 70)
         
         for i, scenario in enumerate(scenarios[:3], 1):
@@ -948,7 +948,7 @@ class RetailTraderSupportV2:
             
             report.append(f"     风险信号:")
             for signal in scenario.risk_signals:
-                report.append(f"       ⚠️  {signal}")
+                report.append(f"       [警告] {signal}")
         
         report.append("\n" + "=" * 70)
         return "\n".join(report)

@@ -20,6 +20,7 @@ from enum import Enum
 from pathlib import Path
 import json
 import loguru
+import re
 
 from core.utils import (
     time_to_minutes,
@@ -31,6 +32,8 @@ from core.utils import (
     is_lanban,
     calculate_stop_loss,
     calculate_take_profit,
+    DataFrameFieldMapper,
+    StockCodeUtils,
 )
 
 logger = loguru.logger
@@ -257,18 +260,12 @@ class WeakToStrongStrategy:
         self._load_pools()
     
     def _get_code_col(self, df: pd.DataFrame) -> str:
-        """获取代码列名，处理不同命名"""
-        for col in ['代码', 'code', 'ts_code', 'Code', 'stock_code']:
-            if col in df.columns:
-                return col
-        return None
+        """获取代码列名，处理不同命名 - 使用统一的字段映射工具"""
+        return DataFrameFieldMapper.get_code_column(df)
     
     def _get_name_col(self, df: pd.DataFrame) -> str:
-        """获取名称列名，处理不同命名"""
-        for col in ['名称', 'name', 'Name', 'stock_name']:
-            if col in df.columns:
-                return col
-        return None
+        """获取名称列名，处理不同命名 - 使用统一的字段映射工具"""
+        return DataFrameFieldMapper.get_name_column(df)
     
     def _parse_enum(self, enum_class, value):
         """解析枚举值，支持多种格式"""
@@ -935,7 +932,7 @@ class WeakToStrongStrategy:
     
     # ==================== 阶段2：走弱确认 ====================
     
-    def _check_weakening(self, 
+    def _check_weakening(self,
                         dragon: DragonCandidate,
                         today_zt: pd.DataFrame,
                         tick_data: pd.DataFrame,
@@ -943,18 +940,20 @@ class WeakToStrongStrategy:
         """检查龙头是否走弱"""
         code = dragon.stock_code
         name = dragon.stock_name
-        
+
         logger.debug(f"[弱转强-走弱检查] 检查 {name}({code}) {dragon.dragon_type.value}...")
-        
+
         # 获取代码列名
         zt_code_col = self._get_code_col(today_zt)
         if not zt_code_col:
             logger.warning(f"[弱转强-走弱检查] 涨停池缺少代码列，可用列: {list(today_zt.columns)}")
             return None
-        
+
         # 在今日涨停池中查找（处理不同格式的代码列）
+        # 统一代码格式：移除后缀并补零
         zt_codes = today_zt[zt_code_col].astype(str).str.replace(r'\.\w+$', '', regex=True).str.zfill(6)
-        stock_row = today_zt[zt_codes == code]
+        code_normalized = re.sub(r'\.\w+$', '', str(code)).zfill(6)
+        stock_row = today_zt[zt_codes == code_normalized]
         
         if stock_row.empty:
             # 不在涨停池中 = 断板

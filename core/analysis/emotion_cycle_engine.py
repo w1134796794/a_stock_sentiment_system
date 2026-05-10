@@ -25,6 +25,9 @@ import loguru
 
 logger = loguru.logger
 
+# 导入外置配置
+from config.config_loader import EmotionCycleConfig
+
 
 class EmotionCycle(Enum):
     """情绪周期阶段枚举"""
@@ -37,43 +40,53 @@ class EmotionCycle(Enum):
 
 @dataclass
 class CycleThresholds:
-    """情绪周期阈值配置"""
-    # 涨停家数阈值
-    limit_up_high: int = 100      # 高潮期门槛
-    limit_up_mid_high: int = 80   # 上升期上限
-    limit_up_mid_low: int = 50    # 上升期下限/震荡期上限
-    limit_up_low: int = 30        # 震荡期下限/退潮期上限
-    limit_up_freeze: int = 20     # 冰点期上限
+    """
+    情绪周期阈值配置
     
-    # 连板高度阈值
-    board_height_boom: int = 7    # 高潮期最低高度
-    board_height_high: int = 6    # 上升期上限
-    board_height_mid: int = 4     # 上升期下限/震荡期上限
-    board_height_low: int = 3     # 震荡期下限/冰点期上限
+    注意: 现在阈值从YAML配置文件加载，此类保留用于兼容性
+    建议使用 EmotionCycleConfig() 获取最新配置
+    """
     
-    # 炸板率阈值 (%)
-    broken_rate_low: float = 15.0     # 低炸板率（健康）
-    broken_rate_mid: float = 25.0     # 中等炸板率
-    broken_rate_high: float = 40.0    # 高炸板率（危险）
-    
-    # 核按钮阈值 (跌停家数)
-    nuclear_button_low: int = 3       # 少量核按钮
-    nuclear_button_high: int = 10     # 大量核按钮
-    
-    # 昨日涨停溢价阈值 (%)
-    premium_high: float = 3.0         # 高溢价
-    premium_mid: float = 1.0          # 中等溢价
-    premium_low: float = -1.0         # 负溢价
-    
-    # 连板率阈值 (连板股数/涨停股总数 %)
-    continuous_rate_high: float = 30.0    # 高连板率（情绪高涨）
-    continuous_rate_mid: float = 20.0     # 中等连板率
-    continuous_rate_low: float = 10.0     # 低连板率（情绪低迷）
-    
-    # 跌停惩罚阈值 (跌停家数/涨停家数 比例)
-    limit_down_ratio_low: float = 0.1     # 跌停少（健康）
-    limit_down_ratio_mid: float = 0.3     # 中等跌停
-    limit_down_ratio_high: float = 0.5    # 跌停多（危险）
+    def __init__(self):
+        # 从外置配置加载
+        config = EmotionCycleConfig()
+        
+        # 涨停家数阈值
+        self.limit_up_high = config.limit_up_high
+        self.limit_up_mid_high = config.limit_up_mid_high
+        self.limit_up_mid_low = config.limit_up_mid_low
+        self.limit_up_low = config.limit_up_low
+        self.limit_up_freeze = config.limit_up_freeze
+        
+        # 连板高度阈值
+        self.board_height_boom = config.board_height_boom
+        self.board_height_high = config.board_height_high
+        self.board_height_mid = config.board_height_mid
+        self.board_height_low = config.board_height_low
+        
+        # 炸板率阈值
+        self.broken_rate_low = config.broken_rate_low
+        self.broken_rate_mid = config.broken_rate_mid
+        self.broken_rate_high = config.broken_rate_high
+        
+        # 核按钮阈值
+        self.nuclear_button_low = config.nuclear_button_low
+        self.nuclear_button_high = config.nuclear_button_high
+        
+        # 昨日涨停溢价阈值
+        self.premium_high = config.premium_high
+        self.premium_mid = config.premium_mid
+        self.premium_low = config.premium_low
+        
+        # 连板率阈值
+        self.continuous_rate_high = config.continuous_rate_high
+        self.continuous_rate_mid = config.continuous_rate_mid
+        self.continuous_rate_low = config.continuous_rate_low
+        
+        # 跌停惩罚阈值
+        self.limit_down_ratio_low = config.limit_down_ratio_low
+        self.limit_down_ratio_mid = config.limit_down_ratio_mid
+        self.limit_down_ratio_high = config.limit_down_ratio_high
 
 
 @dataclass
@@ -350,33 +363,22 @@ class EmotionCycleEngine:
         """
         计算连板梯队完整性得分
         
-        理想梯队: 1B > 2B > 3B > 4B > 5B (金字塔结构)
-        得分越高表示梯队越完整
+        使用公共组件库计算，保持向后兼容
         """
-        if not board_distribution or 1 not in board_distribution:
-            return 0.0
+        from core.analysis.market_indicators import calculate_echelon_score
+        from config.config_loader import get_emotion_cycle_config
         
-        count_1b = board_distribution.get(1, 0)
-        if count_1b == 0:
-            return 0.0
+        # 从配置获取理想比例和阈值
+        config = get_emotion_cycle_config()
+        echelon_config = config.get('echelon_scoring', {})
+        ideal_ratios = echelon_config.get('ideal_ratios', [0.6, 0.4, 0.25, 0.15, 0.1])
+        min_ratio_threshold = echelon_config.get('min_ratio_threshold', 0.5)
         
-        # 计算各层占比
-        ratios = []
-        for height in range(2, 7):  # 2B到6B
-            count = board_distribution.get(height, 0)
-            ratio = count / count_1b if count_1b > 0 else 0
-            ratios.append(ratio)
-        
-        # 理想比例递减: 2B应该占1B的50-70%, 3B占2B的50-70%, etc.
-        ideal_ratios = [0.6, 0.4, 0.25, 0.15, 0.1]
-        
-        # 计算与理想比例的匹配度
-        score = 0
-        for actual, ideal in zip(ratios, ideal_ratios):
-            if actual >= ideal * 0.5:  # 至少达到理想值的50%
-                score += 1
-        
-        return score / len(ideal_ratios)
+        return calculate_echelon_score(
+            board_distribution,
+            ideal_ratios=ideal_ratios,
+            min_ratio_threshold=min_ratio_threshold
+        )
     
     def _determine_cycle(self, scores: Dict[str, float]) -> EmotionCycle:
         """根据得分确定情绪周期"""
@@ -586,15 +588,17 @@ class EmotionCycleEngine:
                 try:
                     ts_code = row[code_col]
                     
-                    # 获取昨日涨停价（close）和今日开盘价
-                    yesterday_price = self.dm.get_stock_daily_price(ts_code, yesterday)
-                    today_price = self.dm.get_stock_daily_price(ts_code, today)
-                    
-                    if not yesterday_price or not today_price:
+                    # 优化：一次性获取两日的数据，而不是分别查询两次
+                    df = self.dm.get_stock_daily(ts_code, yesterday, today)
+                    if df.empty or len(df) < 2:
                         continue
                     
-                    prev_close = yesterday_price.get('close', 0)
-                    today_open = today_price.get('open', 0)
+                    # 按日期排序，确保顺序正确
+                    df = df.sort_values('trade_date')
+                    
+                    # 获取昨日收盘价（第一行）和今日开盘价（第二行）
+                    prev_close = float(df.iloc[0].get('close', 0))
+                    today_open = float(df.iloc[1].get('open', 0))
                     
                     if prev_close <= 0 or today_open <= 0:
                         continue

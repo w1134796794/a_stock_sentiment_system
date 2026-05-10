@@ -23,11 +23,19 @@ from core.data.industry_mapper import IndustryMapper
 from core.analysis.pattern_recognition import PatternRecognition
 from core.analysis.emotion_cycle_engine import EmotionCycleEngine
 # 使用新版同花顺板块追踪器
-from core.analysis.ths_sector_tracker import THSSectorTracker as SectorRotationTracker
+from core.analysis.ths_sector_tracker import THSSectorTracker
 from core.report.report_generator_v2 import ReportGeneratorV2
 from core.execution.execution_engine import UnifiedExecutionEngine
 from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
 from core.utils import DateUtils
+
+# 新增：资金流向和筹码结构分析
+from core.analysis.moneyflow_analyzer import create_moneyflow_analyzer
+from core.analysis.chip_structure_analyzer import create_chip_analyzer
+# 新增：ML情绪周期预测
+from core.analysis.emotion_cycle_integrated import create_integrated_engine
+# 新增：概念连板梯队分析
+from core.analysis.concept_board_hierarchy import ConceptBoardHierarchyAnalyzer
 
 logger = loguru.logger
 
@@ -36,12 +44,19 @@ class SentimentSystem:
         self.dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
         self.mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
         self.emotion_engine = EmotionCycleEngine(dm=self.dm)  # 情绪周期引擎，传入DataManager用于计算溢价率
-        self.sector_tracker = SectorRotationTracker(self.dm)  # 板块轮动追踪器
+        self.sector_tracker = THSSectorTracker(self.dm)  # 板块轮动追踪器
         self.reporter = ReportGeneratorV2(OUTPUT_DIR)
         self.execution_engine = None  # 延迟初始化
         self.retail_support = None  # 散户支持模块延迟初始化
         self.today = datetime.now().strftime("%Y%m%d")
         self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        
+        # 新增：资金流向和筹码结构分析器
+        self.moneyflow_analyzer = None  # 延迟初始化
+        self.chip_analyzer = None       # 延迟初始化
+        self.integrated_emotion_engine = None  # 综合情绪周期引擎（规则+ML）
+        # 新增：概念连板梯队分析器
+        self.concept_hierarchy_analyzer = None  # 延迟初始化
         
     def run_daily_analysis(self, date: str = None):
         """
@@ -77,7 +92,7 @@ class SentimentSystem:
         if not hierarchy_df.empty:
             logger.info(f"层级映射完成，覆盖 {hierarchy_df['L2_Industry'].nunique()} 个二级行业")
         
-        # 3. 情绪周期分析
+        # 3. 情绪周期分析（新增：综合规则+ML判断）
         logger.info("[3/6] 分析情绪周期...")
         
         # 获取跌停数据（用于计算核按钮）
@@ -92,6 +107,49 @@ class SentimentSystem:
             limit_down_df=limit_down_df,
             prev_limit_up_df=prev_limit_up_df
         )
+        
+        # 新增：使用综合引擎（规则+ML）进行情绪周期判断
+        try:
+            if self.integrated_emotion_engine is None:
+                self.integrated_emotion_engine = create_integrated_engine(self.emotion_engine)
+            
+            # 构建ML模型需要的指标
+            metrics = emotion_result.get('metrics', {})
+            ml_indicators = {
+                'limit_up_count': metrics.get('limit_up_count', 0),
+                'max_board_height': metrics.get('max_board_height', 0),
+                'broken_rate': metrics.get('broken_rate', 0),
+                'continuous_rate': metrics.get('continuous_rate', 0),
+            }
+            
+            # 获取综合判断结果
+            integrated_result = self.integrated_emotion_engine.detect_cycle_integrated(
+                market_data={'limit_up_df': zt_pool, 'limit_down_df': limit_down_df},
+                indicators=ml_indicators,
+                use_ml=True
+            )
+            
+            # 将综合结果添加到emotion_result中
+            emotion_result['integrated_analysis'] = {
+                'rule_state': integrated_result.rule_based_state,
+                'ml_state': integrated_result.ml_predicted_state,
+                'final_state': integrated_result.final_state,
+                'confidence': integrated_result.final_confidence,
+                'agreement': integrated_result.agreement,
+                'analysis': integrated_result.analysis,
+                'risk_level': integrated_result.risk_level,
+            }
+            
+            logger.info(f"[综合判断] 规则引擎: {integrated_result.rule_based_state} | "
+                       f"ML模型: {integrated_result.ml_predicted_state} | "
+                       f"最终: {integrated_result.final_state} (置信度{integrated_result.final_confidence:.1%})")
+            
+            if not integrated_result.agreement:
+                logger.warning(f"[分歧警告] {integrated_result.analysis}")
+            
+        except Exception as e:
+            logger.warning(f"[综合判断] ML分析失败，使用规则引擎结果: {e}")
+            emotion_result['integrated_analysis'] = None
         
         # ========== DEBUG: 情绪周期详细数据 ==========
         logger.info("=" * 60)
@@ -140,100 +198,184 @@ class SentimentSystem:
             logger.info("  暂无评分数据")
         logger.info("=" * 60)
         
-        # 4. 主线板块分析（使用带交叉验证的新方法）
-        logger.info("[4/6] 计算主线板块强度...(剔除ST板块)")
-        # 获取limit_cpt_list数据用于概念分析
-        limit_cpt_df = self.dm.get_limit_cpt_list(date)
-        
-        # ========== DEBUG: 原始概念板块数据 ==========
-        logger.info("=" * 60)
-        logger.info("【DEBUG】原始概念板块数据 (limit_cpt_list)")
-        logger.info("=" * 60)
-        if not limit_cpt_df.empty:
-            logger.info(f"获取到 {len(limit_cpt_df)} 个概念板块")
-            for i, row in limit_cpt_df.head(5).iterrows():
-                name = row.get('name', row.get('concept', 'N/A'))
-                up_nums = row.get('up_nums', 'N/A')
-                cons_nums = row.get('cons_nums', 'N/A')
-                rank = row.get('rank', i+1)
-                logger.info(f"  排名{rank}: {name} (涨停{up_nums}家, 连板{cons_nums}家)")
+        # 4. 热点概念识别
+        logger.info("[4/12] 识别热点概念板块...")
+        # 增加top_n确保包含所有可能的热点概念
+        hot_concepts_df = self.sector_tracker.analyze_concept_sectors(date, top_n=5)
+        if not hot_concepts_df.empty and 'is_hot' in hot_concepts_df.columns:
+            # 使用布尔索引，确保正确处理is_hot列
+            hot_mask = hot_concepts_df['is_hot'].astype(bool)
+            hot_concepts = hot_concepts_df[hot_mask]['name'].tolist()
+            logger.info(f"[OK] 识别到 {len(hot_concepts)} 个热点概念: {', '.join(hot_concepts[:10])}{'...' if len(hot_concepts) > 10 else ''}")
         else:
-            logger.info("  未获取到概念板块数据")
-        logger.info("=" * 60)
+            hot_concepts = []
+            logger.info("  未识别到热点概念")
         
-        # 使用带交叉验证的分析方法
-        # 先获取热门行业数据（用于判断概念-行业共振）
-        hot_industries = self.sector_tracker.get_hot_industries_from_sectors(top_n=5)
-        if hot_industries:
-            logger.info(f"✓ 识别到热门行业: {hot_industries}")
+        # 5. 热点行业识别
+        logger.info("[5/12] 识别热点行业板块...")
+        # 增加top_n确保包含所有可能的热点行业
+        hot_industries_df = self.sector_tracker.analyze_industry_sectors(date, top_n=5)
+        if not hot_industries_df.empty and 'is_hot' in hot_industries_df.columns:
+            # 使用布尔索引，确保正确处理is_hot列
+            hot_mask = hot_industries_df['is_hot'].astype(bool)
+            hot_industries = hot_industries_df[hot_mask]['name'].tolist()
+            logger.info(f"[OK] 识别到 {len(hot_industries)} 个热点行业: {', '.join(hot_industries[:10])}{'...' if len(hot_industries) > 10 else ''}")
         else:
-            logger.info("⚠ 未能识别热门行业，信号类型可能默认为'弱势'")
-        
-        mainline_df = self.sector_tracker.analyze_with_validation(
-            date, top_n=10, hot_industries=hot_industries
+            hot_industries = []
+            logger.info("  未识别到热点行业")
+
+        # 5.5 概念连板梯队分析（新增）
+        logger.info("[5.5/12] 分析概念连板梯队...")
+        concept_hierarchy = {}  # 初始化为空字典
+        concept_hierarchy_report = ""  # 报告文本
+        if self.concept_hierarchy_analyzer is None:
+            self.concept_hierarchy_analyzer = ConceptBoardHierarchyAnalyzer(self.dm)
+
+        if not zt_pool.empty:
+            concept_hierarchy = self.concept_hierarchy_analyzer.analyze_hierarchy(zt_pool, date)
+            if concept_hierarchy:
+                logger.info(f"[OK] 概念连板梯队分析完成，共 {len(concept_hierarchy)} 个概念")
+                # 生成报告文本
+                concept_hierarchy_report = self.concept_hierarchy_analyzer.format_hierarchy_for_report(concept_hierarchy, top_n=10)
+                logger.info(f"[概念连板梯队]\n{concept_hierarchy_report}")
+                # 获取强势概念
+                strong_concepts = self.concept_hierarchy_analyzer.get_strong_concepts(concept_hierarchy)
+                if strong_concepts:
+                    logger.info(f"[OK] 识别到 {len(strong_concepts)} 个强势概念")
+            else:
+                logger.info("  无概念连板梯队数据")
+        else:
+            logger.info("  涨停池为空，跳过概念连板梯队分析")
+
+        # 6. 概念持续性分析（基于当前热点概念，M天内N次模式）
+        logger.info("[6/12] 分析概念板块持续性...")
+        concept_persistence_df = self.sector_tracker.analyze_concept_persistence(
+            date, top_n=10, lookback_days=10, hot_concepts_df=hot_concepts_df
         )
-        
-        # ========== DEBUG: 热点主线详细数据 ==========
-        logger.info("=" * 60)
-        logger.info("【DEBUG】热点主线分析详细数据 (带交叉验证)")
-        logger.info("=" * 60)
-        if not mainline_df.empty:
-            logger.info(f"✓ 分析完成，共 {len(mainline_df)} 个板块\n")
-            for i, row in mainline_df.iterrows():
-                logger.info(f"【Top{i+1}】{row['板块名称']}")
-                logger.info(f"  基础数据:")
-                logger.info(f"    - 当前排名: {row['当前排名']}")
-                logger.info(f"    - 涨停家数: {row['涨停家数']}")
-                logger.info(f"    - 综合评分: {row['综合评分']}")
-                logger.info(f"    - 所处阶段: {row['所处阶段']}")
-                logger.info(f"    - 市场周期: {row['市场周期']}")
-                logger.info(f"  资金因子:")
-                logger.info(f"    - 成交额变化: {row['成交额变化']}")
-                logger.info(f"    - 换手率: {row['换手率']}")
-                logger.info(f"  趋势因子:")
-                logger.info(f"    - 排名动量: {row['排名动量']}")
-                logger.info(f"    - 涨停趋势: {row['涨停趋势']}")
-                logger.info(f"    - 持续性评分: {row['持续性评分']}")
-                logger.info(f"  交叉验证:")
-                logger.info(f"    - 主要行业: {row.get('主要行业', 'N/A')}")
-                logger.info(f"    - 行业集中度: {row.get('行业集中度', 'N/A')}")
-                logger.info(f"    - 信号类型: {row.get('信号类型', 'N/A')}")
-                logger.info(f"    - 信号强度: {row.get('信号强度', 'N/A')}")
-                logger.info(f"    - 共振得分: {row.get('共振得分', 'N/A')}")
-                logger.info(f"  策略建议:")
-                logger.info(f"    - 操作建议: {row['操作建议']}")
-                logger.info(f"    - 建议仓位: {row['建议仓位']}")
-                logger.info(f"    - 调整后仓位: {row.get('调整后仓位', row['建议仓位'])}")
-                logger.info(f"    - 紧急度: {row['紧急度']}")
-                logger.info(f"    - 策略理由: {row['策略理由']}")
-                logger.info(f"    - 验证理由: {row.get('验证理由', 'N/A')}")
-                logger.info("")
+        if not concept_persistence_df.empty:
+            logger.info(f"[OK] 概念持续性分析完成，发现 {len(concept_persistence_df)} 个持续热门概念")
+            for _, row in concept_persistence_df.head(5).iterrows():
+                logger.info(f"  {row['板块名称']}: 10天内{row['热点天数']}次热点(频率{row['热点频率']}%), 评分{row['持续性评分']}, 阶段[{row['所处阶段']}], {row['操作建议']}")
         else:
-            logger.info("  无主线板块数据")
-        logger.info("=" * 60)
+            logger.info("  无持续热门概念")
         
-        # 5. 板块持续性分析
-        logger.info("[5/6] 分析板块持续性...")
-        sector_persistence_df = self.sector_tracker.analyze_sectors_persistence(date, top_n=10)
-        if not sector_persistence_df.empty:
-            logger.info(f"✓ 板块持续性分析完成，发现 {len(sector_persistence_df)} 个板块")
-            for _, row in sector_persistence_df.head(5).iterrows():
-                logger.info(f"  {row['板块名称']}: 评分{row['持续性评分']}, 阶段[{row['所处阶段']}], {row['操作建议']}")
+        # 7. 行业持续性分析（基于当前热点行业，M天内N次模式）
+        logger.info("[7/12] 分析行业板块持续性...")
+        industry_persistence_df = self.sector_tracker.analyze_industry_persistence(
+            date, top_n=10, lookback_days=10, hot_industries_df=hot_industries_df
+        )
+        if not industry_persistence_df.empty:
+            logger.info(f"[OK] 行业持续性分析完成，发现 {len(industry_persistence_df)} 个持续热门行业")
+            for _, row in industry_persistence_df.head(5).iterrows():
+                logger.info(f"  {row['板块名称']}: 10天内{row['热点天数']}次热点(频率{row['热点频率']}%), 评分{row['持续性评分']}, 阶段[{row['所处阶段']}], {row['操作建议']}")
         else:
-            logger.info("  无板块持续性数据")
+            logger.info("  无持续热门行业")
         
-        # 6. 综合当日数据和20日数据计算板块权重
-        logger.info("[6/6] 计算综合板块权重（当日+20日）...")
-        display_mainline_df = self._calculate_combined_mainline(hierarchy_df, date)
+        # 8. 概念-行业共振分析（市场主线）
+        logger.info("[8/12] 分析概念-行业共振（市场主线）...")
+        main_themes_df = self.sector_tracker.analyze_concept_industry_resonance(
+            date, 
+            hot_concepts_df=hot_concepts_df,
+            hot_industries_df=hot_industries_df,
+            lookback_days=10
+        )
+        if not main_themes_df.empty:
+            logger.info(f"[OK] 共振分析完成，识别 {len(main_themes_df)} 条市场主线")
+            for _, row in main_themes_df.head(5).iterrows():
+                logger.info(f"  {row['主线名称']}: 共振度{row['共振度']}%, 概念[{row.get('核心概念', 'N/A')}], 行业[{row.get('核心行业', 'N/A')}], {row['操作建议']}")
+        else:
+            logger.info("  未识别到明显的概念-行业共振主线")
         
-        # 7. 模式识别
-        logger.info("[7/7] 识别交易模式...")
+        # 9. 资金流向和筹码结构分析（新增）
+        logger.info("[10/12] 资金流向和筹码结构分析...")
+        
+        # 初始化分析器
+        if self.moneyflow_analyzer is None:
+            self.moneyflow_analyzer = create_moneyflow_analyzer(self.dm)
+        if self.chip_analyzer is None:
+            self.chip_analyzer = create_chip_analyzer(self.dm)
+        
+        # 分析涨停股票的资金流向和筹码结构
+        moneyflow_analysis = {}
+        chip_analysis = {}
+        
+        if not zt_pool.empty and 'code' in zt_pool.columns:
+            # 获取前10只涨停股票进行深入分析
+            top_zt_stocks = zt_pool.head(10)['code'].tolist()
+            
+            logger.info(f"分析 {len(top_zt_stocks)} 只涨停股票的资金流向和筹码结构...")
+            
+            for stock_code in top_zt_stocks:
+                try:
+                    # 资金流向分析
+                    mf_result = self.moneyflow_analyzer.analyze_stock_moneyflow(stock_code, date)
+                    if mf_result.net_mf_amount != 0:
+                        moneyflow_analysis[stock_code] = {
+                            'name': mf_result.name,
+                            'main_net': mf_result.main_net_amount,
+                            'retail_net': mf_result.retail_net_amount,
+                            'direction': '流入' if mf_result.main_net_amount > 0 else '流出'
+                        }
+                    
+                    # 筹码结构分析
+                    chip_result = self.chip_analyzer.analyze_chip_structure(stock_code, date)
+                    if chip_result.profit_pct > 0:
+                        chip_analysis[stock_code] = {
+                            'name': chip_result.name,
+                            'profit_pct': chip_result.profit_pct,
+                            'concentration': chip_result.concentration,
+                            'structure_type': chip_result.structure_type,
+                            'cost_bias': chip_result.cost_bias
+                        }
+                except Exception as e:
+                    logger.debug(f"分析 {stock_code} 失败: {e}")
+            
+            # 打印分析结果摘要
+            if moneyflow_analysis:
+                logger.info("[资金流向分析] 主力资金流向:")
+                inflow_stocks = [k for k, v in moneyflow_analysis.items() if v['main_net'] > 0]
+                outflow_stocks = [k for k, v in moneyflow_analysis.items() if v['main_net'] <= 0]
+                logger.info(f"  主力流入: {len(inflow_stocks)}只, 流出: {len(outflow_stocks)}只")
+            
+            if chip_analysis:
+                logger.info("[筹码结构分析] 筹码分布:")
+                high_profit = [k for k, v in chip_analysis.items() if v['profit_pct'] >= 70]
+                low_profit = [k for k, v in chip_analysis.items() if v['profit_pct'] <= 30]
+                logger.info(f"  高获利盘(≥70%): {len(high_profit)}只, 低获利盘(≤30%): {len(low_profit)}只")
+        
+        # 11. 北向资金和龙虎榜分析（新增）
+        logger.info("[11/12] 北向资金和龙虎榜分析...")
+        
+        try:
+            # 北向资金流向
+            hsgt_flow = self.moneyflow_analyzer.analyze_hsgt_flow(date)
+            logger.info(f"[北向资金] 当日净流入: {hsgt_flow.north_money:.2f}亿元 ({hsgt_flow.trend})")
+            
+            # 北向资金趋势（5日）
+            hsgt_trend = self.moneyflow_analyzer.extensions.analyze_hsgt_trend(date, days=5)
+            if hsgt_trend:
+                logger.info(f"[北向资金] 5日平均: {hsgt_trend['avg_5d']:.2f}亿元, "
+                           f"连续{'流入' if hsgt_trend['continuous_days'] > 0 else '流出'}: {abs(hsgt_trend['continuous_days'])}天")
+            
+            # 龙虎榜汇总
+            top_list_summary = self.moneyflow_analyzer.extensions.analyze_top_list_summary(date)
+            if top_list_summary:
+                logger.info(f"[龙虎榜] 上榜股票: {top_list_summary.get('total_stocks', 0)}只, "
+                           f"净买入: {top_list_summary.get('net_amount', 0)/100000000:.2f}亿元")
+                
+        except Exception as e:
+            logger.warning(f"[资金流向分析] 获取北向/龙虎榜数据失败: {e}")
+        
+        # 12. 模式识别
+        logger.info("[12/12] 识别交易模式...")
         pr = PatternRecognition(self.dm, sector_engine=None, mapper=self.mapper)
         
         # 从板块持续性分析中提取热点板块信息
         hot_sectors = []
-        if not sector_persistence_df.empty:
-            for _, row in sector_persistence_df.iterrows():
+        # 合并概念和行业持续性数据
+        all_persistence_df = pd.concat([concept_persistence_df, industry_persistence_df], ignore_index=True)
+        if not all_persistence_df.empty:
+            for _, row in all_persistence_df.iterrows():
                 stage = row.get('所处阶段', '')
                 if stage in ['加速期', '高潮期', '萌芽期']:
                     hot_sectors.append({
@@ -257,8 +399,8 @@ class SentimentSystem:
             if signals:
                 logger.info(f"  - {ptype}: {len(signals)}个")
         
-        # 7. 为核心标的获取概念数据
-        logger.info("[7/7] 获取核心标的所属概念...")
+        # 10. 为核心标的获取概念数据
+        logger.info("[10/12] 获取核心标的所属概念...")
         if not hierarchy_df.empty:
             # 只获取10点半前封板的核心标的的概念
             core_stocks_mask = hierarchy_df.apply(lambda row: self._is_core_stock(row), axis=1)
@@ -267,8 +409,8 @@ class SentimentSystem:
             if not core_stocks_df.empty:
                 logger.info(f"核心标的: {len(core_stocks_df)}只")
         
-        # 8. 获取龙头池和走弱池数据
-        logger.info("[8/8] 获取龙头池和走弱池数据...")
+        # 11. 获取龙头池和走弱池数据
+        logger.info("[11/12] 获取龙头池和走弱池数据...")
         dragon_pool_data = []
         weakening_pool_data = []
         if hasattr(pr, 'weak_to_strong') and pr.weak_to_strong:
@@ -276,42 +418,49 @@ class SentimentSystem:
                 pool_summary = pr.weak_to_strong.get_pools_summary()
                 dragon_pool_data = pool_summary.get('dragon_pool', [])
                 weakening_pool_data = pool_summary.get('weakening_pool', [])
-                logger.info(f"✓ 龙头池: {len(dragon_pool_data)}只, 走弱池: {len(weakening_pool_data)}只")
+                logger.info(f"[OK] 龙头池: {len(dragon_pool_data)}只, 走弱池: {len(weakening_pool_data)}只")
             except Exception as e:
                 logger.warning(f"获取龙头池数据失败: {e}")
         
-        # 9. 生成报告
-        logger.info("[9/9] 生成分析报告...")
-        # 使用 mainline_df（来自 analyze_with_validation）作为热点概念数据
-        # 包含：当前排名、10日累计排名、共振得分、持续性评分等核心指标
+        # 12. 生成报告
+        logger.info("[12/12] 生成分析报告...")
+        # 使用 main_themes_df（来自 analyze_concept_industry_resonance ）作为热点主线数据
+        # 包含：概念-行业共振度、持续性评分等核心指标
         report_data = {
             'date': date,
-            'mainline_df': mainline_df,  # 使用 sector_tracker.analyze_with_validation 的结果
+            'mainline_df': main_themes_df,  # 使用共振分析结果作为热点主线数据
             'emotion_result': emotion_result,
-            'sector_persistence_df': sector_persistence_df,
+            'sector_persistence_df': all_persistence_df if 'all_persistence_df' in locals() else pd.concat([concept_persistence_df, industry_persistence_df], ignore_index=True),
             'patterns': patterns,
             'hierarchy_df': hierarchy_df,
             'zt_pool': zt_pool,
             'dragon_pool': dragon_pool_data,
-            'weakening_pool': weakening_pool_data
+            'weakening_pool': weakening_pool_data,
+            # 新增：资金流向和筹码结构分析数据
+            'moneyflow_analysis': moneyflow_analysis,
+            'chip_analysis': chip_analysis,
+            # 新增：概念连板梯队分析数据
+            'concept_hierarchy': concept_hierarchy,
+            'concept_hierarchy_report': concept_hierarchy_report,
         }
-        
+
         # 使用带时间戳的文件名避免文件被占用
         timestamp = datetime.now().strftime("%H%M%S")
         report_file_name = f"短线情绪分析报告_{date}_{timestamp}.xlsx"
         report_path = self.reporter.create_daily_report(report_data, file_name=report_file_name)
         logger.info(f"✅ 分析完成，报告保存至: {report_path}")
-        
-        # 10. 生成交易计划（复盘后生成次日计划）
-        logger.info("[10/10] 生成次日交易计划...")
-        self._generate_trade_plans(date, patterns, display_mainline_df, emotion_result)
-        
-        # 11. 生成散户支持报告（隔夜预判、三阶过滤、剧本推演等）
-        logger.info("[11/11] 生成散户决策支持报告...")
+
+        # 13. 生成交易计划（复盘后生成次日计划）
+        logger.info("[13/14] 生成次日交易计划...")
+        self._generate_trade_plans(date, patterns, main_themes_df, emotion_result)
+
+        # 14. 生成散户支持报告（隔夜预判、三阶过滤、剧本推演等）
+        logger.info("[14/14] 生成散户决策支持报告...")
         self._generate_retail_support_report(date, zt_pool, hierarchy_df, patterns, emotion_result)
-        
-        # 11. 输出交易建议
-        self._print_trading_advice(display_mainline_df, patterns, emotion_result, sector_persistence_df)
+
+        # 15. 输出交易建议
+        all_persistence_df = pd.concat([concept_persistence_df, industry_persistence_df], ignore_index=True) if not concept_persistence_df.empty or not industry_persistence_df.empty else pd.DataFrame()
+        self._print_trading_advice(main_themes_df, patterns, emotion_result, all_persistence_df)
     
     def _generate_trade_plans(self, date: str, patterns: Dict, mainline_df: pd.DataFrame, emotion_result: Dict):
         """
@@ -372,7 +521,7 @@ class SentimentSystem:
                     group = plans_df[plans_df['介入时机'] == timing]
                     print(f"\n【{timing}】{len(group)}只")
                     for _, row in group.head(3).iterrows():
-                        resonance_tag = "🔥共振" if row.get('热点共振', False) else ""
+                        resonance_tag = "[共振]" if row.get('热点共振', False) else ""
                         print(f"  - {row['名称']}({row['代码']}) - {row['模式']} {resonance_tag}")
                         print(f"    目标价:{row['目标价']:.2f} 止损:{row['止损价']:.2f} 仓位:{row['仓位']}")
                 print("="*60)
@@ -531,7 +680,7 @@ class SentimentSystem:
             report_file = Path(OUTPUT_DIR) / f"散户决策报告_{date}.txt"
             with open(report_file, 'w', encoding='utf-8') as f:
                 f.write(report)
-            logger.info(f"✓ 散户决策报告已保存: {report_file}")
+            logger.info(f"[OK] 散户决策报告已保存: {report_file}")
             
             # 6. 打印摘要 - 使用格式化函数
             def fmt_val(val, decimal_places=2):
@@ -580,9 +729,22 @@ class SentimentSystem:
         print("【今日交易决策辅助】")
         print("="*60)
         
-        # 情绪周期判断
+        # 情绪周期判断（新增：显示综合判断结果）
         cycle_name = emotion_result.get('cycle_name', '未知')
         strategy = emotion_result.get('strategy', None)
+        integrated = emotion_result.get('integrated_analysis')
+        
+        # 优先显示综合判断结果
+        if integrated:
+            print(f"\n[情绪周期 - 综合判断]")
+            print(f"  规则引擎: {integrated['rule_state']}")
+            print(f"  ML模型: {integrated['ml_state']}")
+            print(f"  最终判断: {integrated['final_state']} (置信度{integrated['confidence']:.1%})")
+            if not integrated['agreement']:
+                print(f"  [警告] 规则与ML判断不一致，{integrated['analysis']}")
+            print(f"  风险等级: {integrated['risk_level']}")
+        else:
+            print(f"\n[情绪周期] {cycle_name}")
         
         if cycle_name == '高潮期':
             print("[!] 市场情绪高潮，建议减仓观望，避免高位接盘")
@@ -603,7 +765,7 @@ class SentimentSystem:
         if sector_persistence_df is not None and not sector_persistence_df.empty:
             print("\n[重点关注的板块 - 持续性Top5]:")
             for i, row in sector_persistence_df.head(5).iterrows():
-                stage_icon = "🔥" if row['所处阶段'] == '高潮期' else "📈" if row['所处阶段'] == '加速期' else "🌱"
+                stage_icon = "[高潮]" if row['所处阶段'] == '高潮期' else "[加速]" if row['所处阶段'] == '加速期' else "[萌芽]"
                 print(f"  {i+1}. {stage_icon} {row['板块名称']} (涨停{row['涨停家数']}家, 评分{row['持续性评分']})")
                 print(f"     阶段: {row['所处阶段']} | {row['操作建议']}")
         elif not mainline_df.empty:
@@ -629,188 +791,7 @@ class SentimentSystem:
         logger.info(f"启动回测: {start_date} 至 {end_date}")
         # 实现多日期回测逻辑
         pass
-    
-    def _calculate_combined_mainline(self, hierarchy_df: pd.DataFrame, trade_date: str) -> pd.DataFrame:
-        """
-        计算综合板块权重（当日数据 + 20日统计数据 + 东财行业板块因子）
-        权重公式: 综合强度 = 20日涨停数×0.35 + 当日涨停数×0.35 + 最高连板×0.15 + 东财综合强度×0.15
-        """
-        # 如果没有hierarchy数据，返回空DataFrame
-        if hierarchy_df.empty:
-            logger.warning("[_calculate_combined_mainline] hierarchy_df为空，无法计算主线")
-            return pd.DataFrame()
-        # 0. 获取东财行业板块数据
-        sector_data = self.dm.get_industry_sector_data(trade_date)
-        sector_dict = {}
-        if not sector_data.empty:
-            # 构建行业名称到因子数据的映射
-            for _, row in sector_data.iterrows():
-                sector_dict[row['name']] = {
-                    'pct_change': row['pct_change'],
-                    'up_down_ratio': row['up_down_ratio'],
-                    'up_down_diff': row['up_down_diff'],
-                    'leading_pct': row['leading_pct'],
-                    'leading_strength': row['leading_strength'],
-                    'turnover_rate': row['turnover_rate'],
-                    'activity_score': row['activity_score'],
-                    'composite_strength': row['composite_strength'],
-                    'up_num': row['up_num'],
-                    'down_num': row['down_num']
-                }
-            logger.info(f"✓ 获取东财行业板块数据: {len(sector_dict)}个板块")
-        
-        # 1. 统计当日各板块涨停数
-        today_stats = {}
-        if not hierarchy_df.empty:
-            for l2_name, group in hierarchy_df.groupby('L2_Industry'):
-                if l2_name == '其他':
-                    continue
-                
-                # 获取该组的L1和L2（取第一个非空值）
-                l1_values = group['L1_Industry'].dropna()
-                l2_values = group['L2_Industry'].dropna()
-                
-                l1 = l1_values.iloc[0] if not l1_values.empty and l1_values.iloc[0] != '其他' else '未知'
-                l2 = l2_values.iloc[0] if not l2_values.empty and l2_values.iloc[0] != '其他' else '未知'
-                
-                # 如果L1或L2为空，尝试从行业映射获取
-                if l1 == '未知' or l2 == '未知' or l1 == '其他' or l2 == '其他':
-                    l2_mapped = self.mapper.get_l2_by_l3(l2_name)
-                    l1_mapped = self.mapper.get_l1_by_l2(l2_mapped)
-                    if l2 == '未知' or l2 == '其他':
-                        l2 = l2_mapped if l2_mapped != '其他' else l2
-                    if l1 == '未知' or l1 == '其他':
-                        l1 = l1_mapped if l1_mapped != '其他' else l1
-                
-                today_stats[l2_name] = {
-                    'today_count': len(group),
-                    'max_board': group['BoardHeight'].max() if 'BoardHeight' in group.columns else 1,
-                    'l1': l1,
-                    'l2': l2
-                }
-        
-        # 2. 加载20日统计数据
-        mainline_20d_path = Path(OUTPUT_DIR) / "mainline_sectors.xlsx"
-        combined_data = []
-        
-        if mainline_20d_path.exists():
-            mainline_20d_df = pd.read_excel(mainline_20d_path)
-            
-            # 3. 合并数据计算综合权重
-            for _, row in mainline_20d_df.iterrows():
-                l2_name = row['L2_Industry']
-                
-                # 20日数据
-                count_20d = row['Total_Limit_Up']
-                
-                # 当日数据（如果有）
-                today_data = today_stats.get(l2_name, {})
-                today_count = today_data.get('today_count', 0)
-                today_max_board = today_data.get('max_board', 1)
-                
-                # 取20日和当日的最高连板
-                max_board = max(
-                    today_max_board,
-                    today_data.get('max_board', 1)
-                )
-                
-                # 获取东财行业板块因子
-                sector_factor = sector_dict.get(l2_name, {})
-                dc_composite = sector_factor.get('composite_strength', 0)
-                dc_up_down_ratio = sector_factor.get('up_down_ratio', 0)
-                dc_leading_strength = sector_factor.get('leading_strength', 0)
-                
-                # 计算综合强度分
-                # 权重: 20日涨停数×0.35 + 当日涨停数×0.35 + 最高连板×0.15 + 东财综合强度×0.15
-                strength_score = (
-                    count_20d * 0.35 +
-                    today_count * 0.35 * 3 +  # 当日涨停权重放大3倍（当日重要性更高）
-                    max_board * 0.15 * 5 +     # 连板权重放大5倍
-                    dc_composite * 0.15        # 东财综合强度因子
-                )
-                
-                combined_data.append({
-                    'L1_Industry': row['L1_Industry'],
-                    'L2_Industry': row['L2_Industry'],
-                    'L2_Industry': l2_name,
-                    'LimitUp_Count': count_20d,  # 兼容报告生成器
-                    'LimitUp_Count_20d': count_20d,
-                    'LimitUp_Count_Today': today_count,
-                    'Max_BoardHeight': max_board,
-                    'Strength_Score': round(strength_score, 2),
-                    # 东财因子字段
-                    'DC_Composite': round(dc_composite, 2),
-                    'DC_UpDownRatio': round(dc_up_down_ratio, 2),
-                    'DC_LeadingStrength': round(dc_leading_strength, 2),
-                    'DC_PctChange': round(sector_factor.get('pct_change', 0), 2),
-                    'DC_UpNum': sector_factor.get('up_num', 0),
-                    'DC_DownNum': sector_factor.get('down_num', 0)
-                })
-            
-            # 4. 检查当日新出现的强势板块（不在20日统计中但当日有多只涨停）
-            for l2_name, data in today_stats.items():
-                if l2_name not in mainline_20d_df['L2_Industry'].values and data['today_count'] >= 2:
-                    # 获取东财行业板块因子
-                    sector_factor = sector_dict.get(l2_name, {})
-                    dc_composite = sector_factor.get('composite_strength', 0)
-                    dc_up_down_ratio = sector_factor.get('up_down_ratio', 0)
-                    dc_leading_strength = sector_factor.get('leading_strength', 0)
-                    
-                    # 新出现的强势板块 - 融入东财因子
-                    strength_score = (
-                        data['today_count'] * 0.35 * 3 + 
-                        data['max_board'] * 0.15 * 5 +
-                        dc_composite * 0.15  # 东财综合强度因子
-                    )
-                    
-                    # 获取正确的L1和L2
-                    l1 = data['l1']
-                    l2 = data['l2']
-                    
-                    # 如果L1或L2是"其他"，尝试从行业映射获取
-                    if l1 == '其他' or l2 == '其他' or l1 == '未知' or l2 == '未知':
-                        # 从mapper获取正确的行业信息
-                        l2_correct = self.mapper.get_l2_by_l3(l2_name)
-                        l1_correct = self.mapper.get_l1_by_l2(l2_correct)
-                        l1 = l1_correct if l1_correct != '其他' else l1
-                        l2 = l2_correct if l2_correct != '其他' else l2
-                    
-                    combined_data.append({
-                        'L1_Industry': l1,
-                        'L2_Industry': l2,
-                        'L2_Industry': l2_name,
-                        'LimitUp_Count': data['today_count'],  # 兼容报告生成器
-                        'LimitUp_Count_20d': 0,
-                        'LimitUp_Count_Today': data['today_count'],
-                        'Max_BoardHeight': data['max_board'],
-                        'Strength_Score': round(strength_score, 2),
-                        'Is_New': True,  # 标记为新板块
-                        # 东财因子字段
-                        'DC_Composite': round(dc_composite, 2),
-                        'DC_UpDownRatio': round(dc_up_down_ratio, 2),
-                        'DC_LeadingStrength': round(dc_leading_strength, 2),
-                        'DC_PctChange': round(sector_factor.get('pct_change', 0), 2),
-                        'DC_UpNum': sector_factor.get('up_num', 0),
-                        'DC_DownNum': sector_factor.get('down_num', 0)
-                    })
-                    logger.info(f"发现新强势板块: {l2_name} (当日{data['today_count']}只涨停)")
-        else:
-            # 如果没有20日数据，使用当日数据
-            logger.info("20日统计数据不存在，使用当日数据")
-            return mainline_df
-        
-        # 5. 排序并返回
-        result_df = pd.DataFrame(combined_data)
-        if not result_df.empty:
-            result_df = result_df.sort_values('Strength_Score', ascending=False)
-            logger.info(f"✓ 综合板块分析完成: {len(result_df)} 个板块")
-            # 显示TOP5
-            for i, row in result_df.head(5).iterrows():
-                new_flag = " [NEW]" if row.get('Is_New', False) else ""
-                logger.info(f"  {row['L2_Industry']}: 强度{row['Strength_Score']:.1f} (20日{row['LimitUp_Count_20d']}, 当日{row['LimitUp_Count_Today']}){new_flag}")
-        
-        return result_df
-    
+
     def _is_core_stock(self, row) -> bool:
         """
         判断是否为10点半前封板的核心标的
@@ -1027,6 +1008,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='A股短线情绪量化系统')
     parser.add_argument('--mode', choices=['analysis', 'backtest', 'risk', 'position'],
                        default='analysis', help='运行模式')
+    parser.add_argument('--date', type=str, help='分析日期 (YYYYMMDD)，默认今日')
     parser.add_argument('--start-date', type=str, help='回测开始日期 (YYYYMMDD)')
     parser.add_argument('--end-date', type=str, help='回测结束日期 (YYYYMMDD)')
 
@@ -1041,7 +1023,7 @@ if __name__ == "__main__":
         if args.mode == 'analysis':
             # 执行每日分析
             system = SentimentSystem()
-            system.run_daily_analysis()
+            system.run_daily_analysis(args.date)
         elif args.mode == 'backtest':
             # 运行回测
             run_backtest(args.start_date, args.end_date)
