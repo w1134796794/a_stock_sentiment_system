@@ -1428,10 +1428,14 @@ class THSSectorTracker:
                                             hot_industries_df: pd.DataFrame = None,
                                             lookback_days: int = 10) -> pd.DataFrame:
         """
-        分析概念-行业共振（市场主线）
+        分析概念-行业共振（市场主线）- 多维度共振模型
         
-        基于已经识别出的热点概念和热点行业，分析它们之间的共振关系，
-        识别出真正的市场主线。
+        改进点：
+        1. 降低成分股重叠度阈值（15%），概念和行业成分股数量差异大
+        2. 增加涨停股重叠度维度（权重30%）
+        3. 增加热度趋势同步性维度（权重25%）
+        4. 增加领涨股重叠度维度（权重20%）
+        5. 成分股重叠度权重降至25%
         
         Args:
             trade_date: 交易日期（YYYYMMDD）
@@ -1453,10 +1457,16 @@ class THSSectorTracker:
             hot_industries_df = self.analyze_industry_sectors(trade_date, top_n=20)
         
         # 2. 获取持续热门概念和持续热门行业
-        concept_persistence_df = self.analyze_concept_persistence(trade_date, top_n=10, lookback_days=lookback_days)
-        industry_persistence_df = self.analyze_industry_persistence(trade_date, top_n=10, lookback_days=lookback_days)
+        concept_persistence_df = self.analyze_concept_persistence(trade_date, top_n=15, lookback_days=lookback_days)
+        industry_persistence_df = self.analyze_industry_persistence(trade_date, top_n=15, lookback_days=lookback_days)
         
-        # 3. 分析共振关系
+        # 3. 获取涨停池数据（用于涨停股重叠度分析）
+        limit_up_df = self.dm.get_limit_up_pool(trade_date)
+        
+        # 4. 获取全市场股票涨幅数据（用于龙头股分析）
+        all_stocks_df = self._get_all_stocks_performance(trade_date)
+        
+        # 5. 分析共振关系
         main_themes = []
         
         # 遍历持续热门概念
@@ -1467,6 +1477,18 @@ class THSSectorTracker:
             if not concept_stocks:
                 continue
             
+            # 获取概念的涨停股
+            concept_limit_up_stocks = self._get_sector_limit_up_stocks(concept_name, trade_date, limit_up_df)
+            
+            # 获取概念的龙头股（涨幅前10）
+            concept_top_performers = self._get_sector_top_performers(concept_name, trade_date, all_stocks_df, top_n=10)
+            
+            # 获取概念近5日涨幅数据（用于趋势同步性）
+            concept_trend = self._get_sector_trend(concept_name, trade_date, days=5)
+            
+            # 获取概念近5日资金流向（用于资金流向共振）
+            concept_moneyflow = self._get_sector_moneyflow_trend(concept_name, trade_date, days=5)
+            
             # 找与该概念共振的行业
             for _, industry_row in industry_persistence_df.iterrows():
                 industry_name = industry_row['板块名称']
@@ -1475,21 +1497,57 @@ class THSSectorTracker:
                 if not industry_stocks:
                     continue
                 
-                # 计算共振度（成分股重叠度）
-                overlap = concept_stocks & industry_stocks
-                resonance_score = len(overlap) / len(concept_stocks) * 100 if concept_stocks else 0
+                # ========== 多维度共振分析（六维模型）==========
                 
-                # 共振度>30%认为是强共振
-                if resonance_score >= 30:
+                # 维度1：成分股重叠度（权重15%）
+                overlap = concept_stocks & industry_stocks
+                stock_overlap_score = len(overlap) / len(concept_stocks) * 100 if concept_stocks else 0
+                
+                # 维度2：涨停股重叠度（权重15%）
+                industry_limit_up_stocks = self._get_sector_limit_up_stocks(industry_name, trade_date, limit_up_df)
+                limit_up_overlap = concept_limit_up_stocks & industry_limit_up_stocks
+                limit_up_overlap_score = len(limit_up_overlap) / max(len(concept_limit_up_stocks), 1) * 100 if concept_limit_up_stocks else 0
+                
+                # 维度3：龙头股重叠度（权重20%）- 基于涨幅前10
+                industry_top_performers = self._get_sector_top_performers(industry_name, trade_date, all_stocks_df, top_n=10)
+                top_performer_overlap = concept_top_performers & industry_top_performers
+                top_performer_score = len(top_performer_overlap) / max(len(concept_top_performers), 1) * 100 if concept_top_performers else 0
+                
+                # 维度4：领涨股重叠度（权重10%）- 涨停股中封单最大的前3只
+                concept_leaders = self._get_sector_leaders(concept_name, trade_date, limit_up_df, top_n=3)
+                industry_leaders = self._get_sector_leaders(industry_name, trade_date, limit_up_df, top_n=3)
+                leader_overlap = concept_leaders & industry_leaders
+                leader_overlap_score = len(leader_overlap) / max(len(concept_leaders), 1) * 100 if concept_leaders else 0
+                
+                # 维度5：热度趋势同步性（权重20%）
+                industry_trend = self._get_sector_trend(industry_name, trade_date, days=5)
+                trend_sync_score = self._calculate_trend_sync(concept_trend, industry_trend)
+                
+                # 维度6：资金流向共振（权重20%）
+                industry_moneyflow = self._get_sector_moneyflow_trend(industry_name, trade_date, days=5)
+                moneyflow_sync_score = self._calculate_moneyflow_sync(concept_moneyflow, industry_moneyflow)
+                
+                # 综合共振度（加权平均）
+                composite_resonance = (
+                    stock_overlap_score * 0.15 +
+                    limit_up_overlap_score * 0.15 +
+                    top_performer_score * 0.20 +
+                    leader_overlap_score * 0.10 +
+                    trend_sync_score * 0.20 +
+                    moneyflow_sync_score * 0.20
+                )
+                
+                # 降低阈值到12%，六维模型更容易识别弱共振
+                if composite_resonance >= 12:
                     # 计算综合评分
                     concept_score = concept_row['持续性评分']
                     industry_score = industry_row['持续性评分']
                     persistence_avg = (concept_score + industry_score) / 2
-                    composite_score = (resonance_score * 0.4 + persistence_avg * 0.6)
+                    composite_score = (composite_resonance * 0.5 + persistence_avg * 0.5)
                     
-                    # 判断所处阶段
-                    concept_days = concept_row['持续天数']
-                    industry_days = industry_row['持续天数']
+                    # 判断所处阶段（使用'热点天数'字段）
+                    concept_days = concept_row['热点天数']
+                    industry_days = industry_row['热点天数']
                     min_days = min(concept_days, industry_days)
                     
                     if min_days >= lookback_days * 0.7:
@@ -1515,10 +1573,20 @@ class THSSectorTracker:
                         '主线名称': f"{concept_name}+{industry_name}",
                         '核心概念': concept_name,
                         '核心行业': industry_name,
-                        '共振度': round(resonance_score, 1),
+                        '共振度': round(composite_resonance, 1),  # 保留原字段名兼容
+                        '综合共振度': round(composite_resonance, 1),
+                        '成分股重叠': round(stock_overlap_score, 1),
+                        '涨停股重叠': round(limit_up_overlap_score, 1),
+                        '龙头股重叠': round(top_performer_score, 1),
+                        '领涨股重叠': round(leader_overlap_score, 1),
+                        '趋势同步性': round(trend_sync_score, 1),
+                        '资金共振度': round(moneyflow_sync_score, 1),
                         '概念持续性': concept_days,
                         '行业持续性': industry_days,
                         '重叠股票数': len(overlap),
+                        '涨停重叠数': len(limit_up_overlap),
+                        '龙头重叠数': len(top_performer_overlap),
+                        '领涨重叠数': len(leader_overlap),
                         '综合评分': round(composite_score, 1),
                         '所处阶段': stage,
                         '操作建议': advice
@@ -1528,14 +1596,17 @@ class THSSectorTracker:
             logger.warning("[analyze_concept_industry_resonance] 未找到概念和行业的强共振关系")
             return pd.DataFrame()
         
-        # 4. 按综合评分排序
+        # 5. 按综合评分排序
         result_df = pd.DataFrame(main_themes)
         result_df = result_df.sort_values('综合评分', ascending=False)
         
         logger.info("-" * 80)
         logger.info(f"【共振分析结果】共识别 {len(result_df)} 条市场主线")
         for idx, row in result_df.head(5).iterrows():
-            logger.info(f"  Top{idx+1}: {row['主线名称']} - 共振度{row['共振度']}%, 综合评分{row['综合评分']}, 阶段:{row['所处阶段']}")
+            logger.info(f"  Top{idx+1}: {row['主线名称']} - "
+                       f"综合共振度{row['综合共振度']}% "
+                       f"(成分股{row['成分股重叠']}%|涨停{row['涨停股重叠']}%|龙头{row['龙头股重叠']}%|领涨{row['领涨股重叠']}%|趋势{row['趋势同步性']}%|资金{row['资金共振度']}%), "
+                       f"综合评分{row['综合评分']}, 阶段:{row['所处阶段']}")
         logger.info("=" * 80)
         
         return result_df
@@ -1575,6 +1646,387 @@ class THSSectorTracker:
         except Exception as e:
             logger.warning(f"[_get_sector_stocks_set] 获取 {sector_name} 成分股失败: {e}")
             return set()
+    
+    def _get_sector_limit_up_stocks(self, sector_name: str, trade_date: str, 
+                                     limit_up_df: pd.DataFrame = None) -> set:
+        """
+        获取板块的涨停股代码集合
+        
+        Args:
+            sector_name: 板块名称
+            trade_date: 交易日期
+            limit_up_df: 涨停池数据
+            
+        Returns:
+            set: 涨停股代码集合（6位数字格式）
+        """
+        try:
+            if limit_up_df is None or limit_up_df.empty:
+                return set()
+            
+            # 获取板块成分股
+            sector_stocks = self._get_sector_stocks_set(sector_name, trade_date)
+            if not sector_stocks:
+                return set()
+            
+            # 标准化成分股代码（去除后缀）
+            sector_codes = set()
+            for code in sector_stocks:
+                clean_code = str(code).split('.')[0].zfill(6)
+                sector_codes.add(clean_code)
+            
+            # 从涨停池筛选属于该板块的股票
+            limit_up_codes = set()
+            code_col = None
+            if '代码' in limit_up_df.columns:
+                code_col = '代码'
+            elif 'code' in limit_up_df.columns:
+                code_col = 'code'
+            elif 'ts_code' in limit_up_df.columns:
+                code_col = 'ts_code'
+            
+            if code_col:
+                for _, row in limit_up_df.iterrows():
+                    code = str(row[code_col]).split('.')[0].zfill(6)
+                    if code in sector_codes:
+                        limit_up_codes.add(code)
+            
+            return limit_up_codes
+        except Exception as e:
+            logger.warning(f"[_get_sector_limit_up_stocks] 获取 {sector_name} 涨停股失败: {e}")
+            return set()
+    
+    def _get_sector_leaders(self, sector_name: str, trade_date: str,
+                            limit_up_df: pd.DataFrame = None, top_n: int = 3) -> set:
+        """
+        获取板块的领涨股代码集合（封单金额最大的前N只）
+        
+        Args:
+            sector_name: 板块名称
+            trade_date: 交易日期
+            limit_up_df: 涨停池数据
+            top_n: 取前N只领涨股
+            
+        Returns:
+            set: 领涨股代码集合
+        """
+        try:
+            if limit_up_df is None or limit_up_df.empty:
+                return set()
+            
+            # 获取板块涨停股
+            limit_up_stocks = self._get_sector_limit_up_stocks(sector_name, trade_date, limit_up_df)
+            if not limit_up_stocks:
+                return set()
+            
+            # 标准化涨停池代码列
+            code_col = None
+            if '代码' in limit_up_df.columns:
+                code_col = '代码'
+            elif 'code' in limit_up_df.columns:
+                code_col = 'code'
+            elif 'ts_code' in limit_up_df.columns:
+                code_col = 'ts_code'
+            
+            if not code_col:
+                return set()
+            
+            # 添加标准化代码列用于筛选
+            limit_up_df = limit_up_df.copy()
+            limit_up_df['clean_code'] = limit_up_df[code_col].astype(str).str.split('.').str[0].str.zfill(6)
+            
+            # 筛选属于该板块的涨停股
+            sector_limit_up = limit_up_df[limit_up_df['clean_code'].isin(limit_up_stocks)]
+            if sector_limit_up.empty:
+                return set()
+            
+            # 按封单金额排序，取前N只
+            # 尝试不同的封单金额字段名
+            amount_col = None
+            for col in ['封单额', '封单金额', 'seal_amount', 'bid_amount']:
+                if col in sector_limit_up.columns:
+                    amount_col = col
+                    break
+            
+            if amount_col:
+                sector_limit_up = sector_limit_up.sort_values(amount_col, ascending=False)
+            
+            leaders = set(sector_limit_up.head(top_n)['clean_code'].tolist())
+            return leaders
+        except Exception as e:
+            logger.warning(f"[_get_sector_leaders] 获取 {sector_name} 领涨股失败: {e}")
+            return set()
+    
+    def _get_sector_trend(self, sector_name: str, trade_date: str, days: int = 5) -> List[float]:
+        """
+        获取板块近N日的涨幅趋势
+        
+        Args:
+            sector_name: 板块名称
+            trade_date: 交易日期
+            days: 回溯天数
+            
+        Returns:
+            List[float]: 每日涨幅列表（从最早到最近）
+        """
+        try:
+            # 获取板块代码
+            concept_list, industry_list = self._load_sector_list()
+            
+            sector_row = concept_list[concept_list['name'] == sector_name]
+            if not sector_row.empty:
+                ts_code = sector_row.iloc[0]['ts_code']
+            else:
+                sector_row = industry_list[industry_list['name'] == sector_name]
+                if not sector_row.empty:
+                    ts_code = sector_row.iloc[0]['ts_code']
+                else:
+                    return []
+            
+            # 获取近N日行情数据
+            end_date = datetime.strptime(trade_date, "%Y%m%d")
+            start_date = end_date - timedelta(days=days * 2)  # 多取一些，防止节假日
+            
+            daily_data = self.dm.get_ths_daily(ts_code=ts_code, 
+                                               start_date=start_date.strftime("%Y%m%d"),
+                                               end_date=trade_date)
+            
+            if daily_data.empty or 'pct_change' not in daily_data.columns:
+                return []
+            
+            # 按日期排序，取最近N天
+            daily_data = daily_data.sort_values('trade_date')
+            pct_changes = daily_data['pct_change'].tail(days).tolist()
+            
+            return pct_changes
+        except Exception as e:
+            logger.warning(f"[_get_sector_trend] 获取 {sector_name} 趋势失败: {e}")
+            return []
+    
+    def _calculate_trend_sync(self, trend1: List[float], trend2: List[float]) -> float:
+        """
+        计算两个趋势的同步性得分
+        
+        Args:
+            trend1: 第一个趋势的涨幅列表
+            trend2: 第二个趋势的涨幅列表
+            
+        Returns:
+            float: 同步性得分（0-100）
+        """
+        try:
+            if not trend1 or not trend2 or len(trend1) < 2 or len(trend2) < 2:
+                return 50.0  # 默认中等同步性
+            
+            # 确保长度一致
+            min_len = min(len(trend1), len(trend2))
+            trend1 = trend1[-min_len:]
+            trend2 = trend2[-min_len:]
+            
+            # 计算相关系数
+            if len(trend1) < 2:
+                return 50.0
+            
+            correlation = np.corrcoef(trend1, trend2)[0, 1]
+            
+            # 将相关系数（-1到1）映射到得分（0到100）
+            # 相关系数越接近1，同步性越高
+            if np.isnan(correlation):
+                return 50.0
+            
+            sync_score = (correlation + 1) / 2 * 100
+            return round(sync_score, 1)
+        except Exception as e:
+            logger.warning(f"[_calculate_trend_sync] 计算趋势同步性失败: {e}")
+            return 50.0
+    
+    def _get_all_stocks_performance(self, trade_date: str) -> pd.DataFrame:
+        """
+        获取全市场股票的涨幅数据
+        
+        Args:
+            trade_date: 交易日期
+            
+        Returns:
+            DataFrame: 包含股票代码和涨幅的数据
+        """
+        try:
+            # 使用get_all_rt_k_data获取当日所有股票行情（包含pct_change涨跌幅）
+            daily_data = self.dm.get_all_rt_k_data(trade_date=trade_date)
+            if daily_data.empty:
+                return pd.DataFrame()
+            
+            # 标准化代码格式
+            if 'ts_code' in daily_data.columns:
+                daily_data['code'] = daily_data['ts_code'].astype(str).str.split('.').str[0].str.zfill(6)
+            elif 'code' in daily_data.columns:
+                daily_data['code'] = daily_data['code'].astype(str).str.zfill(6)
+            
+            return daily_data
+        except Exception as e:
+            logger.warning(f"[_get_all_stocks_performance] 获取全市场数据失败: {e}")
+            return pd.DataFrame()
+    
+    def _get_sector_top_performers(self, sector_name: str, trade_date: str,
+                                    all_stocks_df: pd.DataFrame = None, top_n: int = 10) -> set:
+        """
+        获取板块的涨幅龙头股票（涨幅前N）
+        
+        Args:
+            sector_name: 板块名称
+            trade_date: 交易日期
+            all_stocks_df: 全市场股票数据
+            top_n: 取前N只
+            
+        Returns:
+            set: 龙头股代码集合
+        """
+        try:
+            # 获取板块成分股
+            sector_stocks = self._get_sector_stocks_set(sector_name, trade_date)
+            if not sector_stocks:
+                return set()
+            
+            # 标准化成分股代码
+            sector_codes = set()
+            for code in sector_stocks:
+                clean_code = str(code).split('.')[0].zfill(6)
+                sector_codes.add(clean_code)
+            
+            # 如果没有提供全市场数据，则获取
+            if all_stocks_df is None or all_stocks_df.empty:
+                all_stocks_df = self._get_all_stocks_performance(trade_date)
+            
+            if all_stocks_df.empty:
+                return set()
+            
+            # 筛选板块内股票
+            if 'code' not in all_stocks_df.columns:
+                return set()
+            
+            sector_df = all_stocks_df[all_stocks_df['code'].isin(sector_codes)]
+            if sector_df.empty:
+                return set()
+            
+            # 按涨幅排序，取前N
+            if 'pct_change' in sector_df.columns:
+                sector_df = sector_df.sort_values('pct_change', ascending=False)
+            elif '涨跌幅' in sector_df.columns:
+                sector_df = sector_df.sort_values('涨跌幅', ascending=False)
+            else:
+                return set()
+            
+            top_performers = set(sector_df.head(top_n)['code'].tolist())
+            return top_performers
+        except Exception as e:
+            logger.warning(f"[_get_sector_top_performers] 获取 {sector_name} 龙头股失败: {e}")
+            return set()
+    
+    def _get_sector_moneyflow_trend(self, sector_name: str, trade_date: str, days: int = 5) -> List[float]:
+        """
+        获取板块近N日的资金流向趋势
+        
+        Args:
+            sector_name: 板块名称
+            trade_date: 交易日期
+            days: 回溯天数
+            
+        Returns:
+            List[float]: 每日资金净流入（亿元）列表
+        """
+        try:
+            # 获取板块代码
+            concept_list, industry_list = self._load_sector_list()
+            
+            sector_row = concept_list[concept_list['name'] == sector_name]
+            if not sector_row.empty:
+                ts_code = sector_row.iloc[0]['ts_code']
+            else:
+                sector_row = industry_list[industry_list['name'] == sector_name]
+                if not sector_row.empty:
+                    ts_code = sector_row.iloc[0]['ts_code']
+                else:
+                    return []
+            
+            # 获取近N日行情数据（包含成交额）
+            end_date = datetime.strptime(trade_date, "%Y%m%d")
+            start_date = end_date - timedelta(days=days * 2)
+            
+            daily_data = self.dm.get_ths_daily(ts_code=ts_code,
+                                               start_date=start_date.strftime("%Y%m%d"),
+                                               end_date=trade_date)
+            
+            if daily_data.empty:
+                return []
+            
+            # 计算资金净流入（使用成交额和涨跌幅估算）
+            # 简化模型：涨幅>0认为资金净流入，涨幅<0认为资金净流出
+            # 实际应该使用MoneyFlowAnalyzer获取真实的资金流向数据
+            daily_data = daily_data.sort_values('trade_date')
+            
+            moneyflow_list = []
+            for _, row in daily_data.tail(days).iterrows():
+                pct_change = row.get('pct_change', 0)
+                amount = row.get('amount', 0)  # 千元
+                
+                # 估算资金净流入（简化模型）
+                # 涨幅越大，净流入比例越高
+                if pct_change > 0:
+                    net_flow = amount * pct_change / 100  # 简化估算
+                else:
+                    net_flow = amount * pct_change / 100  # 负值表示流出
+                
+                moneyflow_list.append(net_flow / 100000)  # 转换为亿元
+            
+            return moneyflow_list
+        except Exception as e:
+            logger.warning(f"[_get_sector_moneyflow_trend] 获取 {sector_name} 资金流向失败: {e}")
+            return []
+    
+    def _calculate_moneyflow_sync(self, moneyflow1: List[float], moneyflow2: List[float]) -> float:
+        """
+        计算两个资金流向序列的同步性得分
+        
+        Args:
+            moneyflow1: 第一个资金流向列表
+            moneyflow2: 第二个资金流向列表
+            
+        Returns:
+            float: 资金同步性得分（0-100）
+        """
+        try:
+            if not moneyflow1 or not moneyflow2 or len(moneyflow1) < 2 or len(moneyflow2) < 2:
+                return 50.0  # 默认中等同步性
+            
+            # 确保长度一致
+            min_len = min(len(moneyflow1), len(moneyflow2))
+            moneyflow1 = moneyflow1[-min_len:]
+            moneyflow2 = moneyflow2[-min_len:]
+            
+            # 判断资金流向方向（正=流入，负=流出）
+            direction1 = [1 if m > 0 else -1 for m in moneyflow1]
+            direction2 = [1 if m > 0 else -1 for m in moneyflow2]
+            
+            # 计算方向一致率
+            same_direction_count = sum(1 for d1, d2 in zip(direction1, direction2) if d1 == d2)
+            direction_sync = same_direction_count / len(direction1) * 100
+            
+            # 计算相关系数（数值相关性）
+            try:
+                correlation = np.corrcoef(moneyflow1, moneyflow2)[0, 1]
+                if np.isnan(correlation):
+                    correlation = 0
+            except:
+                correlation = 0
+            
+            # 综合得分：方向一致率60% + 数值相关性40%
+            correlation_score = (correlation + 1) / 2 * 100  # 映射到0-100
+            sync_score = direction_sync * 0.6 + correlation_score * 0.4
+            
+            return round(sync_score, 1)
+        except Exception as e:
+            logger.warning(f"[_calculate_moneyflow_sync] 计算资金同步性失败: {e}")
+            return 50.0
 
 
 if __name__ == "__main__":

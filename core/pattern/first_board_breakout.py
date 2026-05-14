@@ -142,7 +142,8 @@ class HotspotFirstBoardStrategy:
                                       today_zt: pd.DataFrame,
                                       history_pools: Dict[str, pd.DataFrame],
                                       date_str: str,
-                                      hot_sectors: List[Dict] = None) -> List[TradeSignal]:
+                                      hot_sectors: List[Dict] = None,
+                                      concept_hierarchy: Dict = None) -> List[TradeSignal]:
         """
         基于二级行业的首板突破检测
 
@@ -157,6 +158,7 @@ class HotspotFirstBoardStrategy:
             history_pools: 历史涨停池（用于板块分析）
             date_str: 日期字符串YYYYMMDD
             hot_sectors: 预计算的热点板块列表（避免重复计算）
+            concept_hierarchy: 概念连板梯队数据（用于复盘参考）
 
         Returns:
             List[TradeSignal]: 符合条件的交易信号
@@ -254,7 +256,7 @@ class HotspotFirstBoardStrategy:
 
             # 分析首板
             signal = self._analyze_first_board(
-                stock, yesterday_zt, sector_info, date_str, is_hot_sector
+                stock, yesterday_zt, sector_info, date_str, is_hot_sector, concept_hierarchy
             )
             if signal:
                 signals.append(signal)
@@ -434,7 +436,8 @@ class HotspotFirstBoardStrategy:
                             yesterday_zt: pd.DataFrame,
                             sector_info: Dict,
                             date_str: str,
-                            is_hot_sector: bool = True) -> Optional[TradeSignal]:
+                            is_hot_sector: bool = True,
+                            concept_hierarchy: Dict = None) -> Optional[TradeSignal]:
         """
         分析单只股票是否为首板突破
 
@@ -448,6 +451,7 @@ class HotspotFirstBoardStrategy:
             sector_info: 行业信息
             date_str: 日期字符串
             is_hot_sector: 是否属于热点板块（影响仓位权重）
+            concept_hierarchy: 概念连板梯队数据（用于复盘参考）
 
         Returns:
             TradeSignal or None: 符合条件的交易信号
@@ -637,6 +641,47 @@ class HotspotFirstBoardStrategy:
 
         logger.debug(f"[{code}] 生成信号: 置信度{confidence:.2f}, 仓位{position_size}, 热点{is_hot_sector}")
 
+        # ===== 获取所属概念和连板梯队信息 =====
+        concept_info_list = []
+        hierarchy_info = ""
+        if concept_hierarchy:
+            # 遍历所有概念，找出包含该股票的概念
+            for concept_name, data in concept_hierarchy.items():
+                stocks = data.get('stocks', [])
+                stock_codes = [str(s.get('code', '')).zfill(6) for s in stocks]
+                if code in stock_codes:
+                    # 找到该股票在该概念中的连板数
+                    board_height = 0
+                    for s in stocks:
+                        if str(s.get('code', '')).zfill(6) == code:
+                            board_height = s.get('board_height', 1)
+                            break
+                    
+                    # 获取该概念的最高连板数
+                    max_height = data.get('max_board_height', 0)
+                    total_limit_up = data.get('total_limit_up', 0)
+                    
+                    concept_info_list.append({
+                        'name': concept_name,
+                        'board_height': board_height,
+                        'max_height': max_height,
+                        'total_limit_up': total_limit_up
+                    })
+            
+            # 按最高连板数排序，取前3个概念
+            concept_info_list.sort(key=lambda x: x['max_height'], reverse=True)
+            top_concepts = concept_info_list[:3]
+            
+            # 构建概念梯队信息
+            if top_concepts:
+                concept_parts = []
+                for c in top_concepts:
+                    if c['max_height'] > 0:
+                        concept_parts.append(f"{c['name']}({c['max_height']}板)")
+                    else:
+                        concept_parts.append(f"{c['name']}")
+                hierarchy_info = " | ".join(concept_parts)
+        
         # 构建理由
         if is_hot_sector:
             reason_parts = [f"首板突破+{sector_name}热点"]
@@ -650,6 +695,9 @@ class HotspotFirstBoardStrategy:
         reason_parts.append(f"封单强度{seal_ratio*100:.1f}%")
         if ma_breakthrough:
             reason_parts.append("突破均线")
+        # 添加所属概念信息
+        if hierarchy_info:
+            reason_parts.append(f"概念: {hierarchy_info}")
 
         # 构建关键指标
         key_metrics = {
@@ -657,8 +705,14 @@ class HotspotFirstBoardStrategy:
             "封单额": f"{seal_amount/1e4:.0f}万",
             "封单强度": f"{seal_ratio*100:.1f}%",
             "所属行业": sector_name,
-            "行业趋势": sector_info['trend_stage']
+            "行业趋势": sector_info['trend_stage'],
+            "距前高": chip_info.get('distance_from_high', 'N/A'),
+            "量能说明": thresholds.get('volume_desc', '标准量能')
         }
+        # 添加所属概念和梯队信息
+        if concept_info_list:
+            key_metrics["所属概念"] = ", ".join([c['name'] for c in concept_info_list[:3]])
+            key_metrics["概念梯队"] = hierarchy_info if hierarchy_info else "无"
         if daily_data:
             if 'rise_5d' in daily_data:
                 key_metrics["5日涨幅"] = f"{daily_data['rise_5d']*100:.1f}%"

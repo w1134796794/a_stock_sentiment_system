@@ -293,9 +293,9 @@ class DataManager:
 
         try:
             if self.ts_pro:
-                logger.debug(f"[get_stock_daily] 调用Tushare daily接口: ts_code={code}")
+                # logger.debug(f"[get_stock_daily] 调用Tushare daily接口: ts_code={code}")
                 df = self.ts_pro.daily(ts_code=code, start_date=start_date, end_date=end_date)
-                logger.debug(f"[get_stock_daily] Tushare返回 {len(df)} 条数据")
+                # logger.debug(f"[get_stock_daily] Tushare返回 {len(df)} 条数据")
                 if not df.empty:
                     df['trade_date'] = pd.to_datetime(df['trade_date'])
                     df.to_csv(cache_file, index=False)

@@ -24,6 +24,8 @@ from core.analysis.pattern_recognition import PatternRecognition
 from core.analysis.emotion_cycle_engine import EmotionCycleEngine
 # 使用新版同花顺板块追踪器
 from core.analysis.ths_sector_tracker import THSSectorTracker
+# 新增：板块分析统筹入口
+from core.analysis.sector_analysis_orchestrator import SectorAnalysisOrchestrator
 from core.report.report_generator_v2 import ReportGeneratorV2
 from core.execution.execution_engine import UnifiedExecutionEngine
 from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
@@ -34,8 +36,6 @@ from core.analysis.moneyflow_analyzer import create_moneyflow_analyzer
 from core.analysis.chip_structure_analyzer import create_chip_analyzer
 # 新增：ML情绪周期预测
 from core.analysis.emotion_cycle_integrated import create_integrated_engine
-# 新增：概念连板梯队分析
-from core.analysis.concept_board_hierarchy import ConceptBoardHierarchyAnalyzer
 
 logger = loguru.logger
 
@@ -44,19 +44,19 @@ class SentimentSystem:
         self.dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
         self.mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
         self.emotion_engine = EmotionCycleEngine(dm=self.dm)  # 情绪周期引擎，传入DataManager用于计算溢价率
-        self.sector_tracker = THSSectorTracker(self.dm)  # 板块轮动追踪器
+        self.sector_tracker = THSSectorTracker(self.dm)  # 板块轮动追踪器（保持兼容）
+        # 新增：板块分析统筹入口（带缓存）
+        self.sector_orchestrator = SectorAnalysisOrchestrator(self.dm, cache_enabled=True)
         self.reporter = ReportGeneratorV2(OUTPUT_DIR)
         self.execution_engine = None  # 延迟初始化
         self.retail_support = None  # 散户支持模块延迟初始化
         self.today = datetime.now().strftime("%Y%m%d")
         self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-        
+
         # 新增：资金流向和筹码结构分析器
         self.moneyflow_analyzer = None  # 延迟初始化
         self.chip_analyzer = None       # 延迟初始化
         self.integrated_emotion_engine = None  # 综合情绪周期引擎（规则+ML）
-        # 新增：概念连板梯队分析器
-        self.concept_hierarchy_analyzer = None  # 延迟初始化
         
     def run_daily_analysis(self, date: str = None):
         """
@@ -198,93 +198,41 @@ class SentimentSystem:
             logger.info("  暂无评分数据")
         logger.info("=" * 60)
         
-        # 4. 热点概念识别
-        logger.info("[4/12] 识别热点概念板块...")
-        # 增加top_n确保包含所有可能的热点概念
-        hot_concepts_df = self.sector_tracker.analyze_concept_sectors(date, top_n=5)
-        if not hot_concepts_df.empty and 'is_hot' in hot_concepts_df.columns:
-            # 使用布尔索引，确保正确处理is_hot列
-            hot_mask = hot_concepts_df['is_hot'].astype(bool)
-            hot_concepts = hot_concepts_df[hot_mask]['name'].tolist()
-            logger.info(f"[OK] 识别到 {len(hot_concepts)} 个热点概念: {', '.join(hot_concepts[:10])}{'...' if len(hot_concepts) > 10 else ''}")
-        else:
-            hot_concepts = []
-            logger.info("  未识别到热点概念")
+        # 4-8. 板块分析（使用统筹入口，带缓存）
+        logger.info("[4-8/12] 执行板块分析（热点识别+持续性+共振+梯队）...")
+        sector_result = self.sector_orchestrator.analyze_all(date, zt_pool=zt_pool)
         
-        # 5. 热点行业识别
-        logger.info("[5/12] 识别热点行业板块...")
-        # 增加top_n确保包含所有可能的热点行业
-        hot_industries_df = self.sector_tracker.analyze_industry_sectors(date, top_n=5)
-        if not hot_industries_df.empty and 'is_hot' in hot_industries_df.columns:
-            # 使用布尔索引，确保正确处理is_hot列
-            hot_mask = hot_industries_df['is_hot'].astype(bool)
-            hot_industries = hot_industries_df[hot_mask]['name'].tolist()
-            logger.info(f"[OK] 识别到 {len(hot_industries)} 个热点行业: {', '.join(hot_industries[:10])}{'...' if len(hot_industries) > 10 else ''}")
-        else:
-            hot_industries = []
-            logger.info("  未识别到热点行业")
-
-        # 5.5 概念连板梯队分析（新增）
-        logger.info("[5.5/12] 分析概念连板梯队...")
-        concept_hierarchy = {}  # 初始化为空字典
-        concept_hierarchy_report = ""  # 报告文本
-        if self.concept_hierarchy_analyzer is None:
-            self.concept_hierarchy_analyzer = ConceptBoardHierarchyAnalyzer(self.dm)
-
-        if not zt_pool.empty:
-            concept_hierarchy = self.concept_hierarchy_analyzer.analyze_hierarchy(zt_pool, date)
-            if concept_hierarchy:
-                logger.info(f"[OK] 概念连板梯队分析完成，共 {len(concept_hierarchy)} 个概念")
-                # 生成报告文本
-                concept_hierarchy_report = self.concept_hierarchy_analyzer.format_hierarchy_for_report(concept_hierarchy, top_n=10)
-                logger.info(f"[概念连板梯队]\n{concept_hierarchy_report}")
-                # 获取强势概念
-                strong_concepts = self.concept_hierarchy_analyzer.get_strong_concepts(concept_hierarchy)
-                if strong_concepts:
-                    logger.info(f"[OK] 识别到 {len(strong_concepts)} 个强势概念")
-            else:
-                logger.info("  无概念连板梯队数据")
-        else:
-            logger.info("  涨停池为空，跳过概念连板梯队分析")
-
-        # 6. 概念持续性分析（基于当前热点概念，M天内N次模式）
-        logger.info("[6/12] 分析概念板块持续性...")
-        concept_persistence_df = self.sector_tracker.analyze_concept_persistence(
-            date, top_n=10, lookback_days=10, hot_concepts_df=hot_concepts_df
-        )
+        # 提取分析结果
+        hot_concepts_df = sector_result.hot_concepts_df
+        hot_industries_df = sector_result.hot_industries_df
+        hot_concepts = sector_result.hot_concepts
+        hot_industries = sector_result.hot_industries
+        concept_persistence_df = sector_result.concept_persistence_df
+        industry_persistence_df = sector_result.industry_persistence_df
+        main_themes_df = sector_result.resonance_df
+        concept_hierarchy = sector_result.concept_hierarchy
+        concept_hierarchy_report = sector_result.concept_hierarchy_report
+        
+        # 打印分析摘要
+        logger.info(f"[OK] 板块分析完成:")
+        logger.info(f"  - 热点概念: {len(hot_concepts)}个")
+        logger.info(f"  - 热点行业: {len(hot_industries)}个")
+        logger.info(f"  - 持续热门概念: {len(concept_persistence_df)}个")
+        logger.info(f"  - 持续热门行业: {len(industry_persistence_df)}个")
+        logger.info(f"  - 市场主线: {len(main_themes_df)}条")
+        logger.info(f"  - 概念连板梯队: {len(concept_hierarchy)}个概念")
+        
+        # 打印详细结果
+        if hot_concepts:
+            logger.info(f"  热点概念: {', '.join(hot_concepts[:10])}{'...' if len(hot_concepts) > 10 else ''}")
         if not concept_persistence_df.empty:
-            logger.info(f"[OK] 概念持续性分析完成，发现 {len(concept_persistence_df)} 个持续热门概念")
-            for _, row in concept_persistence_df.head(5).iterrows():
-                logger.info(f"  {row['板块名称']}: 10天内{row['热点天数']}次热点(频率{row['热点频率']}%), 评分{row['持续性评分']}, 阶段[{row['所处阶段']}], {row['操作建议']}")
-        else:
-            logger.info("  无持续热门概念")
-        
-        # 7. 行业持续性分析（基于当前热点行业，M天内N次模式）
-        logger.info("[7/12] 分析行业板块持续性...")
-        industry_persistence_df = self.sector_tracker.analyze_industry_persistence(
-            date, top_n=10, lookback_days=10, hot_industries_df=hot_industries_df
-        )
-        if not industry_persistence_df.empty:
-            logger.info(f"[OK] 行业持续性分析完成，发现 {len(industry_persistence_df)} 个持续热门行业")
-            for _, row in industry_persistence_df.head(5).iterrows():
-                logger.info(f"  {row['板块名称']}: 10天内{row['热点天数']}次热点(频率{row['热点频率']}%), 评分{row['持续性评分']}, 阶段[{row['所处阶段']}], {row['操作建议']}")
-        else:
-            logger.info("  无持续热门行业")
-        
-        # 8. 概念-行业共振分析（市场主线）
-        logger.info("[8/12] 分析概念-行业共振（市场主线）...")
-        main_themes_df = self.sector_tracker.analyze_concept_industry_resonance(
-            date, 
-            hot_concepts_df=hot_concepts_df,
-            hot_industries_df=hot_industries_df,
-            lookback_days=10
-        )
+            for _, row in concept_persistence_df.head(3).iterrows():
+                logger.info(f"  {row['板块名称']}: 10天内{row['热点天数']}次热点, 评分{row['持续性评分']}, 阶段[{row['所处阶段']}]")
         if not main_themes_df.empty:
-            logger.info(f"[OK] 共振分析完成，识别 {len(main_themes_df)} 条市场主线")
-            for _, row in main_themes_df.head(5).iterrows():
-                logger.info(f"  {row['主线名称']}: 共振度{row['共振度']}%, 概念[{row.get('核心概念', 'N/A')}], 行业[{row.get('核心行业', 'N/A')}], {row['操作建议']}")
-        else:
-            logger.info("  未识别到明显的概念-行业共振主线")
+            for _, row in main_themes_df.head(3).iterrows():
+                logger.info(f"  主线[{row['主线名称']}]: 共振度{row['共振度']}%")
+        if concept_hierarchy_report:
+            logger.info(f"[概念连板梯队]\n{concept_hierarchy_report}")
         
         # 9. 资金流向和筹码结构分析（新增）
         logger.info("[10/12] 资金流向和筹码结构分析...")
@@ -370,26 +318,13 @@ class SentimentSystem:
         logger.info("[12/12] 识别交易模式...")
         pr = PatternRecognition(self.dm, sector_engine=None, mapper=self.mapper)
         
-        # 从板块持续性分析中提取热点板块信息
-        hot_sectors = []
-        # 合并概念和行业持续性数据
-        all_persistence_df = pd.concat([concept_persistence_df, industry_persistence_df], ignore_index=True)
-        if not all_persistence_df.empty:
-            for _, row in all_persistence_df.iterrows():
-                stage = row.get('所处阶段', '')
-                if stage in ['加速期', '高潮期', '萌芽期']:
-                    hot_sectors.append({
-                        'sector_name': row.get('板块名称', ''),
-                        'stats': {'涨停家数': row.get('涨停家数', 0)},
-                        'trend_stage': stage,
-                        'action': row.get('操作建议', ''),
-                        'confidence': row.get('持续性评分', 50) / 100
-                    })
+        # 使用缓存的热点板块数据（从统筹入口获取）
+        hot_sectors = self.sector_orchestrator.get_cached_hot_sectors_for_pattern(date)
         
         # 调试日志：显示传递的热点板块
         logger.info(f"传递给模式识别的热点板块: {len(hot_sectors)}个")
         for hs in hot_sectors[:5]:  # 显示前5个
-            logger.info(f"  - {hs['sector_name']} ({hs['trend_stage']})")
+            logger.info(f"  - {hs['sector_name']} ({hs['trend_stage']}) 评分:{hs['confidence']:.2f}")
         
         patterns = pr.scan_all_patterns(date, self.yesterday, hot_sectors=hot_sectors)
 
@@ -442,6 +377,12 @@ class SentimentSystem:
             # 新增：概念连板梯队分析数据
             'concept_hierarchy': concept_hierarchy,
             'concept_hierarchy_report': concept_hierarchy_report,
+            # 新增：详细热点板块数据（来自统筹入口缓存）
+            'hot_concepts_df': hot_concepts_df,
+            'hot_industries_df': hot_industries_df,
+            'concept_persistence_df': concept_persistence_df,
+            'industry_persistence_df': industry_persistence_df,
+            'sector_result': sector_result,
         }
 
         # 使用带时间戳的文件名避免文件被占用
@@ -480,9 +421,15 @@ class SentimentSystem:
             # 获取热点主线板块名称列表
             hot_sectors = []
             if not mainline_df.empty:
-                # 使用正确的列名 L2_Industry
-                column_name = 'L2_Industry' if 'L2_Industry' in mainline_df.columns else '板块名称'
-                hot_sectors = mainline_df[column_name].tolist()
+                # 共振分析结果使用'主线名称'列（格式：概念+行业）
+                if '主线名称' in mainline_df.columns:
+                    hot_sectors = mainline_df['主线名称'].tolist()
+                elif '核心概念' in mainline_df.columns:
+                    hot_sectors = mainline_df['核心概念'].tolist()
+                elif '核心行业' in mainline_df.columns:
+                    hot_sectors = mainline_df['核心行业'].tolist()
+                else:
+                    hot_sectors = []
                 logger.info(f"【交易计划】热点主线板块: {hot_sectors}")
             
             # 获取情绪周期建议仓位
@@ -549,8 +496,18 @@ class SentimentSystem:
             return patterns
 
         # 构建板块名称到热度评分的映射
-        sector_column = 'L2_Industry' if 'L2_Industry' in mainline_df.columns else '板块名称'
-        score_column = 'Strength_Score' if 'Strength_Score' in mainline_df.columns else '综合评分'
+        # 共振分析结果使用'主线名称'、'核心概念'、'核心行业'列
+        if '主线名称' in mainline_df.columns:
+            sector_column = '主线名称'
+        elif '核心概念' in mainline_df.columns:
+            sector_column = '核心概念'
+        elif '核心行业' in mainline_df.columns:
+            sector_column = '核心行业'
+        else:
+            logger.warning(f"【_filter_resonance_signals】未知的列名，可用列: {list(mainline_df.columns)}")
+            return patterns
+        
+        score_column = '综合评分' if '综合评分' in mainline_df.columns else 'Strength_Score'
 
         hot_sectors = mainline_df[sector_column].tolist()
         sector_heat_map = {}

@@ -173,104 +173,225 @@ class ReportGeneratorV2:
                     worksheet.write(row, col, dashboard_data[row][col], formats['cell'])
 
     def _write_hot_sectors(self, writer, data_dict: Dict, formats: Dict):
-        """Sheet 2: 热点概念 - 核心数据展示"""
+        """Sheet 2: 热点概念 - 包含详细的热点概念、行业和持续性数据"""
+        
+        # 获取各类数据
         mainline_df = data_dict.get('mainline_df', pd.DataFrame())
+        hot_concepts_df = data_dict.get('hot_concepts_df', pd.DataFrame())
+        hot_industries_df = data_dict.get('hot_industries_df', pd.DataFrame())
+        concept_persistence_df = data_dict.get('concept_persistence_df', pd.DataFrame())
+        industry_persistence_df = data_dict.get('industry_persistence_df', pd.DataFrame())
         
-        if mainline_df.empty:
-            df = pd.DataFrame({'提示': ['暂无热点概念数据']})
-            df.to_excel(writer, sheet_name='热点概念', index=False)
-            return
+        # 创建工作表
+        worksheet = writer.book.add_worksheet('热点概念')
+        writer.sheets['热点概念'] = worksheet
         
-        # 核心概念数据字段映射（按重要程度排序）
-        # 主线特征指标优先，帮助识别真正的主线概念而非一日游
-        core_concept_cols = {
-            # 基础信息
-            'ts_code': '板块代码',
-            '板块名称': '概念名称',
-            '当前排名': '当日排名',
-            # 主线特征指标（核心）
-            '10日进前10次数': '10日进前10',
-            '10日进前5次数': '10日进前5',
-            '10日进前3次数': '10日进前3',
-            '连续进前10天数': '连续前10天',
-            '是否主线': '是否主线',
-            '10日平均排名': '10日均排名',
-            '10日最佳排名': '10日最佳',
-            # 涨停数据
-            '涨停家数': '涨停数量',
-            '最高连板': '最高连板',
-            # 评分与阶段
-            '综合评分': '综合评分',
-            '共振得分': '共振得分',
-            '持续性评分': '持续性评分',
-            '所处阶段': '所处阶段',
-            '市场周期': '市场周期',
-            # 趋势因子
-            '排名动量': '排名动量',
-            '涨停趋势': '涨停趋势',
-            # 资金因子
-            '成交额变化': '成交额变化',
-            '换手率': '换手率',
-            # 信号与策略
-            '信号类型': '信号类型',
-            '信号强度': '信号强度',
-            '操作建议': '操作建议',
-            '建议仓位': '建议仓位',
-            '紧急度': '紧急度',
-            '策略理由': '策略理由',
-        }
+        current_row = 0
         
-        # 检查哪些列存在，并按核心字段顺序构建DataFrame
-        available_cols = {}
-        for k, v in core_concept_cols.items():
-            if k in mainline_df.columns:
-                available_cols[k] = v
+        # ========== 第一部分：市场主线（共振分析结果）==========
+        if not mainline_df.empty:
+            # 写入标题
+            worksheet.merge_range(current_row, 0, current_row, 10, '一、市场主线（概念-行业共振）', formats['header_green'])
+            current_row += 1
+            
+            # 主线数据字段映射
+            mainline_cols = {
+                '主线名称': '主线名称',
+                '共振度': '共振度(%)',
+                '核心概念': '核心概念',
+                '核心行业': '核心行业',
+                '综合评分': '综合评分',
+                '持续性评分': '持续性评分',
+                '所处阶段': '所处阶段',
+                '操作建议': '操作建议',
+                '策略理由': '策略理由',
+            }
+            
+            available_mainline_cols = {k: v for k, v in mainline_cols.items() if k in mainline_df.columns}
+            if available_mainline_cols:
+                df_mainline = mainline_df[list(available_mainline_cols.keys())].copy()
+                df_mainline.columns = list(available_mainline_cols.values())
+                
+                # 写入表头
+                for col_num, col_name in enumerate(df_mainline.columns):
+                    worksheet.write(current_row, col_num, col_name, formats['header'])
+                current_row += 1
+                
+                # 写入数据
+                for _, row in df_mainline.iterrows():
+                    for col_num, value in enumerate(row):
+                        worksheet.write(current_row, col_num, value, formats['cell'])
+                    current_row += 1
+            
+            current_row += 1  # 空行
         
-        if available_cols:
-            # 按核心字段顺序选择列
-            df_display = mainline_df[list(available_cols.keys())].copy()
-            df_display.columns = list(available_cols.values())
-        else:
-            # 如果没有匹配的列，显示所有列（将板块名称改为概念名称）
-            df_display = mainline_df.copy()
-            if '板块名称' in df_display.columns:
-                df_display = df_display.rename(columns={'板块名称': '概念名称'})
+        # ========== 第二部分：热点概念明细 ==========
+        if not hot_concepts_df.empty:
+            worksheet.merge_range(current_row, 0, current_row, 10, '二、热点概念明细（当日）', formats['header_green'])
+            current_row += 1
+            
+            # 热点概念字段映射
+            concept_cols = {
+                'name': '概念名称',
+                'ts_code': '板块代码',
+                'pct_change': '涨跌幅(%)',
+                'rank': '排名',
+                'composite_score': '综合评分',
+                'limit_up_count': '涨停家数',
+                'amount': '成交额(千元)',
+                'is_hot': '是否热点',
+            }
+            
+            available_concept_cols = {k: v for k, v in concept_cols.items() if k in hot_concepts_df.columns}
+            if available_concept_cols:
+                df_concepts = hot_concepts_df[list(available_concept_cols.keys())].copy()
+                df_concepts.columns = list(available_concept_cols.values())
+                
+                # 按综合评分排序
+                if '综合评分' in df_concepts.columns:
+                    df_concepts = df_concepts.sort_values('综合评分', ascending=False)
+                
+                # 写入表头
+                for col_num, col_name in enumerate(df_concepts.columns):
+                    worksheet.write(current_row, col_num, col_name, formats['header'])
+                current_row += 1
+                
+                # 写入数据
+                for _, row in df_concepts.iterrows():
+                    for col_num, value in enumerate(row):
+                        worksheet.write(current_row, col_num, value, formats['cell'])
+                    current_row += 1
+            
+            current_row += 1  # 空行
         
-        # 按综合评分降序排序
-        if '综合评分' in df_display.columns:
-            df_display = df_display.sort_values('综合评分', ascending=False)
-        elif '共振得分' in df_display.columns:
-            df_display = df_display.sort_values('共振得分', ascending=False)
+        # ========== 第三部分：热点行业明细 ==========
+        if not hot_industries_df.empty:
+            worksheet.merge_range(current_row, 0, current_row, 10, '三、热点行业明细（当日）', formats['header_green'])
+            current_row += 1
+            
+            # 热点行业字段映射
+            industry_cols = {
+                'name': '行业名称',
+                'ts_code': '板块代码',
+                'pct_change': '涨跌幅(%)',
+                'rank': '排名',
+                'composite_score': '综合评分',
+                'limit_up_count': '涨停家数',
+                'amount': '成交额(千元)',
+                'is_hot': '是否热点',
+            }
+            
+            available_industry_cols = {k: v for k, v in industry_cols.items() if k in hot_industries_df.columns}
+            if available_industry_cols:
+                df_industries = hot_industries_df[list(available_industry_cols.keys())].copy()
+                df_industries.columns = list(available_industry_cols.values())
+                
+                # 按综合评分排序
+                if '综合评分' in df_industries.columns:
+                    df_industries = df_industries.sort_values('综合评分', ascending=False)
+                
+                # 写入表头
+                for col_num, col_name in enumerate(df_industries.columns):
+                    worksheet.write(current_row, col_num, col_name, formats['header'])
+                current_row += 1
+                
+                # 写入数据
+                for _, row in df_industries.iterrows():
+                    for col_num, value in enumerate(row):
+                        worksheet.write(current_row, col_num, value, formats['cell'])
+                    current_row += 1
+            
+            current_row += 1  # 空行
         
-        df_display.to_excel(writer, sheet_name='热点概念', index=False)
+        # ========== 第四部分：概念持续性分析 ==========
+        if not concept_persistence_df.empty:
+            worksheet.merge_range(current_row, 0, current_row, 12, '四、概念板块持续性分析（10日内热点频率）', formats['header_green'])
+            current_row += 1
+            
+            # 持续性分析字段映射
+            persistence_cols = {
+                '板块名称': '概念名称',
+                '热点天数': '热点天数(10日)',
+                '热点频率': '热点频率(%)',
+                '持续性评分': '持续性评分',
+                '所处阶段': '所处阶段',
+                '最新排名': '最新排名',
+                '排名趋势': '排名趋势',
+                '最新涨幅': '最新涨幅(%)',
+                '涨停家数': '涨停家数',
+                '操作建议': '操作建议',
+                '策略理由': '策略理由',
+            }
+            
+            available_persistence_cols = {k: v for k, v in persistence_cols.items() if k in concept_persistence_df.columns}
+            if available_persistence_cols:
+                df_concept_persist = concept_persistence_df[list(available_persistence_cols.keys())].copy()
+                df_concept_persist.columns = list(available_persistence_cols.values())
+                
+                # 按持续性评分排序
+                if '持续性评分' in df_concept_persist.columns:
+                    df_concept_persist = df_concept_persist.sort_values('持续性评分', ascending=False)
+                
+                # 写入表头
+                for col_num, col_name in enumerate(df_concept_persist.columns):
+                    worksheet.write(current_row, col_num, col_name, formats['header'])
+                current_row += 1
+                
+                # 写入数据
+                for _, row in df_concept_persist.iterrows():
+                    for col_num, value in enumerate(row):
+                        worksheet.write(current_row, col_num, value, formats['cell'])
+                    current_row += 1
+            
+            current_row += 1  # 空行
         
-        worksheet = writer.sheets['热点概念']
+        # ========== 第五部分：行业持续性分析 ==========
+        if not industry_persistence_df.empty:
+            worksheet.merge_range(current_row, 0, current_row, 12, '五、行业板块持续性分析（10日内热点频率）', formats['header_green'])
+            current_row += 1
+            
+            # 持续性分析字段映射
+            industry_persistence_cols = {
+                '板块名称': '行业名称',
+                '热点天数': '热点天数(10日)',
+                '热点频率': '热点频率(%)',
+                '持续性评分': '持续性评分',
+                '所处阶段': '所处阶段',
+                '最新排名': '最新排名',
+                '排名趋势': '排名趋势',
+                '最新涨幅': '最新涨幅(%)',
+                '涨停家数': '涨停家数',
+                '操作建议': '操作建议',
+                '策略理由': '策略理由',
+            }
+            
+            available_ind_persist_cols = {k: v for k, v in industry_persistence_cols.items() if k in industry_persistence_df.columns}
+            if available_ind_persist_cols:
+                df_industry_persist = industry_persistence_df[list(available_ind_persist_cols.keys())].copy()
+                df_industry_persist.columns = list(available_ind_persist_cols.values())
+                
+                # 按持续性评分排序
+                if '持续性评分' in df_industry_persist.columns:
+                    df_industry_persist = df_industry_persist.sort_values('持续性评分', ascending=False)
+                
+                # 写入表头
+                for col_num, col_name in enumerate(df_industry_persist.columns):
+                    worksheet.write(current_row, col_num, col_name, formats['header'])
+                current_row += 1
+                
+                # 写入数据
+                for _, row in df_industry_persist.iterrows():
+                    for col_num, value in enumerate(row):
+                        worksheet.write(current_row, col_num, value, formats['cell'])
+                    current_row += 1
+        
         # 设置列宽
-        worksheet.set_column('A:A', 12)  # 板块代码
-        worksheet.set_column('B:B', 16)  # 概念名称
-        worksheet.set_column('C:C', 10)  # 当日排名
-        # 主线特征指标（核心列，稍宽以突出显示）
-        worksheet.set_column('D:D', 12)  # 10日进前10
-        worksheet.set_column('E:E', 12)  # 10日进前5
-        worksheet.set_column('F:F', 12)  # 10日进前3
-        worksheet.set_column('G:G', 12)  # 连续前10天
-        worksheet.set_column('H:H', 10)  # 是否主线
-        worksheet.set_column('I:J', 11)  # 10日均排名、10日最佳
-        # 其他数据
-        worksheet.set_column('K:L', 10)  # 涨停数量、最高连板
-        worksheet.set_column('M:O', 11)  # 综合评分、共振得分、持续性评分
-        worksheet.set_column('P:Q', 10)  # 所处阶段、市场周期
-        worksheet.set_column('R:S', 10)  # 排名动量、涨停趋势
-        worksheet.set_column('T:U', 11)  # 成交额变化、换手率
-        worksheet.set_column('V:W', 10)  # 信号类型、信号强度
-        worksheet.set_column('X:X', 14)  # 操作建议
-        worksheet.set_column('Y:Y', 10)  # 建议仓位
-        worksheet.set_column('Z:Z', 8)   # 紧急度
-        worksheet.set_column('AA:AA', 30)  # 策略理由
-        
-        # 应用表头格式
-        for col_num in range(len(df_display.columns)):
-            worksheet.write(0, col_num, df_display.columns[col_num], formats['header_green'])
+        worksheet.set_column('A:A', 16)  # 名称列
+        worksheet.set_column('B:B', 12)  # 代码/排名列
+        worksheet.set_column('C:E', 12)  # 数值列
+        worksheet.set_column('F:H', 12)  # 评分/阶段列
+        worksheet.set_column('I:L', 12)  # 其他数值列
+        worksheet.set_column('M:M', 30)  # 策略理由列
 
     def _write_first_board(self, writer, data_dict: Dict, formats: Dict):
         """Sheet 3: 首板突破"""

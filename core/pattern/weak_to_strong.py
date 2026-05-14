@@ -234,9 +234,11 @@ class WeakToStrongStrategy:
         self.params = {
             # 龙头识别标准
             "min_board_height": 4,           # 连板龙头：最少4连板
-            "min_total_rise": 0.40,          # 趋势龙头：近10日涨幅>=40%
+            "min_total_rise": 0.40,          # 趋势龙头：近10日涨幅>=40%（已弃用，改用斜率）
             "min_limit_up_count": 2,         # 趋势龙头：期间至少2个涨停
             "max_limit_up_gap": 2,           # 趋势龙头：涨停间隔不超过2天
+            "min_slope_daily": 0.03,         # 趋势龙头：日均斜率>=3%（新增）
+            "min_r_squared": 0.5,            # 趋势龙头：R²>=0.5（新增，衡量趋势性）
             
             # 走弱确认标准
             "weakening_types": ["烂板", "断板", "尾盘板", "放量滞涨", "趋势回调"],
@@ -827,18 +829,48 @@ class WeakToStrongStrategy:
                 else:
                     consecutive_limit = 0
             
-            logger.debug(f"[弱转强-趋势龙头] {name}({code}) 日线统计: 10日涨幅{total_rise*100:.1f}%，"
-                        f"涨停{limit_up_count}次，最大连续{max_consecutive}天")
+            # ===== 计算价格斜率（线性回归）=====
+            # 使用对数价格计算斜率，更准确反映增长率
+            # x: 时间序列 (0, 1, 2, ..., n-1)
+            # y: 对数收盘价 ln(close)
+            n = len(daily_df)
+            x = np.arange(n)
+            y = np.log(daily_df['close'].values)
             
-            # 趋势龙头标准：
-            # 1. 涨幅>=40%
-            # 2. 至少2个涨停
+            # 计算斜率: slope = Σ[(x_i - x̄)(y_i - ȳ)] / Σ[(x_i - x̄)²]
+            x_mean = np.mean(x)
+            y_mean = np.mean(y)
+            numerator = np.sum((x - x_mean) * (y - y_mean))
+            denominator = np.sum((x - x_mean) ** 2)
+            slope = numerator / denominator if denominator != 0 else 0
+            
+            # 计算R²（决定系数），衡量趋势性
+            y_pred = y_mean + slope * (x - x_mean)
+            ss_res = np.sum((y - y_pred) ** 2)
+            ss_tot = np.sum((y - y_mean) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+            
+            # 将斜率转换为日均涨幅百分比
+            daily_growth_rate = (np.exp(slope) - 1) * 100
+            
+            logger.debug(f"[弱转强-趋势龙头] {name}({code}) 日线统计: 10日涨幅{total_rise*100:.1f}%，"
+                        f"涨停{limit_up_count}次，最大连续{max_consecutive}天，"
+                        f"日均斜率{daily_growth_rate:.2f}%，R²={r_squared:.2f}")
+            
+            # 趋势龙头标准（改进版）：
+            # 1. 日均斜率>=3%（平均每天涨3%，10日累计约34%，考虑复利）
+            # 2. 至少2个涨停（必须有资金攻击）
             # 3. 最大连续涨停<=3（排除连板龙）
-            if (total_rise >= self.params['min_total_rise'] and 
+            # 4. R²>=0.5（确保有一定趋势性，不是大幅波动）
+            min_slope_daily = self.params.get('min_slope_daily', 0.03)  # 默认3%
+            min_r_squared = self.params.get('min_r_squared', 0.5)  # 默认0.5
+            
+            if (daily_growth_rate >= min_slope_daily * 100 and 
                 limit_up_count >= self.params['min_limit_up_count'] and
-                max_consecutive <= 3):
+                max_consecutive <= 3 and
+                r_squared >= min_r_squared):
                 logger.info(f"[弱转强-趋势龙头] ✓ {name}({code}) 符合趋势龙头标准: "
-                           f"10日涨幅{total_rise*100:.1f}%，涨停{limit_up_count}次")
+                           f"日均斜率{daily_growth_rate:.2f}%>=3%，涨停{limit_up_count}次，R²={r_squared:.2f}")
                 return DragonCandidate(
                     stock_code=code,
                     stock_name=name,
@@ -852,10 +884,16 @@ class WeakToStrongStrategy:
                     limit_up_count=limit_up_count
                 )
             else:
-                logger.debug(f"[弱转强-趋势龙头] {name}({code}) 不符合标准: "
-                            f"涨幅{total_rise*100:.1f}%(<{self.params['min_total_rise']*100:.0f}%)或"
-                            f"涨停{limit_up_count}次(<{self.params['min_limit_up_count']})或"
-                            f"连续涨停{max_consecutive}天(>3)")
+                reasons = []
+                if daily_growth_rate < min_slope_daily * 100:
+                    reasons.append(f"日均斜率{daily_growth_rate:.2f}%(<{min_slope_daily*100:.0f}%)")
+                if limit_up_count < self.params['min_limit_up_count']:
+                    reasons.append(f"涨停{limit_up_count}次(<{self.params['min_limit_up_count']})")
+                if max_consecutive > 3:
+                    reasons.append(f"连续涨停{max_consecutive}天(>3)")
+                if r_squared < min_r_squared:
+                    reasons.append(f"R²={r_squared:.2f}(<{min_r_squared})")
+                logger.debug(f"[弱转强-趋势龙头] {name}({code}) 不符合标准: {'; '.join(reasons)}")
         except Exception as e:
             logger.debug(f"[弱转强-趋势龙头] 日线数据检查失败 {code}: {e}")
         

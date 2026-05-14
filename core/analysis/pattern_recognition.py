@@ -205,25 +205,65 @@ class PatternRecognition:
             # ========== 阶段2：从走弱池中检测转强信号 ==========
             logger.info("[弱转强] ========== 阶段2：检测转强信号 ==========")
             
+            # 筛选符合条件的走弱池股票（排除当天入池和不符合条件的）
+            valid_weakening_codes = self._filter_weakening_pool_for_detection(
+                today_date or datetime.now().strftime("%Y%m%d"), today_daily
+            )
+            logger.info(f"[弱转强] 走弱池筛选: 共{len(self.weak_to_strong.weakening_pool)}只，历史走弱纳入观察{len(valid_weakening_codes)}只")
+            
+            if not valid_weakening_codes:
+                logger.info("[弱转强] 无历史走弱股票需要检测，跳过阶段2")
+                return signals
+            
+            # 构建今日涨停池代码集合（用于快速查找）
+            today_zt_codes = set()
+            today_zt_dict = {}  # code -> row
+            for _, row in today_df.iterrows():
+                code = str(row.get('代码', '')).zfill(6)
+                today_zt_codes.add(code)
+                today_zt_dict[code] = row
+            
+            logger.info(f"[弱转强] 今日涨停池共{len(today_zt_codes)}只")
+            
             total_checked = 0
             total_passed = 0
 
-            for _, today_row in today_df.iterrows():
-                code = str(today_row.get('代码', '')).zfill(6)
-                name = today_row.get('名称', '')
-                total_checked += 1
-
-                logger.debug(f"[弱转强] 检测 {name}({code})...")
-
-                # 检查是否在走弱池中
-                if code not in self.weak_to_strong.weakening_pool:
-                    logger.debug(f"[弱转强]   {name} 不在走弱池中，跳过")
-                    continue
-                
+            # 遍历走弱池中的股票，检查是否今日转强（大涨或涨停）
+            for code in valid_weakening_codes:
                 weakening = self.weak_to_strong.weakening_pool[code]
-                logger.info(f"[弱转强]   {name} 在走弱池中，走弱类型={weakening.weakening_type}，开始分析转强...")
+                name = weakening.stock_name
+                total_checked += 1
+                
+                logger.info(f"[弱转强] 检测 {name}({code})，入池日期={weakening.weakening_date}...")
+                
+                # 检查今日是否转强（涨停或大涨>=7%）
+                today_row = None
+                is_limit_up = False
+                price_change = 0
+                
+                # 1. 先检查是否在涨停池中
+                if code in today_zt_codes:
+                    today_row = today_zt_dict[code]
+                    is_limit_up = True
+                    price_change = 9.9  # 涨停默认9.9%+
+                    logger.info(f"[弱转强]   {name} 今日涨停！开始分析转强信号...")
+                # 2. 再检查日线数据中的涨幅
+                elif today_daily is not None and not today_daily.empty:
+                    stock_daily = today_daily[today_daily['ts_code'].str.contains(code)]
+                    if not stock_daily.empty:
+                        latest = stock_daily.iloc[-1]
+                        price_change = latest.get('pct_chg', 0)
+                        # 大涨>=7%也算转强
+                        if price_change >= 7.0:
+                            today_row = latest
+                            logger.info(f"[弱转强]   {name} 今日大涨{price_change:.1f}%！开始分析转强信号...")
+                
+                # 未转强的跳过
+                if today_row is None:
+                    logger.debug(f"[弱转强]   {name} 今日未大涨/涨停（涨幅{price_change:.1f}%），未转强，跳过")
+                    continue
 
-                # 获取昨日数据
+                # 获取昨日数据（用于计算高开）
                 yest_match = yesterday_df[yesterday_df['代码'].astype(str).str.zfill(6) == code]
                 if yest_match.empty:
                     logger.debug(f"[弱转强]   {name} 昨日未涨停，无法计算高开")
@@ -242,70 +282,124 @@ class PatternRecognition:
                     except Exception as e:
                         logger.debug(f"[弱转强]   {name} 获取竞价数据失败: {e}")
 
-                # 检查转强条件
+                # ========== 多维度转强信号检测 ==========
+                
+                # 1. 竞价量价维度评分（30分）
                 gap = auction_analysis.get('gap', 0)
-                min_gap = self.weak_to_strong.params.get('min_gap', 0.03)
-                max_gap = self.weak_to_strong.params.get('max_gap', 0.08)
-                
-                logger.debug(f"[弱转强]   {name} 转强条件检查: 高开{gap*100:.1f}% (要求{min_gap*100:.0f}%-{max_gap*100:.0f}%)")
-                
-                if not (min_gap <= gap <= max_gap):
-                    logger.debug(f"[弱转强]   {name} 过滤: 高开{gap*100:.1f}%不在[{min_gap*100:.0f}%,{max_gap*100:.0f}%]范围内")
-                    continue
-                
-                # 竞价量检查
                 auction_vol_ratio = auction_analysis.get('auction_vol_ratio', 0)
-                min_vol_ratio = self.weak_to_strong.params.get('min_auction_vol_ratio', 0.10)
-                logger.debug(f"[弱转强]   {name} 竞价量比: {auction_vol_ratio*100:.1f}% (要求>{min_vol_ratio*100:.0f}%)")
+                auction_amount = auction_analysis.get('auction_amount', 0)
                 
-                if auction_vol_ratio < min_vol_ratio:
-                    logger.debug(f"[弱转强]   {name} 过滤: 竞价量比{auction_vol_ratio*100:.1f}% < {min_vol_ratio*100:.0f}%")
+                auction_score = 0
+                if gap >= 0.05:  # 高开>=5%
+                    auction_score += 20
+                elif gap >= 0.03:  # 高开>=3%
+                    auction_score += 15
+                
+                if auction_vol_ratio >= 0.15:  # 竞价量比>=15%
+                    auction_score += 10
+                elif auction_vol_ratio >= 0.10:  # 竞价量比>=10%
+                    auction_score += 5
+                
+                if auction_amount >= 10_000_000:  # 竞价金额>=1000万
+                    auction_score += 5
+                
+                logger.debug(f"[弱转强]   {name} 竞价维度: 高开{gap*100:.1f}%, 量比{auction_vol_ratio*100:.1f}%, 金额{auction_amount/10000:.0f}万, 得分{auction_score}/30")
+                
+                # 2. 技术形态维度评分（25分）
+                technical_score = self._calculate_technical_score(code, today_date, today_daily)
+                logger.debug(f"[弱转强]   {name} 技术维度得分{technical_score}/25")
+                
+                # 3. 资金流入维度评分（25分）
+                capital_score = self._calculate_capital_score(code, today_date)
+                logger.debug(f"[弱转强]   {name} 资金维度得分{capital_score}/25")
+                
+                # 4. 市场情绪维度评分（20分）
+                # 统一获取行业名称（涨停池用'所属行业'，日线数据可能用'industry'或其他）
+                sector_name = today_row.get('所属行业', '') or today_row.get('industry', '')
+                sector_score = self._calculate_sector_score(sector_name, today_date, today_df)
+                logger.debug(f"[弱转强]   {name} 情绪维度得分{sector_score}/20")
+                
+                # 计算总评分
+                total_score = auction_score + technical_score + capital_score + sector_score
+                logger.info(f"[弱转强]   {name} 总评分={total_score} (竞价{auction_score}+技术{technical_score}+资金{capital_score}+情绪{sector_score})")
+                
+                # 信号触发阈值判断
+                if total_score < 60:
+                    logger.debug(f"[弱转强]   {name} 过滤: 总评分{total_score} < 60（基础信号阈值）")
                     continue
-
-                limit_up_time = str(today_row.get('首次封板时间', '')).strip()
-                time_score = self._calculate_time_score(limit_up_time)
+                
+                # 确定信号级别和置信度
+                if total_score >= 85:
+                    signal_level = "强烈信号"
+                    confidence = 0.90
+                elif total_score >= 75:
+                    signal_level = "确认信号"
+                    confidence = 0.75
+                else:
+                    signal_level = "基础信号"
+                    confidence = 0.60
+                
+                logger.debug(f"[弱转强]   {name} 信号级别={signal_level}, 置信度={confidence:.2f}")
+                
+                # 涨停时间加分（只有涨停的股票才有封板时间）
+                if is_limit_up:
+                    limit_up_time = str(today_row.get('首次封板时间', '')).strip()
+                    time_score = self._calculate_time_score(limit_up_time)
+                else:
+                    limit_up_time = "N/A（大涨未涨停）"
+                    time_score = 50  # 大涨未涨停给中等分数
                 logger.debug(f"[弱转强]   {name} 涨停时间={limit_up_time}, 时间分={time_score}")
-
-                # 计算置信度
-                confidence = self._calculate_weak_to_strong_confidence_v2(weakening, auction_analysis, time_score)
-                logger.debug(f"[弱转强]   {name} 综合置信度={confidence:.2f}")
-
-                if confidence < 0.65:
-                    logger.debug(f"[弱转强]   {name} 过滤: 置信度{confidence:.2f} < 0.65")
-                    continue
 
                 # 从weakening对象获取龙头信息
                 peak_height = weakening.peak_board_height if weakening.dragon_type.value == "连板龙头" else 0
                 weakening_type = weakening.weakening_type
+                
+                # 确定仓位建议
+                if total_score >= 85:
+                    position_size = "heavy"  # 强烈信号重仓
+                elif total_score >= 75:
+                    position_size = "medium"  # 确认信号中等仓位
+                else:
+                    position_size = "light"  # 基础信号轻仓试错
                 
                 signal = PatternSignal(
                     pattern_type="弱转强",
                     stock_code=code,
                     stock_name=name,
                     confidence=round(confidence, 2),
-                    description=f"{weakening.dragon_type.value}{peak_height}板后{weakening_type}转强，次日高开{auction_analysis.get('gap', 0)*100:.1f}%竞价量{auction_analysis.get('auction_vol_ratio', 0)*100:.1f}%",
+                    description=f"{weakening.dragon_type.value}{peak_height}板后{weakening_type}转强，{signal_level}，总评分{total_score}分",
                     key_metrics={
                         "龙头类型": weakening.dragon_type.value,
                         "最高连板": peak_height,
                         "走弱类型": weakening_type,
                         "走弱日期": weakening.weakening_date,
+                        "信号级别": signal_level,
+                        "总评分": total_score,
+                        "竞价评分": auction_score,
+                        "技术评分": technical_score,
+                        "资金评分": capital_score,
+                        "情绪评分": sector_score,
                         "次日高开": f"{auction_analysis.get('gap', 0)*100:.1f}%",
                         "竞价量比": f"{auction_analysis.get('auction_vol_ratio', 0)*100:.1f}%",
                         "涨停时间": limit_up_time,
                         "回调幅度": f"{weakening.max_drawdown*100:.1f}%",
                     },
-                    entry_price=today_row.get('涨停价', 0),
-                    stop_loss=today_row.get('涨停价', 0) * 0.93,
-                    take_profit=today_row.get('涨停价', 0) * 1.15,
-                    position_size="heavy" if confidence >= 0.80 else "medium",
+                    # 统一获取价格（涨停池用'涨停价'，日线数据用'close'）
+                    entry_price=today_row.get('涨停价', 0) or today_row.get('close', 0),
+                    stop_loss=(today_row.get('涨停价', 0) or today_row.get('close', 0)) * 0.93,
+                    take_profit=(today_row.get('涨停价', 0) or today_row.get('close', 0)) * 1.15,
+                    position_size=position_size,
                     validation_rules=[
                         f"{weakening.dragon_type.value}{peak_height}板（身份）",
                         f"{weakening_type}后走弱（弱）",
-                        f"次日高开{auction_analysis.get('gap', 0)*100:.1f}%（超预期）",
-                        f"竞价量{auction_analysis.get('auction_vol_ratio', 0)*100:.1f}%（资金抢筹）",
+                        f"总评分{total_score}分（{signal_level}）",
+                        f"竞价{auction_score}分/30分（高开{auction_analysis.get('gap', 0)*100:.1f}%）",
+                        f"技术{technical_score}分/25分",
+                        f"资金{capital_score}分/25分",
+                        f"情绪{sector_score}分/20分",
                         "开盘不回踩，快速上板（确认强）"
                     ],
-                    l2_industry=today_row.get('所属行业', '')
+                    l2_industry=sector_name
                 )
                 
                 signals.append(signal)
@@ -1307,13 +1401,6 @@ class PatternRecognition:
 
         return signals
 
-    # 删除detect_weak_to_strong_v2方法（已合并到V1分层策略）
-    # 保留此方法占位，避免调用处报错
-    def detect_weak_to_strong_v2(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
-                                  today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
-        """弱转强V2已删除，请使用detect_weak_to_strong"""
-        logger.debug("[弱转强V2] 策略已删除，请使用分层弱转强策略(V1)")
-        return []
 
     def _normalize_date_to_ymd(self, date_str: str) -> str:
         """
@@ -1572,3 +1659,186 @@ class PatternRecognition:
                 confidence += 0.05
         
         return min(confidence, 0.95)
+    
+    def _filter_weakening_pool_for_detection(self, date_str: str, today_daily: pd.DataFrame = None) -> List[str]:
+        """
+        筛选符合检测条件的走弱池股票
+        
+        核心逻辑：
+        - 入池日期早于当天的股票（历史走弱）才纳入转强观察池
+        - 入池日期为当天的股票（当天刚走弱）不检测转强
+        
+        排除条件：
+        1. 当天入池的股票（刚走弱，需观察）
+        2. 观察期已过期（超过5天）
+        3. 回调幅度过大（>25%，A杀风险）或过小（<5%，刚走弱）
+        4. 成交量连续萎缩（<5日均量50%）
+        
+        Returns:
+            符合条件的股票代码列表
+        """
+        valid_codes = []
+        current_date = datetime.strptime(date_str, "%Y%m%d")
+        
+        for code, weakening in self.weak_to_strong.weakening_pool.items():
+            # 1. 检查入池日期 - 当天入池的不检测
+            try:
+                entry_date_str = weakening.weakening_date
+                entry_date = datetime.strptime(entry_date_str, "%Y%m%d")
+                
+                # 当天入池的股票跳过（刚走弱，不检测转强）
+                if entry_date_str == date_str:
+                    logger.debug(f"[走弱池筛选] {weakening.stock_name} 当天入池({entry_date_str})，不检测转强")
+                    continue
+                
+                # 计算观察天数（从入池日到当前日）
+                observation_days = (current_date - entry_date).days
+                
+                # 观察期超过5天的排除
+                if observation_days > 5:
+                    logger.debug(f"[走弱池筛选] {weakening.stock_name} 观察期过期({observation_days}天 > 5天)")
+                    continue
+                    
+                logger.debug(f"[走弱池筛选] {weakening.stock_name} 入池{observation_days}天，纳入观察")
+            except Exception as e:
+                logger.debug(f"[走弱池筛选] {weakening.stock_name} 日期解析失败: {e}")
+                continue
+            
+            # 2. 检查回调幅度
+            drawdown = weakening.max_drawdown
+            if drawdown > 0.25:
+                logger.debug(f"[走弱池筛选] {weakening.stock_name} 回调过大({drawdown*100:.1f}% > 25%)")
+                continue
+            if drawdown < 0.05:
+                logger.debug(f"[走弱池筛选] {weakening.stock_name} 回调过小({drawdown*100:.1f}% < 5%)")
+                continue
+            
+            # 3. 检查成交量（如果提供了日线数据）
+            if today_daily is not None and not today_daily.empty:
+                stock_daily = today_daily[today_daily['ts_code'].str.contains(code)]
+                if not stock_daily.empty and len(stock_daily) >= 5:
+                    avg_volume_5d = stock_daily['vol'].tail(5).mean()
+                    today_volume = stock_daily.iloc[-1]['vol']
+                    if today_volume < avg_volume_5d * 0.5:
+                        logger.debug(f"[走弱池筛选] {weakening.stock_name} 成交量萎缩(<50%)")
+                        continue
+            
+            valid_codes.append(code)
+            logger.info(f"[走弱池筛选] ✓ {weakening.stock_name}({code}) 符合条件，入池{observation_days}天，回调{drawdown*100:.1f}%")
+        
+        logger.info(f"[走弱池筛选] 共{len(self.weak_to_strong.weakening_pool)}只，历史走弱{len(valid_codes)}只纳入观察")
+        return valid_codes
+    
+    def _calculate_technical_score(self, stock_code: str, date_str: str, today_daily: pd.DataFrame = None) -> int:
+        """
+        计算技术形态维度评分（满分25分）
+        
+        评分标准：
+        - 收盘价站上5日均线: +10分
+        - 5日均线拐头向上: +5分
+        - 成交量突破5日均量1.5倍: +5分
+        - 阳线吞没形态: +5分
+        """
+        score = 0
+        
+        try:
+            # 获取日线数据
+            if today_daily is not None and not today_daily.empty:
+                stock_data = today_daily[today_daily['ts_code'].str.contains(stock_code)]
+                if not stock_data.empty and len(stock_data) >= 5:
+                    df = stock_data.copy()
+                    df['ma5'] = df['close'].rolling(window=5).mean()
+                    
+                    latest = df.iloc[-1]
+                    prev = df.iloc[-2] if len(df) >= 2 else latest
+                    
+                    # 收盘价站上5日均线
+                    if latest['close'] > latest['ma5']:
+                        score += 10
+                    
+                    # 5日均线拐头向上
+                    if latest['ma5'] > prev['ma5']:
+                        score += 5
+                    
+                    # 成交量突破
+                    avg_volume_5d = df['vol'].tail(5).mean()
+                    if latest['vol'] > avg_volume_5d * 1.5:
+                        score += 5
+                    
+                    # 阳线吞没形态
+                    today_body = latest['close'] - latest['open']
+                    prev_body = abs(prev['close'] - prev['open'])
+                    if today_body > 0 and prev_body > 0 and today_body > prev_body * 1.5:
+                        score += 5
+        except Exception as e:
+            logger.debug(f"[技术评分] {stock_code} 计算失败: {e}")
+        
+        return score
+    
+    def _calculate_capital_score(self, stock_code: str, date_str: str) -> int:
+        """
+        计算资金流入维度评分（满分25分）
+        
+        评分标准：
+        - 主力净流入为正: +10分
+        - 大单净流入占比>=20%: +10分
+        - 资金连续流入: +5分
+        """
+        score = 0
+        
+        try:
+            # 获取资金流向数据
+            if self.dm and hasattr(self.dm, 'get_moneyflow_data'):
+                moneyflow = self.dm.get_moneyflow_data(stock_code, date_str)
+                if moneyflow:
+                    # 主力净流入为正
+                    if moneyflow.get('main_inflow', 0) > 0:
+                        score += 10
+                    
+                    # 大单占比
+                    big_order_ratio = moneyflow.get('big_order_ratio', 0)
+                    if big_order_ratio >= 0.20:
+                        score += 10
+                    
+                    # 持续流入
+                    if moneyflow.get('inflow_days', 0) >= 2:
+                        score += 5
+        except Exception as e:
+            logger.debug(f"[资金评分] {stock_code} 计算失败: {e}")
+        
+        return score
+    
+    def _calculate_sector_score(self, sector_name: str, date_str: str, today_zt: pd.DataFrame = None) -> int:
+        """
+        计算市场情绪维度评分（满分20分）
+        
+        评分标准：
+        - 所属板块涨幅>=2%: +10分
+        - 板块内涨停家数>=3家: +10分
+        """
+        score = 0
+        
+        try:
+            # 从涨停池统计板块涨停家数
+            if today_zt is not None and not today_zt.empty and sector_name:
+                sector_zt = today_zt[today_zt['所属行业'] == sector_name]
+                sector_limit_up_count = len(sector_zt)
+                
+                if sector_limit_up_count >= 3:
+                    score += 10
+                elif sector_limit_up_count >= 1:
+                    score += 5
+            
+            # 获取板块涨幅（如果有板块数据）
+            if self.dm and hasattr(self.dm, 'get_sector_daily'):
+                sector_data = self.dm.get_sector_daily(sector_name, date_str)
+                if sector_data:
+                    sector_change = sector_data.get('change_pct', 0)
+                    if sector_change >= 2.0:
+                        score += 10
+                    elif sector_change >= 1.0:
+                        score += 5
+        except Exception as e:
+            logger.debug(f"[情绪评分] {sector_name} 计算失败: {e}")
+        
+        return score

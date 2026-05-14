@@ -31,6 +31,7 @@ class TradeSignal:
     reason: str
     key_metrics: Dict
     validation_rules: List[str]
+    description: str = ""  # 描述字段，用于报告展示
 
 
 class DragonSecondWaveStrategyV2:
@@ -69,12 +70,14 @@ class DragonSecondWaveStrategyV2:
         recent_zt_pools: {日期: 当日涨停池DataFrame}
         hist_data: 历史日线数据（用于涨幅统计，双轨制判断）
         """
-        stock_code_padded = str(stock_code).zfill(6)
+        # 标准化代码格式：去除后缀，保留6位数字
+        stock_code_padded = str(stock_code).split('.')[0].zfill(6)
         logger.debug(f"[{stock_code_padded}] 开始检测龙二波 - 名称:{stock_name}, 日期:{today_str}, 板块热度:{sector_hot}")
 
         # ========== 步骤1：双轨制判断第一波（连板 或 涨幅）==========
+        # 使用 stock_code_padded (6位数字) 确保代码格式一致
         consecutive_record = self._rebuild_consecutive_from_pools(
-            stock_code, recent_zt_pools, hist_data
+            stock_code_padded, recent_zt_pools, hist_data
         )
 
         if not consecutive_record['is_valid']:
@@ -146,7 +149,7 @@ class DragonSecondWaveStrategyV2:
             return None
         logger.debug(f"[{stock_code_padded}] 通过: 调整期质量检查")
 
-        # ========== 步骤4：今日启动确认 ==========
+        # ========== 步骤4：今日启动确认（必须是首板）==========
         today_change = today_data.get('涨跌幅', 0)
 
         if today_change < 9.5:  # 今日未涨停
@@ -158,7 +161,6 @@ class DragonSecondWaveStrategyV2:
         if today_pool.empty:
             logger.debug(f"[{stock_code_padded}] 过滤: 今日涨停池为空")
             return None
-
 
         # 兼容不同的列名
         code_col = None
@@ -174,15 +176,54 @@ class DragonSecondWaveStrategyV2:
             return None
 
         # 确保代码格式一致（都是字符串）
-        today_pool_codes = today_pool[code_col].astype(str).str.zfill(6).tolist()
-
-        if stock_code_padded not in today_pool_codes:
+        today_pool[code_col] = today_pool[code_col].astype(str).str.zfill(6)
+        
+        # 查找该股票在今日涨停池中的数据
+        today_stock_row = today_pool[today_pool[code_col] == stock_code_padded]
+        if today_stock_row.empty:
             logger.debug(f"[{stock_code_padded}] 过滤: 不在今日涨停池中")
-            return None  # 虽然涨幅>9.5%，但可能不是涨停（如科创板20%）
+            return None
         logger.debug(f"[{stock_code_padded}] 通过: 在今日涨停池中")
         
+        # 检查今日是否是首板（连板数=1）
+        today_consecutive = 1  # 默认为1（首板）
+        for col in ['连板数', '连板', 'consecutive', 'limit_up_days', '连板天数']:
+            if col in today_stock_row.columns:
+                today_consecutive = int(today_stock_row[col].iloc[0])
+                break
+        
+        if today_consecutive > 1:
+            logger.debug(f"[{stock_code_padded}] 过滤: 今日不是首板（是{today_consecutive}连板），龙二波要求今日首板")
+            return None
+        logger.debug(f"[{stock_code_padded}] 通过: 今日是首板")
+        
         # ========== 构建信号 ==========
-        logger.debug(f"[{stock_code_padded}] 生成龙二波信号: {first_wave_info['max_boards']}板龙头, 调整{days_since_peak}天, 板块热度:{sector_hot}")
+        # 使用真正的调整天数（从见顶到二波涨停前一天）
+        actual_adjust_days = adjust_period.get('days', days_since_peak)
+        decline_days = adjust_period.get('decline_days', actual_adjust_days // 2)
+        consolidation_days = adjust_period.get('consolidation_days', actual_adjust_days - decline_days)
+        
+        logger.debug(f"[{stock_code_padded}] 生成龙二波信号: {first_wave_info['max_boards']}板龙头, "
+                    f"调整{actual_adjust_days}天(下跌{decline_days}天+震荡{consolidation_days}天), 板块热度:{sector_hot}")
+        
+        # 构建描述 - 区分连板龙和趋势龙
+        wave_type = first_wave_info.get('wave_type', 'consecutive')
+        max_boards = first_wave_info['max_boards']
+        limit_up_count = first_wave_info.get('limit_up_count', 0)
+        
+        if wave_type == 'consecutive' and max_boards >= 3:
+            # 真正的连板龙：连续涨停3板以上
+            wave_type_desc = "连板"
+            wave_detail = f"{max_boards}连板"
+        else:
+            # 趋势龙：10天内多次涨停但不是连续
+            wave_type_desc = "趋势"
+            wave_detail = f"{limit_up_count}次涨停"
+        
+        # 构建调整天数描述：总天数(下跌X天+震荡Y天)
+        adjust_desc = f"调整{actual_adjust_days}天(下跌{decline_days}天+震荡{consolidation_days}天)"
+        description = f"龙二波+{wave_detail}{wave_type_desc}龙+{adjust_desc}+深度{adjust_period['depth']*100:.1f}%"
+        
         return TradeSignal(
             pattern_type=PatternType.DRAGON_SECOND_WAVE,
             stock_code=stock_code,
@@ -193,21 +234,27 @@ class DragonSecondWaveStrategyV2:
             stop_loss=adjust_period['ma10'] * 0.97,
             take_profit=today_data.get('涨停价', 0) * 1.15,
             position_size="medium",
-            reason=f"近期{first_wave_info['max_boards']}板龙头，调整{days_since_peak}天后二波启动",
+            reason=f"近期{wave_detail}{wave_type_desc}龙，{adjust_desc}后二波启动",
             key_metrics={
-                "第一波高度": first_wave_info['max_boards'],
+                "第一波强度": f"{first_wave_info['max_boards']}板",
+                "第一波类型": wave_type_desc,
                 "第一波日期": f"{first_wave_info['start_date']}至{first_wave_info['peak_date']}",
-                "调整天数": days_since_peak,
+                "调整天数": actual_adjust_days,
+                "下跌天数": decline_days,
+                "震荡天数": consolidation_days,
                 "调整深度": f"{adjust_period['depth']*100:.1f}%",
+                "5日涨幅": f"{first_wave_info.get('rise_5d', 0)*100:.1f}%",
+                "10日涨幅": f"{first_wave_info.get('rise_10d', 0)*100:.1f}%",
                 "支撑均线": f"MA10:{adjust_period['ma10']:.2f}"
             },
             validation_rules=[
                 f"近15日内{first_wave_info['max_boards']}连板（真龙）",
-                f"调整{days_since_peak}天（记忆未散）",
+                f"{adjust_desc}（记忆未散）",
                 "回踩MA10获支撑",
                 "地量后放量首板",
                 "板块热度未退" if sector_hot else "板块已冷（风险）"
-            ]
+            ],
+            description=description
         )
     
     # ==================== 核心方法：双轨制第一波判断 ====================
@@ -222,19 +269,23 @@ class DragonSecondWaveStrategyV2:
         轨道2：累计涨幅（5日25%或10日40%）
         轨道3：涨停次数（10天内4次以上）
         
-        满足任一轨道即视为有效第一波
+        简化逻辑：直接从涨停池的连板数字段获取最大连板数
         """
         dates = sorted(recent_pools.keys())
-        logger.debug(f"[{stock_code}] 检查近{len(dates)}天涨停池: {dates}")
+        logger.debug(f"[{stock_code}] 检查近{len(dates)}天涨停池")
 
-        zt_dates = []  # 该股涨停的日期列表
-
+        # 收集该股票在所有涨停池中的连板数
+        max_boards = 0
+        peak_date = None
+        first_date = None
+        zt_dates = []
+        
         for date in dates:
             pool = recent_pools[date]
             if pool.empty:
                 continue
 
-            # 兼容不同的列名：'代码' 或 'Code'
+            # 兼容不同的列名
             code_col = None
             if '代码' in pool.columns:
                 code_col = '代码'
@@ -246,43 +297,35 @@ class DragonSecondWaveStrategyV2:
             if code_col is None:
                 continue
 
-            # 标准化代码格式进行比较（统一为6位数字）
-            pool_codes = pool[code_col].astype(str).str.replace(r'\.SH|\.SZ|\.BJ', '', regex=True).str.zfill(6).values
-            if stock_code in pool_codes:
+            # 标准化代码格式
+            pool[code_col] = pool[code_col].astype(str).str.replace(r'\.SH|\.SZ|\.BJ', '', regex=True).str.zfill(6)
+            
+            # 查找该股票
+            stock_row = pool[pool[code_col] == stock_code]
+            if not stock_row.empty:
                 zt_dates.append(date)
+                
+                # 获取连板数（支持不同字段名）
+                consecutive_col = None
+                for col in ['连板数', '连板', 'consecutive', 'limit_up_days', '连板天数']:
+                    if col in stock_row.columns:
+                        consecutive_col = col
+                        break
+                
+                if consecutive_col:
+                    boards = int(stock_row[consecutive_col].iloc[0])
+                    if boards > max_boards:
+                        max_boards = boards
+                        peak_date = date
+                        # 计算起涨日（假设连板N天，则起涨日是N-1天前）
+                        try:
+                            peak_dt = datetime.strptime(date, "%Y%m%d")
+                            first_dt = peak_dt - timedelta(days=(boards - 1))
+                            first_date = first_dt.strftime("%Y%m%d")
+                        except:
+                            first_date = date
 
-        logger.debug(f"[{stock_code}] 涨停日期: {zt_dates}")
-
-        # 计算连续涨停（允许断板2个交易日）
-        consecutive_groups = []
-        current_group = [zt_dates[0]] if zt_dates else []
-
-        for i in range(1, len(zt_dates)):
-            prev_date_str = zt_dates[i-1]
-            curr_date_str = zt_dates[i]
-
-            # 使用交易日历判断两个日期之间有几个交易日
-            trading_days_between = self._count_trading_days_between(prev_date_str, curr_date_str)
-
-            # 间隔2个交易日算连续（允许断板2天）
-            max_break_days = self.params.get("max_break_days", 2)
-            if trading_days_between <= max_break_days:
-                current_group.append(curr_date_str)
-            else:
-                consecutive_groups.append(current_group)
-                current_group = [curr_date_str]
-
-        if current_group:
-            consecutive_groups.append(current_group)
-        
-        # 找最大连板组
-        max_boards = 0
-        max_group = []
-        if consecutive_groups:
-            max_group = max(consecutive_groups, key=len)
-            max_boards = len(max_group)
-
-        logger.debug(f"[{stock_code}] 连板分组: {[len(g) for g in consecutive_groups]}, 最大连板: {max_boards}")
+        logger.debug(f"[{stock_code}] 涨停日期: {zt_dates}, 最大连板: {max_boards}")
 
         # ========== 双轨制判断 ==========
         
@@ -324,8 +367,11 @@ class DragonSecondWaveStrategyV2:
         if consecutive_valid:
             # 优先使用连板数据
             wave_type = 'consecutive'
-            peak_date = max_group[-1]
-            first_date = max_group[0]
+            # peak_date 和 first_date 已在前面计算
+            if peak_date is None:
+                peak_date = dates[-1] if dates else ''
+            if first_date is None:
+                first_date = dates[0] if dates else ''
         elif rise_valid or limit_up_count_valid:
             # 使用涨幅数据
             wave_type = 'rise'
@@ -355,7 +401,7 @@ class DragonSecondWaveStrategyV2:
                 'max_boards': max_boards,
                 'start_date': first_date,
                 'peak_date': peak_date,
-                'zt_dates': max_group if wave_type == 'consecutive' else [],
+                'zt_dates': zt_dates if wave_type == 'consecutive' else [],
                 'wave_type': wave_type,
                 'rise_5d': rise_stats.get('rise_5d', 0),
                 'rise_10d': rise_stats.get('rise_10d', 0),
@@ -559,25 +605,26 @@ class DragonSecondWaveStrategyV2:
                           peak_date: str, today: str) -> Dict:
         """
         获取调整期数据（peak_date到today之间）
-        为了确保能计算MA10，需要获取peak_date之前额外的数据
+        调整期定义：从第一波见顶到二波启动（今日涨停）前的整个阶段
+        包含：下跌阶段 + 震荡整理阶段
+        
+        关键：调整天数 = 从见顶到今日涨停前一天的交易日数
         """
         # 计算需要提前获取的天数（至少10天数据用于计算MA10）
-        # 从peak_date往前推15个交易日，确保有足够数据
         peak_dt = datetime.strptime(peak_date, "%Y%m%d")
-        extended_start_dt = peak_dt - timedelta(days=20)  # 往前推20个日历天（约15个交易日）
+        extended_start_dt = peak_dt - timedelta(days=20)
         extended_start = extended_start_dt.strftime("%Y%m%d")
 
-        # 从data_manager获取日线数据（扩大范围）
+        # 从data_manager获取日线数据
         hist = self.dm.get_stock_daily(stock_code, extended_start, today)
         if not hist.empty:
-            # 确保数据按日期升序排序（rolling计算需要）
             if 'trade_date' in hist.columns:
                 hist = hist.sort_values('trade_date').reset_index(drop=True)
 
         if hist.empty:
             return {}
 
-        # 筛选出peak_date之后的数据用于分析调整期
+        # 筛选出peak_date之后的数据
         if 'trade_date' in hist.columns:
             peak_dt_ts = pd.Timestamp(peak_date)
             adjust_hist = hist[hist['trade_date'] >= peak_dt_ts].copy()
@@ -587,21 +634,17 @@ class DragonSecondWaveStrategyV2:
         if len(adjust_hist) < 3:
             return {}
 
-        # 使用完整数据计算MA10
-        peak_price = adjust_hist.iloc[0]['high']  # 第一波最高价
+        # 计算调整深度（从peak到最低点的跌幅）
+        peak_price = adjust_hist.iloc[0]['high']
         lowest = adjust_hist['low'].min()
-
-        # 计算调整深度
         depth = (peak_price - lowest) / peak_price
 
-        # 计算均线 - 使用完整历史数据计算MA10和MA20
+        # 计算均线
         total_days = len(hist)
         if total_days < 10:
             return {}
 
         hist['MA10'] = hist['close'].rolling(10).mean()
-        
-        # 同时计算MA20作为备选
         if total_days >= 20:
             hist['MA20'] = hist['close'].rolling(20).mean()
         else:
@@ -610,7 +653,6 @@ class DragonSecondWaveStrategyV2:
         # 获取today对应的均线值
         ma10 = None
         ma20 = None
-        
         if 'trade_date' in hist.columns:
             today_dt_ts = pd.Timestamp(today)
             today_row = hist[hist['trade_date'] == today_dt_ts]
@@ -624,18 +666,38 @@ class DragonSecondWaveStrategyV2:
             ma10 = hist.iloc[-1]['MA10']
             ma20 = hist.iloc[-1]['MA20']
 
-        # 检查MA10是否有效
         if pd.isna(ma10):
             return {}
 
-        adjust_days = len(adjust_hist)
+        # 计算调整天数：从见顶到今日涨停前一天
+        # 这才是真正的"调整期"，包含下跌+震荡
+        if 'trade_date' in hist.columns:
+            today_dt_ts = pd.Timestamp(today)
+            # 排除today这一天（因为是二波启动日）
+            adjust_days_data = adjust_hist[adjust_hist['trade_date'] < today_dt_ts]
+            adjust_days = len(adjust_days_data)
+            
+            # 找到最低点的日期，计算下跌阶段天数
+            lowest_idx = adjust_hist['low'].idxmin()
+            lowest_date = adjust_hist.loc[lowest_idx, 'trade_date']
+            decline_days_data = adjust_hist[adjust_hist['trade_date'] <= lowest_date]
+            decline_days = len(decline_days_data)
+            
+            # 震荡天数 = 总调整天数 - 下跌天数
+            consolidation_days = adjust_days - decline_days
+        else:
+            adjust_days = len(adjust_hist) - 1 if len(adjust_hist) > 1 else len(adjust_hist)
+            decline_days = adjust_days // 2  # 估算
+            consolidation_days = adjust_days - decline_days
 
         return {
             'depth': depth,
             'ma10': ma10,
             'ma20': ma20 if not pd.isna(ma20) else None,
             'lowest_price': lowest,
-            'days': adjust_days
+            'days': adjust_days,
+            'decline_days': decline_days,  # 下跌阶段天数
+            'consolidation_days': consolidation_days  # 震荡阶段天数
         }
     
     def _check_adjust_quality(self, adjust: Dict) -> bool:
@@ -688,10 +750,34 @@ class DragonSecondWaveStrategyV2:
         return True
     
     def _calculate_days_since_peak(self, peak_date: str, today: str) -> int:
-        """计算从第一波见顶到今天的天数"""
+        """计算从第一波见顶到今天的交易日天数"""
+        try:
+            # 尝试使用交易日管理器计算交易日天数
+            if self.dm and hasattr(self.dm, 'trade_date_mgr'):
+                trade_dates = self.dm.trade_date_mgr.get_trade_dates_between(peak_date, today)
+                # 过滤掉peak_date当天
+                trade_dates = [d for d in trade_dates if d > peak_date]
+                return len(trade_dates)
+        except Exception as e:
+            logger.debug(f"使用交易日管理器失败，使用简化计算: {e}")
+        
+        # 简化计算：使用日历天数减去周末
         peak = datetime.strptime(peak_date, "%Y%m%d")
         today_dt = datetime.strptime(today, "%Y%m%d")
-        return (today_dt - peak).days
+        
+        # 计算总天数差
+        total_days = (today_dt - peak).days
+        
+        # 计算中间有多少个周末
+        weekend_days = 0
+        current = peak + timedelta(days=1)
+        while current <= today_dt:
+            if current.weekday() >= 5:  # 周六或周日
+                weekend_days += 1
+            current += timedelta(days=1)
+        
+        trading_days = total_days - weekend_days
+        return max(0, trading_days)
 
 # ==================== 数据准备示例 ====================
 
