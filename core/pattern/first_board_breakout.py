@@ -295,7 +295,7 @@ class HotspotFirstBoardStrategy:
         hot_sectors = []
 
         try:
-            from core.data.data_manager import DataManager
+            from core.data.data_manager_main import DataManager
             from config.settings import TUSHARE_TOKEN, CACHE_DIR
             
             dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)

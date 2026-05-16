@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR
-from core.data.data_manager import DataManager
+from core.data.data_manager_main import DataManager
 from backtest import BacktestEngine
 from backtest.performance_analyzer import PerformanceAnalyzer
 from risk import RiskManager, PositionSizer, RiskAnalyzer

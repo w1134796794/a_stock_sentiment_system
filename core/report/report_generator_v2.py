@@ -110,11 +110,11 @@ class ReportGeneratorV2:
         }
 
     def _write_dashboard(self, writer, data_dict: Dict, formats: Dict):
-        """Sheet 1: 市场概览"""
+        """Sheet 1: 市场概览 — 整合大盘环境 + 情绪周期 + 涨停连续性"""
         emotion = data_dict.get('emotion_result', {})
+        market_env = data_dict.get('market_env', {})
         date = data_dict.get('date', self.date_str)
-        
-        # 辅助函数：安全获取字符串值
+
         def safe_str(value, default='未知'):
             if value is None:
                 return default
@@ -122,52 +122,121 @@ class ReportGeneratorV2:
                 return str(value)
             if isinstance(value, str):
                 return value
-            # 如果是对象，尝试获取name或value属性
             if hasattr(value, 'name'):
                 return str(value.name)
             if hasattr(value, 'value'):
                 return str(value.value)
             return str(value)
-        
-        # 从metrics中获取数值指标
+
+        def fmt_pct(value, default='--'):
+            if value is None:
+                return default
+            try:
+                return f"{float(value):.2f}%"
+            except (ValueError, TypeError):
+                return default
+
+        def fmt_ratio(value, default='--'):
+            if value is None:
+                return default
+            try:
+                return f"{float(value):.1%}"
+            except (ValueError, TypeError):
+                return default
+
         metrics = emotion.get('metrics', {})
-        
-        # 从strategy对象中获取建议
         strategy_obj = emotion.get('strategy', {})
         position = safe_str(strategy_obj.get('position') if isinstance(strategy_obj, dict) else getattr(strategy_obj, 'position', None))
         strategy_desc = safe_str(strategy_obj.get('strategy') if isinstance(strategy_obj, dict) else getattr(strategy_obj, 'strategy', None))
-        
-        # 基础数据
+
+        trend = market_env.get('trend', {})
+        volume = market_env.get('volume', {})
+        width = market_env.get('width', {})
+        continuity = market_env.get('limit_up_continuity', {})
+        first_board = market_env.get('first_board_continuity', {})
+        sh_idx = market_env.get('sh_index', {})
+        sz_idx = market_env.get('sz_index', {})
+        cyb_idx = market_env.get('cyb_index', {})
+        kcb_idx = market_env.get('kcb_index', {})
+        bj_idx = market_env.get('bj_index', {})
+
         dashboard_data = [
-            ['报告日期', date, '', '情绪周期', safe_str(emotion.get('cycle_name')), ''],
+            ['报告日期', date, '', '', '', ''],
             ['', '', '', '', '', ''],
-            ['市场情绪指标', '数值', '说明', '策略建议', '', ''],
+            ['━━━ 一、大盘环境（Layer1 多指数综合评估）', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['指数名称', '收盘价', '涨跌幅', '趋势状态', '趋势评分', ''],
+            ['上证指数', f"{sh_idx.get('close', 0):.2f}", fmt_pct(sh_idx.get('change_pct')),
+             trend.get('state', '--'), f"{trend.get('score', 0):.0f}", ''],
+            ['深证成指', f"{sz_idx.get('close', 0):.2f}", fmt_pct(sz_idx.get('change_pct')), '', '', ''],
+            ['创业板指', f"{cyb_idx.get('close', 0):.2f}", fmt_pct(cyb_idx.get('change_pct')), '', '', ''],
+            ['科创50', f"{kcb_idx.get('close', 0):.2f}", fmt_pct(kcb_idx.get('change_pct')), '', '', ''],
+            ['北证50', f"{bj_idx.get('close', 0):.2f}", fmt_pct(bj_idx.get('change_pct')), '', '', ''],
+            ['', '', '', '', '', ''],
+            ['量能指标', '数值', '说明', '', '', ''],
+            ['全市场成交额', f"{volume.get('total', 0):.0f}亿", '全市场个股成交额汇总', '', '', ''],
+            ['量比(上证)', f"{volume.get('ratio', 0):.2f}", '当日成交额/5日均量', '', '', ''],
+            ['量能状态', volume.get('state', '--'), '', '', '', ''],
+            ['量能评分', f"{volume.get('score', 0):.0f}", '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['市场宽度', '数值', '说明', '', '', ''],
+            ['上涨家数', width.get('up_count', 0), '', '', '', ''],
+            ['下跌家数', width.get('down_count', 0), '', '', '', ''],
+            ['平盘家数', width.get('flat_count', 0), '', '', '', ''],
+            ['上涨比例', fmt_ratio(width.get('up_ratio')), '', '', '', ''],
+            ['宽度状态', width.get('state', '--'), '', '', '', ''],
+            ['宽度评分', f"{width.get('score', 0):.0f}", '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['━━━ 二、涨停连续性（昨日涨停股今日表现）', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['指标', '数值', '说明', '', '', ''],
+            ['昨日涨停总数', continuity.get('total', 0), '前一交易日涨停股票数量', '', '', ''],
+            ['今日高开比例', fmt_ratio(continuity.get('gap_up_ratio')), '今日开盘价>昨日收盘价的比例', '', '', ''],
+            ['今日收红比例', fmt_ratio(continuity.get('positive_ratio')), '今日收盘价>昨日收盘价的比例', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['其中首板', '数值', '说明', '', '', ''],
+            ['首板总数', first_board.get('total', 0), '昨日首板（连板数=1）数量', '', '', ''],
+            ['首板高开比例', fmt_ratio(first_board.get('gap_up_ratio')), '首板股今日高开比例', '', '', ''],
+            ['首板收红比例', fmt_ratio(first_board.get('positive_ratio')), '首板股今日收红比例', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['━━━ 三、情绪周期', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['情绪指标', '数值', '说明', '', '', ''],
             ['涨停家数', metrics.get('limit_up_count', 0), '当日涨停股票数量', '', '', ''],
             ['跌停家数', metrics.get('nuclear_button_count', 0), '当日跌停股票数量', '', '', ''],
             ['炸板率', f"{metrics.get('broken_rate', 0):.1f}%", '炸板数/曾涨停数', '', '', ''],
             ['昨日涨停溢价', f"{metrics.get('prev_limit_up_premium', 0):.1f}%", '昨日涨停股今日平均收益', '', '', ''],
             ['最高连板高度', metrics.get('max_board_height', 0), '市场最高连板数', '', '', ''],
             ['', '', '', '', '', ''],
-            ['策略建议', '', '', '', '', ''],
-            ['当前周期', safe_str(emotion.get('cycle_name')), '', '', '', ''],
-            ['建议仓位', position, '', '', '', ''],
+            ['━━━ 四、综合建议', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['大盘综合评分', f"{market_env.get('composite_score', 0):.0f}/100", '', '', '', ''],
+            ['大盘风险等级', market_env.get('risk_level', '--'), '', '', '', ''],
+            ['大盘建议仓位', market_env.get('suggested_position', '--'), '', '', '', ''],
+            ['情绪周期', safe_str(emotion.get('cycle_name')), '', '', '', ''],
+            ['策略建议仓位', position, '', '', '', ''],
             ['操作策略', strategy_desc, '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['交叉判断', market_env.get('cross_judgment', '--'), '', '', '', ''],
         ]
-        
+
         df = pd.DataFrame(dashboard_data)
         df.to_excel(writer, sheet_name='市场概览', index=False, header=False)
-        
+
         worksheet = writer.sheets['市场概览']
-        worksheet.set_column('A:A', 15)
-        worksheet.set_column('B:B', 15)
-        worksheet.set_column('C:C', 30)
-        worksheet.set_column('D:D', 15)
-        worksheet.set_column('E:E', 20)
-        
-        # 应用格式
+        worksheet.set_column('A:A', 18)
+        worksheet.set_column('B:B', 16)
+        worksheet.set_column('C:C', 36)
+        worksheet.set_column('D:D', 16)
+        worksheet.set_column('E:E', 16)
+        worksheet.set_column('F:F', 10)
+
+        section_rows = {2, 11, 20, 27, 38, 46}
         for row in range(len(dashboard_data)):
             for col in range(6):
-                if row == 0 or row == 2 or row == 9:
+                if row in section_rows:
+                    worksheet.write(row, col, dashboard_data[row][col], formats['header_green'])
+                elif row in {5, 12, 21, 28, 39, 47}:
                     worksheet.write(row, col, dashboard_data[row][col], formats['header'])
                 else:
                     worksheet.write(row, col, dashboard_data[row][col], formats['cell'])
@@ -188,23 +257,27 @@ class ReportGeneratorV2:
         
         current_row = 0
         
-        # ========== 第一部分：市场主线（共振分析结果）==========
+        # ========== 第一部分：市场主线（四维评分模型）==========
         if not mainline_df.empty:
-            # 写入标题
-            worksheet.merge_range(current_row, 0, current_row, 10, '一、市场主线（概念-行业共振）', formats['header_green'])
+            worksheet.merge_range(current_row, 0, current_row, 10, '一、市场主线（涨停集中度+梯队完整性+持续性+龙头强度）', formats['header_green'])
             current_row += 1
-            
-            # 主线数据字段映射
+
             mainline_cols = {
-                '主线名称': '主线名称',
-                '共振度': '共振度(%)',
-                '核心概念': '核心概念',
-                '核心行业': '核心行业',
-                '综合评分': '综合评分',
+                '排名': '排名',
+                '板块名称': '板块名称',
+                '板块类型': '板块类型',
+                '涨跌幅': '涨跌幅(%)',
+                '涨停家数': '涨停家数',
+                '涨停集中度': '涨停集中度',
+                '梯队完整性': '梯队完整性',
+                '梯队详情': '梯队详情',
                 '持续性评分': '持续性评分',
+                '热点天数': '热点天数',
+                '龙头强度': '龙头强度',
+                '最高连板': '最高连板',
+                '综合评分': '综合评分',
                 '所处阶段': '所处阶段',
                 '操作建议': '操作建议',
-                '策略理由': '策略理由',
             }
             
             available_mainline_cols = {k: v for k, v in mainline_cols.items() if k in mainline_df.columns}

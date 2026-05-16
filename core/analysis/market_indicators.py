@@ -368,7 +368,7 @@ def calculate_market_sentiment_indicators(
     Args:
         limit_up_df: 当日涨停数据
         limit_down_df: 当日跌停数据（可选）
-        prev_limit_up_df: 昨日涨停数据（可选，用于计算溢价）
+        prev_limit_up_df: 前天涨停数据（用于T+1溢价计算：前天涨停→昨日开盘买→今日开盘卖）
         
     Returns:
         Dict: 市场情绪指标

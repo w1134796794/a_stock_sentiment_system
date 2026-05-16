@@ -1,6 +1,13 @@
 """
 A股短线情绪量化系统 - 主程序入口
 整合所有模块，提供CLI交互
+
+架构：五层复盘流水线 (Review Pipeline)
+  Layer 1: 看大盘（定仓位）- MarketEnvAnalyzer
+  Layer 2: 看板块（定方向）- SectorAnalysisOrchestrator
+  Layer 3: 看个股（定标的）- StockSelectionEngine
+  Layer 4: 定计划（定执行）- TradePlanGenerator
+  Layer 5: 盘后总结 - ReviewAnalyzer
 """
 import sys
 import argparse
@@ -15,177 +22,133 @@ import loguru
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config.settings import (
-    TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR, 
+    TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR,
     INDUSTRY_MAPPING_FILE, TRADE_HOUR, TRADE_MINUTE
 )
-from core.data.data_manager import DataManager
+from core.data.data_manager_main import DataManager
 from core.data.industry_mapper import IndustryMapper
 from core.analysis.pattern_recognition import PatternRecognition
 from core.analysis.emotion_cycle_engine import EmotionCycleEngine
-# 使用新版同花顺板块追踪器
 from core.analysis.ths_sector_tracker import THSSectorTracker
-# 新增：板块分析统筹入口
 from core.analysis.sector_analysis_orchestrator import SectorAnalysisOrchestrator
 from core.report.report_generator_v2 import ReportGeneratorV2
 from core.execution.execution_engine import UnifiedExecutionEngine
 from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
 from core.utils import DateUtils
 
-# 新增：资金流向和筹码结构分析
 from core.analysis.moneyflow_analyzer import create_moneyflow_analyzer
 from core.analysis.chip_structure_analyzer import create_chip_analyzer
-# 新增：ML情绪周期预测
 from core.analysis.emotion_cycle_integrated import create_integrated_engine
+
+from core.pipeline.review_pipeline import ReviewPipeline, SharedContext
 
 logger = loguru.logger
 
 class SentimentSystem:
     def __init__(self):
         self.dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
-        self.mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
-        self.emotion_engine = EmotionCycleEngine(dm=self.dm)  # 情绪周期引擎，传入DataManager用于计算溢价率
-        self.sector_tracker = THSSectorTracker(self.dm)  # 板块轮动追踪器（保持兼容）
-        # 新增：板块分析统筹入口（带缓存）
+        self.mapper = IndustryMapper(self.dm)
+        self.emotion_engine = EmotionCycleEngine(dm=self.dm)
+        self.sector_tracker = THSSectorTracker(self.dm)
         self.sector_orchestrator = SectorAnalysisOrchestrator(self.dm, cache_enabled=True)
         self.reporter = ReportGeneratorV2(OUTPUT_DIR)
-        self.execution_engine = None  # 延迟初始化
-        self.retail_support = None  # 散户支持模块延迟初始化
+        self.execution_engine = None
+        self.retail_support = None
         self.today = datetime.now().strftime("%Y%m%d")
         self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
-        # 新增：资金流向和筹码结构分析器
-        self.moneyflow_analyzer = None  # 延迟初始化
-        self.chip_analyzer = None       # 延迟初始化
-        self.integrated_emotion_engine = None  # 综合情绪周期引擎（规则+ML）
-        
+        self.moneyflow_analyzer = None
+        self.chip_analyzer = None
+        self.integrated_emotion_engine = None
+
+        self.pipeline = ReviewPipeline(self.dm, self.mapper)
+
     def run_daily_analysis(self, date: str = None):
         """
-        执行每日完整分析流程
-        支持非交易日自动关联最近交易日
+        执行每日完整分析流程 - 使用五层复盘流水线
+
+        五层流水线：
+          Layer 1: 看大盘（定仓位）
+          Layer 2: 看板块（定方向）
+          Layer 3: 看个股（定标的）
+          Layer 4: 定计划（定执行）
+          Layer 5: 盘后总结
         """
         if date is None:
             date = self.today
-        
-        # 使用DateUtils获取最近交易日（自动处理非交易日）
+
         date_utils = DateUtils()
         date = date_utils.get_nearest_trade_date(date)
-        
-        # 获取上一个交易日
         self.yesterday = date_utils.get_prev_trade_date(date)
-        
-        logger.info(f"开始执行 {date} 的日度分析...")
-        logger.info(f"对比日期: {self.yesterday}")
-        
-        # 1. 数据获取
-        logger.info("[1/5] 获取涨停池数据...")
 
-        zt_pool = self.dm.get_limit_up_pool(date)
-        if zt_pool.empty:
-            logger.warning(f"未获取到 {date} 的涨停数据，可能非交易日")
+        logger.info(f"开始执行 {date} 的日度分析（五层复盘流水线）...")
+        logger.info(f"对比日期: {self.yesterday}")
+
+        # ========== 执行五层复盘流水线 ==========
+        ctx = self.pipeline.execute(date)
+
+        if ctx.errors:
+            logger.error(f"流水线执行出现 {len(ctx.errors)} 个错误")
+            for err in ctx.errors:
+                logger.error(f"  - {err}")
+
+        # ========== 打印流水线摘要 ==========
+        self.pipeline.print_summary(ctx)
+
+        # ========== DEBUG: 情绪周期详细数据 ==========
+        self._print_emotion_debug(ctx.emotion_result)
+
+        # ========== 生成报告 ==========
+        self._generate_reports(ctx)
+
+        # ========== 生成散户决策支持报告 ==========
+        self._generate_retail_support_report_v2(ctx)
+
+        # ========== 输出交易建议 ==========
+        all_persistence_df = pd.concat(
+            [ctx.concept_persistence_df, ctx.industry_persistence_df],
+            ignore_index=True
+        ) if not ctx.concept_persistence_df.empty or not ctx.industry_persistence_df.empty else pd.DataFrame()
+
+        self._print_trading_advice(ctx.main_themes_df, ctx.patterns,
+                                   ctx.emotion_result, all_persistence_df)
+
+    def _print_emotion_debug(self, emotion_result: Dict):
+        """打印情绪周期DEBUG数据"""
+        if not emotion_result:
             return
 
-        logger.info(f"获取到 {len(zt_pool)} 只涨停股票")
-        
-        # 2. 构建层级结构
-        logger.info("[2/5] 构建行业层级映射...")
-        hierarchy_df = self.mapper.build_hierarchy_dataframe(zt_pool)
-        if not hierarchy_df.empty:
-            logger.info(f"层级映射完成，覆盖 {hierarchy_df['L2_Industry'].nunique()} 个二级行业")
-        
-        # 3. 情绪周期分析（新增：综合规则+ML判断）
-        logger.info("[3/6] 分析情绪周期...")
-        
-        # 获取跌停数据（用于计算核按钮）
-        limit_down_df = self.dm.get_limit_down_pool(date)
-        
-        # 获取昨日涨停数据（用于计算溢价）
-        prev_limit_up_df = self.dm.get_limit_up_pool(self.yesterday)
-        
-        # 使用情绪周期引擎分析
-        emotion_result = self.emotion_engine.analyze_market_data(
-            limit_up_df=zt_pool,
-            limit_down_df=limit_down_df,
-            prev_limit_up_df=prev_limit_up_df
-        )
-        
-        # 新增：使用综合引擎（规则+ML）进行情绪周期判断
-        try:
-            if self.integrated_emotion_engine is None:
-                self.integrated_emotion_engine = create_integrated_engine(self.emotion_engine)
-            
-            # 构建ML模型需要的指标
-            metrics = emotion_result.get('metrics', {})
-            ml_indicators = {
-                'limit_up_count': metrics.get('limit_up_count', 0),
-                'max_board_height': metrics.get('max_board_height', 0),
-                'broken_rate': metrics.get('broken_rate', 0),
-                'continuous_rate': metrics.get('continuous_rate', 0),
-            }
-            
-            # 获取综合判断结果
-            integrated_result = self.integrated_emotion_engine.detect_cycle_integrated(
-                market_data={'limit_up_df': zt_pool, 'limit_down_df': limit_down_df},
-                indicators=ml_indicators,
-                use_ml=True
-            )
-            
-            # 将综合结果添加到emotion_result中
-            emotion_result['integrated_analysis'] = {
-                'rule_state': integrated_result.rule_based_state,
-                'ml_state': integrated_result.ml_predicted_state,
-                'final_state': integrated_result.final_state,
-                'confidence': integrated_result.final_confidence,
-                'agreement': integrated_result.agreement,
-                'analysis': integrated_result.analysis,
-                'risk_level': integrated_result.risk_level,
-            }
-            
-            logger.info(f"[综合判断] 规则引擎: {integrated_result.rule_based_state} | "
-                       f"ML模型: {integrated_result.ml_predicted_state} | "
-                       f"最终: {integrated_result.final_state} (置信度{integrated_result.final_confidence:.1%})")
-            
-            if not integrated_result.agreement:
-                logger.warning(f"[分歧警告] {integrated_result.analysis}")
-            
-        except Exception as e:
-            logger.warning(f"[综合判断] ML分析失败，使用规则引擎结果: {e}")
-            emotion_result['integrated_analysis'] = None
-        
-        # ========== DEBUG: 情绪周期详细数据 ==========
         logger.info("=" * 60)
         logger.info("【DEBUG】情绪周期分析详细数据")
         logger.info("=" * 60)
-        logger.info(f"情绪周期: {emotion_result['cycle_name']}")
-        logger.info(f"策略建议: {emotion_result['strategy'].strategy}")
-        logger.info(f"仓位控制: {emotion_result['strategy'].position}")
-        logger.info(f"禁忌操作: {emotion_result['strategy'].forbidden_actions}")
-        
-        # 打印原始数据 (从metrics字段获取)
+        logger.info(f"情绪周期: {emotion_result.get('cycle_name', 'N/A')}")
+
+        strategy = emotion_result.get('strategy')
+        if strategy:
+            logger.info(f"策略建议: {strategy.strategy}")
+            logger.info(f"仓位控制: {strategy.position}")
+            logger.info(f"禁忌操作: {strategy.forbidden_actions}")
+
         metrics = emotion_result.get('metrics', {})
         logger.info("\n【DEBUG】原始统计数据:")
         logger.info(f"  涨停家数: {metrics.get('limit_up_count', 'N/A')}")
         logger.info(f"  跌停家数: {metrics.get('nuclear_button_count', 'N/A')}")
         logger.info(f"  炸板率: {metrics.get('broken_rate', 'N/A')}%")
         logger.info(f"  最高连板: {metrics.get('max_board_height', 'N/A')}板")
-        
-        # 昨日涨停表现（基于开盘价）
+
         logger.info("\n【DEBUG】昨日涨停今日开盘表现:")
         logger.info(f"  平均溢价率: {metrics.get('prev_limit_up_premium', 'N/A')}%")
         logger.info(f"  开盘卖出胜率: {metrics.get('win_rate', 'N/A')}%")
         logger.info(f"  平均赢面: {metrics.get('avg_profit', 'N/A')}%")
-        logger.info("  (说明: 昨日涨停股票，今日开盘卖出的统计)")
-        
-        # 连板分布
+
         board_distribution = metrics.get('board_distribution', {})
         if board_distribution:
             logger.info(f"\n【DEBUG】连板分布: {board_distribution}")
-            # 计算连板家数和首板家数
             consecutive_count = sum(v for k, v in board_distribution.items() if k >= 2)
             first_board_count = board_distribution.get(1, 0)
             logger.info(f"  连板家数: {consecutive_count}")
             logger.info(f"  首板家数: {first_board_count}")
-        
-        # 打印评分详情 (从scores字段获取)
+
         scores = emotion_result.get('scores', {})
         logger.info("\n【DEBUG】情绪周期评分详情:")
         if scores:
@@ -194,215 +157,27 @@ class SentimentSystem:
             logger.info(f"  震荡期(shake)得分: {scores.get('shake', 'N/A')}")
             logger.info(f"  退潮期(decline)得分: {scores.get('decline', 'N/A')}")
             logger.info(f"  冰点期(freeze)得分: {scores.get('freeze', 'N/A')}")
-        else:
-            logger.info("  暂无评分数据")
         logger.info("=" * 60)
-        
-        # 4-8. 板块分析（使用统筹入口，带缓存）
-        logger.info("[4-8/12] 执行板块分析（热点识别+持续性+共振+梯队）...")
-        sector_result = self.sector_orchestrator.analyze_all(date, zt_pool=zt_pool)
-        
-        # 提取分析结果
-        hot_concepts_df = sector_result.hot_concepts_df
-        hot_industries_df = sector_result.hot_industries_df
-        hot_concepts = sector_result.hot_concepts
-        hot_industries = sector_result.hot_industries
-        concept_persistence_df = sector_result.concept_persistence_df
-        industry_persistence_df = sector_result.industry_persistence_df
-        main_themes_df = sector_result.resonance_df
-        concept_hierarchy = sector_result.concept_hierarchy
-        concept_hierarchy_report = sector_result.concept_hierarchy_report
-        
-        # 打印分析摘要
-        logger.info(f"[OK] 板块分析完成:")
-        logger.info(f"  - 热点概念: {len(hot_concepts)}个")
-        logger.info(f"  - 热点行业: {len(hot_industries)}个")
-        logger.info(f"  - 持续热门概念: {len(concept_persistence_df)}个")
-        logger.info(f"  - 持续热门行业: {len(industry_persistence_df)}个")
-        logger.info(f"  - 市场主线: {len(main_themes_df)}条")
-        logger.info(f"  - 概念连板梯队: {len(concept_hierarchy)}个概念")
-        
-        # 打印详细结果
-        if hot_concepts:
-            logger.info(f"  热点概念: {', '.join(hot_concepts[:10])}{'...' if len(hot_concepts) > 10 else ''}")
-        if not concept_persistence_df.empty:
-            for _, row in concept_persistence_df.head(3).iterrows():
-                logger.info(f"  {row['板块名称']}: 10天内{row['热点天数']}次热点, 评分{row['持续性评分']}, 阶段[{row['所处阶段']}]")
-        if not main_themes_df.empty:
-            for _, row in main_themes_df.head(3).iterrows():
-                logger.info(f"  主线[{row['主线名称']}]: 共振度{row['共振度']}%")
-        if concept_hierarchy_report:
-            logger.info(f"[概念连板梯队]\n{concept_hierarchy_report}")
-        
-        # 9. 资金流向和筹码结构分析（新增）
-        logger.info("[10/12] 资金流向和筹码结构分析...")
-        
-        # 初始化分析器
-        if self.moneyflow_analyzer is None:
-            self.moneyflow_analyzer = create_moneyflow_analyzer(self.dm)
-        if self.chip_analyzer is None:
-            self.chip_analyzer = create_chip_analyzer(self.dm)
-        
-        # 分析涨停股票的资金流向和筹码结构
-        moneyflow_analysis = {}
-        chip_analysis = {}
-        
-        if not zt_pool.empty and 'code' in zt_pool.columns:
-            # 获取前10只涨停股票进行深入分析
-            top_zt_stocks = zt_pool.head(10)['code'].tolist()
-            
-            logger.info(f"分析 {len(top_zt_stocks)} 只涨停股票的资金流向和筹码结构...")
-            
-            for stock_code in top_zt_stocks:
-                try:
-                    # 资金流向分析
-                    mf_result = self.moneyflow_analyzer.analyze_stock_moneyflow(stock_code, date)
-                    if mf_result.net_mf_amount != 0:
-                        moneyflow_analysis[stock_code] = {
-                            'name': mf_result.name,
-                            'main_net': mf_result.main_net_amount,
-                            'retail_net': mf_result.retail_net_amount,
-                            'direction': '流入' if mf_result.main_net_amount > 0 else '流出'
-                        }
-                    
-                    # 筹码结构分析
-                    chip_result = self.chip_analyzer.analyze_chip_structure(stock_code, date)
-                    if chip_result.profit_pct > 0:
-                        chip_analysis[stock_code] = {
-                            'name': chip_result.name,
-                            'profit_pct': chip_result.profit_pct,
-                            'concentration': chip_result.concentration,
-                            'structure_type': chip_result.structure_type,
-                            'cost_bias': chip_result.cost_bias
-                        }
-                except Exception as e:
-                    logger.debug(f"分析 {stock_code} 失败: {e}")
-            
-            # 打印分析结果摘要
-            if moneyflow_analysis:
-                logger.info("[资金流向分析] 主力资金流向:")
-                inflow_stocks = [k for k, v in moneyflow_analysis.items() if v['main_net'] > 0]
-                outflow_stocks = [k for k, v in moneyflow_analysis.items() if v['main_net'] <= 0]
-                logger.info(f"  主力流入: {len(inflow_stocks)}只, 流出: {len(outflow_stocks)}只")
-            
-            if chip_analysis:
-                logger.info("[筹码结构分析] 筹码分布:")
-                high_profit = [k for k, v in chip_analysis.items() if v['profit_pct'] >= 70]
-                low_profit = [k for k, v in chip_analysis.items() if v['profit_pct'] <= 30]
-                logger.info(f"  高获利盘(≥70%): {len(high_profit)}只, 低获利盘(≤30%): {len(low_profit)}只")
-        
-        # 11. 北向资金和龙虎榜分析（新增）
-        logger.info("[11/12] 北向资金和龙虎榜分析...")
-        
-        try:
-            # 北向资金流向
-            hsgt_flow = self.moneyflow_analyzer.analyze_hsgt_flow(date)
-            logger.info(f"[北向资金] 当日净流入: {hsgt_flow.north_money:.2f}亿元 ({hsgt_flow.trend})")
-            
-            # 北向资金趋势（5日）
-            hsgt_trend = self.moneyflow_analyzer.extensions.analyze_hsgt_trend(date, days=5)
-            if hsgt_trend:
-                logger.info(f"[北向资金] 5日平均: {hsgt_trend['avg_5d']:.2f}亿元, "
-                           f"连续{'流入' if hsgt_trend['continuous_days'] > 0 else '流出'}: {abs(hsgt_trend['continuous_days'])}天")
-            
-            # 龙虎榜汇总
-            top_list_summary = self.moneyflow_analyzer.extensions.analyze_top_list_summary(date)
-            if top_list_summary:
-                logger.info(f"[龙虎榜] 上榜股票: {top_list_summary.get('total_stocks', 0)}只, "
-                           f"净买入: {top_list_summary.get('net_amount', 0)/100000000:.2f}亿元")
-                
-        except Exception as e:
-            logger.warning(f"[资金流向分析] 获取北向/龙虎榜数据失败: {e}")
-        
-        # 12. 模式识别
-        logger.info("[12/12] 识别交易模式...")
-        pr = PatternRecognition(self.dm, sector_engine=None, mapper=self.mapper)
-        
-        # 使用缓存的热点板块数据（从统筹入口获取）
-        hot_sectors = self.sector_orchestrator.get_cached_hot_sectors_for_pattern(date)
-        
-        # 调试日志：显示传递的热点板块
-        logger.info(f"传递给模式识别的热点板块: {len(hot_sectors)}个")
-        for hs in hot_sectors[:5]:  # 显示前5个
-            logger.info(f"  - {hs['sector_name']} ({hs['trend_stage']}) 评分:{hs['confidence']:.2f}")
-        
-        patterns = pr.scan_all_patterns(date, self.yesterday, hot_sectors=hot_sectors)
 
-        total_signals = sum(len(v) for v in patterns.values())
-        logger.info(f"识别到 {total_signals} 个交易信号")
-        for ptype, signals in patterns.items():
-            if signals:
-                logger.info(f"  - {ptype}: {len(signals)}个")
-        
-        # 10. 为核心标的获取概念数据
-        logger.info("[10/12] 获取核心标的所属概念...")
-        if not hierarchy_df.empty:
-            # 只获取10点半前封板的核心标的的概念
-            core_stocks_mask = hierarchy_df.apply(lambda row: self._is_core_stock(row), axis=1)
-            core_stocks_df = hierarchy_df[core_stocks_mask].copy()
-            
-            if not core_stocks_df.empty:
-                logger.info(f"核心标的: {len(core_stocks_df)}只")
-        
-        # 11. 获取龙头池和走弱池数据
-        logger.info("[11/12] 获取龙头池和走弱池数据...")
-        dragon_pool_data = []
-        weakening_pool_data = []
-        if hasattr(pr, 'weak_to_strong') and pr.weak_to_strong:
-            try:
-                pool_summary = pr.weak_to_strong.get_pools_summary()
-                dragon_pool_data = pool_summary.get('dragon_pool', [])
-                weakening_pool_data = pool_summary.get('weakening_pool', [])
-                logger.info(f"[OK] 龙头池: {len(dragon_pool_data)}只, 走弱池: {len(weakening_pool_data)}只")
-            except Exception as e:
-                logger.warning(f"获取龙头池数据失败: {e}")
-        
-        # 12. 生成报告
-        logger.info("[12/12] 生成分析报告...")
-        # 使用 main_themes_df（来自 analyze_concept_industry_resonance ）作为热点主线数据
-        # 包含：概念-行业共振度、持续性评分等核心指标
-        report_data = {
-            'date': date,
-            'mainline_df': main_themes_df,  # 使用共振分析结果作为热点主线数据
-            'emotion_result': emotion_result,
-            'sector_persistence_df': all_persistence_df if 'all_persistence_df' in locals() else pd.concat([concept_persistence_df, industry_persistence_df], ignore_index=True),
-            'patterns': patterns,
-            'hierarchy_df': hierarchy_df,
-            'zt_pool': zt_pool,
-            'dragon_pool': dragon_pool_data,
-            'weakening_pool': weakening_pool_data,
-            # 新增：资金流向和筹码结构分析数据
-            'moneyflow_analysis': moneyflow_analysis,
-            'chip_analysis': chip_analysis,
-            # 新增：概念连板梯队分析数据
-            'concept_hierarchy': concept_hierarchy,
-            'concept_hierarchy_report': concept_hierarchy_report,
-            # 新增：详细热点板块数据（来自统筹入口缓存）
-            'hot_concepts_df': hot_concepts_df,
-            'hot_industries_df': hot_industries_df,
-            'concept_persistence_df': concept_persistence_df,
-            'industry_persistence_df': industry_persistence_df,
-            'sector_result': sector_result,
-        }
+    def _generate_reports(self, ctx: SharedContext):
+        """生成分析报告"""
+        logger.info("[报告] 生成分析报告...")
 
-        # 使用带时间戳的文件名避免文件被占用
+        report_data = self.pipeline.get_context_dict(ctx)
+
         timestamp = datetime.now().strftime("%H%M%S")
-        report_file_name = f"短线情绪分析报告_{date}_{timestamp}.xlsx"
+        report_file_name = f"短线情绪分析报告_{ctx.trade_date}_{timestamp}.xlsx"
         report_path = self.reporter.create_daily_report(report_data, file_name=report_file_name)
-        logger.info(f"✅ 分析完成，报告保存至: {report_path}")
+        logger.info(f"[OK] 分析报告保存至: {report_path}")
 
-        # 13. 生成交易计划（复盘后生成次日计划）
-        logger.info("[13/14] 生成次日交易计划...")
-        self._generate_trade_plans(date, patterns, main_themes_df, emotion_result)
+    def _generate_retail_support_report_v2(self, ctx: SharedContext):
+        """生成散户决策支持报告"""
+        logger.info("[散户支持] 生成散户决策支持报告...")
+        self._generate_retail_support_report(
+            ctx.trade_date, ctx.zt_pool, ctx.hierarchy_df,
+            ctx.patterns, ctx.emotion_result
+        )
 
-        # 14. 生成散户支持报告（隔夜预判、三阶过滤、剧本推演等）
-        logger.info("[14/14] 生成散户决策支持报告...")
-        self._generate_retail_support_report(date, zt_pool, hierarchy_df, patterns, emotion_result)
-
-        # 15. 输出交易建议
-        all_persistence_df = pd.concat([concept_persistence_df, industry_persistence_df], ignore_index=True) if not concept_persistence_df.empty or not industry_persistence_df.empty else pd.DataFrame()
-        self._print_trading_advice(main_themes_df, patterns, emotion_result, all_persistence_df)
-    
     def _generate_trade_plans(self, date: str, patterns: Dict, mainline_df: pd.DataFrame, emotion_result: Dict):
         """
         生成次日交易计划

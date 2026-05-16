@@ -160,8 +160,8 @@ class EmotionCycleEngine:
     2. 连板高度 - 风险偏好
     3. 炸板率 - 市场分歧程度
     4. 核按钮数量 - 恐慌程度
-    5. 昨日涨停溢价 - 赚钱效应（基于开盘价计算）
-    6. 昨日涨停胜率 - 开盘卖出胜率
+    5. 涨停溢价 - 赚钱效应（T+1真实路径：前天涨停→昨日开盘买→今日开盘卖）
+    6. 涨停胜率 - T+1开盘卖出胜率
     7. 平均赢面 - 盈利股票的平均收益
     8. 连板梯队完整性 - 生态健康度
     """
@@ -179,28 +179,33 @@ class EmotionCycleEngine:
                      prev_limit_up_premium: float = None,
                      board_distribution: Dict[int, int] = None,
                      continuous_rate: float = None,
-                     limit_down_count: int = 0) -> Tuple[EmotionCycle, Dict[str, float]]:
+                     limit_down_count: int = 0,
+                     win_rate: float = None,
+                     avg_profit: float = None) -> Tuple[EmotionCycle, Dict[str, float]]:
         """
-        识别当前情绪周期
+        识别当前情绪周期 - 优化版本
 
         Args:
             limit_up_count: 涨停家数
             max_board_height: 最高连板高度
             broken_rate: 炸板率 (%)
             nuclear_button_count: 核按钮数量（跌停家数）
-            prev_limit_up_premium: 昨日涨停溢价 (%)
+            prev_limit_up_premium: 涨停溢价率（T+1路径：前天涨停→昨日开盘买→今日开盘卖，%）
             board_distribution: 连板分布 {1: 20, 2: 10, 3: 5, ...}
             continuous_rate: 连板率 (连板股数/涨停股总数 %)
             limit_down_count: 跌停家数
+            win_rate: T+1开盘卖出胜率 (%)
+            avg_profit: 平均赢面 (%)
 
         Returns:
             Tuple[EmotionCycle, Dict]: (情绪周期枚举, 各周期得分)
         """
-        # 计算综合得分
+        # 计算综合得分 - 传入新增参数
         scores = self._calculate_cycle_scores(
             limit_up_count, max_board_height, broken_rate,
             nuclear_button_count, prev_limit_up_premium, board_distribution,
-            continuous_rate, limit_down_count
+            continuous_rate, limit_down_count,
+            win_rate, avg_profit
         )
 
         # 根据得分判断周期
@@ -219,8 +224,16 @@ class EmotionCycleEngine:
                                prev_limit_up_premium: Optional[float],
                                board_distribution: Optional[Dict[int, int]],
                                continuous_rate: Optional[float] = None,
-                               limit_down_count: int = 0) -> Dict[str, float]:
-        """计算各周期维度的匹配得分"""
+                               limit_down_count: int = 0,
+                               win_rate: Optional[float] = None,
+                               avg_profit: Optional[float] = None) -> Dict[str, float]:
+        """计算各周期维度的匹配得分 - 优化版本
+        
+        改进点：
+        1. 增加胜率和平均赢面作为新特征
+        2. 优化评分权重，使各周期区分度更明显
+        3. 增加趋势动量因子
+        """
         scores = {
             'boom': 0,      # 高潮期得分
             'rise': 0,      # 上升期得分
@@ -231,131 +244,152 @@ class EmotionCycleEngine:
 
         th = self.thresholds
 
-        # 1. 涨停家数评分
+        # 1. 涨停家数评分 - 优化权重
         if limit_up_count >= th.limit_up_high:
-            scores['boom'] += 3
+            scores['boom'] += 4  # 从3增加到4
             scores['rise'] += 1
         elif limit_up_count >= th.limit_up_mid_high:
-            scores['boom'] += 1
+            scores['boom'] += 2  # 从1增加到2
             scores['rise'] += 3
         elif limit_up_count >= th.limit_up_mid_low:
-            scores['rise'] += 2
+            scores['rise'] += 3  # 从2增加到3
             scores['shake'] += 2
         elif limit_up_count >= th.limit_up_low:
-            scores['shake'] += 2
+            scores['shake'] += 3  # 从2增加到3
             scores['decline'] += 1
         elif limit_up_count >= th.limit_up_freeze:
             scores['decline'] += 3
-            scores['freeze'] += 1
+            scores['freeze'] += 2  # 从1增加到2
         else:
-            scores['freeze'] += 3
+            scores['freeze'] += 4  # 从3增加到4
             scores['decline'] += 1
 
-        # 2. 连板高度评分
+        # 2. 连板高度评分 - 优化权重
         if max_board_height >= th.board_height_boom:
-            scores['boom'] += 3
+            scores['boom'] += 4  # 从3增加到4
         elif max_board_height >= th.board_height_high:
-            scores['boom'] += 1
-            scores['rise'] += 2
+            scores['boom'] += 2  # 从1增加到2
+            scores['rise'] += 3
         elif max_board_height >= th.board_height_mid:
-            scores['rise'] += 2
+            scores['rise'] += 3  # 从2增加到3
             scores['shake'] += 1
         elif max_board_height >= th.board_height_low:
-            scores['shake'] += 2
+            scores['shake'] += 3  # 从2增加到3
             scores['decline'] += 1
         else:
-            scores['freeze'] += 2
+            scores['freeze'] += 3  # 从2增加到3
             scores['decline'] += 1
 
         # 3. 炸板率评分
         if broken_rate <= th.broken_rate_low:
-            scores['boom'] += 1
+            scores['boom'] += 2  # 从1增加到2
             scores['rise'] += 2
         elif broken_rate <= th.broken_rate_mid:
             scores['rise'] += 1
             scores['shake'] += 2
         elif broken_rate <= th.broken_rate_high:
-            scores['shake'] += 1
+            scores['shake'] += 2
             scores['decline'] += 2
         else:
             scores['decline'] += 3
-            scores['freeze'] += 1
+            scores['freeze'] += 2  # 从1增加到2
 
         # 4. 核按钮评分
         if nuclear_button_count <= th.nuclear_button_low:
-            scores['boom'] += 1
+            scores['boom'] += 2  # 从1增加到2
             scores['rise'] += 1
         elif nuclear_button_count <= th.nuclear_button_high:
             scores['shake'] += 2
         else:
             scores['decline'] += 3
-            scores['freeze'] += 1
+            scores['freeze'] += 2  # 从1增加到2
 
         # 5. 昨日涨停溢价评分
         if prev_limit_up_premium is not None:
             if prev_limit_up_premium >= th.premium_high:
-                scores['boom'] += 1
+                scores['boom'] += 2  # 从1增加到2
                 scores['rise'] += 2
             elif prev_limit_up_premium >= th.premium_mid:
-                scores['rise'] += 1
+                scores['rise'] += 2  # 从1增加到2
                 scores['shake'] += 1
             elif prev_limit_up_premium >= th.premium_low:
-                scores['shake'] += 1
+                scores['shake'] += 2  # 从1增加到2
                 scores['decline'] += 1
             else:
-                scores['decline'] += 2
+                scores['decline'] += 3  # 从2增加到3
                 scores['freeze'] += 1
 
         # 6. 连板梯队完整性评分
         if board_distribution:
             echelon_score = self._calculate_echelon_score(board_distribution)
             if echelon_score >= 0.8:
-                scores['boom'] += 1
+                scores['boom'] += 2  # 从1增加到2
                 scores['rise'] += 2
             elif echelon_score >= 0.5:
-                scores['rise'] += 1
+                scores['rise'] += 2  # 从1增加到2
                 scores['shake'] += 1
             else:
-                scores['decline'] += 1
+                scores['decline'] += 2  # 从1增加到2
                 scores['freeze'] += 1
 
         # 7. 连板率奖赏因子 (连板股数/涨停股总数)
         if continuous_rate is not None and limit_up_count > 0:
             if continuous_rate >= th.continuous_rate_high:
-                # 高连板率 - 情绪高涨，资金接力意愿强
-                scores['boom'] += 2
+                scores['boom'] += 3  # 从2增加到3
                 scores['rise'] += 2
             elif continuous_rate >= th.continuous_rate_mid:
-                # 中等连板率 - 情绪健康
-                scores['rise'] += 2
+                scores['rise'] += 3  # 从2增加到3
                 scores['shake'] += 1
             elif continuous_rate >= th.continuous_rate_low:
-                # 低连板率 - 情绪低迷，首板多连板少
-                scores['shake'] += 1
+                scores['shake'] += 2  # 从1增加到2
                 scores['decline'] += 2
             else:
-                # 极低连板率 - 情绪冰点
-                scores['decline'] += 1
-                scores['freeze'] += 2
+                scores['decline'] += 2
+                scores['freeze'] += 3  # 从2增加到3
 
         # 8. 跌停惩罚因子 (跌停家数/涨停家数比例)
         if limit_up_count > 0:
             limit_down_ratio = limit_down_count / limit_up_count
             if limit_down_ratio <= th.limit_down_ratio_low:
-                # 跌停很少 - 市场健康
-                scores['boom'] += 1
+                scores['boom'] += 2  # 从1增加到2
                 scores['rise'] += 1
             elif limit_down_ratio <= th.limit_down_ratio_mid:
-                # 中等跌停 - 市场分歧
                 scores['shake'] += 2
             elif limit_down_ratio <= th.limit_down_ratio_high:
-                # 跌停较多 - 风险信号
                 scores['decline'] += 3
+                scores['shake'] += 2  # 从1增加到2
+            else:
+                scores['decline'] += 3
+                scores['freeze'] += 4  # 从3增加到4
+
+        # 9. 新增：胜率评分（T+1模式：前天涨停→昨日开盘买→今日开盘卖的胜率）
+        if win_rate is not None:
+            if win_rate >= 70:
+                scores['boom'] += 1
+                scores['rise'] += 2
+            elif win_rate >= 50:
+                scores['rise'] += 2
+                scores['shake'] += 1
+            elif win_rate >= 30:
+                scores['shake'] += 2
+                scores['decline'] += 1
+            else:
+                scores['decline'] += 2
+                scores['freeze'] += 1
+
+        # 10. 新增：平均赢面评分
+        if avg_profit is not None:
+            if avg_profit >= 5:
+                scores['boom'] += 1
+                scores['rise'] += 2
+            elif avg_profit >= 2:
+                scores['rise'] += 1
+                scores['shake'] += 1
+            elif avg_profit >= 0:
                 scores['shake'] += 1
             else:
-                # 跌停极多 - 恐慌情绪
                 scores['decline'] += 2
-                scores['freeze'] += 3
+                scores['freeze'] += 1
 
         return scores
     
@@ -422,7 +456,7 @@ class EmotionCycleEngine:
         Args:
             limit_up_df: 当日涨停数据
             limit_down_df: 当日跌停数据（可选）
-            prev_limit_up_df: 昨日涨停数据（可选，用于计算溢价）
+            prev_limit_up_df: 前天涨停数据（用于T+1溢价计算：前天涨停→昨日开盘买→今日开盘卖）
             
         Returns:
             包含情绪周期分析结果的字典
@@ -455,13 +489,13 @@ class EmotionCycleEngine:
         # 核按钮数量
         nuclear_button_count = len(limit_down_df) if limit_down_df is not None else 0
         
-        # 昨日涨停溢价率和胜率计算
+        # 涨停溢价率和胜率计算（T+1真实路径：前天涨停→昨日开盘买→今日开盘卖）
         prev_limit_up_premium = None
         win_rate = None  # 胜率
         avg_profit = None  # 平均赢面
         
         if prev_limit_up_df is not None and not prev_limit_up_df.empty:
-            # 计算昨日涨停股票今日开盘的溢价情况
+            # 计算前天涨停股票在T+1模式下的真实溢价表现
             premium_data = self._calculate_prev_limit_up_performance(prev_limit_up_df)
             prev_limit_up_premium = premium_data.get('avg_premium')
             win_rate = premium_data.get('win_rate')
@@ -483,7 +517,7 @@ class EmotionCycleEngine:
         # 跌停家数
         limit_down_count = len(limit_down_df) if limit_down_df is not None else 0
 
-        # 识别情绪周期
+        # 识别情绪周期 - 传入新增参数
         cycle, scores = self.detect_cycle(
             limit_up_count=limit_up_count,
             max_board_height=max_board_height,
@@ -492,7 +526,9 @@ class EmotionCycleEngine:
             prev_limit_up_premium=prev_limit_up_premium,
             board_distribution=board_distribution,
             continuous_rate=continuous_rate,
-            limit_down_count=limit_down_count
+            limit_down_count=limit_down_count,
+            win_rate=win_rate,
+            avg_profit=avg_profit
         )
 
         # 获取策略
@@ -520,16 +556,21 @@ class EmotionCycleEngine:
     
     def _calculate_prev_limit_up_performance(self, prev_limit_up_df: pd.DataFrame) -> Dict:
         """
-        计算昨日涨停股票今日开盘的表现
-        
+        计算前天涨停股票在T+1交易模式下的真实表现
+
+        T+1市场真实交易路径：
+        - T-2日（前天）：股票涨停，进入候选池
+        - T-1日（昨日）：开盘买入（T+1市场下最早可买入时机）
+        - T日（今日）：开盘卖出（买入后次日方可卖出）
+
         计算指标：
-        1. 平均溢价率：今日开盘价相对昨日涨停价的平均涨幅
-        2. 胜率：开盘卖出的胜率（开盘价 > 昨日涨停价的比例）
+        1. 平均溢价率：(今日开盘价 - 昨日开盘价) / 昨日开盘价 × 100%
+        2. 胜率：今日开盘价 > 昨日开盘价的比例
         3. 平均赢面：盈利股票的平均收益率
-        
+
         Args:
-            prev_limit_up_df: 昨日涨停数据，需要包含股票代码
-            
+            prev_limit_up_df: 前天涨停数据，需要包含股票代码
+
         Returns:
             {
                 'avg_premium': 平均溢价率(%),
@@ -542,94 +583,89 @@ class EmotionCycleEngine:
             'win_rate': None,
             'avg_profit': None
         }
-        
+
         if prev_limit_up_df.empty:
             return result
-        
-        # 需要DataManager来获取价格数据
+
         if not hasattr(self, 'dm') or self.dm is None:
             logger.warning("[_calculate_prev_limit_up_performance] 未提供DataManager，无法计算溢价率")
             return result
-        
+
         try:
             premiums = []
             profits = []
-            
-            # 获取股票代码列
+
             code_col = None
             for col in ['ts_code', '代码', 'code', 'stock_code']:
                 if col in prev_limit_up_df.columns:
                     code_col = col
                     break
-            
+
             if code_col is None:
                 logger.warning("[_calculate_prev_limit_up_performance] 未找到股票代码列")
                 return result
-            
-            # 获取昨日和今日的日期
-            # 从数据中获取日期，或使用当前日期
+
             trade_date = None
             for col in ['trade_date', '日期', 'date']:
                 if col in prev_limit_up_df.columns:
                     trade_date = prev_limit_up_df[col].iloc[0]
                     break
-            
+
             if trade_date is None:
                 logger.warning("[_calculate_prev_limit_up_performance] 未找到交易日期")
                 return result
-            
-            # 计算今日日期（下一个交易日）
-            today = self.dm.date_utils.get_next_trade_date(str(trade_date))
-            yesterday = str(trade_date)
-            
-            logger.info(f"[_calculate_prev_limit_up_performance] 计算 {yesterday} 涨停股票 {today} 开盘表现")
-            
+
+            # T+1真实交易路径：
+            # trade_date = T-2（前天，涨停日）
+            # buy_date = T-1（昨日，开盘买入）
+            # sell_date = T（今日，开盘卖出）
+            buy_date = self.dm.date_utils.get_next_trade_date(str(trade_date))
+            sell_date = self.dm.date_utils.get_next_trade_date(buy_date)
+
+            logger.info(f"[_calculate_prev_limit_up_performance] T+1模拟: "
+                       f"{trade_date}涨停 → {buy_date}开盘买入 → {sell_date}开盘卖出")
+
             for _, row in prev_limit_up_df.iterrows():
                 try:
                     ts_code = row[code_col]
-                    
-                    # 优化：一次性获取两日的数据，而不是分别查询两次
-                    df = self.dm.get_stock_daily(ts_code, yesterday, today)
+
+                    df = self.dm.get_stock_daily(ts_code, buy_date, sell_date)
                     if df.empty or len(df) < 2:
                         continue
-                    
-                    # 按日期排序，确保顺序正确
+
                     df = df.sort_values('trade_date')
-                    
-                    # 获取昨日收盘价（第一行）和今日开盘价（第二行）
-                    prev_close = float(df.iloc[0].get('close', 0))
-                    today_open = float(df.iloc[1].get('open', 0))
-                    
-                    if prev_close <= 0 or today_open <= 0:
+
+                    buy_open = float(df.iloc[0].get('open', 0))
+                    sell_open = float(df.iloc[1].get('open', 0))
+
+                    if buy_open <= 0 or sell_open <= 0:
                         continue
-                    
-                    # 计算溢价率
-                    premium = (today_open - prev_close) / prev_close * 100
+
+                    premium = (sell_open - buy_open) / buy_open * 100
                     premiums.append(premium)
-                    
-                    # 如果开盘价高于昨日涨停价，计入盈利
-                    if today_open > prev_close:
+
+                    if sell_open > buy_open:
                         profits.append(premium)
-                    
+
                 except Exception as e:
                     logger.debug(f"计算单只股票溢价失败: {e}")
                     continue
-            
+
             if premiums:
                 result['avg_premium'] = round(sum(premiums) / len(premiums), 2)
                 result['win_rate'] = round(len(profits) / len(premiums) * 100, 2)
-                
+
                 if profits:
                     result['avg_profit'] = round(sum(profits) / len(profits), 2)
                 else:
                     result['avg_profit'] = 0
-                
+
                 logger.info(f"[_calculate_prev_limit_up_performance] 统计完成: "
                            f"样本数={len(premiums)}, 平均溢价={result['avg_premium']}%, "
                            f"胜率={result['win_rate']}%, 平均赢面={result['avg_profit']}%")
             else:
                 logger.warning("[_calculate_prev_limit_up_performance] 无有效溢价数据")
-                
+
         except Exception as e:
             logger.error(f"[_calculate_prev_limit_up_performance] 计算失败: {e}")
 

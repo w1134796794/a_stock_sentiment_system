@@ -230,9 +230,9 @@ class WeakToStrongStrategy:
         # 转强信号池：当日发现的转强信号
         self.recovery_signals: List[RecoverySignal] = []
         
-        # ========== 参数配置 ==========
+        # ========== 参数配置 - 优化版本（支持动态调整）==========
         self.params = {
-            # 龙头识别标准
+            # 龙头识别标准 - 基础阈值
             "min_board_height": 4,           # 连板龙头：最少4连板
             "min_total_rise": 0.40,          # 趋势龙头：近10日涨幅>=40%（已弃用，改用斜率）
             "min_limit_up_count": 2,         # 趋势龙头：期间至少2个涨停
@@ -245,7 +245,7 @@ class WeakToStrongStrategy:
             "max_drawdown_for_recovery": 0.15,  # 最大允许回调15%（防A杀）
             "max_monitor_days": 5,              # 最多观察5天
             
-            # 转强信号标准
+            # 转强信号标准 - 基础阈值（支持动态调整）
             "min_gap": 0.03,                 # 高开>3%
             "ideal_gap": 0.05,               # 理想高开5%
             "max_gap": 0.08,                 # 高开<8%（避免追高）
@@ -256,7 +256,22 @@ class WeakToStrongStrategy:
             # 确认标准
             "max_open_drop": 0.02,           # 开盘回踩<2%
             "max_time_to_limit": 15,         # 15分钟内涨停
+            
+            # 新增：弹性评分系统参数
+            "enable_flexible_scoring": True,  # 启用弹性评分
+            "market_sentiment_weight": 0.3,   # 市场情绪权重
+            "sector_strength_weight": 0.3,    # 板块强度权重
+            "stock_momentum_weight": 0.4,     # 个股动量权重
+            
+            # 新增：动态参数调整
+            "dynamic_params_enabled": True,   # 启用动态参数
+            "sentiment_bullish_boost": 0.02,  # 牛市情绪下阈值降低2%
+            "sentiment_bearish_penalty": 0.02, # 熊市情绪下阈值提高2%
         }
+        
+        # 弹性评分缓存
+        self._flexible_score_cache = {}
+        self._market_sentiment = "neutral"  # 当前市场情绪
         
         # 加载已有池子
         self._load_pools()
@@ -1119,12 +1134,141 @@ class WeakToStrongStrategy:
         
         return signals
     
+    def _get_dynamic_params(self, weakening: WeakeningDragon) -> Dict:
+        """
+        获取动态调整后的参数
+        
+        根据市场情绪、板块强度、个股特征动态调整阈值
+        """
+        if not self.params.get('dynamic_params_enabled', False):
+            return self.params
+        
+        # 基础参数
+        dynamic_params = dict(self.params)
+        
+        # 根据市场情绪调整
+        sentiment_boost = 0
+        if self._market_sentiment == "bullish":
+            sentiment_boost = -self.params.get('sentiment_bullish_boost', 0.02)
+        elif self._market_sentiment == "bearish":
+            sentiment_boost = self.params.get('sentiment_bearish_penalty', 0.02)
+        
+        # 根据板块强度调整
+        sector_boost = 0
+        if weakening.sector_name and self.se:
+            try:
+                # 获取板块强度评分
+                sector_score = self._get_sector_strength(weakening.sector_name)
+                # 板块强度越高，阈值越低（越容易触发）
+                sector_boost = -0.01 * (sector_score / 100)  # 最高降低1%
+            except Exception:
+                pass
+        
+        # 根据个股历史波动率调整
+        volatility_boost = 0
+        if weakening.max_drawdown > 0:
+            # 回调越深，阈值越低（给更多机会）
+            volatility_boost = -0.005 * min(weakening.max_drawdown / 0.1, 1.0)
+        
+        # 综合调整
+        total_adjustment = sentiment_boost + sector_boost + volatility_boost
+        
+        # 应用调整（限制范围）
+        dynamic_params['min_gap'] = max(0.01, min(0.05, self.params['min_gap'] + total_adjustment))
+        dynamic_params['max_gap'] = max(0.05, min(0.12, self.params['max_gap'] + total_adjustment))
+        dynamic_params['min_auction_vol_ratio'] = max(0.05, min(0.20, self.params['min_auction_vol_ratio'] + total_adjustment))
+        
+        return dynamic_params
+    
+    def _get_sector_strength(self, sector_name: str) -> float:
+        """获取板块强度评分（0-100）"""
+        try:
+            # 如果板块引擎可用，获取板块强度
+            if self.se and hasattr(self.se, 'get_sector_strength'):
+                return self.se.get_sector_strength(sector_name)
+            return 50  # 默认中等强度
+        except Exception:
+            return 50
+    
+    def _calculate_flexible_score(self, 
+                                  gap_pct: float, 
+                                  auction_vol_ratio: float,
+                                  auction_amount: float,
+                                  weakening: WeakeningDragon) -> float:
+        """
+        计算弹性评分（0-100）
+        
+        综合考虑多个因子，给出更灵活的评分
+        """
+        if not self.params.get('enable_flexible_scoring', False):
+            return 0  # 不启用时返回0
+        
+        # 1. 高开评分（0-30分）
+        gap_score = 0
+        if gap_pct >= 0.05:
+            gap_score = 30
+        elif gap_pct >= 0.03:
+            gap_score = 20 + (gap_pct - 0.03) / 0.02 * 10
+        elif gap_pct >= 0.01:
+            gap_score = (gap_pct - 0.01) / 0.02 * 20
+        gap_score = min(30, max(0, gap_score))
+        
+        # 2. 竞价量评分（0-25分）
+        vol_score = 0
+        if auction_vol_ratio >= 0.15:
+            vol_score = 25
+        elif auction_vol_ratio >= 0.10:
+            vol_score = 15 + (auction_vol_ratio - 0.10) / 0.05 * 10
+        elif auction_vol_ratio >= 0.05:
+            vol_score = (auction_vol_ratio - 0.05) / 0.05 * 15
+        vol_score = min(25, max(0, vol_score))
+        
+        # 3. 竞价金额评分（0-20分）
+        amount_score = 0
+        if auction_amount >= 10000000:  # 1000万
+            amount_score = 20
+        elif auction_amount >= 5000000:  # 500万
+            amount_score = 10 + (auction_amount - 5000000) / 5000000 * 10
+        elif auction_amount >= 1000000:  # 100万
+            amount_score = (auction_amount - 1000000) / 4000000 * 10
+        amount_score = min(20, max(0, amount_score))
+        
+        # 4. 个股动量评分（0-15分）
+        momentum_score = 0
+        if weakening.max_drawdown <= 0.05:  # 回调小于5%
+            momentum_score = 15
+        elif weakening.max_drawdown <= 0.10:  # 回调小于10%
+            momentum_score = 10
+        elif weakening.max_drawdown <= 0.15:  # 回调小于15%
+            momentum_score = 5
+        
+        # 5. 市场情绪评分（0-10分）
+        sentiment_score = 0
+        if self._market_sentiment == "bullish":
+            sentiment_score = 10
+        elif self._market_sentiment == "neutral":
+            sentiment_score = 5
+        
+        # 综合评分
+        total_score = gap_score + vol_score + amount_score + momentum_score + sentiment_score
+        
+        return min(100, max(0, total_score))
+    
+    def update_market_sentiment(self, sentiment: str):
+        """更新市场情绪（用于动态参数调整）"""
+        valid_sentiments = ["bullish", "neutral", "bearish"]
+        if sentiment in valid_sentiments:
+            self._market_sentiment = sentiment
+            logger.info(f"[弱转强] 市场情绪更新为: {sentiment}")
+        else:
+            logger.warning(f"[弱转强] 无效的市场情绪: {sentiment}")
+    
     def _check_auction_recovery(self,
                                weakening: WeakeningDragon,
                                auction: Dict,
                                date_str: str,
                                time_str: str) -> Optional[RecoverySignal]:
-        """检查竞价转强信号"""
+        """检查竞价转强信号 - 优化版本（支持动态参数和弹性评分）"""
         open_price = auction.get('开盘价', 0)
         yest_close = weakening.current_price  # 用走弱时的价格作为基准
         
@@ -1133,8 +1277,13 @@ class WeakToStrongStrategy:
         
         gap_pct = (open_price - yest_close) / yest_close
         
-        # 高开范围检查
-        if not (self.params['min_gap'] <= gap_pct <= self.params['max_gap']):
+        # 获取动态参数
+        dynamic_params = self._get_dynamic_params(weakening)
+        
+        # 高开范围检查（使用动态参数）
+        if not (dynamic_params['min_gap'] <= gap_pct <= dynamic_params['max_gap']):
+            logger.debug(f"[{weakening.stock_code}] 高开{gap_pct*100:.1f}%不在范围"
+                        f"[{dynamic_params['min_gap']*100:.0f}%-{dynamic_params['max_gap']*100:.0f}%]")
             return None
         
         # 竞价量检查
@@ -1142,20 +1291,56 @@ class WeakToStrongStrategy:
         yest_vol = auction.get('昨日成交量', 1000000)  # 默认值防止除0
         auction_vol_ratio = auction_vol / yest_vol if yest_vol > 0 else 0
         
-        if auction_vol_ratio < self.params['min_auction_vol_ratio']:
+        if auction_vol_ratio < dynamic_params['min_auction_vol_ratio']:
+            logger.debug(f"[{weakening.stock_code}] 竞价量比例{auction_vol_ratio*100:.1f}%"
+                        f"<{dynamic_params['min_auction_vol_ratio']*100:.0f}%")
             return None
         
         # 竞价金额检查
         auction_amount = auction.get('竞价成交额', auction_vol * open_price)
         if auction_amount < self.params['min_auction_amount']:
+            logger.debug(f"[{weakening.stock_code}] 竞价金额{auction_amount/10000:.0f}万"
+                        f"<{self.params['min_auction_amount']/10000:.0f}万")
             return None
         
-        # 计算置信度
-        confidence = 0.70
+        # 计算弹性评分
+        flexible_score = self._calculate_flexible_score(
+            gap_pct, auction_vol_ratio, auction_amount, weakening
+        )
+        
+        # 计算置信度（结合弹性评分）
+        confidence = 0.60  # 基础置信度
+        
+        # 高开加分
         if gap_pct >= self.params['ideal_gap']:
             confidence += 0.15
+        elif gap_pct >= dynamic_params['min_gap']:
+            confidence += 0.05
+        
+        # 竞价量加分
         if auction_vol_ratio >= self.params['ideal_auction_vol_ratio']:
             confidence += 0.10
+        elif auction_vol_ratio >= dynamic_params['min_auction_vol_ratio']:
+            confidence += 0.05
+        
+        # 弹性评分加分（如果启用）
+        if self.params.get('enable_flexible_scoring', False):
+            if flexible_score >= 80:
+                confidence += 0.10
+            elif flexible_score >= 60:
+                confidence += 0.05
+        
+        # 根据走弱类型调整置信度
+        if weakening.weakening_type == "断板":
+            confidence += 0.05  # 断板后转强更可靠
+        elif "放量滞涨" in weakening.weakening_type:
+            confidence -= 0.05  # 放量滞涨后转强需要更谨慎
+        
+        final_confidence = min(0.95, max(0.50, confidence))
+        
+        logger.info(f"[{weakening.stock_code}] 竞价转强信号: "
+                   f"高开{gap_pct*100:.1f}%, 竞价量{auction_vol_ratio*100:.1f}%, "
+                   f"弹性评分{flexible_score:.0f}, 置信度{final_confidence*100:.0f}%")
         
         return RecoverySignal(
             stock_code=weakening.stock_code,
@@ -1168,7 +1353,7 @@ class WeakToStrongStrategy:
             open_price=open_price,
             open_change_pct=gap_pct,
             suggested_entry=open_price * 1.01,  # 建议买入价：开盘价+1%
-            confidence=min(confidence, 0.95)
+            confidence=final_confidence
         )
     
     def _confirm_recovery(self,

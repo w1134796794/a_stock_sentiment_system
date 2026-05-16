@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR, INDUSTRY_MAPPING_FILE
-from core.data.data_manager import DataManager
+from core.data.data_manager_main import DataManager
 from core.data.industry_mapper import IndustryMapper
 from core.analysis.pattern_recognition import PatternRecognition
 from core.analysis.emotion_cycle_engine import EmotionCycleEngine
@@ -15,7 +15,7 @@ from core.analysis.ths_sector_tracker import THSSectorTracker as SectorRotationT
 
 # 初始化
 dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
-mapper = IndustryMapper(INDUSTRY_MAPPING_FILE)
+mapper = IndustryMapper(dm)
 emotion_engine = EmotionCycleEngine()
 sector_tracker = SectorRotationTracker(dm)
 

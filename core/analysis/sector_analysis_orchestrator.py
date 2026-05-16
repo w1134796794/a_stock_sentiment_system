@@ -48,8 +48,8 @@ class SectorAnalysisResult:
     concept_persistence_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     industry_persistence_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     
-    # 共振分析结果
-    resonance_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # 主线识别结果（替代共振分析）
+    main_themes_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     
     # 概念连板梯队
     concept_hierarchy: Dict = field(default_factory=dict)
@@ -168,17 +168,19 @@ class SectorAnalysisOrchestrator:
         else:
             logger.info("  无持续热门行业")
         
-        # 5. 概念-行业共振分析
-        logger.info("[5/6] 分析概念-行业共振（市场主线）...")
-        result.resonance_df = self.sector_tracker.analyze_concept_industry_resonance(
+        # 5. 主线识别（四维评分：涨停集中度+梯队完整性+持续性+龙头强度）
+        logger.info("[5/6] 识别市场主线（四维评分模型）...")
+        result.main_themes_df = self.sector_tracker.identify_main_themes(
             trade_date,
             hot_concepts_df=result.hot_concepts_df,
             hot_industries_df=result.hot_industries_df,
-            lookback_days=10
+            concept_persistence_df=result.concept_persistence_df,
+            industry_persistence_df=result.industry_persistence_df,
+            top_n=10
         )
-        if not result.resonance_df.empty:
-            result.main_themes = result.resonance_df['主线名称'].tolist()
-            logger.info(f"[OK] 识别 {len(result.resonance_df)} 条市场主线")
+        if not result.main_themes_df.empty:
+            result.main_themes = result.main_themes_df['板块名称'].tolist()
+            logger.info(f"[OK] 识别 {len(result.main_themes_df)} 条市场主线")
         else:
             logger.info("  未识别到明显主线")
         
@@ -220,24 +222,54 @@ class SectorAnalysisOrchestrator:
     def _build_hot_sectors_for_pattern(self, result: SectorAnalysisResult) -> List[Dict]:
         """
         构建用于模式扫描的热点板块列表
-        
-        合并概念和行业持续性数据，格式化为模式识别需要的格式
+
+        优先使用主线识别结果，补充持续性分析中的活跃板块
         """
         hot_sectors = []
-        
-        # 合并概念和行业持续性数据
+        seen_names = set()
+
+        # 优先从主线识别结果中提取
+        if not result.main_themes_df.empty:
+            for _, row in result.main_themes_df.iterrows():
+                name = row.get('板块名称', '')
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
+
+                stage = row.get('所处阶段', '')
+                if stage in ['启动期', '加速期', '高潮期', '主升浪', '成长期', '成熟期']:
+                    hot_sectors.append({
+                        'sector_name': name,
+                        'sector_type': row.get('板块类型', ''),
+                        'stats': {
+                            '涨停家数': row.get('涨停家数', 0),
+                            '梯队详情': row.get('梯队详情', ''),
+                            '最高连板': row.get('最高连板', 0),
+                        },
+                        'trend_stage': stage,
+                        'action': row.get('操作建议', ''),
+                        'confidence': row.get('综合评分', 50) / 100,
+                        'hot_days': row.get('热点天数', 0),
+                        'hot_frequency': row.get('持续性评分', 0) / 100,
+                    })
+
+        # 补充持续性分析中的活跃板块（未出现在主线中的）
         all_persistence_df = pd.concat(
             [result.concept_persistence_df, result.industry_persistence_df],
             ignore_index=True
         )
-        
+
         if not all_persistence_df.empty:
             for _, row in all_persistence_df.iterrows():
+                name = row.get('板块名称', '')
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
+
                 stage = row.get('所处阶段', '')
-                # 只选取处于活跃阶段的板块
                 if stage in ['启动期', '加速期', '高潮期', '主升浪']:
                     hot_sectors.append({
-                        'sector_name': row.get('板块名称', ''),
+                        'sector_name': name,
                         'sector_type': row.get('板块类型', ''),
                         'stats': {'涨停家数': row.get('涨停家数', 0)},
                         'trend_stage': stage,
@@ -246,10 +278,9 @@ class SectorAnalysisOrchestrator:
                         'hot_days': row.get('热点天数', 0),
                         'hot_frequency': row.get('热点频率', 0),
                     })
-        
-        # 按持续性评分排序
+
         hot_sectors.sort(key=lambda x: x['confidence'], reverse=True)
-        
+
         logger.info(f"[SectorAnalysisOrchestrator] 构建热点板块列表: {len(hot_sectors)}个")
         return hot_sectors
     
@@ -290,11 +321,11 @@ class SectorAnalysisOrchestrator:
             return result.industry_persistence_df
         return pd.DataFrame()
     
-    def get_cached_resonance(self, trade_date: Optional[str] = None) -> pd.DataFrame:
-        """获取缓存的共振分析结果"""
+    def get_cached_main_themes(self, trade_date: Optional[str] = None) -> pd.DataFrame:
+        """获取缓存的主线识别结果"""
         result = self.get_cached_result(trade_date)
         if result:
-            return result.resonance_df
+            return result.main_themes_df
         return pd.DataFrame()
     
     def get_cached_hot_sectors_for_pattern(self, trade_date: Optional[str] = None) -> List[Dict]:

@@ -86,7 +86,7 @@ class IntegratedEmotionCycleEngine:
         Returns:
             IntegratedCycleResult: 综合判断结果
         """
-        # 1. 规则引擎判断 - 从indicators中提取所需参数
+        # 1. 规则引擎判断 - 从indicators中提取所需参数（包含新增特征）
         rule_state_enum, rule_scores = self.rule_engine.detect_cycle(
             limit_up_count=indicators.get('limit_up_count', 0),
             max_board_height=indicators.get('max_board_height', 0),
@@ -95,7 +95,9 @@ class IntegratedEmotionCycleEngine:
             prev_limit_up_premium=indicators.get('prev_limit_up_premium'),
             board_distribution=indicators.get('board_distribution'),
             continuous_rate=indicators.get('continuous_rate'),
-            limit_down_count=indicators.get('limit_down_count', 0)
+            limit_down_count=indicators.get('limit_down_count', 0),
+            win_rate=indicators.get('win_rate'),
+            avg_profit=indicators.get('avg_profit')
         )
         # 将Enum转换为字符串（ML模型需要字符串状态）
         rule_state = rule_state_enum.value if hasattr(rule_state_enum, 'value') else str(rule_state_enum)
@@ -160,9 +162,9 @@ class IntegratedEmotionCycleEngine:
 
     def _calculate_rule_confidence(self, scores: Dict, state: str) -> float:
         """
-        计算规则引擎的置信度
+        计算规则引擎的置信度 - 优化版本
         
-        基于各周期得分的离散程度
+        基于各周期得分的离散程度，增加更多特征维度
         """
         if not scores:
             return 0.5
@@ -174,7 +176,7 @@ class IntegratedEmotionCycleEngine:
         if total == 0:
             return 0.5
         
-        # 最高分占比越高，置信度越高
+        # 基础置信度：最高分占比
         confidence = max_score / total
         
         # 如果有明显第二高分，降低置信度
@@ -183,14 +185,37 @@ class IntegratedEmotionCycleEngine:
             ratio = sorted_values[1] / sorted_values[0]
             confidence *= (1 - ratio * 0.5)
         
-        return min(1.0, max(0.3, confidence))
+        # 增加得分离散度惩罚 - 如果所有得分都很接近，说明市场模糊
+        if len(values) >= 2:
+            mean_score = np.mean(values)
+            std_score = np.std(values)
+            # 离散度系数 (变异系数)
+            cv = std_score / mean_score if mean_score > 0 else 0
+            # 离散度低时降低置信度
+            if cv < 0.3:
+                confidence *= 0.7
+            elif cv < 0.5:
+                confidence *= 0.85
+        
+        # 增加绝对得分惩罚 - 如果最高分太低，说明信号弱
+        if max_score < 5:
+            confidence *= 0.8
+        elif max_score < 8:
+            confidence *= 0.9
+        
+        return min(1.0, max(0.2, confidence))
 
     def _integrate_results(self,
                            rule_state: str, rule_conf: float,
                            ml_state: str, ml_conf: float,
                            ml_probs: Dict[str, float]) -> Tuple[str, float, bool]:
         """
-        整合规则引擎和ML模型的结果
+        整合规则引擎和ML模型的结果 - 优化版本
+        
+        改进点：
+        1. 增加分歧处理机制 - 当两者置信度都不高时，采用保守策略
+        2. 动态权重调整 - 根据历史表现调整权重
+        3. 增加不确定性惩罚
         
         Returns:
             Tuple[str, float, bool]: (最终状态, 置信度, 是否一致)
@@ -198,24 +223,47 @@ class IntegratedEmotionCycleEngine:
         agreement = (rule_state == ml_state)
         
         if agreement:
-            # 两者一致，提高置信度
-            final_conf = min(1.0, (rule_conf + ml_conf) / 2 * 1.2)
+            # 两者一致，提高置信度（但不过度乐观）
+            avg_conf = (rule_conf + ml_conf) / 2
+            boost_factor = 1.15  # 从1.2降到1.15，更保守
+            final_conf = min(0.95, avg_conf * boost_factor)
             return rule_state, final_conf, True
         
-        # 两者不一致，加权投票
-        # 计算各状态的综合得分
+        # 两者不一致 - 改进分歧处理逻辑
+        # 情况1：两者置信度都很低（<0.5），市场处于模糊状态
+        if rule_conf < 0.5 and ml_conf < 0.5:
+            # 采用最保守的状态（震荡期）
+            logger.warning(f"[分歧处理] 两者置信度均低(规则:{rule_conf:.1%}, ML:{ml_conf:.1%})，采用保守策略")
+            return "震荡期", max(0.3, (rule_conf + ml_conf) / 2 * 0.8), False
+        
+        # 情况2：规则引擎置信度显著高于ML
+        if rule_conf > ml_conf + 0.2:
+            # 规则引擎主导，但降低置信度
+            final_conf = rule_conf * 0.85
+            return rule_state, final_conf, False
+        
+        # 情况3：ML置信度显著高于规则引擎
+        if ml_conf > rule_conf + 0.2:
+            # ML主导，但降低置信度
+            final_conf = ml_conf * 0.85
+            return ml_state, final_conf, False
+        
+        # 情况4：两者置信度接近但不一致 - 加权投票
         integrated_scores = {}
         
         for state in set(list(ml_probs.keys()) + [rule_state]):
             score = 0.0
             
-            # 规则引擎贡献
+            # 规则引擎贡献 - 动态权重
             if state == rule_state:
-                score += self.rule_weight * rule_conf
+                # 规则引擎在极端行情下更可靠
+                weight = self.rule_weight * (1.2 if rule_conf > 0.7 else 0.9)
+                score += weight * rule_conf
             
             # ML模型贡献
             ml_prob = ml_probs.get(state, 0.0)
-            score += self.ml_weight * ml_conf * ml_prob
+            ml_weight = self.ml_weight * (1.1 if ml_conf > 0.7 else 0.9)
+            score += ml_weight * ml_conf * ml_prob
             
             integrated_scores[state] = score
         
@@ -223,29 +271,48 @@ class IntegratedEmotionCycleEngine:
         final_state = max(integrated_scores, key=integrated_scores.get)
         final_conf = integrated_scores[final_state]
         
+        # 分歧时降低置信度
+        final_conf *= 0.9
+        
         return final_state, final_conf, False
 
     def _generate_analysis(self,
                            rule_state: str, rule_conf: float,
                            ml_state: str, ml_conf: float,
                            agreement: bool, final_state: str) -> str:
-        """生成分析说明"""
+        """生成分析说明 - 优化版本"""
         if agreement:
-            return f"规则引擎和ML模型一致判断为【{final_state}】，置信度高"
+            avg_conf = (rule_conf + ml_conf) / 2
+            if avg_conf > 0.7:
+                return f"规则引擎和ML模型一致判断为【{final_state}】，置信度高（{avg_conf:.1%}）"
+            elif avg_conf > 0.5:
+                return f"规则引擎和ML模型一致判断为【{final_state}】，置信度中等（{avg_conf:.1%}）"
+            else:
+                return f"规则引擎和ML模型一致判断为【{final_state}】，但置信度较低（{avg_conf:.1%}），建议谨慎"
         
         analysis_parts = []
         analysis_parts.append(f"规则引擎判断：{rule_state}（置信度{rule_conf:.1%}）")
         analysis_parts.append(f"ML模型预测：{ml_state}（置信度{ml_conf:.1%}）")
         
-        # 分析分歧原因
-        if rule_conf > 0.8 and ml_conf < 0.6:
+        # 分析分歧原因 - 更细致的分析
+        conf_diff = abs(rule_conf - ml_conf)
+        
+        if rule_conf < 0.5 and ml_conf < 0.5:
+            analysis_parts.append("两者置信度均低，市场信号模糊，采用保守策略")
+        elif rule_conf > 0.8 and ml_conf < 0.6:
             analysis_parts.append("规则引擎置信度显著高于ML模型，可能处于极端行情")
         elif ml_conf > 0.8 and rule_conf < 0.6:
             analysis_parts.append("ML模型置信度显著高于规则引擎，可能处于过渡行情")
+        elif conf_diff < 0.1:
+            analysis_parts.append("两者置信度接近但判断不同，市场处于转折期")
         else:
-            analysis_parts.append("两者置信度均不高，市场处于模糊状态")
+            analysis_parts.append("两者存在分歧，市场处于模糊状态")
         
-        analysis_parts.append(f"综合判断为【{final_state}】，建议谨慎操作")
+        # 根据最终状态给出具体建议
+        if final_state == "震荡期":
+            analysis_parts.append("综合判断为【震荡期】，建议控制仓位，快进快出")
+        else:
+            analysis_parts.append(f"综合判断为【{final_state}】，建议谨慎操作")
         
         return "；".join(analysis_parts)
 

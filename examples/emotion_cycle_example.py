@@ -9,7 +9,7 @@ from pathlib import Path
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.data.data_manager import DataManager
+from core.data.data_manager_main import DataManager
 from core.analysis.emotion_cycle_engine import EmotionCycleEngine
 from config.settings import TUSHARE_TOKEN, CACHE_DIR
 import loguru
@@ -45,9 +45,10 @@ def analyze_today_emotion(trade_date: str = None):
     # 5. 获取当日跌停数据（核按钮）
     limit_down_df = dm.get_limit_down_pool(trade_date)
     
-    # 6. 获取昨日涨停数据（用于计算溢价）
+    # 6. 获取前天涨停数据（用于T+1溢价计算：前天涨停→昨日开盘买→今日开盘卖）
     prev_trade_date = dm.date_utils.get_prev_trade_date(trade_date)
-    prev_limit_up_df = dm.get_limit_up_pool(prev_trade_date)
+    day_before_prev = dm.date_utils.get_prev_trade_date(prev_trade_date)
+    prev_limit_up_df = dm.get_limit_up_pool(day_before_prev)
     
     # 7. 调用情绪周期分析
     result = engine.analyze_market_data(

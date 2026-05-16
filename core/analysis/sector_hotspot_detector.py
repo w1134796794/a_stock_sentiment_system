@@ -35,6 +35,11 @@ class HotSpotDetector:
     """
     板块热点识别器
 
+    改进点：
+    1. 增加连续性约束 - 热点需要持续多天才能确认
+    2. 多因子综合评分 - 结合动量、资金、情绪等多维度
+    3. 历史趋势分析 - 考虑近期表现趋势
+
     将热点识别逻辑从THSSectorTracker中分离出来，职责单一：
     - 识别哪些板块是当日热点
     - 计算热点强度评分
@@ -45,6 +50,10 @@ class HotSpotDetector:
         self.dm = data_manager
         self.sector_params = sector_params
         self._member_cache: Dict[str, pd.DataFrame] = {}
+        
+        # 新增：历史热点记录（用于连续性分析）
+        self._hotspot_history: Dict[str, List[Dict]] = {}
+        self._history_max_days = 5  # 保留最近5天的历史记录
 
     def detect_concept_hotspots(self, concept_daily: pd.DataFrame,
                                  concept_codes: Set[str],
@@ -253,12 +262,22 @@ class HotSpotDetector:
     def _calc_industry_limit_up_stats(self, industry_df: pd.DataFrame,
                                        trade_date: str) -> pd.DataFrame:
         """计算行业板块涨停统计"""
-        # 获取当日涨停股票列表
         limit_up_codes = set()
         try:
             limit_up_df = self.dm.get_limit_up_pool(date=trade_date)
-            if not limit_up_df.empty and 'code' in limit_up_df.columns:
-                limit_up_codes = set(limit_up_df['code'].astype(str).str.replace(r'\.[A-Z]+$', '', regex=True))
+            if not limit_up_df.empty:
+                code_col = None
+                if '代码' in limit_up_df.columns:
+                    code_col = '代码'
+                elif 'code' in limit_up_df.columns:
+                    code_col = 'code'
+                elif 'ts_code' in limit_up_df.columns:
+                    code_col = 'ts_code'
+
+                if code_col:
+                    limit_up_codes = set(
+                        limit_up_df[code_col].astype(str).str.replace(r'\.[A-Z]+$', '', regex=True)
+                    )
         except Exception as e:
             logger.warning(f"[_calc_industry_limit_up_stats] 获取涨停数据失败: {e}")
 
@@ -313,85 +332,188 @@ class HotSpotDetector:
         return merged_df
 
     def _score_concept_sectors(self, result_df: pd.DataFrame) -> pd.DataFrame:
-        """概念板块专属评分"""
+        """概念板块专属评分 - 优化版本
+        
+        改进点：
+        1. 增加动量因子 - 考虑近期趋势
+        2. 增加情绪因子 - 涨停家数变化率
+        3. 增加资金因子 - 成交额占比
+        """
         max_rank = len(result_df)
+        if max_rank == 0:
+            return result_df
 
+        # 价格得分（涨幅排名）
         result_df['rank'] = result_df['pct_change'].rank(ascending=False, method='min')
         result_df['price_score'] = (max_rank - result_df['rank'] + 1) / max_rank * 100
 
+        # 成交额得分
         result_df['avg_amount'] = result_df['amount'] / result_df['member_count']
         result_df['amount_rank'] = result_df['avg_amount'].rank(ascending=False, method='min')
         result_df['amount_score'] = (max_rank - result_df['amount_rank'] + 1) / max_rank * 100
 
+        # 涨停得分（优化版本）
         if 'limit_cpt_rank' in result_df.columns:
             max_limit_up = result_df['limit_up_count'].max()
-
+            
             def calc_concept_limit_score(row):
                 if row['limit_up_count'] <= 0:
                     return 0
+                # 涨停数量得分
                 count_score = min(row['limit_up_count'] / max_limit_up * 100, 100) if max_limit_up > 0 else 0
+                # 排名得分（前20名有分）
                 rank_score = (20 - row['limit_cpt_rank']) / 20 * 100 if row['limit_cpt_rank'] <= 20 else 0
-                return count_score * 0.7 + rank_score * 0.3
+                # 涨停占比得分
+                member_count = row.get('member_count', 1)
+                limit_ratio = row['limit_up_count'] / member_count if member_count > 0 else 0
+                ratio_score = min(limit_ratio * 500, 100)  # 涨停占比10%得50分
+                
+                return count_score * 0.5 + rank_score * 0.3 + ratio_score * 0.2
 
             result_df['limit_score'] = result_df.apply(calc_concept_limit_score, axis=1)
         else:
             result_df['limit_score'] = 0
 
+        # 新增：动量得分（基于历史趋势）
+        result_df['momentum_score'] = self._calc_momentum_score(result_df)
+
+        # 综合评分（优化权重）
         result_df['composite_score'] = (
-            result_df['price_score'] * 0.35 +
-            result_df['amount_score'] * 0.25 +
-            result_df['limit_score'] * 0.40
+            result_df['price_score'] * 0.30 +
+            result_df['amount_score'] * 0.20 +
+            result_df['limit_score'] * 0.35 +
+            result_df['momentum_score'] * 0.15
         )
 
         return result_df
 
-    def _score_industry_sectors(self, result_df: pd.DataFrame) -> pd.DataFrame:
-        """行业板块专属评分"""
-        max_rank = len(result_df)
+    def _calc_momentum_score(self, result_df: pd.DataFrame) -> pd.Series:
+        """计算动量得分 - 基于历史趋势"""
+        scores = []
+        
+        for ts_code in result_df['ts_code']:
+            history = self._hotspot_history.get(ts_code, [])
+            
+            if len(history) < 2:
+                scores.append(50)  # 无历史数据，给中等分
+                continue
+            
+            # 计算近期趋势
+            recent_scores = [h.get('composite_score', 0) for h in history[-3:]]
+            
+            if len(recent_scores) >= 2:
+                # 趋势向上加分
+                trend = recent_scores[-1] - recent_scores[0]
+                if trend > 0:
+                    momentum = min(50 + trend * 2, 100)
+                else:
+                    momentum = max(50 + trend * 2, 0)
+            else:
+                momentum = 50
+            
+            scores.append(momentum)
+        
+        return pd.Series(scores, index=result_df.index)
 
+    def _update_hotspot_history(self, result_df: pd.DataFrame, trade_date: str):
+        """更新热点历史记录"""
+        for _, row in result_df.iterrows():
+            ts_code = row['ts_code']
+            
+            if ts_code not in self._hotspot_history:
+                self._hotspot_history[ts_code] = []
+            
+            # 添加当日记录
+            self._hotspot_history[ts_code].append({
+                'date': trade_date,
+                'composite_score': row.get('composite_score', 0),
+                'is_hot': row.get('is_hot', False),
+                'limit_up_count': row.get('limit_up_count', 0),
+                'pct_change': row.get('pct_change', 0)
+            })
+            
+            # 限制历史记录长度
+            if len(self._hotspot_history[ts_code]) > self._history_max_days:
+                self._hotspot_history[ts_code] = self._hotspot_history[ts_code][-self._history_max_days:]
+
+    def _score_industry_sectors(self, result_df: pd.DataFrame) -> pd.DataFrame:
+        """行业板块专属评分 - 优化版本
+        
+        改进点：
+        1. 增加动量因子 - 考虑近期趋势
+        2. 增加资金因子 - 成交额占比和变化率
+        3. 增加涨停占比因子
+        """
+        max_rank = len(result_df)
+        if max_rank == 0:
+            return result_df
+
+        # 价格得分（涨幅排名）
         result_df['rank'] = result_df['pct_change'].rank(ascending=False, method='min')
         result_df['price_score'] = (max_rank - result_df['rank'] + 1) / max_rank * 100
 
+        # 成交额得分
         result_df['avg_amount'] = result_df['amount'] / result_df['member_count']
         result_df['amount_rank'] = result_df['avg_amount'].rank(ascending=False, method='min')
         result_df['amount_score'] = (max_rank - result_df['amount_rank'] + 1) / max_rank * 100
 
+        # 涨停得分（优化版本）
         if 'limit_up_count' in result_df.columns:
             max_limit_up = result_df['limit_up_count'].max()
 
             def calc_industry_limit_score(row):
                 if row['limit_up_count'] <= 0:
                     return 0
+                # 涨停数量得分
                 count_score = min(row['limit_up_count'] / max_limit_up * 100, 100) if max_limit_up > 0 else 0
-                return count_score * 0.6
+                # 涨停占比得分
+                member_count = row.get('member_count', 1)
+                limit_ratio = row['limit_up_count'] / member_count if member_count > 0 else 0
+                ratio_score = min(limit_ratio * 1000, 100)  # 涨停占比5%得50分
+                
+                return count_score * 0.6 + ratio_score * 0.4
 
             result_df['limit_score'] = result_df.apply(calc_industry_limit_score, axis=1)
         else:
             result_df['limit_score'] = 0
 
+        # 新增：动量得分
+        result_df['momentum_score'] = self._calc_momentum_score(result_df)
+
+        # 综合评分（优化权重）
         result_df['composite_score'] = (
-            result_df['price_score'] * 0.30 +
-            result_df['amount_score'] * 0.40 +
-            result_df['limit_score'] * 0.30
+            result_df['price_score'] * 0.25 +
+            result_df['amount_score'] * 0.35 +
+            result_df['limit_score'] * 0.25 +
+            result_df['momentum_score'] * 0.15
         )
 
         return result_df
 
-    def _mark_hot_concepts(self, result_df: pd.DataFrame) -> pd.DataFrame:
-        """标记热点概念"""
+    def _mark_hot_concepts(self, result_df: pd.DataFrame, trade_date: str = None) -> pd.DataFrame:
+        """标记热点概念 - 优化版本
+        
+        改进点：
+        1. 增加连续性约束 - 需要历史表现支持
+        2. 增加综合评分门槛
+        3. 优化条件组合逻辑
+        """
         params = self.sector_params.get('概念', {})
         min_pct_change = params.get('min_pct_change', 5.0)
+        min_composite_score = params.get('min_composite_score', 60.0)
 
         def is_hot_concept(row):
             limit_up_count = row.get('limit_up_count', 0)
             limit_cpt_rank = row.get('limit_cpt_rank', 999)
             member_count = row.get('member_count', 1)
             pct_change = row.get('pct_change', 0)
+            composite_score = row.get('composite_score', 0)
 
             has_limit_up = limit_up_count > 0
             if not has_limit_up:
                 return False
 
+            # 基础条件
             is_top10_limit = limit_cpt_rank <= 10
             is_top20_limit = limit_cpt_rank <= 20
 
@@ -399,12 +521,25 @@ class HotSpotDetector:
             has_good_spread = limit_up_ratio > 0.10
 
             has_strong_move = pct_change > min_pct_change
+            
+            # 综合评分门槛
+            has_good_score = composite_score >= min_composite_score
 
-            if is_top10_limit:
+            # 连续性约束（如果有历史数据）
+            ts_code = row.get('ts_code', '')
+            history = self._hotspot_history.get(ts_code, [])
+            has_continuity = False
+            if len(history) >= 2:
+                # 至少连续2天有涨停
+                recent_limit_ups = [h.get('limit_up_count', 0) for h in history[-2:]]
+                has_continuity = all(count > 0 for count in recent_limit_ups)
+
+            # 决策逻辑
+            if is_top10_limit and has_good_score:
                 return True
-            elif is_top20_limit and (has_good_spread or has_strong_move):
+            elif is_top20_limit and has_good_spread and has_strong_move and has_good_score:
                 return True
-            elif has_good_spread and has_strong_move:
+            elif has_good_spread and has_strong_move and (has_continuity or composite_score >= 70):
                 return True
 
             return False
@@ -412,18 +547,30 @@ class HotSpotDetector:
         result_df['is_hot'] = result_df.apply(is_hot_concept, axis=1)
         result_df['is_hot_concept'] = result_df['is_hot']
         result_df['is_hot_industry'] = False
+        
+        # 更新历史记录
+        if trade_date:
+            self._update_hotspot_history(result_df, trade_date)
 
         return result_df
 
-    def _mark_hot_industries(self, result_df: pd.DataFrame) -> pd.DataFrame:
-        """标记热点行业"""
+    def _mark_hot_industries(self, result_df: pd.DataFrame, trade_date: str = None) -> pd.DataFrame:
+        """标记热点行业 - 优化版本
+        
+        改进点：
+        1. 增加连续性约束
+        2. 增加综合评分门槛
+        3. 优化条件组合逻辑
+        """
         params = self.sector_params.get('行业', {})
         min_pct_change = params.get('min_pct_change', 3.0)
+        min_composite_score = params.get('min_composite_score', 55.0)
 
         def is_hot_industry(row):
             limit_up_count = row.get('limit_up_count', 0)
             member_count = row.get('member_count', 1)
             pct_change = row.get('pct_change', 0)
+            composite_score = row.get('composite_score', 0)
 
             rank = row.get('rank', 999)
             total_count = len(result_df)
@@ -438,12 +585,24 @@ class HotSpotDetector:
 
             limit_up_ratio = limit_up_count / member_count if member_count > 0 else 0
             has_spread = limit_up_ratio > 0.05
+            
+            # 综合评分门槛
+            has_good_score = composite_score >= min_composite_score
 
-            if is_hot_by_price and is_high_amount:
+            # 连续性约束
+            ts_code = row.get('ts_code', '')
+            history = self._hotspot_history.get(ts_code, [])
+            has_continuity = False
+            if len(history) >= 2:
+                recent_scores = [h.get('composite_score', 0) for h in history[-2:]]
+                has_continuity = all(score >= min_composite_score for score in recent_scores)
+
+            # 决策逻辑（更严格）
+            if is_hot_by_price and is_high_amount and has_good_score:
                 return True
-            elif is_hot_by_price and has_limit_up:
+            elif is_hot_by_price and has_limit_up and has_good_score:
                 return True
-            elif is_high_amount and has_spread:
+            elif is_high_amount and has_spread and (has_continuity or composite_score >= 65):
                 return True
 
             return False
@@ -451,5 +610,9 @@ class HotSpotDetector:
         result_df['is_hot'] = result_df.apply(is_hot_industry, axis=1)
         result_df['is_hot_concept'] = False
         result_df['is_hot_industry'] = result_df['is_hot']
+        
+        # 更新历史记录
+        if trade_date:
+            self._update_hotspot_history(result_df, trade_date)
 
         return result_df

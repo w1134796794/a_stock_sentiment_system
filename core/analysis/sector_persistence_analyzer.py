@@ -4,15 +4,21 @@
 负责分析板块的历史持续性，判断板块所处的生命周期阶段
 
 核心职责：
-1. 概念板块持续性分析 - M天内N次模式
-2. 行业板块持续性分析 - M天内N次模式
+1. 概念板块持续性分析 - 统计过去10天出现次数最多的板块
+2. 行业板块持续性分析 - 统计过去10天出现次数最多的板块
 3. 计算持续性评分和所处阶段
 4. 生成操作建议
+
+改进逻辑：
+- 不再局限于"当前热点"才分析历史
+- 而是扫描过去10天所有出现过的热点，统计出现次数
+- 返回出现次数最多的板块作为"持续性热点"
 """
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
+from collections import Counter
 
 import loguru
 
@@ -36,58 +42,78 @@ class SectorPersistenceAnalyzer:
     """
     板块持续性分析器
 
+    改进点：
+    1. 扫描过去10天所有热点，统计出现次数
+    2. 返回出现次数最多的板块作为持续性热点
+    3. 不再局限于当前热点才分析历史
+
     将持续性分析逻辑从THSSectorTracker中分离出来，职责单一：
-    - 分析板块在M天内出现N次热点的模式
-    - 计算持续性评分
-    - 判断板块所处生命周期阶段
+    - 统计过去M天内各板块出现热点的次数
+    - 返回出现次数最多的topN板块
+    - 计算持续性评分和所处阶段
     """
 
     def __init__(self, data_manager, persistence_config: Dict):
         self.dm = data_manager
         self.persistence_config = persistence_config
+        
+        # 新增：增量计算缓存
+        self._analysis_cache: Dict[str, Dict] = {}
+        self._cache_max_size = 100
+        
+        # 新增：历史分析结果缓存（用于增量计算）
+        self._historical_analysis_cache: Dict[str, pd.DataFrame] = {}
+        self._last_analysis_date: Optional[str] = None
 
     def analyze_concept_persistence(self, trade_date: str,
                                      hot_concepts_df: pd.DataFrame,
                                      lookback_days: int = 10,
                                      top_n: int = 10) -> pd.DataFrame:
         """
-        分析概念板块持续性 - M天内N次模式
+        分析概念板块持续性 - 统计过去10天出现次数最多的概念
+
+        改进逻辑：
+        1. 扫描过去lookback_days天所有被标记为热点的概念
+        2. 统计每个概念出现的次数
+        3. 返回出现次数最多的top_n个概念
+        4. 不再局限于"当前热点"才分析
 
         Args:
             trade_date: 交易日期
-            hot_concepts_df: 当前热点概念分析结果
-            lookback_days: 回溯交易日数量M
+            hot_concepts_df: 当前热点概念分析结果（用于获取最新数据）
+            lookback_days: 回溯交易日数量M（默认10天）
             top_n: 返回前N个持续热门概念
 
         Returns:
             DataFrame: 概念持续性分析结果
         """
-        logger.info("[SectorPersistenceAnalyzer] 开始分析概念板块持续性...")
+        logger.info("[SectorPersistenceAnalyzer] 开始分析概念板块持续性（按出现次数排序）...")
 
-        hot_threshold_days = self.persistence_config.get('hot_threshold_days', 3)
-
-        # 只关注当前被标记为热点的概念
-        current_hot_concepts = hot_concepts_df[hot_concepts_df['is_hot'] == True]
-        if current_hot_concepts.empty:
-            logger.warning("[analyze_concept_persistence] 当前无热点概念")
-            return pd.DataFrame()
-
-        target_concept_names = set(current_hot_concepts['name'].tolist())
-        logger.info(f"[analyze_concept_persistence] 分析 {len(target_concept_names)} 个热点概念的历史持续性")
-
-        # 获取历史数据
+        # 获取历史数据（不再局限于当前热点）
         daily_results = self._collect_historical_data(
-            target_concept_names, trade_date, lookback_days, '概念'
+            set(), trade_date, lookback_days, '概念'
         )
 
         if not daily_results:
             logger.warning("[analyze_concept_persistence] 无法获取历史数据")
             return pd.DataFrame()
 
-        # 分析持续性
+        # 统计所有板块在过去lookback_days天内出现热点的次数
+        hot_counts = self._count_hot_appearances(daily_results, lookback_days)
+
+        if not hot_counts:
+            logger.warning("[analyze_concept_persistence] 历史数据中无热点记录")
+            return pd.DataFrame()
+
+        # 获取出现次数最多的top_n个板块
+        top_sectors = hot_counts.most_common(top_n)
+        logger.info(f"[analyze_concept_persistence] 统计完成，共{len(hot_counts)}个概念出现过热点，返回前{len(top_sectors)}个")
+
+        # 分析这些板块的详细持续性数据
+        target_names = set([name for name, _ in top_sectors])
         results = self._analyze_persistence_m_n(
-            target_concept_names, daily_results, lookback_days,
-            hot_threshold_days, '概念'
+            target_names, daily_results, lookback_days,
+            hot_threshold_days=1, sector_type='概念'
         )
 
         if not results:
@@ -95,9 +121,13 @@ class SectorPersistenceAnalyzer:
 
         result_df = pd.DataFrame(results)
         result_df = result_df[result_df['热点天数'] >= 1]
-        result_df = result_df.sort_values('持续性评分', ascending=False)
+        # 按热点天数降序排序（出现次数最多的排在前面）
+        result_df = result_df.sort_values('热点天数', ascending=False)
 
-        logger.info(f"[analyze_concept_persistence] 分析完成，{len(result_df.head(top_n))} 个持续热门概念")
+        logger.info(f"[analyze_concept_persistence] 分析完成，返回 {len(result_df)} 个持续热门概念")
+        for _, row in result_df.head(5).iterrows():
+            logger.info(f"  - {row['板块名称']}: {lookback_days}天内{row['热点天数']}次热点, 评分{row['持续性评分']:.1f}")
+
         return result_df.head(top_n)
 
     def analyze_industry_persistence(self, trade_date: str,
@@ -105,43 +135,50 @@ class SectorPersistenceAnalyzer:
                                       lookback_days: int = 10,
                                       top_n: int = 10) -> pd.DataFrame:
         """
-        分析行业板块持续性 - M天内N次模式
+        分析行业板块持续性 - 统计过去10天出现次数最多的行业
+
+        改进逻辑：
+        1. 扫描过去lookback_days天所有被标记为热点的行业
+        2. 统计每个行业出现的次数
+        3. 返回出现次数最多的top_n个行业
+        4. 不再局限于"当前热点"才分析
 
         Args:
             trade_date: 交易日期
-            hot_industries_df: 当前热点行业分析结果
-            lookback_days: 回溯交易日数量M
+            hot_industries_df: 当前热点行业分析结果（用于获取最新数据）
+            lookback_days: 回溯交易日数量M（默认10天）
             top_n: 返回前N个持续热门行业
 
         Returns:
             DataFrame: 行业持续性分析结果
         """
-        logger.info("[SectorPersistenceAnalyzer] 开始分析行业板块持续性...")
+        logger.info("[SectorPersistenceAnalyzer] 开始分析行业板块持续性（按出现次数排序）...")
 
-        hot_threshold_days = self.persistence_config.get('hot_threshold_days', 3)
-
-        # 只关注当前被标记为热点的行业
-        current_hot_industries = hot_industries_df[hot_industries_df['is_hot'] == True]
-        if current_hot_industries.empty:
-            logger.warning("[analyze_industry_persistence] 当前无热点行业")
-            return pd.DataFrame()
-
-        target_industry_names = set(current_hot_industries['name'].tolist())
-        logger.info(f"[analyze_industry_persistence] 分析 {len(target_industry_names)} 个热点行业的历史持续性")
-
-        # 获取历史数据
+        # 获取历史数据（不再局限于当前热点）
         daily_results = self._collect_historical_data(
-            target_industry_names, trade_date, lookback_days, '行业'
+            set(), trade_date, lookback_days, '行业'
         )
 
         if not daily_results:
             logger.warning("[analyze_industry_persistence] 无法获取历史数据")
             return pd.DataFrame()
 
-        # 分析持续性
+        # 统计所有板块在过去lookback_days天内出现热点的次数
+        hot_counts = self._count_hot_appearances(daily_results, lookback_days)
+
+        if not hot_counts:
+            logger.warning("[analyze_industry_persistence] 历史数据中无热点记录")
+            return pd.DataFrame()
+
+        # 获取出现次数最多的top_n个板块
+        top_sectors = hot_counts.most_common(top_n)
+        logger.info(f"[analyze_industry_persistence] 统计完成，共{len(hot_counts)}个行业出现过热点，返回前{len(top_sectors)}个")
+
+        # 分析这些板块的详细持续性数据
+        target_names = set([name for name, _ in top_sectors])
         results = self._analyze_persistence_m_n(
-            target_industry_names, daily_results, lookback_days,
-            hot_threshold_days, '行业'
+            target_names, daily_results, lookback_days,
+            hot_threshold_days=1, sector_type='行业'
         )
 
         if not results:
@@ -149,10 +186,43 @@ class SectorPersistenceAnalyzer:
 
         result_df = pd.DataFrame(results)
         result_df = result_df[result_df['热点天数'] >= 1]
-        result_df = result_df.sort_values('持续性评分', ascending=False)
+        # 按热点天数降序排序（出现次数最多的排在前面）
+        result_df = result_df.sort_values('热点天数', ascending=False)
 
-        logger.info(f"[analyze_industry_persistence] 分析完成，{len(result_df.head(top_n))} 个持续热门行业")
+        logger.info(f"[analyze_industry_persistence] 分析完成，返回 {len(result_df)} 个持续热门行业")
+        for _, row in result_df.head(5).iterrows():
+            logger.info(f"  - {row['板块名称']}: {lookback_days}天内{row['热点天数']}次热点, 评分{row['持续性评分']:.1f}")
+
         return result_df.head(top_n)
+
+    def _count_hot_appearances(self, daily_results: Dict[str, pd.DataFrame],
+                                lookback_days: int) -> Counter:
+        """
+        统计每个板块在过去lookback_days天内被标记为热点的次数
+
+        Args:
+            daily_results: 每日分析结果字典 {date: DataFrame}
+            lookback_days: 回溯天数
+
+        Returns:
+            Counter: 板块名称 -> 出现次数
+        """
+        hot_counts = Counter()
+        date_list = sorted(daily_results.keys(), reverse=True)[:lookback_days]
+
+        for date in date_list:
+            daily_df = daily_results[date]
+            if daily_df.empty or 'is_hot' not in daily_df.columns:
+                continue
+
+            # 只统计被标记为热点的板块
+            hot_sectors = daily_df[daily_df['is_hot'] == True]
+            for _, row in hot_sectors.iterrows():
+                sector_name = row.get('name', '')
+                if sector_name:
+                    hot_counts[sector_name] += 1
+
+        return hot_counts
 
     def _collect_historical_data(self, target_names: Set[str],
                                   trade_date: str,
@@ -180,8 +250,13 @@ class SectorPersistenceAnalyzer:
                                   hot_threshold_days: int,
                                   sector_type: str) -> List[Dict]:
         """
-        分析板块持续性 - M天内N次模式
-
+        分析板块持续性 - M天内N次模式 - 优化版本
+        
+        改进点：
+        1. 使用缓存避免重复计算
+        2. 增量计算 - 复用上次的分析结果
+        3. 优化循环效率
+        
         Args:
             target_sectors: 目标板块名称集合
             daily_results: 每日分析结果字典 {date: DataFrame}
@@ -194,8 +269,30 @@ class SectorPersistenceAnalyzer:
         """
         results = []
         date_list = sorted(daily_results.keys(), reverse=True)
+        
+        # 新增：检查缓存是否可用（增量计算）
+        cache_key = f"{sector_type}_{lookback_days}_{hot_threshold_days}"
+        cached_analysis = self._analysis_cache.get(cache_key, {})
+        
+        # 新增：统计优化效果
+        cache_hits = 0
+        cache_misses = 0
 
         for sector_name in target_sectors:
+            # 新增：检查缓存
+            sector_cache_key = f"{cache_key}_{sector_name}"
+            if sector_cache_key in cached_analysis:
+                cached_result = cached_analysis[sector_cache_key]
+                # 检查缓存是否仍然有效（日期列表未变化）
+                cached_dates = cached_result.get('_date_list', [])
+                if cached_dates == date_list:
+                    results.append(cached_result)
+                    cache_hits += 1
+                    continue
+            
+            cache_misses += 1
+            
+            # 标准分析流程
             sector_history = []
             hot_days_detail = []
 
@@ -267,7 +364,7 @@ class SectorPersistenceAnalyzer:
             up_count = latest.get('limit_up_count', 0)
             operation_advice = self._get_operation_advice(is_persistent_hot, stage, rank_trend)
 
-            results.append({
+            result = {
                 '板块名称': latest['name'],
                 '板块类型': latest['type'],
                 'ts_code': latest.get('ts_code', ''),
@@ -286,8 +383,25 @@ class SectorPersistenceAnalyzer:
                 '所处阶段': stage,
                 '涨停家数': up_count,
                 '操作建议': operation_advice,
-                '策略理由': self._get_strategy_reason(latest, hot_days, trend_desc, stage)
-            })
+                '策略理由': self._get_strategy_reason(latest, hot_days, trend_desc, stage),
+                '_date_list': date_list  # 用于缓存验证
+            }
+            
+            # 新增：保存到缓存
+            if cache_key not in self._analysis_cache:
+                self._analysis_cache[cache_key] = {}
+            self._analysis_cache[cache_key][sector_cache_key] = result
+            
+            # 新增：限制缓存大小
+            if len(self._analysis_cache[cache_key]) > self._cache_max_size:
+                oldest_sector = next(iter(self._analysis_cache[cache_key]))
+                del self._analysis_cache[cache_key][oldest_sector]
+            
+            results.append(result)
+        
+        # 新增：记录缓存效果
+        if cache_hits > 0 or cache_misses > 0:
+            logger.info(f"[持续性分析] 缓存命中: {cache_hits}, 缓存未命中: {cache_misses}, 命中率: {cache_hits/(cache_hits+cache_misses)*100:.1f}%")
 
         return results
 
@@ -335,13 +449,19 @@ class SectorPersistenceAnalyzer:
                                           lookback_days: int = 10,
                                           top_n: int = 10) -> pd.DataFrame:
         """
-        使用提供的历史数据分析持续性
+        使用提供的历史数据分析持续性 - 改进版本
+
+        改进逻辑：
+        1. 扫描historical_data中所有被标记为热点的板块
+        2. 统计每个板块出现的次数
+        3. 返回出现次数最多的top_n个板块
+        4. 不再局限于"当前热点"才分析
 
         这是主要的入口方法，由THSSectorTracker调用并提供历史数据
 
         Args:
             trade_date: 交易日期
-            hot_sectors_df: 当前热点板块DataFrame
+            hot_sectors_df: 当前热点板块DataFrame（用于补充最新数据）
             historical_data: 历史数据字典 {date: DataFrame}
             lookback_days: 回溯天数
             top_n: 返回前N个
@@ -349,21 +469,30 @@ class SectorPersistenceAnalyzer:
         Returns:
             DataFrame: 持续性分析结果
         """
-        if hot_sectors_df.empty or 'is_hot' not in hot_sectors_df.columns:
+        if not historical_data:
+            logger.warning("[analyze_persistence_with_history] 历史数据为空")
             return pd.DataFrame()
 
-        hot_threshold_days = self.persistence_config.get('hot_threshold_days', 3)
-        current_hot = hot_sectors_df[hot_sectors_df['is_hot'] == True]
+        sector_type = '概念'
+        if not hot_sectors_df.empty and 'type' in hot_sectors_df.columns:
+            sector_type = hot_sectors_df.iloc[0].get('type', '概念')
 
-        if current_hot.empty:
+        # 统计所有板块在过去lookback_days天内出现热点的次数
+        hot_counts = self._count_hot_appearances(historical_data, lookback_days)
+
+        if not hot_counts:
+            logger.warning("[analyze_persistence_with_history] 历史数据中无热点记录")
             return pd.DataFrame()
 
-        target_names = set(current_hot['name'].tolist())
-        sector_type = current_hot.iloc[0].get('type', '概念') if not current_hot.empty else '概念'
+        # 获取出现次数最多的top_n个板块
+        top_sectors = hot_counts.most_common(top_n)
+        logger.info(f"[analyze_persistence_with_history] 统计完成，共{len(hot_counts)}个板块出现过热点，返回前{len(top_sectors)}个")
 
+        # 分析这些板块的详细持续性数据
+        target_names = set([name for name, _ in top_sectors])
         results = self._analyze_persistence_m_n(
             target_names, historical_data, lookback_days,
-            hot_threshold_days, sector_type
+            hot_threshold_days=1, sector_type=sector_type
         )
 
         if not results:
@@ -371,6 +500,11 @@ class SectorPersistenceAnalyzer:
 
         result_df = pd.DataFrame(results)
         result_df = result_df[result_df['热点天数'] >= 1]
-        result_df = result_df.sort_values('持续性评分', ascending=False)
+        # 按热点天数降序排序（出现次数最多的排在前面）
+        result_df = result_df.sort_values('热点天数', ascending=False)
+
+        logger.info(f"[analyze_persistence_with_history] 分析完成，返回 {len(result_df)} 个持续热门板块")
+        for _, row in result_df.head(5).iterrows():
+            logger.info(f"  - {row['板块名称']}: {lookback_days}天内{row['热点天数']}次热点, 评分{row['持续性评分']:.1f}")
 
         return result_df.head(top_n)

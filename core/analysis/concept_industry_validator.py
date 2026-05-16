@@ -3,7 +3,7 @@
 
 实现双轨制分析：
 1. 概念维度：同花顺概念板块（短线热点）
-2. 行业维度：东财行业体系（中线趋势）
+2. 行业维度：同花顺行业体系（中线趋势）
 
 核心功能：
 - 概念成分股行业分布分析
@@ -60,28 +60,24 @@ class CrossValidationResult:
 class ConceptIndustryValidator:
     """
     概念-行业交叉验证器
-    
-    结合同花顺概念热点和东财行业分布，识别真正的产业趋势
+
+    结合同花顺概念热点和同花顺行业分布，识别真正的产业趋势
     """
-    
+
     def __init__(self, data_manager=None):
         self.dm = data_manager
-        self.ths_mapper = None  # 同花顺映射器
-        self.dc_mapper = None   # 东财映射器
+        self.ths_mapper = None
         self._init_mappers()
-    
+
     def _init_mappers(self):
         """初始化行业映射器"""
         try:
-            from core.data.industry_mapper import THSIndustryMapper, DCIndustryMapper
-            
+            from core.data.industry_mapper import THSIndustryMapper
+
             if self.dm:
                 self.ths_mapper = THSIndustryMapper(self.dm)
                 logger.info("[ConceptIndustryValidator] 同花顺映射器初始化成功")
-            
-            self.dc_mapper = DCIndustryMapper()
-            logger.info("[ConceptIndustryValidator] 东财映射器初始化成功")
-            
+
         except Exception as e:
             logger.warning(f"[ConceptIndustryValidator] 映射器初始化失败: {e}")
     
@@ -104,7 +100,7 @@ class ConceptIndustryValidator:
                 'top3_industries': [(行业, 数量), ...]
             }
         """
-        if not self.ths_mapper or not self.dc_mapper:
+        if not self.ths_mapper:
             logger.warning("[analyze_concept_industry_distribution] 映射器未初始化")
             return {}
         
@@ -404,7 +400,7 @@ if __name__ == "__main__":
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     
-    from core.data.data_manager import DataManager
+    from core.data.data_manager_main import DataManager
     from config.settings import TUSHARE_TOKEN, CACHE_DIR
     
     print("="*80)

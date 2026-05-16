@@ -422,7 +422,9 @@ class MoneyFlowAnalyzer:
             # 获取当日涨停股票
             limit_up_df = self.dm.get_limit_up_pool(trade_date)
             if not limit_up_df.empty:
-                stock_list = limit_up_df['code'].tolist() if 'code' in limit_up_df.columns else []
+                code_col = '代码' if '代码' in limit_up_df.columns else ('code' if 'code' in limit_up_df.columns else None)
+                if code_col:
+                    stock_list = limit_up_df[code_col].tolist()
         
         if not stock_list:
             return pd.DataFrame()

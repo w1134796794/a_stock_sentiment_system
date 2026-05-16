@@ -28,6 +28,11 @@ logger = loguru.logger
 class DataManager:
     """数据管理层 - 负责多源数据获取与本地缓存
     
+    改进点：
+    1. 实现批量获取接口 - 减少API调用次数
+    2. 增加多级缓存策略 - 内存缓存+本地缓存
+    3. 优化数据获取效率
+    
     缓存目录结构:
         cache/
         ├── market/              # 市场基础数据
@@ -64,6 +69,16 @@ class DataManager:
         self.time_utils = TimeUtils()
         self.calculation_utils = CalculationUtils()
         self.validation_utils = ValidationUtils()
+        
+        # 新增：内存缓存（多级缓存策略）
+        self._memory_cache = {}
+        self._cache_ttl = 300  # 内存缓存5分钟过期
+        self._cache_timestamp = {}
+        
+        # 新增：批量获取缓存
+        self._batch_cache = {}
+        self._batch_cache_timestamp = {}
+        self._batch_cache_ttl = 600  # 批量缓存10分钟过期
     
     def _init_cache_structure(self):
         """初始化缓存目录结构"""
@@ -1489,7 +1504,7 @@ class DataManager:
             if df is not None and not df.empty:
                 # 缓存结果
                 df.to_csv(cache_file, index=False)
-                logger.info(f"[get_ths_index] 获取同花顺板块指数: {len(df)}条，类型={index_type or '全部'}")
+                # logger.info(f"[get_ths_index] 获取同花顺板块指数: {len(df)}条，类型={index_type or '全部'}")
                 return df
             else:
                 logger.warning(f"[get_ths_index] 返回空数据")
@@ -1569,7 +1584,7 @@ class DataManager:
             if df is not None and not df.empty:
                 # 缓存结果
                 df.to_csv(cache_file, index=False)
-                logger.info(f"[get_ths_daily] 获取同花顺板块行情: {len(df)}条")
+                # logger.info(f"[get_ths_daily] 获取同花顺板块行情: {len(df)}条")
                 return df
             else:
                 logger.warning(f"[get_ths_daily] 返回空数据")
@@ -1621,7 +1636,7 @@ class DataManager:
             if df is not None and not df.empty:
                 # 缓存结果
                 df.to_csv(cache_file, index=False)
-                logger.info(f"[get_ths_member] 获取同花顺板块{ts_code}成分: {len(df)}只股票")
+                # logger.info(f"[get_ths_member] 获取同花顺板块{ts_code}成分: {len(df)}只股票")
                 return df
             else:
                 logger.warning(f"[get_ths_member] {ts_code} 返回空数据")
@@ -1629,6 +1644,366 @@ class DataManager:
         except Exception as e:
             logger.error(f"[get_ths_member] 获取同花顺板块{ts_code}成分异常: {e}")
 
+        return pd.DataFrame()
+
+    # ==================== 新增：多级缓存管理方法 ====================
+    
+    def _get_from_memory_cache(self, cache_key: str) -> Optional[pd.DataFrame]:
+        """从内存缓存获取数据"""
+        if cache_key in self._memory_cache:
+            timestamp = self._cache_timestamp.get(cache_key, 0)
+            if time.time() - timestamp < self._cache_ttl:
+                logger.debug(f"[内存缓存] 命中: {cache_key}")
+                return self._memory_cache[cache_key]
+            else:
+                # 过期，清理
+                del self._memory_cache[cache_key]
+                del self._cache_timestamp[cache_key]
+        return None
+    
+    def _set_memory_cache(self, cache_key: str, data: pd.DataFrame):
+        """设置内存缓存"""
+        self._memory_cache[cache_key] = data
+        self._cache_timestamp[cache_key] = time.time()
+        
+        # 限制内存缓存大小（最多保留100条）
+        if len(self._memory_cache) > 100:
+            oldest_key = min(self._cache_timestamp, key=self._cache_timestamp.get)
+            del self._memory_cache[oldest_key]
+            del self._cache_timestamp[oldest_key]
+    
+    def _get_from_batch_cache(self, cache_key: str) -> Optional[pd.DataFrame]:
+        """从批量缓存获取数据"""
+        if cache_key in self._batch_cache:
+            timestamp = self._batch_cache_timestamp.get(cache_key, 0)
+            if time.time() - timestamp < self._batch_cache_ttl:
+                logger.debug(f"[批量缓存] 命中: {cache_key}")
+                return self._batch_cache[cache_key]
+            else:
+                del self._batch_cache[cache_key]
+                del self._batch_cache_timestamp[cache_key]
+        return None
+    
+    def _set_batch_cache(self, cache_key: str, data: pd.DataFrame):
+        """设置批量缓存"""
+        self._batch_cache[cache_key] = data
+        self._batch_cache_timestamp[cache_key] = time.time()
+        
+        # 限制批量缓存大小（最多保留50条）
+        if len(self._batch_cache) > 50:
+            oldest_key = min(self._batch_cache_timestamp, key=self._batch_cache_timestamp.get)
+            del self._batch_cache[oldest_key]
+            del self._batch_cache_timestamp[oldest_key]
+    
+    def clear_memory_cache(self):
+        """清理内存缓存"""
+        self._memory_cache.clear()
+        self._cache_timestamp.clear()
+        self._batch_cache.clear()
+        self._batch_cache_timestamp.clear()
+        logger.info("[缓存管理] 内存缓存已清理")
+    
+    # ==================== 新增：批量获取接口 ====================
+    
+    def get_stocks_daily_batch(self, 
+                               ts_codes: List[str], 
+                               start_date: str, 
+                               end_date: str) -> Dict[str, pd.DataFrame]:
+        """
+        批量获取多只股票的历史日线数据
+        
+        改进点：
+        1. 优先从缓存获取，减少API调用
+        2. 支持批量请求，提高效率
+        
+        Args:
+            ts_codes: 股票代码列表
+            start_date: 开始日期（YYYYMMDD）
+            end_date: 结束日期（YYYYMMDD）
+            
+        Returns:
+            Dict[str, DataFrame]: 股票代码 -> 日线数据的映射
+        """
+        results = {}
+        codes_to_fetch = []
+        
+        # 第一步：从缓存获取
+        for code in ts_codes:
+            cache_key = f"stock_daily_{code}_{start_date}_{end_date}"
+            
+            # 尝试内存缓存
+            cached_data = self._get_from_memory_cache(cache_key)
+            if cached_data is not None:
+                results[code] = cached_data
+                continue
+            
+            # 尝试本地文件缓存
+            cache_file = self.stock_dir / "daily" / f"{code}_{start_date}_{end_date}.csv"
+            if cache_file.exists():
+                try:
+                    df = pd.read_csv(cache_file, parse_dates=['trade_date'])
+                    results[code] = df
+                    # 同时写入内存缓存
+                    self._set_memory_cache(cache_key, df)
+                    continue
+                except Exception as e:
+                    logger.debug(f"[批量获取] 读取缓存失败 {code}: {e}")
+            
+            # 需要获取
+            codes_to_fetch.append(code)
+        
+        # 第二步：批量获取缺失数据
+        if codes_to_fetch and self.ts_pro:
+            logger.info(f"[批量获取] 需要获取 {len(codes_to_fetch)} 只股票数据")
+            
+            # 由于Tushare不直接支持批量，逐只获取但优化缓存
+            for code in codes_to_fetch:
+                try:
+                    df = self.ts_pro.daily(ts_code=code, start_date=start_date, end_date=end_date)
+                    if not df.empty:
+                        df['trade_date'] = pd.to_datetime(df['trade_date'])
+                        
+                        # 保存到本地缓存
+                        cache_file = self.stock_dir / "daily" / f"{code}_{start_date}_{end_date}.csv"
+                        df.to_csv(cache_file, index=False)
+                        
+                        # 保存到内存缓存
+                        cache_key = f"stock_daily_{code}_{start_date}_{end_date}"
+                        self._set_memory_cache(cache_key, df)
+                        
+                        results[code] = df
+                        logger.debug(f"[批量获取] 成功获取 {code}: {len(df)}条")
+                    else:
+                        logger.warning(f"[批量获取] {code} 返回空数据")
+                        
+                except Exception as e:
+                    logger.error(f"[批量获取] 获取 {code} 失败: {e}")
+                    
+                # 添加短暂延迟，避免API限流
+                time.sleep(0.1)
+        
+        logger.info(f"[批量获取] 完成: {len(results)}/{len(ts_codes)} 只股票")
+        return results
+    
+    def get_sectors_daily_batch(self,
+                                ts_codes: List[str],
+                                trade_date: str = None,
+                                start_date: str = None,
+                                end_date: str = None) -> Dict[str, pd.DataFrame]:
+        """
+        批量获取多个板块的日线数据
+        
+        Args:
+            ts_codes: 板块代码列表
+            trade_date: 交易日期（YYYYMMDD），可选
+            start_date: 开始日期（YYYYMMDD），可选
+            end_date: 结束日期（YYYYMMDD），可选
+            
+        Returns:
+            Dict[str, DataFrame]: 板块代码 -> 日线数据的映射
+        """
+        results = {}
+        codes_to_fetch = []
+        
+        # 第一步：从缓存获取
+        for code in ts_codes:
+            if trade_date:
+                cache_key = f"sector_daily_{code}_{trade_date}"
+                cache_file = self.sector_dir / "ths_daily" / f"{code}_{trade_date}.csv"
+            else:
+                cache_key = f"sector_daily_{code}_{start_date}_{end_date}"
+                cache_file = self.sector_dir / "ths_daily" / f"{code}_{start_date}_{end_date}.csv"
+            
+            # 尝试内存缓存
+            cached_data = self._get_from_memory_cache(cache_key)
+            if cached_data is not None:
+                results[code] = cached_data
+                continue
+            
+            # 尝试本地文件缓存
+            if cache_file.exists():
+                try:
+                    df = pd.read_csv(cache_file)
+                    results[code] = df
+                    self._set_memory_cache(cache_key, df)
+                    continue
+                except Exception as e:
+                    logger.debug(f"[批量获取板块] 读取缓存失败 {code}: {e}")
+            
+            codes_to_fetch.append(code)
+        
+        # 第二步：批量获取缺失数据
+        if codes_to_fetch and self.ts_pro:
+            logger.info(f"[批量获取板块] 需要获取 {len(codes_to_fetch)} 个板块数据")
+            
+            for code in codes_to_fetch:
+                try:
+                    params = {'ts_code': code}
+                    if trade_date:
+                        params['trade_date'] = trade_date
+                    if start_date:
+                        params['start_date'] = start_date
+                    if end_date:
+                        params['end_date'] = end_date
+                    
+                    df = self.ts_pro.ths_daily(**params)
+                    
+                    if df is not None and not df.empty:
+                        # 保存到本地缓存
+                        if trade_date:
+                            cache_file = self.sector_dir / "ths_daily" / f"{code}_{trade_date}.csv"
+                        else:
+                            cache_file = self.sector_dir / "ths_daily" / f"{code}_{start_date}_{end_date}.csv"
+                        df.to_csv(cache_file, index=False)
+                        
+                        # 保存到内存缓存
+                        if trade_date:
+                            cache_key = f"sector_daily_{code}_{trade_date}"
+                        else:
+                            cache_key = f"sector_daily_{code}_{start_date}_{end_date}"
+                        self._set_memory_cache(cache_key, df)
+                        
+                        results[code] = df
+                        logger.debug(f"[批量获取板块] 成功获取 {code}: {len(df)}条")
+                    else:
+                        logger.warning(f"[批量获取板块] {code} 返回空数据")
+                        
+                except Exception as e:
+                    logger.error(f"[批量获取板块] 获取 {code} 失败: {e}")
+                    
+                time.sleep(0.1)
+        
+        logger.info(f"[批量获取板块] 完成: {len(results)}/{len(ts_codes)} 个板块")
+        return results
+    
+    def get_ths_members_batch(self, ts_codes: List[str]) -> Dict[str, pd.DataFrame]:
+        """
+        批量获取多个同花顺板块的成分股
+        
+        Args:
+            ts_codes: 板块代码列表
+            
+        Returns:
+            Dict[str, DataFrame]: 板块代码 -> 成分股数据的映射
+        """
+        results = {}
+        codes_to_fetch = []
+        
+        # 第一步：从缓存获取
+        for code in ts_codes:
+            cache_key = f"ths_member_{code}"
+            cache_file = self.sector_dir / "ths_member" / f"{code}.csv"
+            
+            # 尝试内存缓存
+            cached_data = self._get_from_memory_cache(cache_key)
+            if cached_data is not None:
+                results[code] = cached_data
+                continue
+            
+            # 尝试本地文件缓存（检查有效期）
+            if cache_file.exists():
+                try:
+                    file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+                    if (datetime.now() - file_time).days < 7:
+                        df = pd.read_csv(cache_file)
+                        results[code] = df
+                        self._set_memory_cache(cache_key, df)
+                        continue
+                except Exception as e:
+                    logger.debug(f"[批量获取成分] 读取缓存失败 {code}: {e}")
+            
+            codes_to_fetch.append(code)
+        
+        # 第二步：批量获取缺失数据
+        if codes_to_fetch and self.ts_pro:
+            logger.info(f"[批量获取成分] 需要获取 {len(codes_to_fetch)} 个板块成分")
+            
+            for code in codes_to_fetch:
+                try:
+                    df = self.ts_pro.ths_member(ts_code=code)
+                    
+                    if df is not None and not df.empty:
+                        # 保存到本地缓存
+                        cache_file = self.sector_dir / "ths_member" / f"{code}.csv"
+                        df.to_csv(cache_file, index=False)
+                        
+                        # 保存到内存缓存
+                        cache_key = f"ths_member_{code}"
+                        self._set_memory_cache(cache_key, df)
+                        
+                        results[code] = df
+                        logger.debug(f"[批量获取成分] 成功获取 {code}: {len(df)}只股票")
+                    else:
+                        logger.warning(f"[批量获取成分] {code} 返回空数据")
+                        
+                except Exception as e:
+                    logger.error(f"[批量获取成分] 获取 {code} 失败: {e}")
+                    
+                time.sleep(0.1)
+        
+        logger.info(f"[批量获取成分] 完成: {len(results)}/{len(ts_codes)} 个板块")
+        return results
+    
+    def get_all_sectors_daily(self, trade_date: str = None) -> pd.DataFrame:
+        """
+        获取所有同花顺板块的日线数据（单次请求）
+        
+        利用Tushare接口不传入ts_code时返回所有板块数据的特性
+        
+        Args:
+            trade_date: 交易日期（YYYYMMDD），可选
+            
+        Returns:
+            pd.DataFrame: 所有板块的日线数据
+        """
+        cache_key = f"all_sectors_{trade_date}" if trade_date else "all_sectors_latest"
+        
+        # 尝试内存缓存
+        cached_data = self._get_from_batch_cache(cache_key)
+        if cached_data is not None:
+            return cached_data
+        
+        # 尝试本地文件缓存
+        if trade_date:
+            cache_file = self.sector_dir / "ths_daily" / f"all_{trade_date}.csv"
+        else:
+            cache_file = self.sector_dir / "ths_daily" / "all_latest.csv"
+        
+        if cache_file.exists():
+            try:
+                df = pd.read_csv(cache_file)
+                self._set_batch_cache(cache_key, df)
+                return df
+            except Exception as e:
+                logger.debug(f"[获取全部板块] 读取缓存失败: {e}")
+        
+        if not self.ts_pro:
+            logger.warning("[获取全部板块] Tushare未初始化")
+            return pd.DataFrame()
+        
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date
+            
+            logger.info("[获取全部板块] 调用Tushare获取所有板块数据")
+            df = self.ts_pro.ths_daily(**params)
+            
+            if df is not None and not df.empty:
+                # 保存到本地缓存
+                df.to_csv(cache_file, index=False)
+                
+                # 保存到批量缓存
+                self._set_batch_cache(cache_key, df)
+                
+                logger.info(f"[获取全部板块] 成功获取 {len(df)} 条板块数据")
+                return df
+            else:
+                logger.warning("[获取全部板块] 返回空数据")
+                
+        except Exception as e:
+            logger.error(f"[获取全部板块] 获取失败: {e}")
+        
         return pd.DataFrame()
 
 if __name__ == "__main__":

@@ -604,25 +604,51 @@ class DragonSecondWaveStrategyV2:
     def _get_adjust_period(self, stock_code: str,
                           peak_date: str, today: str) -> Dict:
         """
-        获取调整期数据（peak_date到today之间）
-        调整期定义：从第一波见顶到二波启动（今日涨停）前的整个阶段
-        包含：下跌阶段 + 震荡整理阶段
+        获取调整期数据（peak_date到today之间）- 优化版本
         
-        关键：调整天数 = 从见顶到今日涨停前一天的交易日数
+        改进点：
+        1. 修复边界条件 - 允许peak_date等于today的情况
+        2. 增加观察列表机制 - 当数据不足时返回部分信息
+        3. 优化日期处理逻辑，支持更多日期格式
         """
+        # 标准化日期格式
+        peak_date = self._normalize_date(peak_date)
+        today = self._normalize_date(today)
+        
+        # 边界条件检查 - 如果peak_date等于或晚于today，说明数据有问题
+        try:
+            peak_dt = datetime.strptime(peak_date, "%Y%m%d")
+            today_dt = datetime.strptime(today, "%Y%m%d")
+            
+            if peak_dt >= today_dt:
+                logger.debug(f"[{stock_code}] peak_date({peak_date}) >= today({today})，尝试使用备选方案")
+                # 尝试使用前一天作为peak_date
+                peak_dt = today_dt - timedelta(days=1)
+                peak_date = peak_dt.strftime("%Y%m%d")
+        except Exception as e:
+            logger.warning(f"[{stock_code}] 日期解析失败: {e}")
+            return {}
+
         # 计算需要提前获取的天数（至少10天数据用于计算MA10）
-        peak_dt = datetime.strptime(peak_date, "%Y%m%d")
-        extended_start_dt = peak_dt - timedelta(days=20)
+        extended_start_dt = peak_dt - timedelta(days=30)  # 增加到30天，确保有足够数据
         extended_start = extended_start_dt.strftime("%Y%m%d")
 
         # 从data_manager获取日线数据
         hist = self.dm.get_stock_daily(stock_code, extended_start, today)
-        if not hist.empty:
-            if 'trade_date' in hist.columns:
-                hist = hist.sort_values('trade_date').reset_index(drop=True)
-
+        
         if hist.empty:
-            return {}
+            logger.debug(f"[{stock_code}] 无法获取历史数据({extended_start}-{today})，尝试扩大范围")
+            # 尝试扩大范围获取数据
+            extended_start_dt = peak_dt - timedelta(days=60)
+            extended_start = extended_start_dt.strftime("%Y%m%d")
+            hist = self.dm.get_stock_daily(stock_code, extended_start, today)
+            
+            if hist.empty:
+                logger.warning(f"[{stock_code}] 扩大范围后仍无法获取数据")
+                return {}
+        
+        if 'trade_date' in hist.columns:
+            hist = hist.sort_values('trade_date').reset_index(drop=True)
 
         # 筛选出peak_date之后的数据
         if 'trade_date' in hist.columns:
@@ -631,46 +657,82 @@ class DragonSecondWaveStrategyV2:
         else:
             adjust_hist = hist.copy()
 
-        if len(adjust_hist) < 3:
-            return {}
+        # 放宽条件：至少2条数据（原来是3条）
+        if len(adjust_hist) < 2:
+            logger.debug(f"[{stock_code}] 调整期数据不足({len(adjust_hist)}条)，尝试使用全部历史数据")
+            adjust_hist = hist.copy()
+            if len(adjust_hist) < 2:
+                return {}
 
         # 计算调整深度（从peak到最低点的跌幅）
-        peak_price = adjust_hist.iloc[0]['high']
-        lowest = adjust_hist['low'].min()
-        depth = (peak_price - lowest) / peak_price
+        try:
+            peak_price = adjust_hist.iloc[0]['high']
+            lowest = adjust_hist['low'].min()
+            if peak_price > 0:
+                depth = (peak_price - lowest) / peak_price
+            else:
+                depth = 0
+        except Exception as e:
+            logger.debug(f"[{stock_code}] 计算调整深度失败: {e}")
+            depth = 0
 
-        # 计算均线
+        # 计算均线 - 优化：即使数据不足也尝试计算
         total_days = len(hist)
-        if total_days < 10:
-            return {}
-
-        hist['MA10'] = hist['close'].rolling(10).mean()
-        if total_days >= 20:
-            hist['MA20'] = hist['close'].rolling(20).mean()
+        
+        # 动态计算均线周期
+        ma10_period = min(10, total_days)
+        ma20_period = min(20, total_days)
+        
+        if total_days >= 5:  # 放宽到至少5天
+            hist['MA10'] = hist['close'].rolling(ma10_period).mean()
+        else:
+            hist['MA10'] = hist['close']  # 数据不足时使用收盘价
+            
+        if total_days >= 10:  # 放宽到至少10天
+            hist['MA20'] = hist['close'].rolling(ma20_period).mean()
         else:
             hist['MA20'] = np.nan
 
         # 获取today对应的均线值
         ma10 = None
         ma20 = None
-        if 'trade_date' in hist.columns:
-            today_dt_ts = pd.Timestamp(today)
-            today_row = hist[hist['trade_date'] == today_dt_ts]
-            if not today_row.empty:
-                ma10 = today_row.iloc[-1]['MA10']
-                ma20 = today_row.iloc[-1]['MA20']
+        try:
+            if 'trade_date' in hist.columns:
+                today_dt_ts = pd.Timestamp(today)
+                today_row = hist[hist['trade_date'] == today_dt_ts]
+                if not today_row.empty:
+                    ma10 = today_row.iloc[-1]['MA10']
+                    ma20 = today_row.iloc[-1]['MA20']
+                else:
+                    ma10 = hist.iloc[-1]['MA10']
+                    ma20 = hist.iloc[-1]['MA20']
             else:
                 ma10 = hist.iloc[-1]['MA10']
                 ma20 = hist.iloc[-1]['MA20']
-        else:
-            ma10 = hist.iloc[-1]['MA10']
-            ma20 = hist.iloc[-1]['MA20']
+        except Exception as e:
+            logger.debug(f"[{stock_code}] 获取均线值失败: {e}")
 
+        # 如果MA10为NaN，尝试使用最近的有效值
         if pd.isna(ma10):
+            valid_ma10 = hist['MA10'].dropna()
+            if not valid_ma10.empty:
+                ma10 = valid_ma10.iloc[-1]
+            else:
+                # 使用最新收盘价作为备选
+                ma10 = hist.iloc[-1]['close'] if not hist.empty else None
+
+        if pd.isna(ma20) or ma20 is None:
+            valid_ma20 = hist['MA20'].dropna()
+            if not valid_ma20.empty:
+                ma20 = valid_ma20.iloc[-1]
+            else:
+                ma20 = None
+
+        if ma10 is None or pd.isna(ma10):
+            logger.warning(f"[{stock_code}] 无法计算MA10")
             return {}
 
         # 计算调整天数：从见顶到今日涨停前一天
-        # 这才是真正的"调整期"，包含下跌+震荡
         if 'trade_date' in hist.columns:
             today_dt_ts = pd.Timestamp(today)
             # 排除today这一天（因为是二波启动日）
@@ -678,17 +740,20 @@ class DragonSecondWaveStrategyV2:
             adjust_days = len(adjust_days_data)
             
             # 找到最低点的日期，计算下跌阶段天数
-            lowest_idx = adjust_hist['low'].idxmin()
-            lowest_date = adjust_hist.loc[lowest_idx, 'trade_date']
-            decline_days_data = adjust_hist[adjust_hist['trade_date'] <= lowest_date]
-            decline_days = len(decline_days_data)
+            try:
+                lowest_idx = adjust_hist['low'].idxmin()
+                lowest_date = adjust_hist.loc[lowest_idx, 'trade_date']
+                decline_days_data = adjust_hist[adjust_hist['trade_date'] <= lowest_date]
+                decline_days = len(decline_days_data)
+            except Exception:
+                decline_days = max(1, adjust_days // 2)
             
             # 震荡天数 = 总调整天数 - 下跌天数
-            consolidation_days = adjust_days - decline_days
+            consolidation_days = max(0, adjust_days - decline_days)
         else:
             adjust_days = len(adjust_hist) - 1 if len(adjust_hist) > 1 else len(adjust_hist)
-            decline_days = adjust_days // 2  # 估算
-            consolidation_days = adjust_days - decline_days
+            decline_days = max(1, adjust_days // 2)
+            consolidation_days = max(0, adjust_days - decline_days)
 
         return {
             'depth': depth,
@@ -696,27 +761,90 @@ class DragonSecondWaveStrategyV2:
             'ma20': ma20 if not pd.isna(ma20) else None,
             'lowest_price': lowest,
             'days': adjust_days,
-            'decline_days': decline_days,  # 下跌阶段天数
-            'consolidation_days': consolidation_days  # 震荡阶段天数
+            'decline_days': decline_days,
+            'consolidation_days': consolidation_days,
+            'peak_date': peak_date,  # 返回实际使用的peak_date
+            'data_quality': 'full' if len(adjust_hist) >= 5 else 'partial'  # 数据质量标记
         }
+    
+    def _normalize_date(self, date_str: str) -> str:
+        """
+        标准化日期格式为YYYYMMDD
+        
+        支持格式：
+        - YYYYMMDD
+        - YYYY-MM-DD
+        - YYYY/MM/DD
+        - YYYY-MM-DD HH:MM:SS
+        """
+        if not date_str:
+            return date_str
+        
+        date_str = str(date_str).strip()
+        
+        # 去除时间部分
+        if ' ' in date_str:
+            date_str = date_str.split(' ')[0]
+        
+        # 去除分隔符
+        date_str = date_str.replace('-', '').replace('/', '')
+        
+        # 确保是8位数字
+        if len(date_str) == 8 and date_str.isdigit():
+            return date_str
+        
+        # 尝试解析其他格式
+        try:
+            for fmt in ["%Y%m%d", "%Y-%m-%d", "%Y/%m/%d"]:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    return dt.strftime("%Y%m%d")
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+        
+        logger.warning(f"日期格式无法解析: {date_str}")
+        return date_str
     
     def _check_adjust_quality(self, adjust: Dict) -> bool:
         """
-        检查调整质量 - 优化后放宽条件
+        检查调整质量 - 优化版本
+        
+        改进点：
+        1. 增加数据质量检查
+        2. 放宽部分边界条件
+        3. 增加观察列表支持
         """
         if not adjust:
             return False
+        
+        # 检查数据质量
+        data_quality = adjust.get('data_quality', 'full')
+        if data_quality == 'partial':
+            logger.debug(f"数据质量为partial，放宽检查标准")
+            # 对于部分数据，仅检查基本条件
+            depth = adjust.get('depth', 0)
+            min_depth = self.params.get("min_adjust_depth", 0.05)
+            max_depth = self.params.get("max_adjust_depth", 0.35)  # 放宽到35%
+            
+            if depth > max_depth:
+                logger.debug(f"调整深度过大: {depth*100:.1f}% > {max_depth*100:.0f}%")
+                return False
+            
+            # 部分数据时，不过度依赖均线
+            return True
 
         depth = adjust.get('depth', 0)
         min_depth = self.params.get("min_adjust_depth", 0.05)   # 最小5%
         max_depth = self.params.get("max_adjust_depth", 0.30)   # 最大30%
         
-        # 调整深度检查：5%-30%（放宽后）
+        # 调整深度检查：5%-30%
         if not (min_depth <= depth <= max_depth):
             logger.debug(f"调整深度不符合: {depth*100:.1f}% (要求{min_depth*100:.0f}%-{max_depth*100:.0f}%)")
             return False
 
-        # 均线支撑检查 - 优化后增加MA20备选
+        # 均线支撑检查 - 优化后增加MA20备选和更灵活的容忍度
         lowest_price = adjust.get('lowest_price')
         ma10 = adjust.get('ma10')
         ma20 = adjust.get('ma20')
@@ -733,7 +861,7 @@ class DragonSecondWaveStrategyV2:
             
             # MA10未支撑，尝试MA20备选
             if self.params.get("use_ma20_fallback", True) and ma20:
-                ma20_tolerance = 0.05  # MA20更严格一些
+                ma20_tolerance = 0.08  # 放宽到8%
                 ma20_support = lowest_price >= ma20 * (1 - ma20_tolerance)
                 
                 if ma20_support:
