@@ -43,6 +43,7 @@ class DragonSecondWaveStrategyV2:
         self.params = {
             "recent_days": 20,           # 放宽：15→20天，给更多蓄势时间
             "max_adjust_days": 15,       # 放宽：10→15天，允许更久调整
+            "min_adjust_days": 2,        # 新增：第一波见顶后至少2个交易日才能算调整期
             "max_break_days": 2,         # 新增：允许断板2天（原为1天）
             "min_adjust_depth": 0.05,    # 新增：最小调整深度5%（强势调整）
             "max_adjust_depth": 0.30,    # 放宽：25%→30%，容忍更深回调
@@ -101,6 +102,12 @@ class DragonSecondWaveStrategyV2:
         if days_since_peak > self.params["max_adjust_days"] + 5:
             logger.debug(f"[{stock_code_padded}] 过滤: 第一波距今太久 ({days_since_peak}天 > {self.params['max_adjust_days'] + 5}天)")
             return None
+
+        min_adjust = self.params["min_adjust_days"]
+        if days_since_peak < min_adjust:
+            logger.debug(f"[{stock_code_padded}] 过滤: 第一波距今仅{days_since_peak}天(<{min_adjust}天)，尚未形成有效调整期，仍属第一波")
+            return None
+
         logger.debug(f"[{stock_code_padded}] 通过: 第一波距今{days_since_peak}天")
 
         # ========== 步骤2：判断第一波高度（真龙标准）==========
@@ -621,10 +628,8 @@ class DragonSecondWaveStrategyV2:
             today_dt = datetime.strptime(today, "%Y%m%d")
             
             if peak_dt >= today_dt:
-                logger.debug(f"[{stock_code}] peak_date({peak_date}) >= today({today})，尝试使用备选方案")
-                # 尝试使用前一天作为peak_date
-                peak_dt = today_dt - timedelta(days=1)
-                peak_date = peak_dt.strftime("%Y%m%d")
+                logger.debug(f"[{stock_code}] peak_date({peak_date}) >= today({today})，第一波尚未结束，无法计算调整期")
+                return {}
         except Exception as e:
             logger.warning(f"[{stock_code}] 日期解析失败: {e}")
             return {}
