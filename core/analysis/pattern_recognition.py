@@ -77,31 +77,8 @@ class PatternRecognition:
             self.first_board_breakout = None
         
         # 注释掉不需要的策略：分歧转一致、卡位板、炸板回封
-        # try:
-        #     from core.pattern.divergence_to_consensus import DivergenceToConsensusStrategy
-        #     self.divergence_to_consensus = DivergenceToConsensusStrategy(self.dm, self.se)
-        #     logger.info("✓ 分歧转一致策略加载成功")
-        # except Exception as e:
-        #     logger.warning(f"✗ 分歧转一致策略加载失败: {e}")
-        #     self.divergence_to_consensus = None
         self.divergence_to_consensus = None
-        
-        # try:
-        #     from core.pattern.position_battle import PositionBattleStrategy
-        #     self.position_battle = PositionBattleStrategy(self.dm)
-        #     logger.info("✓ 卡位板策略加载成功")
-        # except Exception as e:
-        #     logger.warning(f"✗ 卡位板策略加载失败: {e}")
-        #     self.position_battle = None
         self.position_battle = None
-        
-        # try:
-        #     from core.pattern.blast_reseal import BlastResealAnalyzer
-        #     self.blast_reseal = BlastResealAnalyzer(self.dm)
-        #     logger.info("✓ 炸板回封策略加载成功")
-        # except Exception as e:
-        #     logger.warning(f"✗ 炸板回封策略加载失败: {e}")
-        #     self.blast_reseal = None
         self.blast_reseal = None
         
         try:
@@ -111,9 +88,6 @@ class PatternRecognition:
         except Exception as e:
             logger.warning(f"✗ 龙二波策略加载失败: {e}")
             self.dragon_second_wave = None
-        
-        # 删除弱转强V2策略初始化（已合并到V1）
-        self.weak_to_strong_v2 = None
     
     # ==================== 模式识别接口 ====================
     
@@ -123,7 +97,9 @@ class PatternRecognition:
                               history_pools: Dict[str, pd.DataFrame] = None,
                               today_daily: pd.DataFrame = None,
                               stock_to_ths_industry: Dict[str, str] = None,
-                              stock_to_ths_concept: Dict[str, str] = None) -> List[PatternSignal]:
+                              stock_to_ths_concept: Dict[str, str] = None,
+                              all_hot_member_codes: set = None,
+                              stock_to_hot_sectors: Dict[str, list] = None) -> List[PatternSignal]:
         """
         弱转强模式识别 - 动态龙头跟踪版本
         
@@ -426,7 +402,9 @@ class PatternRecognition:
                                    day_before_yesterday_df: pd.DataFrame = None,
                                    today_date: str = None, yest_date: str = None,
                                    stock_to_ths_industry: Dict[str, str] = None,
-                                   stock_to_ths_concept: Dict[str, str] = None) -> List[PatternSignal]:
+                                   stock_to_ths_concept: Dict[str, str] = None,
+                                   all_hot_member_codes: set = None,
+                                   stock_to_hot_sectors: Dict[str, list] = None) -> List[PatternSignal]:
         """
         二板定龙模式识别 - 使用连板数字段优化
         
@@ -563,252 +541,6 @@ class PatternRecognition:
 
         except Exception as e:
             logger.error(f"[二板定龙] 检测失败: {e}", exc_info=True)
-
-        return signals
-
-    def detect_divergence_to_consensus(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
-                                       today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
-        """
-        分歧转一致模式识别 - 完整策略逻辑
-        
-        Args:
-            today_df: 今日涨停池数据
-            yesterday_df: 昨日涨停池数据
-            today_date: 今日日期 (YYYYMMDD)，用于获取准确的开盘价
-            yest_date: 昨日日期 (YYYYMMDD)，用于获取准确的昨收价
-        """
-        signals = []
-
-        logger.debug(f"[分歧转一致] 开始检测，今日涨停{len(today_df)}只，昨日涨停{len(yesterday_df)}只")
-
-        if self.divergence_to_consensus is None:
-            logger.warning("[分歧转一致] 策略未加载")
-            return signals
-
-        if today_df.empty or yesterday_df.empty:
-            logger.debug(f"[分歧转一致] 数据为空，今日={today_df.empty}, 昨日={yesterday_df.empty}")
-            return signals
-
-        try:
-            total_checked = 0
-            total_passed = 0
-
-            for _, today_row in today_df.iterrows():
-                code = str(today_row.get('代码', '')).zfill(6)
-                name = today_row.get('名称', '')
-                total_checked += 1
-
-                logger.debug(f"[分歧转一致] 检测 {name}({code})...")
-
-                yest_match = yesterday_df[yesterday_df['代码'].astype(str).str.zfill(6) == code]
-                if yest_match.empty:
-                    logger.debug(f"[分歧转一致]   {name} 昨日未涨停，跳过")
-                    continue
-
-                yest_row = yest_match.iloc[0]
-                logger.debug(f"[分歧转一致]   {name} 昨日已涨停，检查分歧特征...")
-
-                # 条件1: 昨日必须有分歧（炸板）
-                blast_times = yest_row.get('炸板次数', 0)
-                logger.debug(f"[分歧转一致]   {name} 昨日炸板次数={blast_times}")
-                
-                if blast_times == 0:
-                    logger.debug(f"[分歧转一致]   {name} 过滤: 昨日无炸板，无分歧")
-                    continue
-
-                if blast_times > 5:
-                    logger.debug(f"[分歧转一致]   {name} 过滤: 昨日炸板次数{blast_times} > 5，烂透了")
-                    continue
-
-                # 条件2: 昨日换手检查
-                turnover = yest_row.get('换手率', 0)
-                logger.debug(f"[分歧转一致]   {name} 昨日换手率={turnover:.1f}%")
-                
-                if not (15 <= turnover <= 35):
-                    logger.debug(f"[分歧转一致]   {name} 过滤: 换手率{turnover:.1f}%不在[15%,35%]范围内")
-                    continue
-
-                # 条件3: 昨日涨停时间（尾盘板质量差）
-                limit_up_time = str(yest_row.get('首次封板时间', '')).strip()
-                last_seal_time = str(yest_row.get('最后封板时间', '')).strip()
-                logger.debug(f"[分歧转一致]   {name} 昨日首次涨停={limit_up_time}, 最后封板={last_seal_time}")
-                
-                if limit_up_time > "14:30:00":
-                    logger.debug(f"[分歧转一致]   {name} 过滤: 昨日尾盘涨停{limit_up_time}，偷袭板")
-                    continue
-
-                # 条件4: 今日高开（弱转强信号）
-                gap_ratio = self._calculate_gap_ratio(today_row, yest_row, today_date, yest_date)
-                logger.debug(f"[分歧转一致]   {name} 今日高开={gap_ratio*100:.1f}%")
-                
-                if not (0.02 <= gap_ratio <= 0.07):
-                    logger.debug(f"[分歧转一致]   {name} 过滤: 高开{gap_ratio*100:.1f}%不在[2%,7%]范围内")
-                    continue
-
-                # 条件5: 今日涨停时间（快速上板）
-                today_limit_time = str(today_row.get('首次封板时间', '')).strip()
-                is_fast = self._is_fast_limit(today_limit_time, max_time="09:40:00")
-                logger.debug(f"[分歧转一致]   {name} 今日涨停时间={today_limit_time}, 是否快速={is_fast}")
-                
-                if not is_fast:
-                    logger.debug(f"[分歧转一致]   {name} 过滤: 今日涨停时间{today_limit_time}太晚")
-                    continue
-
-                # 计算置信度
-                confidence = self._calculate_divergence_confidence(blast_times, turnover, gap_ratio, is_fast)
-                logger.debug(f"[分歧转一致]   {name} 综合置信度={confidence:.2f}")
-
-                if confidence < 0.70:
-                    logger.debug(f"[分歧转一致]   {name} 过滤: 置信度{confidence:.2f} < 0.70")
-                    continue
-
-                signal = PatternSignal(
-                    pattern_type="分歧转一致",
-                    stock_code=code,
-                    stock_name=name,
-                    confidence=round(confidence, 2),
-                    description=f"昨日烂板（炸板{blast_times}次，换手{turnover:.1f}%），"
-                               f"今日高开{gap_ratio*100:.1f}%{today_limit_time}涨停，分歧转一致",
-                    key_metrics={
-                        "昨日炸板次数": blast_times,
-                        "昨日换手率": f"{turnover:.1f}%",
-                        "昨日涨停时间": limit_up_time,
-                        "今日高开": f"{gap_ratio*100:.1f}%",
-                        "今日涨停时间": today_limit_time,
-                        "买点时机": "竞价" if gap_ratio >= 0.04 else "开盘"
-                    },
-                    entry_price=today_row.get('涨停价', 0),
-                    stop_loss=yest_row.get('最低价', today_row.get('涨停价', 0) * 0.93),
-                    take_profit=today_row.get('涨停价', 0) * 1.15,
-                    position_size="medium",
-                    validation_rules=[
-                        f"昨日炸板{blast_times}次（分歧）",
-                        f"昨日换手{turnover:.1f}%（充分换手）",
-                        f"今日高开{gap_ratio*100:.1f}%（超预期）",
-                        f"{today_limit_time}涨停（一致性强）"
-                    ],
-                    l2_industry=today_row.get('所属行业', '')
-                )
-                
-                signals.append(signal)
-                total_passed += 1
-                logger.debug(f"[分歧转一致]   {name} 生成信号 (置信度{confidence:.2f})")
-
-            logger.info(f"[分歧转一致] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 通过{total_passed}只)")
-
-        except Exception as e:
-            logger.error(f"[分歧转一致] 检测失败: {e}", exc_info=True)
-
-        return signals
-
-    def detect_blast_reseal(self, today_df: pd.DataFrame, today_date: str = None) -> List[PatternSignal]:
-        """
-        炸板回封模式识别 - 完整策略逻辑
-        """
-        signals = []
-
-        logger.debug(f"[炸板回封] 开始检测，今日涨停{len(today_df)}只")
-
-        if self.blast_reseal is None:
-            logger.warning("[炸板回封] 策略未加载")
-            return signals
-
-        if today_df.empty:
-            logger.debug("[炸板回封] 今日数据为空")
-            return signals
-
-        try:
-            total_checked = 0
-            total_blast = 0
-            total_passed = 0
-
-            for _, today_row in today_df.iterrows():
-                code = str(today_row.get('代码', '')).zfill(6)
-                name = today_row.get('名称', '')
-                total_checked += 1
-
-                # 检查是否有炸板
-                blast_times = today_row.get('炸板次数', 0)
-                if blast_times == 0:
-                    continue
-
-                total_blast += 1
-
-                # 条件1: 炸板次数检查
-                if blast_times > 3:
-                    continue
-
-                # 条件2: 涨停时间（早盘炸板才可能是洗盘）
-                first_limit_time = str(today_row.get('首次封板时间', '')).strip()
-                last_limit_time = str(today_row.get('最后封板时间', '')).strip()
-
-                # 统一时间格式为 HH:MM:SS 进行比较
-                first_limit_time_formatted = self._format_time(first_limit_time)
-                if first_limit_time_formatted > "10:30:00":
-                    continue
-
-                # 条件3: 回封时间分析
-                reseal_duration = self._calculate_reseal_duration(first_limit_time, last_limit_time, blast_times)
-                
-                if reseal_duration > 20:
-                    continue
-
-                # 条件4: 换手检查（全天换手不能太高）
-                turnover = today_row.get('换手率', 0)
-                
-                if turnover > 35:
-                    continue
-
-                # 条件5: 封单质量
-                seal_amount = today_row.get('封单额', 0) or today_row.get('封板资金', 0)
-                float_cap = today_row.get('流通市值', 1)
-                seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
-
-                # 计算置信度
-                confidence = self._calculate_blast_reseal_confidence(blast_times, reseal_duration, turnover, seal_ratio)
-
-                if confidence < 0.60:
-                    continue
-
-                # 判断信号类型
-                signal_type = self._classify_blast_reseal(blast_times, reseal_duration, turnover)
-
-                signal = PatternSignal(
-                    pattern_type=f"炸板回封-{signal_type}",
-                    stock_code=code,
-                    stock_name=name,
-                    confidence=round(confidence, 2),
-                    description=f"早盘涨停后炸板{blast_times}次，{reseal_duration}分钟回封，"
-                               f"换手{turnover:.1f}%，封单强度{seal_ratio*100:.1f}%",
-                    key_metrics={
-                        "炸板次数": blast_times,
-                        "首次涨停": first_limit_time,
-                        "最后封板": last_limit_time,
-                        "回封用时": f"{reseal_duration}分钟",
-                        "全天换手": f"{turnover:.1f}%",
-                        "封单强度": f"{seal_ratio*100:.2f}%",
-                        "信号类型": signal_type
-                    },
-                    entry_price=today_row.get('涨停价', 0),
-                    stop_loss=today_row.get('涨停价', 0) * 0.95,
-                    take_profit=today_row.get('涨停价', 0) * 1.10,
-                    position_size="light" if signal_type == "洗盘待定" else "medium",
-                    validation_rules=[
-                        f"炸板{blast_times}次（分歧）",
-                        f"{reseal_duration}分钟回封（速度）",
-                        f"全天换手{turnover:.1f}%（量能）",
-                        f"封单强度{seal_ratio*100:.1f}%（质量）"
-                    ],
-                    l2_industry=today_row.get('所属行业', '')
-                )
-                
-                signals.append(signal)
-                total_passed += 1
-
-            logger.info(f"[炸板回封] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 炸板{total_blast}只, 通过{total_passed}只)")
-
-        except Exception as e:
-            logger.error(f"[炸板回封] 检测失败: {e}", exc_info=True)
 
         return signals
 
@@ -1111,23 +843,6 @@ class PatternRecognition:
             return f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
         return time_str
 
-    def _calculate_reseal_duration(self, first_time: str, last_time: str, blast_times: int) -> int:
-        """计算回封用时（估算）"""
-        if not first_time or not last_time:
-            return 999
-        try:
-            # 统一时间格式
-            first_time = self._format_time(first_time)
-            last_time = self._format_time(last_time)
-            fmt = "%H:%M:%S"
-            start = datetime.strptime(first_time, fmt)
-            end = datetime.strptime(last_time, fmt)
-            duration = int((end - start).total_seconds() / 60)
-            # 减去炸板次数（每次炸板约1-2分钟）
-            return max(duration - blast_times * 2, 1)
-        except:
-            return 999
-
     def _calculate_weak_to_strong_confidence(self, weak_quality: Dict, auction: Dict, 
                                               time_score: int, board_height: int) -> float:
         """计算弱转强置信度"""
@@ -1182,59 +897,6 @@ class PatternRecognition:
             confidence += 0.05
         
         return min(confidence, 0.95)
-
-    def _calculate_divergence_confidence(self, blast_times: int, turnover: float, 
-                                          gap: float, is_fast: bool) -> float:
-        """计算分歧转一致置信度"""
-        confidence = 0.70
-        
-        if 2 <= blast_times <= 3:
-            confidence += 0.05
-        
-        if 20 <= turnover <= 30:
-            confidence += 0.10
-        
-        if gap >= 0.04:
-            confidence += 0.10
-        elif gap >= 0.02:
-            confidence += 0.05
-        
-        if is_fast:
-            confidence += 0.10
-        
-        return min(confidence, 0.90)
-
-    def _calculate_blast_reseal_confidence(self, blast_times: int, duration: int, 
-                                            turnover: float, seal_ratio: float) -> float:
-        """计算炸板回封置信度"""
-        confidence = 0.60
-        
-        if blast_times == 1:
-            confidence += 0.10
-        
-        if duration <= 5:
-            confidence += 0.15
-        elif duration <= 10:
-            confidence += 0.10
-        elif duration <= 15:
-            confidence += 0.05
-        
-        if turnover <= 25:
-            confidence += 0.10
-        
-        if seal_ratio >= 0.03:
-            confidence += 0.10
-        
-        return min(confidence, 0.90)
-
-    def _classify_blast_reseal(self, blast_times: int, duration: int, turnover: float) -> str:
-        """分类炸板回封信号类型"""
-        if blast_times == 1 and duration <= 10 and turnover <= 25:
-            return "洗盘成功"
-        elif blast_times <= 2 and duration <= 20 and turnover <= 30:
-            return "洗盘待定"
-        else:
-            return "谨慎观察"
 
     def detect_first_board_breakout(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame = None,
                                     date_str: str = None, history_pools: Dict[str, pd.DataFrame] = None,
@@ -1305,9 +967,15 @@ class PatternRecognition:
                                   recent_zt_pools: Dict[str, pd.DataFrame],
                                   today_date: str,
                                   stock_to_ths_industry: Dict[str, str] = None,
-                                  stock_to_ths_concept: Dict[str, str] = None) -> List[PatternSignal]:
+                                  stock_to_ths_concept: Dict[str, str] = None,
+                                  all_hot_member_codes: set = None,
+                                  stock_to_hot_sectors: Dict[str, list] = None) -> List[PatternSignal]:
         """
         龙二波模式识别 - 调用DragonSecondWaveStrategyV2
+
+        Args:
+            all_hot_member_codes: 所有热点板块成分股代码集合（用于快速判定板块热度）
+            stock_to_hot_sectors: 股票→所属热点板块名称列表（用于日志输出）
         """
         signals = []
 
@@ -1356,16 +1024,26 @@ class PatternRecognition:
             total_passed = 0
 
             for _, today_row in today_df.iterrows():
-                code = str(today_row.get('代码', '')).zfill(6)
+                code = str(today_row.get('代码', '')).split('.')[0].zfill(6)
                 name = today_row.get('名称', '')
                 total_checked += 1
 
                 sector_hot = False
-                stock_code_clean = code.zfill(6)
-                ths_industry = (stock_to_ths_industry or {}).get(stock_code_clean, '')
-                ths_concept = (stock_to_ths_concept or {}).get(stock_code_clean, '')
-                sector_hot = bool(ths_industry or ths_concept)
-                stock_sector = ths_industry or ths_concept or today_row.get('所属行业', '')
+                stock_code_clean = code
+                stock_sector = ''
+
+                if all_hot_member_codes:
+                    sector_hot = stock_code_clean in all_hot_member_codes
+
+                if sector_hot:
+                    hot_sector_list = (stock_to_hot_sectors or {}).get(stock_code_clean, [])
+                    stock_sector = hot_sector_list[0] if hot_sector_list else ''
+                    logger.debug(f"[龙二波]   {name}({code}) 命中热点: {', '.join(hot_sector_list[:5])}")
+                else:
+                    ths_industry = (stock_to_ths_industry or {}).get(stock_code_clean, '')
+                    ths_concept = (stock_to_ths_concept or {}).get(stock_code_clean, '')
+                    stock_sector = ths_industry or ths_concept or str(today_row.get('所属行业', ''))
+                    logger.debug(f"[龙二波]   {name}({code}) 板块热度=False, 所属行业={stock_sector}")
 
                 # 日期已经是YYYYMMDD格式，直接使用
                 # 获取历史数据以启用双轨制判断（连板 或 涨幅）
@@ -1515,13 +1193,29 @@ class PatternRecognition:
         results = {}
         
         # 构建 stock→THS行业/概念 反向映射（统一替换东财行业数据）
-        stock_to_ths_industry = {}  # stock_code → THS行业名称
-        stock_to_ths_concept = {}   # stock_code → THS概念名称
+        # 同时构建 all_hot_member_codes（所有热点板块成分股集合）
+        # 和 stock_to_hot_sectors（股票→所属热点板块列表）
+        stock_to_ths_industry = {}    # stock_code → THS行业名称
+        stock_to_ths_concept = {}     # stock_code → THS概念名称
+        all_hot_member_codes = set()  # 所有热点板块成分股代码集合
+        stock_to_hot_sectors = {}     # stock_code → [热点板块名称列表]
+        
         if hot_sectors:
             for hs in hot_sectors:
                 sector_type = hs.get('sector_type', '')
                 sector_name = hs.get('sector_name', '')
                 member_codes = hs.get('member_codes', set())
+                
+                if not member_codes:
+                    continue
+                
+                all_hot_member_codes.update(member_codes)
+                
+                for code in member_codes:
+                    if code not in stock_to_hot_sectors:
+                        stock_to_hot_sectors[code] = []
+                    stock_to_hot_sectors[code].append(sector_name)
+                
                 if sector_type == '行业':
                     for code in member_codes:
                         if code not in stock_to_ths_industry:
@@ -1530,7 +1224,11 @@ class PatternRecognition:
                     for code in member_codes:
                         if code not in stock_to_ths_concept:
                             stock_to_ths_concept[code] = sector_name
-            logger.info(f"[模式识别] THS行业映射: {len(stock_to_ths_industry)}只, THS概念映射: {len(stock_to_ths_concept)}只")
+            
+            logger.info(f"[模式识别] THS行业映射: {len(stock_to_ths_industry)}只, "
+                       f"THS概念映射: {len(stock_to_ths_concept)}只, "
+                       f"热点成分股总计: {len(all_hot_member_codes)}只, "
+                       f"有热点归属的股票: {len(stock_to_hot_sectors)}只")
         else:
             logger.warning("[模式识别] 未收到热点板块数据，将回退使用东财行业")
 
@@ -1542,7 +1240,9 @@ class PatternRecognition:
                 history_pools=recent_zt_pools,
                 today_daily=today_daily,
                 stock_to_ths_industry=stock_to_ths_industry,
-                stock_to_ths_concept=stock_to_ths_concept
+                stock_to_ths_concept=stock_to_ths_concept,
+                all_hot_member_codes=all_hot_member_codes,
+                stock_to_hot_sectors=stock_to_hot_sectors
             )
         except Exception as e:
             logger.error(f"弱转强检测失败: {e}")
@@ -1556,7 +1256,9 @@ class PatternRecognition:
                 today_df, yesterday_df, day_before_yesterday_df,
                 today_date_ymd, yesterday_date_ymd,
                 stock_to_ths_industry=stock_to_ths_industry,
-                stock_to_ths_concept=stock_to_ths_concept
+                stock_to_ths_concept=stock_to_ths_concept,
+                all_hot_member_codes=all_hot_member_codes,
+                stock_to_hot_sectors=stock_to_hot_sectors
             )
         except Exception as e:
             logger.error(f"二板定龙检测失败: {e}")
@@ -1568,7 +1270,9 @@ class PatternRecognition:
             results["龙二波"] = self.detect_dragon_second_wave(
                 today_df, recent_zt_pools, today_date_ymd,
                 stock_to_ths_industry=stock_to_ths_industry,
-                stock_to_ths_concept=stock_to_ths_concept
+                stock_to_ths_concept=stock_to_ths_concept,
+                all_hot_member_codes=all_hot_member_codes,
+                stock_to_hot_sectors=stock_to_hot_sectors
             )
         except Exception as e:
             logger.error(f"龙二波检测失败: {e}")
@@ -1623,24 +1327,6 @@ class PatternRecognition:
         all_signals.sort(key=lambda x: x.confidence, reverse=True)
         
         return all_signals[:top_n]
-    
-    def filter_by_sector(self, signals: List[PatternSignal], 
-                         hot_sectors: List[str]) -> List[PatternSignal]:
-        """
-        按热点板块过滤信号
-        
-        Args:
-            signals: 信号列表
-            hot_sectors: 热点板块列表
-            
-        Returns:
-            List[PatternSignal]: 属于热点板块的信号
-        """
-        filtered = []
-        for signal in signals:
-            if signal.l2_industry and signal.l2_industry in hot_sectors:
-                filtered.append(signal)
-        return filtered
 
     def _calculate_weak_to_strong_confidence_v2(self, weakening, auction: Dict, 
                                                  time_score: int) -> float:
