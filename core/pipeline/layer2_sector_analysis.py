@@ -88,6 +88,7 @@ class SectorAnalysisLayer:
             result.main_themes = sector_result.main_themes_df['板块名称'].tolist() if not sector_result.main_themes_df.empty else []
             result.concept_hierarchy = sector_result.concept_hierarchy
             result.concept_hierarchy_report = sector_result.concept_hierarchy_report
+            result.hot_sectors_for_pattern = sector_result.hot_sectors_for_pattern
 
             result.sector_analysis_summary = self._generate_summary(result)
 

@@ -49,6 +49,32 @@ class ConfigLoader:
             else:
                 logger.warning(f"[ConfigLoader] 配置文件不存在: {filepath}")
 
+        self._load_factor_configs()
+
+    def _load_factor_configs(self):
+        """加载因子配置文件"""
+        factors_dir = self.config_dir / "factors"
+        if not factors_dir.exists():
+            logger.debug("[ConfigLoader] factors目录不存在，跳过因子配置加载")
+            return
+
+        factor_config_files = {
+            'factor_registry': 'factor_registry.yaml',
+            'layer1_market_env': 'layer1_market_env.yaml',
+            'emotion_cycle_factors': 'emotion_cycle.yaml',
+            'layer2_sector': 'layer2_sector.yaml',
+            'layer3_stock_select': 'layer3_stock_select.yaml',
+            'layer4_trade_plan': 'layer4_trade_plan.yaml',
+        }
+
+        for name, filename in factor_config_files.items():
+            filepath = factors_dir / filename
+            if filepath.exists():
+                self._configs[name] = self._load_yaml(filepath)
+                logger.info(f"[ConfigLoader] 加载因子配置: factors/{filename}")
+            else:
+                logger.debug(f"[ConfigLoader] 因子配置文件不存在: factors/{filename}")
+
     def _load_yaml(self, filepath: Path) -> Dict:
         """加载YAML文件"""
         try:
@@ -271,3 +297,58 @@ class EmotionCycleConfig:
 def load_emotion_cycle_config() -> EmotionCycleConfig:
     """加载情绪周期配置（兼容旧代码）"""
     return EmotionCycleConfig()
+
+
+# ============================================
+# 因子配置便捷访问函数
+# ============================================
+
+def get_factor_registry_config() -> Dict[str, Any]:
+    """获取因子注册表配置"""
+    return config_loader.get_config('factor_registry')
+
+
+def get_layer1_factor_config() -> Dict[str, Any]:
+    """获取Layer1因子配置"""
+    return config_loader.get_config('layer1_market_env')
+
+
+def get_emotion_factor_config() -> Dict[str, Any]:
+    """获取情绪周期因子配置"""
+    return config_loader.get_config('emotion_cycle_factors')
+
+
+def get_layer2_factor_config() -> Dict[str, Any]:
+    """获取Layer2因子配置"""
+    return config_loader.get_config('layer2_sector')
+
+
+def get_layer3_factor_config() -> Dict[str, Any]:
+    """获取Layer3因子配置"""
+    return config_loader.get_config('layer3_stock_select')
+
+
+def get_layer4_factor_config() -> Dict[str, Any]:
+    """获取Layer4因子配置"""
+    return config_loader.get_config('layer4_trade_plan')
+
+
+def get_layer_factor_config(layer: str) -> Dict[str, Any]:
+    """
+    根据Layer名称获取对应的因子配置
+
+    Args:
+        layer: 'layer1' / 'emotion' / 'layer2' / 'layer3' / 'layer4'
+
+    Returns:
+        因子配置字典
+    """
+    mapping = {
+        'layer1': 'layer1_market_env',
+        'emotion': 'emotion_cycle_factors',
+        'layer2': 'layer2_sector',
+        'layer3': 'layer3_stock_select',
+        'layer4': 'layer4_trade_plan',
+    }
+    config_name = mapping.get(layer, '')
+    return config_loader.get_config(config_name) if config_name else {}

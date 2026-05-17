@@ -44,6 +44,10 @@ class TradeSignal:
     l2_industry: str = ""  # 二级行业
     buy_strategy: str = ""  # 买点策略：主买点/次买点
     next_day_expectation: str = ""  # 次日预期
+    is_dual_resonance: bool = False  # 是否双热点共振（概念+行业同时热点）
+    is_hot_sector: bool = False  # 是否属于热点板块
+    matched_sector_name: str = ""  # 匹配到的热点板块名称（概念或行业）
+    matched_sector_type: str = ""  # 匹配到的热点板块类型（概念/行业）
 
 
 class HotspotFirstBoardStrategy:
@@ -148,16 +152,17 @@ class HotspotFirstBoardStrategy:
         基于二级行业的首板突破检测
 
         流程：
-        1. 获取热点二级行业（从参数传入或调用analyze_all_sectors_v2计算）
+        1. 获取热点板块（从参数传入，包含概念+行业，含member_codes）
         2. 分析所有涨停股票中的首板（不限于热点板块）
         3. 结合技术指标进行过滤
         4. 属于热点板块的股票增加仓位权重
+        5. 同时属于热点概念+热点行业的股票获得双共振置信度加成
 
         Args:
             today_zt: 今日涨停池
             history_pools: 历史涨停池（用于板块分析）
             date_str: 日期字符串YYYYMMDD
-            hot_sectors: 预计算的热点板块列表（避免重复计算）
+            hot_sectors: 预计算的热点板块列表（含member_codes，避免重复计算）
             concept_hierarchy: 概念连板梯队数据（用于复盘参考）
 
         Returns:
@@ -170,33 +175,81 @@ class HotspotFirstBoardStrategy:
             return signals
 
         # 1. 获取热点板块（同花顺概念/行业）
-        if hot_sectors is None:
-            # 如果没有传入热点板块，则自行计算
+        if not hot_sectors:
             hot_sectors = self._get_hot_sectors(today_zt, history_pools, date_str)
         else:
             logger.info(f"[首板突破] 使用传入的热点板块数据: {len(hot_sectors)}个")
-        
-        # 构建热点板块代码集合（用于快速匹配）
-        hot_sector_codes = set()
+
+        # 构建热点板块代码集合（按概念/行业分开，用于双共振检测）
+        hot_concept_codes = set()
+        hot_industry_codes = set()
+        hot_concept_names = set()
+        hot_industry_names = set()
+
         for hs in hot_sectors:
-            hot_sector_codes.update(hs.get('member_codes', set()))
-        
+            sector_type = hs.get('sector_type', '')
+            member_codes = hs.get('member_codes', set())
+            sector_name = hs.get('sector_name', '')
+
+            if sector_type == '概念':
+                hot_concept_codes.update(member_codes)
+                hot_concept_names.add(sector_name)
+            elif sector_type == '行业':
+                hot_industry_codes.update(member_codes)
+                hot_industry_names.add(sector_name)
+            else:
+                # 未知类型，同时加入两个集合
+                hot_concept_codes.update(member_codes)
+                hot_industry_codes.update(member_codes)
+
+        # 全部热点代码（用于向后兼容的快速匹配）
+        hot_sector_codes = hot_concept_codes | hot_industry_codes
+
         logger.info(f"[首板突破] 识别到 {len(hot_sectors)} 个热点板块")
-        logger.info(f"[首板突破] 热点板块包含 {len(hot_sector_codes)} 只成分股")
-        
+        logger.info(f"[首板突破]   热点概念: {len(hot_concept_names)}个, 成分股{len(hot_concept_codes)}只")
+        logger.info(f"[首板突破]   热点行业: {len(hot_industry_names)}个, 成分股{len(hot_industry_codes)}只")
+        logger.info(f"[首板突破]   全部热点成分股: {len(hot_sector_codes)}只")
+
         # 2. 获取昨日涨停池（用于确认首板）
         yesterday_date = self._get_date_offset(date_str, -1)
         yesterday_zt = history_pools.get(yesterday_date, pd.DataFrame())
 
-        # 3. 统计每个东财行业的涨停数量（用于独狼板检测）
-        sector_limit_up_counts = {}
-        if '所属行业' in today_zt.columns:
-            sector_limit_up_counts = today_zt['所属行业'].value_counts().to_dict()
-        elif 'L2_Industry' in today_zt.columns:
-            sector_limit_up_counts = today_zt['L2_Industry'].value_counts().to_dict()
-        
-        logger.info(f"[首板突破] 东财行业涨停统计: {len(sector_limit_up_counts)}个行业有涨停")
-        
+        # 3. 构建 stock→THS行业/概念 反向映射（用于替换东财行业数据）
+        stock_to_ths_industry = {}  # stock_code → THS行业名称
+        stock_to_ths_concept = {}   # stock_code → THS概念名称
+        stock_to_ths_ts_code = {}   # stock_code → THS板块代码
+        ths_sector_limit_up_counts = {}  # THS板块名称 → 涨停家数
+
+        for hs in hot_sectors:
+            sector_name = hs.get('sector_name', '')
+            sector_type = hs.get('sector_type', '')
+            ts_code = hs.get('ts_code', '')
+            member_codes = hs.get('member_codes', set())
+
+            # 统计该THS板块在今日涨停池中的涨停家数
+            ths_limit_up_count = 0
+            for _, zt_stock in today_zt.iterrows():
+                zt_code = str(zt_stock.get('代码', '')).zfill(6)
+                if zt_code in member_codes:
+                    ths_limit_up_count += 1
+            ths_sector_limit_up_counts[sector_name] = ths_limit_up_count
+
+            # 构建反向映射
+            if sector_type == '行业':
+                for code in member_codes:
+                    if code not in stock_to_ths_industry:
+                        stock_to_ths_industry[code] = sector_name
+                        stock_to_ths_ts_code[code] = ts_code
+            elif sector_type == '概念':
+                for code in member_codes:
+                    if code not in stock_to_ths_concept:
+                        stock_to_ths_concept[code] = sector_name
+                        stock_to_ths_ts_code[code] = ts_code
+
+        logger.info(f"[首板突破] THS行业映射: {len(stock_to_ths_industry)}只股票, "
+                    f"THS概念映射: {len(stock_to_ths_concept)}只股票")
+        logger.info(f"[首板突破] THS板块涨停统计: {len(ths_sector_limit_up_counts)}个板块")
+
         # 4. 分析所有涨停股票中的首板（不限于热点板块）
         total_analyzed = 0
         total_filtered = 0
@@ -204,59 +257,112 @@ class HotspotFirstBoardStrategy:
         for _, stock in today_zt.iterrows():
             total_analyzed += 1
 
-            # 获取股票代码（统一为6位数字）
             stock_code = str(stock.get('代码', '')).zfill(6)
-            
-            # 获取股票所属东财行业（用于独狼板检测）
-            sector_name = stock.get('所属行业', '') or stock.get('L2_Industry', '')
-            sector_limit_up_count = sector_limit_up_counts.get(sector_name, 0)
 
-            # 判断该股票是否属于热点板块（通过代码匹配）
-            matched_hot_sector = None
-            if stock_code in hot_sector_codes:
-                # 找到匹配的热点板块（取第一个匹配的）
-                for hs in hot_sectors:
-                    if stock_code in hs.get('member_codes', set()):
-                        matched_hot_sector = hs
-                        break
-            
-            if matched_hot_sector:
-                # 属于热点板块，使用热点板块信息
-                sector_info = {
-                    'sector_name': matched_hot_sector['sector_name'],
-                    'sector_type': matched_hot_sector.get('sector_type', '概念'),
-                    'ts_code': matched_hot_sector.get('ts_code', ''),
-                    'stats': {
-                        '涨停家数': matched_hot_sector['stats'].get('涨停家数', 0),
-                        '连板家数': matched_hot_sector['stats'].get('连板家数', 0),
-                        '东财行业涨停数': sector_limit_up_count
-                    },
-                    'trend_stage': matched_hot_sector['trend_stage'],
-                    'action': matched_hot_sector['action'],
-                    'confidence': matched_hot_sector['confidence']
-                }
-                is_hot_sector = True
-                logger.debug(f"[{stock_code}] 击中热点板块: {matched_hot_sector['sector_name']}")
+            # 获取THS行业/概念名称（优先THS，回退东财）
+            ths_industry_name = stock_to_ths_industry.get(stock_code, '')
+            ths_concept_name = stock_to_ths_concept.get(stock_code, '')
+            # 优先使用THS行业名，其次THS概念名，最后回退东财行业
+            ths_sector_name = ths_industry_name or ths_concept_name or stock.get('所属行业', '') or stock.get('L2_Industry', '')
+
+            # 获取该股票所属THS板块的涨停家数（优先THS，回退东财行业列）
+            sector_limit_up_count = 0
+            if ths_industry_name and ths_industry_name in ths_sector_limit_up_counts:
+                sector_limit_up_count = ths_sector_limit_up_counts[ths_industry_name]
+            elif ths_concept_name and ths_concept_name in ths_sector_limit_up_counts:
+                sector_limit_up_count = ths_sector_limit_up_counts[ths_concept_name]
             else:
-                # 不属于热点板块，使用东财行业信息
+                # THS映射未覆盖，回退用东财行业列统计
+                dongcai_sector = stock.get('所属行业', '') or stock.get('L2_Industry', '')
+                if dongcai_sector:
+                    sector_limit_up_count = sum(
+                        1 for _, zt in today_zt.iterrows()
+                        if (zt.get('所属行业', '') or zt.get('L2_Industry', '')) == dongcai_sector
+                    )
+
+            # 判断该股票是否属于热点板块（通过代码匹配，区分概念/行业）
+            is_hot_concept = stock_code in hot_concept_codes
+            is_hot_industry = stock_code in hot_industry_codes
+            is_hot_sector = is_hot_concept or is_hot_industry
+            is_dual_resonance = is_hot_concept and is_hot_industry
+
+            # 找到匹配的热点板块信息
+            matched_hot_concept = None
+            matched_hot_industry = None
+
+            if is_hot_concept:
+                for hs in hot_sectors:
+                    if hs.get('sector_type', '') == '概念' and stock_code in hs.get('member_codes', set()):
+                        matched_hot_concept = hs
+                        break
+
+            if is_hot_industry:
+                for hs in hot_sectors:
+                    if hs.get('sector_type', '') == '行业' and stock_code in hs.get('member_codes', set()):
+                        matched_hot_industry = hs
+                        break
+
+            if is_hot_sector:
+                # 优先使用行业热点信息，其次概念热点信息
+                primary_hs = matched_hot_industry or matched_hot_concept
                 sector_info = {
-                    'sector_name': sector_name or '未知行业',
-                    'sector_type': '东财行业',
-                    'ts_code': '',
+                    'sector_name': primary_hs['sector_name'],
+                    'sector_type': primary_hs.get('sector_type', '概念'),
+                    'ts_code': primary_hs.get('ts_code', ''),
+                    'stats': {
+                        '涨停家数': primary_hs['stats'].get('涨停家数', 0),
+                        '连板家数': primary_hs['stats'].get('连板家数', 0),
+                        'THS板块涨停数': sector_limit_up_count
+                    },
+                    'trend_stage': primary_hs['trend_stage'],
+                    'action': primary_hs['action'],
+                    'confidence': primary_hs['confidence']
+                }
+                if is_dual_resonance:
+                    logger.debug(f"[{stock_code}] 双热点共振: 概念={matched_hot_concept['sector_name'] if matched_hot_concept else 'N/A'}, "
+                                f"行业={matched_hot_industry['sector_name'] if matched_hot_industry else 'N/A'}")
+                else:
+                    logger.debug(f"[{stock_code}] 击中热点板块: {primary_hs['sector_name']}({primary_hs.get('sector_type', '')})")
+            else:
+                # 非热点股票：优先使用THS概念映射的名称和板块代码
+                ths_concept_for_stock = stock_to_ths_concept.get(stock_code, '')
+                ths_ts_code_for_stock = stock_to_ths_ts_code.get(stock_code, '')
+                sector_info = {
+                    'sector_name': ths_concept_for_stock or ths_sector_name or '未知行业',
+                    'sector_type': 'THS概念' if ths_concept_for_stock else ('THS行业' if ths_industry_name else '未知'),
+                    'ts_code': ths_ts_code_for_stock or '',
                     'stats': {
                         '涨停家数': sector_limit_up_count,
                         '连板家数': 0,
-                        '东财行业涨停数': sector_limit_up_count
+                        'THS板块涨停数': sector_limit_up_count
                     },
                     'trend_stage': '非热点',
                     'action': '',
                     'confidence': 0.0
                 }
-                is_hot_sector = False
 
-            # 分析首板
+            # 确定匹配的板块信息（用于日志和信号）
+            if is_dual_resonance:
+                matched_sector_name = f"{matched_hot_concept['sector_name']}+{matched_hot_industry['sector_name']}"
+                matched_sector_type = "概念+行业"
+            elif is_hot_concept:
+                matched_sector_name = matched_hot_concept['sector_name']
+                matched_sector_type = "概念"
+            elif is_hot_industry:
+                matched_sector_name = matched_hot_industry['sector_name']
+                matched_sector_type = "行业"
+            else:
+                matched_sector_name = ""
+                matched_sector_type = ""
+
+            # 分析首板（传入双共振标记和匹配板块信息）
             signal = self._analyze_first_board(
-                stock, yesterday_zt, sector_info, date_str, is_hot_sector, concept_hierarchy
+                stock, yesterday_zt, sector_info, date_str,
+                is_hot_sector=is_hot_sector,
+                is_dual_resonance=is_dual_resonance,
+                matched_sector_name=matched_sector_name,
+                matched_sector_type=matched_sector_type,
+                concept_hierarchy=concept_hierarchy
             )
             if signal:
                 signals.append(signal)
@@ -265,10 +371,13 @@ class HotspotFirstBoardStrategy:
 
         # 按置信度排序
         signals.sort(key=lambda x: x.confidence, reverse=True)
-        
-        # 统计热点板块信号数量（通过sector_type判断）
-        hot_count = sum(1 for s in signals if s.l2_industry and s.l2_industry != '非热点')
-        logger.info(f"[首板突破] 检测完成: 共 {len(signals)} 个信号 (击中热点{hot_count}只, 未击中{len(signals)-hot_count}只, 分析{total_analyzed}只, 过滤{total_filtered}只)")
+
+        # 统计热点板块信号数量
+        hot_count = sum(1 for s in signals if getattr(s, 'is_hot_sector', False))
+        dual_count = sum(1 for s in signals if getattr(s, 'is_dual_resonance', False))
+        logger.info(f"[首板突破] 检测完成: 共 {len(signals)} 个信号 "
+                    f"(击中热点{hot_count}只, 双共振{dual_count}只, "
+                    f"分析{total_analyzed}只, 过滤{total_filtered}只)")
 
         return signals
 
@@ -411,7 +520,10 @@ class HotspotFirstBoardStrategy:
         sector_stats = sector_info.get('stats', {})
         sector_limit_up_count = sector_stats.get('涨停家数', 0)
         if sector_limit_up_count < self.params['min_sector_limit_up']:
-            return f"独狼板(板块涨停{sector_limit_up_count}家<{self.params['min_sector_limit_up']}家)"
+            sector_name = sector_info.get('sector_name', '未知')
+            sector_ts = sector_info.get('ts_code', '')
+            return (f"独狼板(板块[{sector_name}]{sector_ts} 涨停{sector_limit_up_count}家"
+                    f"<{self.params['min_sector_limit_up']}家)")
         
         # 3. 检查一字板（无换手）
         # 通过开板次数和涨停类型判断
@@ -437,6 +549,9 @@ class HotspotFirstBoardStrategy:
                             sector_info: Dict,
                             date_str: str,
                             is_hot_sector: bool = True,
+                            is_dual_resonance: bool = False,
+                            matched_sector_name: str = "",
+                            matched_sector_type: str = "",
                             concept_hierarchy: Dict = None) -> Optional[TradeSignal]:
         """
         分析单只股票是否为首板突破
@@ -451,6 +566,9 @@ class HotspotFirstBoardStrategy:
             sector_info: 行业信息
             date_str: 日期字符串
             is_hot_sector: 是否属于热点板块（影响仓位权重）
+            is_dual_resonance: 是否同时属于热点概念+热点行业（双共振加成）
+            matched_sector_name: 匹配到的热点板块名称
+            matched_sector_type: 匹配到的热点板块类型（概念/行业/概念+行业）
             concept_hierarchy: 概念连板梯队数据（用于复盘参考）
 
         Returns:
@@ -460,8 +578,15 @@ class HotspotFirstBoardStrategy:
         code = str(code).zfill(6)
         name = stock.get('名称', '')
         sector_name = sector_info['sector_name']
+        sector_ts_code = sector_info.get('ts_code', '')
 
-        logger.debug(f"[{code}] 开始分析首板 - 名称:{name}, 行业:{sector_name}, 热点:{is_hot_sector}")
+        if is_hot_sector:
+            logger.debug(f"[{code}] 开始分析首板 - 名称:{name}, 行业:{sector_name}, "
+                         f"板块代码:{sector_ts_code or '无'}, 热点:True"
+                         f"({matched_sector_type}:{matched_sector_name})")
+        else:
+            logger.debug(f"[{code}] 开始分析首板 - 名称:{name}, 行业:{sector_name}, "
+                         f"板块代码:{sector_ts_code or '无'}, 热点:False")
 
         # ===== 步骤1: 基础过滤（必检项）=====
         skip_reason = self._should_skip_stock(stock, sector_info, date_str)
@@ -634,6 +759,8 @@ class HotspotFirstBoardStrategy:
             confidence += 0.05  # 均线突破加成
         if is_hot_sector:
             confidence += 0.05  # 热点板块加成
+        if is_dual_resonance:
+            confidence += 0.08  # 双热点共振额外加成（概念+行业同时热点）
         confidence = min(confidence, 0.95)
 
         # 确定仓位权重：热点板块 -> medium, 非热点 -> light
@@ -683,7 +810,9 @@ class HotspotFirstBoardStrategy:
                 hierarchy_info = " | ".join(concept_parts)
         
         # 构建理由
-        if is_hot_sector:
+        if is_dual_resonance:
+            reason_parts = [f"首板突破+{sector_name}热点(双共振)"]
+        elif is_hot_sector:
             reason_parts = [f"首板突破+{sector_name}热点"]
         else:
             reason_parts = [f"首板突破+{sector_name}"]
@@ -731,7 +860,10 @@ class HotspotFirstBoardStrategy:
             f"筹码结构: 距前高{chip_info.get('distance_from_high', 'N/A')}"
         ]
         if is_hot_sector:
-            validation_rules.append(f"属于热点行业: {sector_name}")
+            if matched_sector_type:
+                validation_rules.append(f"属于热点{matched_sector_type}: {matched_sector_name}")
+            else:
+                validation_rules.append(f"属于热点板块: {sector_name}")
         else:
             validation_rules.append(f"行业: {sector_name}（非热点）")
         if daily_data and 'rise_5d' in daily_data:
@@ -769,7 +901,11 @@ class HotspotFirstBoardStrategy:
             validation_rules=validation_rules,
             l2_industry=sector_name,
             buy_strategy=buy_strategy,
-            next_day_expectation=next_day_expectation
+            next_day_expectation=next_day_expectation,
+            is_dual_resonance=is_dual_resonance,
+            is_hot_sector=is_hot_sector,
+            matched_sector_name=matched_sector_name,
+            matched_sector_type=matched_sector_type
         )
 
     def _get_daily_data(self, stock_code: str, date_str: str) -> Optional[Dict]:

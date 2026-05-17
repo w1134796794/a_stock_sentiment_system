@@ -106,6 +106,11 @@ class MarketEnvResult:
     # 详细分析文本
     analysis_summary: str = ""
 
+    # 补充因子字段（供 factor_collector 使用）
+    amount_change_ratio: float = 0.0     # 成交额环比变化率
+    limit_down_count: int = 0            # 跌停家数
+    blasted_next_day_pct: float = 0.0    # 炸板股次日表现
+
 
 class MarketEnvAnalyzer:
     """

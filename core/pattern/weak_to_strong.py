@@ -351,7 +351,9 @@ class WeakToStrongStrategy:
                            today_tick: Dict[str, pd.DataFrame],
                            history_pools: Dict[str, pd.DataFrame],
                            date_str: str,
-                           today_daily: pd.DataFrame = None) -> Dict:
+                           today_daily: pd.DataFrame = None,
+                           stock_to_ths_industry: Dict[str, str] = None,
+                           stock_to_ths_concept: Dict[str, str] = None) -> Dict:
         """
         每日更新龙头池和走弱池
         
@@ -382,7 +384,11 @@ class WeakToStrongStrategy:
         
         # 1. 识别新龙头并入池
         logger.info(f"[弱转强] ========== 阶段1: 识别新龙头 ==========")
-        new_dragons = self._identify_new_dragons(today_zt, history_pools, date_str)
+        new_dragons = self._identify_new_dragons(
+            today_zt, history_pools, date_str,
+            stock_to_ths_industry=stock_to_ths_industry or {},
+            stock_to_ths_concept=stock_to_ths_concept or {}
+        )
         for dragon in new_dragons:
             if dragon.stock_code not in self.dragon_pool:
                 self.dragon_pool[dragon.stock_code] = dragon
@@ -497,7 +503,9 @@ class WeakToStrongStrategy:
     def _identify_new_dragons(self, 
                              today_zt: pd.DataFrame,
                              history_pools: Dict[str, pd.DataFrame],
-                             date_str: str) -> List[DragonCandidate]:
+                             date_str: str,
+                             stock_to_ths_industry: Dict[str, str] = None,
+                             stock_to_ths_concept: Dict[str, str] = None) -> List[DragonCandidate]:
         """
         识别新的龙头候选股
         
@@ -523,7 +531,9 @@ class WeakToStrongStrategy:
                 code = str(row.get('代码', '')).zfill(6)
                 name = row.get('名称', '')
                 board_height = row.get('连板数', 0)
-                sector = row.get('所属行业', '') or row.get('L2_Industry', '')
+                ths_ind = (stock_to_ths_industry or {}).get(code, '')
+                ths_con = (stock_to_ths_concept or {}).get(code, '')
+                sector = ths_ind or ths_con or row.get('所属行业', '') or row.get('L2_Industry', '')
                 current_price = row.get('最新价', 0)
                 
                 # 检查是否已经是连板龙头（连板数>=4）
@@ -579,9 +589,11 @@ class WeakToStrongStrategy:
                         continue
                     
                     if code not in recent_limit_up_stocks:
+                        ths_ind = (stock_to_ths_industry or {}).get(code, '')
+                        ths_con = (stock_to_ths_concept or {}).get(code, '')
                         recent_limit_up_stocks[code] = {
                             'name': row.get('名称', ''),
-                            'sector': row.get('所属行业', '') or row.get('L2_Industry', ''),
+                            'sector': ths_ind or ths_con or row.get('所属行业', '') or row.get('L2_Industry', ''),
                             'last_limit_date': date,
                             'last_limit_price': row.get('最新价', 0)
                         }

@@ -31,6 +31,7 @@ class PatternSignal:
     position_size: str = "medium"  # light/medium/heavy
     validation_rules: List[str] = None
     l2_industry: str = ""  # 二级行业
+    is_dual_resonance: bool = False  # 是否双热点共振
 
     def __post_init__(self):
         if self.validation_rules is None:
@@ -120,7 +121,9 @@ class PatternRecognition:
                               day_before_yesterday_df: pd.DataFrame = None,
                               today_date: str = None, yest_date: str = None,
                               history_pools: Dict[str, pd.DataFrame] = None,
-                              today_daily: pd.DataFrame = None) -> List[PatternSignal]:
+                              today_daily: pd.DataFrame = None,
+                              stock_to_ths_industry: Dict[str, str] = None,
+                              stock_to_ths_concept: Dict[str, str] = None) -> List[PatternSignal]:
         """
         弱转强模式识别 - 动态龙头跟踪版本
         
@@ -176,7 +179,9 @@ class PatternRecognition:
                 today_tick=today_tick,
                 history_pools=history_pools,
                 date_str=today_date or datetime.now().strftime("%Y%m%d"),
-                today_daily=today_daily
+                today_daily=today_daily,
+                stock_to_ths_industry=stock_to_ths_industry or {},
+                stock_to_ths_concept=stock_to_ths_concept or {}
             )
             
             # 输出池子更新结果
@@ -314,9 +319,13 @@ class PatternRecognition:
                 logger.debug(f"[弱转强]   {name} 资金维度得分{capital_score}/25")
                 
                 # 4. 市场情绪维度评分（20分）
-                # 统一获取行业名称（涨停池用'所属行业'，日线数据可能用'industry'或其他）
-                sector_name = today_row.get('所属行业', '') or today_row.get('industry', '')
-                sector_score = self._calculate_sector_score(sector_name, today_date, today_df)
+                # 统一获取行业名称（优先THS行业，其次THS概念，最后回退东财行业）
+                sector_name = (stock_to_ths_industry or {}).get(code, '') or (stock_to_ths_concept or {}).get(code, '') or today_row.get('所属行业', '') or today_row.get('industry', '')
+                sector_score = self._calculate_sector_score(
+                    sector_name, today_date, today_df,
+                    stock_to_ths_industry=stock_to_ths_industry,
+                    stock_to_ths_concept=stock_to_ths_concept
+                )
                 logger.debug(f"[弱转强]   {name} 情绪维度得分{sector_score}/20")
                 
                 # 计算总评分
@@ -415,7 +424,9 @@ class PatternRecognition:
     
     def detect_second_board_dragon(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame,
                                    day_before_yesterday_df: pd.DataFrame = None,
-                                   today_date: str = None, yest_date: str = None) -> List[PatternSignal]:
+                                   today_date: str = None, yest_date: str = None,
+                                   stock_to_ths_industry: Dict[str, str] = None,
+                                   stock_to_ths_concept: Dict[str, str] = None) -> List[PatternSignal]:
         """
         二板定龙模式识别 - 使用连板数字段优化
         
@@ -457,17 +468,20 @@ class PatternRecognition:
             total_checked = 0
             total_passed = 0
 
-            # 直接使用连板数=2的股票（二板）
-            for _, today_row in today_df.iterrows():
+            # 预过滤：只保留连板数=2的股票
+            board_col = '连板数' if '连板数' in today_df.columns else 'limit_times'
+            if board_col not in today_df.columns:
+                logger.debug("[二板定龙] 涨停池缺少连板数列")
+                return signals
+
+            second_board_df = today_df[today_df[board_col].astype(float) == 2.0]
+            skipped = len(today_df) - len(second_board_df)
+            logger.debug(f"[二板定龙] 今日涨停{len(today_df)}只，连板数=2的{len(second_board_df)}只，跳过{skipped}只")
+
+            for _, today_row in second_board_df.iterrows():
                 code = str(today_row.get('代码', '')).zfill(6)
                 name = today_row.get('名称', '')
                 total_checked += 1
-
-                # 检查连板数是否为2
-                board_count = today_row.get('连板数', 0)
-                if board_count != 2:
-                    logger.debug(f"[二板定龙]   {name} 连板数={board_count}，不是二板，跳过")
-                    continue
 
                 logger.debug(f"[二板定龙] 检测 {name}({code})，确认二板...")
 
@@ -538,7 +552,7 @@ class PatternRecognition:
                         f"{limit_up_time}涨停（速度）",
                         f"封单强度{seal_ratio*100:.2f}%（质量）"
                     ],
-                    l2_industry=today_row.get('所属行业', '')
+                    l2_industry=(stock_to_ths_industry or {}).get(code, '') or (stock_to_ths_concept or {}).get(code, '') or today_row.get('所属行业', '')
                 )
                 
                 signals.append(signal)
@@ -1275,7 +1289,8 @@ class PatternRecognition:
                     take_profit=ts.take_profit,
                     position_size=ts.position_size,
                     validation_rules=ts.validation_rules,
-                    l2_industry=getattr(ts, 'l2_industry', '')
+                    l2_industry=getattr(ts, 'l2_industry', ''),
+                    is_dual_resonance=getattr(ts, 'is_dual_resonance', False)
                 )
                 signals.append(pattern_signal)
 
@@ -1289,7 +1304,8 @@ class PatternRecognition:
     def detect_dragon_second_wave(self, today_df: pd.DataFrame,
                                   recent_zt_pools: Dict[str, pd.DataFrame],
                                   today_date: str,
-                                  hot_sectors: List[str] = None) -> List[PatternSignal]:
+                                  stock_to_ths_industry: Dict[str, str] = None,
+                                  stock_to_ths_concept: Dict[str, str] = None) -> List[PatternSignal]:
         """
         龙二波模式识别 - 调用DragonSecondWaveStrategyV2
         """
@@ -1345,9 +1361,11 @@ class PatternRecognition:
                 total_checked += 1
 
                 sector_hot = False
-                stock_sector = today_row.get('所属行业', '')
-                if hot_sectors and stock_sector:
-                    sector_hot = stock_sector in hot_sectors
+                stock_code_clean = code.zfill(6)
+                ths_industry = (stock_to_ths_industry or {}).get(stock_code_clean, '')
+                ths_concept = (stock_to_ths_concept or {}).get(stock_code_clean, '')
+                sector_hot = bool(ths_industry or ths_concept)
+                stock_sector = ths_industry or ths_concept or today_row.get('所属行业', '')
 
                 # 日期已经是YYYYMMDD格式，直接使用
                 # 获取历史数据以启用双轨制判断（连板 或 涨幅）
@@ -1419,28 +1437,21 @@ class PatternRecognition:
 
     def _get_prev_trading_day(self, date_str: str, days: int = 1) -> str:
         """
-        获取前N个交易日 - 使用交易日管理器
-        
+        获取前N个交易日 - 使用交易日历
+
         Args:
             date_str: 日期字符串 YYYYMMDD
             days: 往前推几个交易日
-            
+
         Returns:
-            str: 前一个交易日的日期 YYYYMMDD
+            str: 前N个交易日的日期 YYYYMMDD
         """
-        # 使用交易日管理器获取前N个交易日
-        if self.dm and hasattr(self.dm, 'trade_date_mgr'):
-            return self.dm.trade_date_mgr.get_prev_trade_date(date_str, days)
-        
-        # 备用方案：简化处理（仅跳过周末）
-        from datetime import datetime, timedelta
-        dt = datetime.strptime(date_str, "%Y%m%d")
-        count = 0
-        while count < days:
-            dt = dt - timedelta(days=1)
-            if dt.weekday() < 5:  # 周一到周五
-                count += 1
-        return dt.strftime("%Y%m%d")
+        from core.utils.date_utils import get_last_n_trade_dates
+
+        trade_dates = get_last_n_trade_dates(days + 1, date_str)
+        if len(trade_dates) > days:
+            return trade_dates[days]
+        return trade_dates[-1] if trade_dates else date_str
 
     def scan_all_patterns(self, today_date: str, yesterday_date: str = None, hot_sectors: List[Dict] = None) -> Dict[str, List[PatternSignal]]:
         """
@@ -1475,11 +1486,14 @@ class PatternRecognition:
         day_before_yesterday_ymd = self._get_prev_trading_day(yesterday_date_ymd, 1)
         day_before_yesterday_df = self.dm.get_limit_up_pool(day_before_yesterday_ymd)
         
-        # 获取最近15个交易日涨停池数据（用于龙二波检测，跳过周末）
+        # 获取最近15个交易日涨停池数据（用于龙二波检测，基于交易日历）
         logger.info("获取最近15个交易日涨停池数据...")
+        from core.utils.date_utils import get_last_n_trade_dates
+        recent_trade_dates = get_last_n_trade_dates(16, today_date_ymd)
+        recent_trade_dates = [d for d in recent_trade_dates if d != today_date_ymd][:15]
+
         recent_zt_pools = {}
-        for i in range(1, 16):  # 从1开始，排除今日
-            date_str_ymd = self._get_prev_trading_day(today_date_ymd, i)
+        for i, date_str_ymd in enumerate(recent_trade_dates, 1):
             df = self.dm.get_limit_up_pool(date_str_ymd)
             if not df.empty:
                 recent_zt_pools[date_str_ymd] = df
@@ -1500,13 +1514,35 @@ class PatternRecognition:
         
         results = {}
         
+        # 构建 stock→THS行业/概念 反向映射（统一替换东财行业数据）
+        stock_to_ths_industry = {}  # stock_code → THS行业名称
+        stock_to_ths_concept = {}   # stock_code → THS概念名称
+        if hot_sectors:
+            for hs in hot_sectors:
+                sector_type = hs.get('sector_type', '')
+                sector_name = hs.get('sector_name', '')
+                member_codes = hs.get('member_codes', set())
+                if sector_type == '行业':
+                    for code in member_codes:
+                        if code not in stock_to_ths_industry:
+                            stock_to_ths_industry[code] = sector_name
+                elif sector_type == '概念':
+                    for code in member_codes:
+                        if code not in stock_to_ths_concept:
+                            stock_to_ths_concept[code] = sector_name
+            logger.info(f"[模式识别] THS行业映射: {len(stock_to_ths_industry)}只, THS概念映射: {len(stock_to_ths_concept)}只")
+        else:
+            logger.warning("[模式识别] 未收到热点板块数据，将回退使用东财行业")
+
         # 1. 弱转强检测
         try:
             logger.info("-" * 40)
             results["弱转强"] = self.detect_weak_to_strong(
                 today_df, yesterday_df, day_before_yesterday_df, today_date_ymd, yesterday_date_ymd,
                 history_pools=recent_zt_pools,
-                today_daily=today_daily
+                today_daily=today_daily,
+                stock_to_ths_industry=stock_to_ths_industry,
+                stock_to_ths_concept=stock_to_ths_concept
             )
         except Exception as e:
             logger.error(f"弱转强检测失败: {e}")
@@ -1518,7 +1554,9 @@ class PatternRecognition:
             logger.info("-" * 40)
             results["二板定龙"] = self.detect_second_board_dragon(
                 today_df, yesterday_df, day_before_yesterday_df,
-                today_date_ymd, yesterday_date_ymd
+                today_date_ymd, yesterday_date_ymd,
+                stock_to_ths_industry=stock_to_ths_industry,
+                stock_to_ths_concept=stock_to_ths_concept
             )
         except Exception as e:
             logger.error(f"二板定龙检测失败: {e}")
@@ -1527,15 +1565,10 @@ class PatternRecognition:
         # 4. 龙二波检测
         try:
             logger.info("-" * 40)
-            # 获取热点板块
-            hot_sectors = []
-            if self.se:
-                try:
-                    hot_sectors = self.se.get_hot_sectors(today_date_ymd, top_n=10)
-                except Exception as e:
-                    logger.warning(f"获取热点板块失败: {e}")
             results["龙二波"] = self.detect_dragon_second_wave(
-                today_df, recent_zt_pools, today_date_ymd, hot_sectors
+                today_df, recent_zt_pools, today_date_ymd,
+                stock_to_ths_industry=stock_to_ths_industry,
+                stock_to_ths_concept=stock_to_ths_concept
             )
         except Exception as e:
             logger.error(f"龙二波检测失败: {e}")
@@ -1545,7 +1578,8 @@ class PatternRecognition:
         try:
             logger.info("-" * 40)
             results["首板突破"] = self.detect_first_board_breakout(
-                today_df, yesterday_df, today_date_ymd, recent_zt_pools
+                today_df, yesterday_df, today_date_ymd, recent_zt_pools,
+                hot_sectors=hot_sectors
             )
         except Exception as e:
             logger.error(f"首板突破检测失败: {e}")
@@ -1808,7 +1842,9 @@ class PatternRecognition:
         
         return score
     
-    def _calculate_sector_score(self, sector_name: str, date_str: str, today_zt: pd.DataFrame = None) -> int:
+    def _calculate_sector_score(self, sector_name: str, date_str: str, today_zt: pd.DataFrame = None,
+                               stock_to_ths_industry: Dict[str, str] = None,
+                               stock_to_ths_concept: Dict[str, str] = None) -> int:
         """
         计算市场情绪维度评分（满分20分）
         
@@ -1819,10 +1855,23 @@ class PatternRecognition:
         score = 0
         
         try:
-            # 从涨停池统计板块涨停家数
+            # 从涨停池统计板块涨停家数（优先用THS映射，回退东财行业列）
             if today_zt is not None and not today_zt.empty and sector_name:
-                sector_zt = today_zt[today_zt['所属行业'] == sector_name]
-                sector_limit_up_count = len(sector_zt)
+                sector_limit_up_count = 0
+                ths_industry = stock_to_ths_industry or {}
+                ths_concept = stock_to_ths_concept or {}
+                
+                for _, zt_row in today_zt.iterrows():
+                    zt_code = str(zt_row.get('代码', '')).zfill(6)
+                    zt_ths_ind = ths_industry.get(zt_code, '')
+                    zt_ths_con = ths_concept.get(zt_code, '')
+                    if zt_ths_ind == sector_name or zt_ths_con == sector_name:
+                        sector_limit_up_count += 1
+                
+                # 如果THS映射没匹配到，回退用东财行业列
+                if sector_limit_up_count == 0 and '所属行业' in today_zt.columns:
+                    sector_zt = today_zt[today_zt['所属行业'] == sector_name]
+                    sector_limit_up_count = len(sector_zt)
                 
                 if sector_limit_up_count >= 3:
                     score += 10

@@ -1,0 +1,63 @@
+# ============================================
+# Emotion Engine: 情绪周期 — 因子启用与权重配置
+# 扩展原有 emotion_cycle_config.yaml，增加因子开关
+# ============================================
+
+emotion_cycle:
+
+  # 子类综合权重
+  composite_weights:
+    core: 0.60
+    structure: 0.20
+    extreme: 0.10
+    quality: 0.10
+
+  # ---- 核心情绪因子 ----
+  core:
+    enabled_factors:
+      - "limit_up_count"
+      - "max_board_height"
+      - "broken_rate"
+      - "nuclear_button_count"
+      - "prev_limit_up_premium"
+      - "echelon_integrity"
+      - "continuous_rate"
+      - "limit_down_ratio"
+      - "win_rate"
+      - "avg_profit"
+    factor_weights:
+      limit_up_count: 1.0
+      max_board_height: 0.8
+      broken_rate: 0.6
+      nuclear_button_count: 0.5
+      prev_limit_up_premium: 0.5
+      echelon_integrity: 0.4
+      continuous_rate: 0.6
+      limit_down_ratio: 0.7
+      win_rate: 0.5
+      avg_profit: 0.4
+
+  # ---- 结构因子 ----
+  structure:
+    enabled_factors:
+      - "B1_first_board_ratio"
+    factor_weights:
+      B1_first_board_ratio: 1.0
+
+  # ---- 极端情绪因子 ----
+  extreme:
+    enabled_factors:
+      - "B2_one_word_board_ratio"
+      - "B3_tail_board_ratio"
+      - "B4_extreme_reversal_count"
+    factor_weights:
+      B2_one_word_board_ratio: 0.35
+      B3_tail_board_ratio: 0.35
+      B4_extreme_reversal_count: 0.30
+
+  # ---- 质量因子 ----
+  quality:
+    enabled_factors:
+      - "B5_avg_seal_ratio"
+    factor_weights:
+      B5_avg_seal_ratio: 1.0

@@ -1,0 +1,42 @@
+# ============================================
+# Layer 4: 交易计划 — 因子启用与权重配置
+# ============================================
+
+layer4_trade_plan:
+
+  # 子类综合权重
+  composite_weights:
+    cycle: 0.30
+    divergence: 0.25
+    feedback: 0.25
+    moneyflow: 0.20
+
+  # ---- 周期因子 ----
+  cycle:
+    enabled_factors:
+      - "F1_cycle_duration"
+    factor_weights:
+      F1_cycle_duration: 1.0
+
+  # ---- 背离因子 ----
+  divergence:
+    enabled_factors:
+      - "F2_market_emotion_divergence"
+    factor_weights:
+      F2_market_emotion_divergence: 1.0
+
+  # ---- 反馈因子 ----
+  feedback:
+    enabled_factors:
+      - "F3_signal_win_rate"
+    factor_weights:
+      F3_signal_win_rate: 1.0
+
+  # ---- 资金流向因子 ----
+  moneyflow:
+    enabled_factors:
+      - "E3_north_flow"
+      - "E4_margin_change_ratio"
+    factor_weights:
+      E3_north_flow: 0.55
+      E4_margin_change_ratio: 0.45

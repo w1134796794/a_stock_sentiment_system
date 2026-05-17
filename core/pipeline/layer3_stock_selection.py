@@ -44,6 +44,12 @@ class StockSelectionResult:
 
     selection_summary: str = ""
 
+    # 新增个股技术因子 (D1-D5)
+    stock_tech_factors: Dict[str, Dict] = field(default_factory=dict)
+
+    # 新增资金流向因子 (E1-E4)
+    moneyflow_factors: Dict[str, Dict] = field(default_factory=dict)
+
 
 class StockSelectionLayer:
     """
@@ -99,6 +105,12 @@ class StockSelectionLayer:
             self._apply_multi_factor_scoring(result, market_env)
 
             self._analyze_moneyflow_and_chip(result, zt_pool, trade_date)
+
+            # D1-D5: 个股技术因子
+            self._compute_stock_tech_factors(result, zt_pool, trade_date)
+
+            # E1-E4: 资金流向因子
+            self._compute_moneyflow_factors(result, zt_pool, trade_date)
 
             result.selection_summary = self._generate_summary(result)
 
@@ -329,3 +341,244 @@ class StockSelectionLayer:
                 lines.append(f"   [{sector}]: {', '.join(names)}")
 
         return "\n".join(lines)
+
+    def _compute_stock_tech_factors(self, result: StockSelectionResult,
+                                     zt_pool: pd.DataFrame, trade_date: str):
+        """
+        D1-D5: 个股技术因子计算
+
+        D1: N日高低位 - 当前价在N日最高最低之间的位置
+        D2: 量价配合度 - 涨幅与量比的匹配程度
+        D3: 封板强度 - 封板时间+封单量综合评分
+        D4: 换手率健康度 - 换手率是否在合理区间
+        D5: 均线多头排列度 - MA5>MA10>MA20>MA60的程度
+        """
+        try:
+            ts_code_col = None
+            for col in ['ts_code', '代码', 'code']:
+                if col in zt_pool.columns:
+                    ts_code_col = col
+                    break
+            if ts_code_col is None or zt_pool.empty:
+                return
+
+            codes = zt_pool[ts_code_col].astype(str).tolist()[:30]
+
+            for code in codes:
+                try:
+                    daily = self.dm.get_stock_daily(code, trade_date, trade_date)
+                    if daily is None or daily.empty:
+                        continue
+
+                    row = daily.iloc[-1]
+                    close = float(row.get('close', 0))
+                    pre_close = float(row.get('pre_close', 0))
+                    vol = float(row.get('vol', 0))
+                    amount = float(row.get('amount', 0))
+                    pct_chg = float(row.get('pct_chg', 0))
+
+                    factors = {}
+
+                    # D1: N日高低位 (默认20日)
+                    from datetime import datetime, timedelta
+                    lookback_start = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
+                    hist = self.dm.get_stock_daily(code, lookback_start, trade_date)
+                    if hist is not None and not hist.empty and len(hist) >= 5:
+                        n_high = float(hist['high'].max())
+                        n_low = float(hist['low'].min())
+                        if n_high > n_low:
+                            factors['D1_n_day_high_low'] = round(
+                                (close - n_low) / (n_high - n_low) * 100, 1
+                            )
+                        else:
+                            factors['D1_n_day_high_low'] = 50.0
+
+                        # D5: 均线多头排列度
+                        if 'close' in hist.columns:
+                            closes = hist['close'].astype(float)
+                            if len(closes) >= 60:
+                                ma5 = closes.tail(5).mean()
+                                ma10 = closes.tail(10).mean()
+                                ma20 = closes.tail(20).mean()
+                                ma60 = closes.tail(60).mean()
+                                align_score = 0
+                                if ma5 > ma10:
+                                    align_score += 25
+                                if ma10 > ma20:
+                                    align_score += 25
+                                if ma20 > ma60:
+                                    align_score += 25
+                                if close > ma5:
+                                    align_score += 25
+                                factors['D5_ma_bull_align'] = align_score
+                            else:
+                                factors['D5_ma_bull_align'] = 50.0
+                    else:
+                        factors['D1_n_day_high_low'] = 50.0
+                        factors['D5_ma_bull_align'] = 50.0
+
+                    # D2: 量价配合度
+                    if vol > 0 and pre_close > 0:
+                        vol_ratio = vol / max(float(hist['vol'].tail(5).mean()) if hist is not None and not hist.empty else vol, 1)
+                        if pct_chg > 0 and vol_ratio > 1.0:
+                            factors['D2_vol_price_coord'] = min(100, vol_ratio * 50 + 30)
+                        elif pct_chg > 0 and vol_ratio <= 1.0:
+                            factors['D2_vol_price_coord'] = max(0, vol_ratio * 40)
+                        elif pct_chg < 0 and vol_ratio < 1.0:
+                            factors['D2_vol_price_coord'] = 50.0
+                        else:
+                            factors['D2_vol_price_coord'] = max(0, 50 - vol_ratio * 20)
+                    else:
+                        factors['D2_vol_price_coord'] = 50.0
+
+                    # D3: 封板强度 (从涨停池获取封板时间和封单)
+                    zt_row = zt_pool[zt_pool[ts_code_col].astype(str) == code]
+                    seal_score = 50.0
+                    if not zt_row.empty:
+                        zt_r = zt_row.iloc[0]
+                        time_col = None
+                        for tc in ['first_time', '首次封板时间', '封板时间']:
+                            if tc in zt_pool.columns:
+                                time_col = tc
+                                break
+                        if time_col:
+                            ft = str(zt_r.get(time_col, '')).strip()
+                            if ft <= '09:35:00':
+                                seal_score = 90.0
+                            elif ft <= '10:00:00':
+                                seal_score = 75.0
+                            elif ft <= '10:30:00':
+                                seal_score = 60.0
+                            elif ft <= '11:30:00':
+                                seal_score = 45.0
+                            elif ft <= '14:00:00':
+                                seal_score = 30.0
+                            else:
+                                seal_score = 15.0
+                    factors['D3_seal_strength'] = seal_score
+
+                    # D4: 换手率健康度
+                    turnover = float(row.get('turnover_rate', row.get('turnover', 0)))
+                    if turnover <= 0 and amount > 0:
+                        turnover = amount / 1e8
+                    if 3 <= turnover <= 15:
+                        factors['D4_turnover_health'] = 80.0
+                    elif 1 <= turnover < 3:
+                        factors['D4_turnover_health'] = 60.0
+                    elif 15 < turnover <= 25:
+                        factors['D4_turnover_health'] = 50.0
+                    elif turnover > 25:
+                        factors['D4_turnover_health'] = 30.0
+                    else:
+                        factors['D4_turnover_health'] = 40.0
+
+                    result.stock_tech_factors[code] = factors
+
+                except Exception as e:
+                    logger.debug(f"[Layer3] D因子计算失败 {code}: {e}")
+
+            logger.info(f"[Layer3] D1-D5个股技术因子计算完成: {len(result.stock_tech_factors)}只")
+        except Exception as e:
+            logger.warning(f"[Layer3] D因子批量计算失败: {e}")
+
+    def _compute_moneyflow_factors(self, result: StockSelectionResult,
+                                    zt_pool: pd.DataFrame, trade_date: str):
+        """
+        E1-E4: 资金流向因子计算
+
+        E1: 主力净流入占比 - 主力净额/成交额
+        E2: 散户净流入占比 - 散户净额/成交额
+        E3: 大单买入占比 - 大单买入/总成交
+        E4: 资金流向趋势 - 近N日主力净流入方向
+        """
+        try:
+            ts_code_col = None
+            for col in ['ts_code', '代码', 'code']:
+                if col in zt_pool.columns:
+                    ts_code_col = col
+                    break
+            if ts_code_col is None or zt_pool.empty:
+                return
+
+            codes = zt_pool[ts_code_col].astype(str).tolist()[:30]
+
+            for code in codes:
+                try:
+                    factors = {}
+
+                    # 尝试获取资金流向数据
+                    mf_data = None
+                    try:
+                        if hasattr(self.dm, 'get_moneyflow'):
+                            mf_data = self.dm.get_moneyflow(code, trade_date)
+                    except Exception:
+                        pass
+
+                    if mf_data is not None and not mf_data.empty:
+                        row = mf_data.iloc[-1]
+                        buy_elg = float(row.get('buy_elg_amount', 0))
+                        sell_elg = float(row.get('sell_elg_amount', 0))
+                        buy_lg = float(row.get('buy_lg_amount', 0))
+                        sell_lg = float(row.get('sell_lg_amount', 0))
+                        buy_md = float(row.get('buy_md_amount', 0))
+                        sell_md = float(row.get('sell_md_amount', 0))
+                        buy_sm = float(row.get('buy_sm_amount', 0))
+                        sell_sm = float(row.get('sell_sm_amount', 0))
+
+                        total_amount = buy_elg + sell_elg + buy_lg + sell_lg + buy_md + sell_md + buy_sm + sell_sm
+
+                        if total_amount > 0:
+                            main_net = (buy_elg + buy_lg) - (sell_elg + sell_lg)
+                            retail_net = (buy_md + buy_sm) - (sell_md + sell_sm)
+
+                            factors['E1_main_net_ratio'] = round(main_net / total_amount * 100, 2)
+                            factors['E2_retail_net_ratio'] = round(retail_net / total_amount * 100, 2)
+                            factors['E3_large_buy_ratio'] = round(
+                                (buy_elg + buy_lg) / total_amount * 100, 2
+                            )
+
+                            # E4: 资金流向趋势（近5日主力净流入方向）
+                            try:
+                                if hasattr(self.dm, 'get_moneyflow'):
+                                    hist_mf = self.dm.get_moneyflow(code, lookback_days=5)
+                                    if hist_mf is not None and not hist_mf.empty:
+                                        net_flows = []
+                                        for _, r in hist_mf.iterrows():
+                                            b_elg = float(r.get('buy_elg_amount', 0))
+                                            s_elg = float(r.get('sell_elg_amount', 0))
+                                            b_lg = float(r.get('buy_lg_amount', 0))
+                                            s_lg = float(r.get('sell_lg_amount', 0))
+                                            net_flows.append((b_elg + b_lg) - (s_elg + s_lg))
+
+                                        if net_flows:
+                                            positive_days = sum(1 for nf in net_flows if nf > 0)
+                                            factors['E4_moneyflow_trend'] = round(
+                                                positive_days / len(net_flows) * 100, 1
+                                            )
+                                        else:
+                                            factors['E4_moneyflow_trend'] = 50.0
+                                    else:
+                                        factors['E4_moneyflow_trend'] = 50.0
+                                else:
+                                    factors['E4_moneyflow_trend'] = 50.0
+                            except Exception:
+                                factors['E4_moneyflow_trend'] = 50.0
+                        else:
+                            factors['E1_main_net_ratio'] = 0.0
+                            factors['E2_retail_net_ratio'] = 0.0
+                            factors['E3_large_buy_ratio'] = 0.0
+                            factors['E4_moneyflow_trend'] = 50.0
+                    else:
+                        factors['E1_main_net_ratio'] = 0.0
+                        factors['E2_retail_net_ratio'] = 0.0
+                        factors['E3_large_buy_ratio'] = 0.0
+                        factors['E4_moneyflow_trend'] = 50.0
+
+                    result.moneyflow_factors[code] = factors
+
+                except Exception as e:
+                    logger.debug(f"[Layer3] E因子计算失败 {code}: {e}")
+
+            logger.info(f"[Layer3] E1-E4资金流向因子计算完成: {len(result.moneyflow_factors)}只")
+        except Exception as e:
+            logger.warning(f"[Layer3] E因子批量计算失败: {e}")

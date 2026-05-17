@@ -224,9 +224,25 @@ class SectorAnalysisOrchestrator:
         构建用于模式扫描的热点板块列表
 
         优先使用主线识别结果，补充持续性分析中的活跃板块
+        包含 ts_code 和 member_codes 用于个股-板块匹配
         """
         hot_sectors = []
         seen_names = set()
+
+        def _enrich_member_codes(sector_name: str, ts_code: str) -> set:
+            """获取板块成分股代码集合"""
+            if not ts_code:
+                return set()
+            try:
+                members_df = self.sector_tracker.get_sector_members(ts_code)
+                if not members_df.empty:
+                    if 'con_code' in members_df.columns:
+                        return set(str(c).split('.')[0].zfill(6) for c in members_df['con_code'].values)
+                    elif 'code' in members_df.columns:
+                        return set(str(c).split('.')[0].zfill(6) for c in members_df['code'].values)
+            except Exception as e:
+                logger.debug(f"[_build_hot_sectors] 获取{sector_name}成分股失败: {e}")
+            return set()
 
         # 优先从主线识别结果中提取
         if not result.main_themes_df.empty:
@@ -238,9 +254,14 @@ class SectorAnalysisOrchestrator:
 
                 stage = row.get('所处阶段', '')
                 if stage in ['启动期', '加速期', '高潮期', '主升浪', '成长期', '成熟期']:
+                    ts_code = row.get('板块代码', '')
+                    member_codes = _enrich_member_codes(name, ts_code)
+
                     hot_sectors.append({
                         'sector_name': name,
                         'sector_type': row.get('板块类型', ''),
+                        'ts_code': ts_code,
+                        'member_codes': member_codes,
                         'stats': {
                             '涨停家数': row.get('涨停家数', 0),
                             '梯队详情': row.get('梯队详情', ''),
@@ -268,9 +289,14 @@ class SectorAnalysisOrchestrator:
 
                 stage = row.get('所处阶段', '')
                 if stage in ['启动期', '加速期', '高潮期', '主升浪']:
+                    ts_code = row.get('ts_code', '') or row.get('板块代码', '')
+                    member_codes = _enrich_member_codes(name, ts_code)
+
                     hot_sectors.append({
                         'sector_name': name,
                         'sector_type': row.get('板块类型', ''),
+                        'ts_code': ts_code,
+                        'member_codes': member_codes,
                         'stats': {'涨停家数': row.get('涨停家数', 0)},
                         'trend_stage': stage,
                         'action': row.get('操作建议', ''),
@@ -336,7 +362,13 @@ class SectorAnalysisOrchestrator:
         """
         result = self.get_cached_result(trade_date)
         if result:
+            count = len(result.hot_sectors_for_pattern)
+            logger.info(f"[SectorAnalysisOrchestrator] get_cached_hot_sectors_for_pattern: "
+                       f"trade_date={trade_date}, 缓存命中, hot_sectors={count}个")
             return result.hot_sectors_for_pattern
+        logger.warning(f"[SectorAnalysisOrchestrator] get_cached_hot_sectors_for_pattern: "
+                      f"trade_date={trade_date}, 缓存未命中! _cache keys={list(self._cache.keys())}, "
+                      f"_current_date={self._current_date}")
         return []
     
     def get_cached_concept_hierarchy(self, trade_date: Optional[str] = None) -> Dict:

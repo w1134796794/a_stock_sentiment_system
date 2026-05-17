@@ -79,6 +79,10 @@ class TradePlanResult:
 
     plan_summary: str = ""
 
+    # 新增因子
+    market_emotion_divergence: float = 0.0    # F2: 大盘-情绪背离度
+    prev_signal_win_rate: float = 0.0         # F3: 昨日信号胜率
+
 
 class TradePlanLayer:
     """
@@ -129,6 +133,14 @@ class TradePlanLayer:
 
             result.overall_position_advice, result.max_position_pct = \
                 self._calculate_overall_position(market_env, emotion_cycle)
+
+            # F2: 大盘-情绪背离度
+            result.market_emotion_divergence = self._calc_market_emotion_divergence(
+                market_env, emotion_cycle
+            )
+
+            # F3: 昨日信号胜率
+            result.prev_signal_win_rate = self._calc_prev_signal_win_rate(trade_date)
 
             result.plan_summary = self._generate_summary(result)
 
@@ -347,3 +359,81 @@ class TradePlanLayer:
                         f"- 仓位:{item['position_pct']:.0%}")
 
         return "\n".join(lines)
+
+    def _calc_market_emotion_divergence(self, market_env, emotion_cycle: str) -> float:
+        """
+        F2: 大盘-情绪背离度
+
+        计算市场环境评分与情绪周期之间的背离程度。
+        正常情况：大盘好→情绪好，大盘差→情绪差
+        背离情况：大盘好但情绪差（警惕），大盘差但情绪好（可能反弹）
+
+        Returns:
+            float: 背离度，0=完全一致，100=完全背离
+        """
+        try:
+            market_score = getattr(market_env, 'composite_score', 50) if market_env else 50
+
+            emotion_score_map = {
+                '冰点期': 10,
+                '回暖期': 40,
+                '高潮期': 80,
+                '退潮期': 30,
+                '震荡期': 50,
+            }
+            emotion_score = emotion_score_map.get(emotion_cycle, 50)
+
+            divergence = abs(market_score - emotion_score)
+            logger.info(f"[Layer4] F2-大盘情绪背离度: {divergence:.1f} "
+                        f"(大盘={market_score:.0f}, 情绪={emotion_score})")
+            return divergence
+        except Exception as e:
+            logger.debug(f"[Layer4] F2-背离度计算失败: {e}")
+            return 0.0
+
+    def _calc_prev_signal_win_rate(self, trade_date: str) -> float:
+        """
+        F3: 昨日信号胜率
+
+        统计昨日涨停池中股票今日的表现，计算胜率。
+        胜率 = 今日收涨的昨日涨停股数 / 昨日涨停股总数
+
+        Returns:
+            float: 胜率 0.0~1.0
+        """
+        try:
+            from datetime import datetime, timedelta
+            prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+
+            prev_zt = self.dm.get_limit_up_pool(prev_date)
+            if prev_zt is None or prev_zt.empty:
+                return 0.0
+
+            ts_code_col = None
+            for col in ['ts_code', '代码', 'code']:
+                if col in prev_zt.columns:
+                    ts_code_col = col
+                    break
+            if ts_code_col is None:
+                return 0.0
+
+            today_df = self.dm.get_all_stocks_daily(trade_date=trade_date)
+            if today_df is None or today_df.empty:
+                return 0.0
+
+            today_df['ts_code'] = today_df['ts_code'].astype(str)
+            codes = prev_zt[ts_code_col].astype(str).tolist()
+            today_sub = today_df[today_df['ts_code'].isin(codes)]
+
+            if today_sub.empty or 'pct_chg' not in today_sub.columns:
+                return 0.0
+
+            total = len(today_sub)
+            win = int((pd.to_numeric(today_sub['pct_chg'], errors='coerce') > 0).sum())
+            win_rate = win / total if total > 0 else 0.0
+
+            logger.info(f"[Layer4] F3-昨日信号胜率: {win_rate:.1%} ({win}/{total})")
+            return win_rate
+        except Exception as e:
+            logger.debug(f"[Layer4] F3-胜率计算失败: {e}")
+            return 0.0

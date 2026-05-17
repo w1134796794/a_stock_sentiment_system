@@ -82,6 +82,10 @@ class SharedContext:
     trade_plans_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     trade_plan_report: str = ""
 
+    # 因子数据（跨层收集）
+    stock_tech_factors: Dict[str, Dict] = field(default_factory=dict)
+    moneyflow_factors: Dict[str, Dict] = field(default_factory=dict)
+
     # Layer 5 输出
     review_result: Optional[ReviewResult] = None
 
@@ -181,6 +185,14 @@ class ReviewPipeline:
         logger.info(f"[ReviewPipeline] 五层流水线执行完成")
         logger.info("=" * 80)
 
+        # ========== 因子结果收集与保存 ==========
+        try:
+            from core.factors.factor_collector import FactorCollector
+            collector = FactorCollector()
+            collector.collect_and_save(ctx, ctx.trade_date)
+        except Exception as e:
+            logger.warning(f"[Pipeline] 因子结果收集失败: {e}")
+
         return ctx
 
     def execute_layer(self, layer_num: int, ctx: SharedContext) -> SharedContext:
@@ -268,8 +280,17 @@ class ReviewPipeline:
                 hot_sectors = self.layer2.orchestrator.get_cached_hot_sectors_for_pattern(
                     ctx.trade_date
                 )
-            except Exception:
-                pass
+                logger.info(f"[Pipeline] 从Layer2缓存获取热点板块: {len(hot_sectors)}个, trade_date={ctx.trade_date}")
+            except Exception as e:
+                logger.warning(f"[Pipeline] 获取缓存热点板块失败: {e}")
+                import traceback
+                logger.warning(traceback.format_exc())
+        else:
+            logger.warning("[Pipeline] Layer2 orchestrator 不可用")
+
+        if not hot_sectors:
+            logger.warning(f"[Pipeline] 热点板块列表为空，将触发首板突破策略的兜底计算")
+            hot_sectors = None
 
         result = self.layer3.analyze(
             ctx.trade_date, ctx.prev_trade_date, ctx.day_before_prev,
@@ -286,6 +307,8 @@ class ReviewPipeline:
         ctx.chip_analysis = result.chip_analysis
         ctx.dragon_pool_data = result.dragon_pool_data
         ctx.weakening_pool_data = result.weakening_pool_data
+        ctx.stock_tech_factors = result.stock_tech_factors
+        ctx.moneyflow_factors = result.moneyflow_factors
 
         if ctx.market_env:
             ctx.market_env.cross_judgment = self.layer1.cross_analyze_with_emotion(

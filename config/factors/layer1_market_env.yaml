@@ -1,0 +1,63 @@
+# ============================================
+# Layer 1: 大盘环境 — 因子启用与权重配置
+# 可通过 enabled_factors 动态增减因子
+# 可通过 factor_weights 调整各因子权重
+# ============================================
+
+layer1_market_env:
+
+  # 子类综合权重（归一化到1.0）
+  composite_weights:
+    trend: 0.40
+    volume: 0.30
+    width: 0.30
+
+  # ---- 趋势子类 ----
+  trend:
+    enabled_factors:
+      - "multi_index_trend"
+      - "A1_index_intraday_volatility"
+      - "A2_index_consecutive_direction"
+      - "A3_style_deviation"
+    factor_weights:
+      multi_index_trend: 0.40
+      A1_index_intraday_volatility: 0.20
+      A2_index_consecutive_direction: 0.20
+      A3_style_deviation: 0.20
+
+  # ---- 量能子类 ----
+  volume:
+    enabled_factors:
+      - "total_amount"
+      - "volume_ratio"
+      - "A4_amount_change_ratio"
+    factor_weights:
+      total_amount: 0.40
+      volume_ratio: 0.35
+      A4_amount_change_ratio: 0.25
+
+  # ---- 宽度子类 ----
+  width:
+    enabled_factors:
+      - "up_down_ratio"
+      - "A5_limit_down_count"
+      - "up_count"
+    factor_weights:
+      up_down_ratio: 0.45
+      A5_limit_down_count: 0.30
+      up_count: 0.25
+
+  # ---- 连续性子类（独立模块，不参与综合评分）----
+  continuity:
+    enabled_factors:
+      - "prev_limit_up_gap_up"
+      - "prev_limit_up_positive"
+      - "prev_first_board_gap_up"
+      - "prev_first_board_positive"
+      - "A6_blasted_next_day_performance"
+    factor_weights:
+      prev_limit_up_gap_up: 0.25
+      prev_limit_up_positive: 0.25
+      prev_first_board_gap_up: 0.20
+      prev_first_board_positive: 0.20
+      A6_blasted_next_day_performance: 0.10

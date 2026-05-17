@@ -1,0 +1,64 @@
+# ============================================
+# Layer 2: 板块分析 — 因子启用与权重配置
+# ============================================
+
+layer2_sector:
+
+  # 子类综合权重
+  composite_weights:
+    momentum: 0.30
+    capital: 0.25
+    emotion: 0.25
+    quality: 0.10
+    structure: 0.05
+    persistence: 0.05
+
+  # ---- 动量因子 ----
+  momentum:
+    enabled_factors:
+      - "sector_pct_change"
+      - "sector_momentum"
+    factor_weights:
+      sector_pct_change: 0.60
+      sector_momentum: 0.40
+
+  # ---- 资金因子 ----
+  capital:
+    enabled_factors:
+      - "sector_amount"
+      - "C4_sector_net_capital_flow"
+    factor_weights:
+      sector_amount: 0.60
+      C4_sector_net_capital_flow: 0.40
+
+  # ---- 情绪因子 ----
+  emotion:
+    enabled_factors:
+      - "sector_limit_up_count"
+      - "sector_limit_up_ratio"
+    factor_weights:
+      sector_limit_up_count: 0.70
+      sector_limit_up_ratio: 0.30
+
+  # ---- 质量因子 ----
+  quality:
+    enabled_factors:
+      - "C1_avg_seal_time"
+      - "C3_sector_next_day_premium"
+    factor_weights:
+      C1_avg_seal_time: 0.50
+      C3_sector_next_day_premium: 0.50
+
+  # ---- 结构因子 ----
+  structure:
+    enabled_factors:
+      - "C2_leader_follower_seal_ratio"
+    factor_weights:
+      C2_leader_follower_seal_ratio: 1.0
+
+  # ---- 持续性因子 ----
+  persistence:
+    enabled_factors:
+      - "C5_sector_rotation_speed"
+    factor_weights:
+      C5_sector_rotation_speed: 1.0

@@ -97,6 +97,7 @@ class DataManager:
         (self.stock_dir / "daily_price").mkdir(parents=True, exist_ok=True)
         (self.stock_dir / "daily_data").mkdir(parents=True, exist_ok=True)
         (self.stock_dir / "daily_basic").mkdir(parents=True, exist_ok=True)
+        (self.stock_dir / "all_daily").mkdir(parents=True, exist_ok=True)
         (self.stock_dir / "tick").mkdir(parents=True, exist_ok=True)
         (self.stock_dir / "auction").mkdir(parents=True, exist_ok=True)
 
@@ -134,7 +135,54 @@ class DataManager:
                     return df
         except Exception as e:
             logger.error(f"Tushare获取失败: {e}")
-    
+        return pd.DataFrame()
+
+    def get_all_stocks_daily(self, trade_date: str) -> pd.DataFrame:
+        """
+        获取全市场所有股票日线行情（Tushare daily 接口，仅传 trade_date）
+
+        返回字段：ts_code, trade_date, open, high, low, close, pre_close,
+                  change, pct_chg, vol, amount
+
+        用途：
+        - 统计全市场涨跌家数（市场宽度）
+        - 统计全市场总成交额
+        - 筛选满足量价条件的个股
+
+        Args:
+            trade_date: 交易日期（YYYYMMDD）
+
+        Returns:
+            DataFrame: 全市场个股日线数据
+        """
+        cache_file = self.stock_dir / "all_daily" / f"{trade_date}.csv"
+
+        if cache_file.exists():
+            try:
+                df = pd.read_csv(cache_file)
+                if not df.empty:
+                    logger.info(f"[get_all_stocks_daily] 从缓存加载 {trade_date} 全市场日线: {len(df)}只")
+                    return df
+            except Exception:
+                pass
+
+        if not self.ts_pro:
+            logger.warning("[get_all_stocks_daily] Tushare未初始化")
+            return pd.DataFrame()
+
+        try:
+            df = self.ts_pro.daily(trade_date=trade_date)
+            if df is None or df.empty:
+                logger.warning(f"[get_all_stocks_daily] {trade_date} 无数据")
+                return pd.DataFrame()
+
+            df.to_csv(cache_file, index=False)
+            logger.info(f"[get_all_stocks_daily] {trade_date} 获取 {len(df)} 只股票日线数据")
+            return df
+        except Exception as e:
+            logger.error(f"[get_all_stocks_daily] {trade_date} 获取失败: {e}")
+            return pd.DataFrame()
+
     def get_limit_up_pool(self, date: str) -> pd.DataFrame:
         """
         获取涨停池数据

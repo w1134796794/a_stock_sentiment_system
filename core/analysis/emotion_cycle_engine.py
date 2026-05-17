@@ -166,10 +166,75 @@ class EmotionCycleEngine:
     8. 连板梯队完整性 - 生态健康度
     """
     
-    def __init__(self, thresholds: CycleThresholds = None, dm=None):
+    def __init__(self, thresholds: CycleThresholds = None, dm=None, factor_registry=None):
         self.thresholds = thresholds or CycleThresholds()
         self.history_cycles: List[Dict] = []  # 历史周期记录
         self.dm = dm  # DataManager实例，用于获取价格数据
+        self.factor_registry = factor_registry  # 因子注册中心
+
+        # 从因子配置加载评分权重
+        self._load_scoring_weights()
+
+    def _load_scoring_weights(self):
+        """从FactorRegistry加载评分权重，失败则使用默认值"""
+        self.scoring_weights = {
+            'limit_up_count': 1.0,
+            'board_height': 0.8,
+            'broken_rate': 0.6,
+            'nuclear_button': 0.5,
+            'premium': 0.5,
+            'echelon': 0.4,
+            'continuous_rate': 0.6,
+            'limit_down_ratio': 0.7,
+            'win_rate': 0.5,
+            'avg_profit': 0.4,
+            'first_board_ratio': 0.08,
+            'one_word_ratio': 0.05,
+            'tail_board_ratio': 0.05,
+            'extreme_reversal': 0.05,
+            'avg_seal_ratio': 0.05,
+        }
+
+        if self.factor_registry is None:
+            try:
+                from core.factors.factor_registry import get_factor_registry
+                self.factor_registry = get_factor_registry()
+            except Exception:
+                pass
+
+        if self.factor_registry is not None:
+            try:
+                factor_weights = self.factor_registry.get_composite_weights('emotion')
+                if not factor_weights:
+                    factor_weights = {}
+
+                for sub_cat in ['core', 'structure', 'extreme', 'quality']:
+                    factor_ids = self.factor_registry.get_enabled_factors('emotion', sub_cat)
+                    for fid in factor_ids:
+                        w = self.factor_registry.get_factor_weight('emotion', sub_cat, fid)
+                        key_map = {
+                            'limit_up_count': 'limit_up_count',
+                            'max_board_height': 'board_height',
+                            'broken_rate': 'broken_rate',
+                            'nuclear_button_count': 'nuclear_button',
+                            'prev_limit_up_premium': 'premium',
+                            'echelon_integrity': 'echelon',
+                            'continuous_rate': 'continuous_rate',
+                            'limit_down_ratio': 'limit_down_ratio',
+                            'win_rate': 'win_rate',
+                            'avg_profit': 'avg_profit',
+                            'B1_first_board_ratio': 'first_board_ratio',
+                            'B2_one_word_board_ratio': 'one_word_ratio',
+                            'B3_tail_board_ratio': 'tail_board_ratio',
+                            'B4_extreme_reversal_count': 'extreme_reversal',
+                            'B5_avg_seal_ratio': 'avg_seal_ratio',
+                        }
+                        if fid in key_map:
+                            self.scoring_weights[key_map[fid]] = w
+
+                logger.info("[EmotionCycleEngine] 从FactorRegistry加载评分权重成功")
+            except Exception as e:
+                logger.warning(f"[EmotionCycleEngine] 从FactorRegistry加载权重失败: {e}，使用默认值")
         
     def detect_cycle(self,
                      limit_up_count: int,
@@ -517,6 +582,58 @@ class EmotionCycleEngine:
         # 跌停家数
         limit_down_count = len(limit_down_df) if limit_down_df is not None else 0
 
+        # B1: 首板/连板比
+        first_board_ratio = None
+        if limit_times_col in limit_up_df.columns:
+            board_vals = pd.to_numeric(limit_up_df[limit_times_col], errors='coerce').fillna(1).astype(int)
+            first_count = int((board_vals == 1).sum())
+            multi_count = int((board_vals >= 2).sum())
+            first_board_ratio = first_count / multi_count if multi_count > 0 else (first_count if first_count > 0 else 0.0)
+
+        # B2: 一字板占比
+        one_word_ratio = None
+        time_col = None
+        for col in ['first_time', '首次封板时间', '封板时间']:
+            if col in limit_up_df.columns:
+                time_col = col
+                break
+        if time_col and limit_up_count > 0:
+            one_word_count = int((limit_up_df[time_col].astype(str).str.strip() <= '09:25:00').sum())
+            one_word_ratio = one_word_count / limit_up_count
+
+        # B3: 尾盘板占比
+        tail_board_ratio = None
+        if time_col and limit_up_count > 0:
+            tail_count = int((limit_up_df[time_col].astype(str).str.strip() >= '14:30:00').sum())
+            tail_board_ratio = tail_count / limit_up_count
+
+        # B4: 地天板/天地板数量（需要daily数据，此处用涨停池代理）
+        extreme_reversal_count = 0
+
+        # B5: 涨停股平均封单比
+        avg_seal_ratio = None
+        seal_col = None
+        for col in ['封单金额', 'seal_amount', 'limit_amount']:
+            if col in limit_up_df.columns:
+                seal_col = col
+                break
+        if seal_col:
+            seals = pd.to_numeric(limit_up_df[seal_col], errors='coerce').dropna()
+            if not seals.empty:
+                avg_seal_ratio = float(seals.mean())
+
+        # C1: 平均封板时间（从首次封板到收盘的时长，秒）
+        avg_seal_time = None
+        if time_col and limit_up_count > 0:
+            times = limit_up_df[time_col].astype(str).str.strip()
+            valid_times = times[times.str.match(r'^\d{2}:\d{2}:\d{2}$')]
+            if not valid_times.empty:
+                def _time_to_seconds(t):
+                    parts = t.split(':')
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                seconds = valid_times.apply(_time_to_seconds)
+                avg_seal_time = float(seconds.mean())
+
         # 识别情绪周期 - 传入新增参数
         cycle, scores = self.detect_cycle(
             limit_up_count=limit_up_count,
@@ -549,7 +666,13 @@ class EmotionCycleEngine:
                 'board_distribution': board_distribution,
                 'continuous_rate': round(continuous_rate, 2),
                 'limit_down_count': limit_down_count,
-                'limit_down_ratio': round(limit_down_count / limit_up_count, 2) if limit_up_count > 0 else 0
+                'limit_down_ratio': round(limit_down_count / limit_up_count, 2) if limit_up_count > 0 else 0,
+                'first_board_ratio': first_board_ratio,
+                'one_word_ratio': one_word_ratio,
+                'tail_board_ratio': tail_board_ratio,
+                'extreme_reversal_count': extreme_reversal_count,
+                'avg_seal_ratio': avg_seal_ratio,
+                'avg_seal_time': avg_seal_time,
             },
             'scores': scores
         }
