@@ -1656,7 +1656,7 @@
       "peak_price": 139.48,
       "peak_date": "20260515",
       "entry_date": "20260515",
-      "sector_name": "航空装备",
+      "sector_name": "机器人概念",
       "total_rise_10d": 0.44989604989604975,
       "limit_up_count": 3,
       "status": "DragonStatus.WEAKENING",
@@ -1714,7 +1714,7 @@
       "peak_price": 16.79,
       "peak_date": "20260515",
       "entry_date": "20260515",
-      "sector_name": "电子化学",
+      "sector_name": "芯片概念",
       "total_rise_10d": 0.5112511251125113,
       "limit_up_count": 2,
       "status": "DragonStatus.WEAKENING",
@@ -1736,5 +1736,5 @@
       }
     }
   },
-  "update_time": "20260517 22:01:34"
+  "update_time": "20260517 22:58:49"
 }

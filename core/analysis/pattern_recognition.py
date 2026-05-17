@@ -900,12 +900,16 @@ class PatternRecognition:
 
     def detect_first_board_breakout(self, today_df: pd.DataFrame, yesterday_df: pd.DataFrame = None,
                                     date_str: str = None, history_pools: Dict[str, pd.DataFrame] = None,
-                                    hot_sectors: List[Dict] = None) -> List[PatternSignal]:
+                                    hot_sectors: List[Dict] = None,
+                                    all_hot_member_codes: set = None,
+                                    stock_to_hot_sectors: Dict[str, list] = None) -> List[PatternSignal]:
         """
         首板突破模式识别 - 调用HotspotFirstBoardStrategy
 
         Args:
             hot_sectors: 预计算的热点板块列表（避免重复计算板块热度）
+            all_hot_member_codes: 所有热点板块成分股代码集合（用于快速判定板块热度）
+            stock_to_hot_sectors: 股票→所属热点板块名称列表（用于日志输出）
         """
         signals = []
 
@@ -935,7 +939,9 @@ class PatternRecognition:
                         history_pools_filtered[date_key] = pool_df
             logger.debug(f"[首板突破] 过滤后历史池: {len(history_pools_filtered)}天 (排除今日)")
             trade_signals = self.first_board_breakout.detect_first_board_by_sectors(
-                first_board_df, history_pools_filtered, date_str, hot_sectors=hot_sectors
+                first_board_df, history_pools_filtered, date_str, hot_sectors=hot_sectors,
+                all_hot_member_codes=all_hot_member_codes,
+                stock_to_hot_sectors=stock_to_hot_sectors
             )
 
             for ts in trade_signals:
@@ -1024,7 +1030,13 @@ class PatternRecognition:
             total_passed = 0
 
             for _, today_row in today_df.iterrows():
-                code = str(today_row.get('代码', '')).split('.')[0].zfill(6)
+                code_raw = str(today_row.get('代码', '')).strip().upper()
+                if '.' in code_raw:
+                    parts = code_raw.split('.')
+                    code = parts[0].zfill(6) + '.' + parts[1]
+                else:
+                    code = code_raw.zfill(6)
+                    code += '.SH' if (code.startswith('688') or code.startswith('6')) else '.SZ'
                 name = today_row.get('名称', '')
                 total_checked += 1
 
@@ -1283,7 +1295,9 @@ class PatternRecognition:
             logger.info("-" * 40)
             results["首板突破"] = self.detect_first_board_breakout(
                 today_df, yesterday_df, today_date_ymd, recent_zt_pools,
-                hot_sectors=hot_sectors
+                hot_sectors=hot_sectors,
+                all_hot_member_codes=all_hot_member_codes,
+                stock_to_hot_sectors=stock_to_hot_sectors
             )
         except Exception as e:
             logger.error(f"首板突破检测失败: {e}")

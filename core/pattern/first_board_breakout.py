@@ -147,7 +147,9 @@ class HotspotFirstBoardStrategy:
                                       history_pools: Dict[str, pd.DataFrame],
                                       date_str: str,
                                       hot_sectors: List[Dict] = None,
-                                      concept_hierarchy: Dict = None) -> List[TradeSignal]:
+                                      concept_hierarchy: Dict = None,
+                                      all_hot_member_codes: set = None,
+                                      stock_to_hot_sectors: Dict[str, list] = None) -> List[TradeSignal]:
         """
         基于二级行业的首板突破检测
 
@@ -164,6 +166,8 @@ class HotspotFirstBoardStrategy:
             date_str: 日期字符串YYYYMMDD
             hot_sectors: 预计算的热点板块列表（含member_codes，避免重复计算）
             concept_hierarchy: 概念连板梯队数据（用于复盘参考）
+            all_hot_member_codes: 预计算的热点成分股集合（6位纯数字，用于O(1)判定）
+            stock_to_hot_sectors: 预计算的股票→热点板块列表映射
 
         Returns:
             List[TradeSignal]: 符合条件的交易信号
@@ -280,11 +284,17 @@ class HotspotFirstBoardStrategy:
                         if (zt.get('所属行业', '') or zt.get('L2_Industry', '')) == dongcai_sector
                     )
 
-            # 判断该股票是否属于热点板块（通过代码匹配，区分概念/行业）
-            is_hot_concept = stock_code in hot_concept_codes
-            is_hot_industry = stock_code in hot_industry_codes
-            is_hot_sector = is_hot_concept or is_hot_industry
-            is_dual_resonance = is_hot_concept and is_hot_industry
+            # 判断该股票是否属于热点板块（优先使用预构建集合，O(1)判定）
+            if all_hot_member_codes is not None:
+                is_hot_sector = stock_code in all_hot_member_codes
+                is_hot_concept = stock_code in hot_concept_codes
+                is_hot_industry = stock_code in hot_industry_codes
+                is_dual_resonance = is_hot_concept and is_hot_industry
+            else:
+                is_hot_concept = stock_code in hot_concept_codes
+                is_hot_industry = stock_code in hot_industry_codes
+                is_hot_sector = is_hot_concept or is_hot_industry
+                is_dual_resonance = is_hot_concept and is_hot_industry
 
             # 找到匹配的热点板块信息
             matched_hot_concept = None
@@ -433,17 +443,18 @@ class HotspotFirstBoardStrategy:
                     try:
                         members_df = tracker.get_sector_members(ts_code)
                         if not members_df.empty:
-                            # 提取成分股代码（统一为6位数字）
-                            if 'con_code' in members_df.columns:
-                                member_codes = set(
-                                    str(c).split('.')[0].zfill(6) 
-                                    for c in members_df['con_code'].values
-                                )
-                            elif 'code' in members_df.columns:
-                                member_codes = set(
-                                    str(c).split('.')[0].zfill(6) 
-                                    for c in members_df['code'].values
-                                )
+                            col = 'con_code' if 'con_code' in members_df.columns else ('code' if 'code' in members_df.columns else None)
+                            if col:
+                                member_codes = set()
+                                for c in members_df[col].values:
+                                    code_str = str(c).strip().upper()
+                                    if '.' in code_str:
+                                        parts = code_str.split('.')
+                                        code_str = parts[0].zfill(6) + '.' + parts[1]
+                                    else:
+                                        code_str = code_str.zfill(6)
+                                        code_str += '.SH' if (code_str.startswith('688') or code_str.startswith('6')) else '.SZ'
+                                    member_codes.add(code_str)
                             else:
                                 member_codes = set()
                                 logger.warning(f"[首板突破] 板块{sector_name}成分股数据缺少代码列")
@@ -574,8 +585,7 @@ class HotspotFirstBoardStrategy:
         Returns:
             TradeSignal or None: 符合条件的交易信号
         """
-        code = stock.get('代码', '')
-        code = str(code).zfill(6)
+        code = str(stock.get('代码', '')).zfill(6)
         name = stock.get('名称', '')
         sector_name = sector_info['sector_name']
         sector_ts_code = sector_info.get('ts_code', '')

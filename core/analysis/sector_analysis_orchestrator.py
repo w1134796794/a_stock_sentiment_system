@@ -230,16 +230,25 @@ class SectorAnalysisOrchestrator:
         seen_names = set()
 
         def _enrich_member_codes(sector_name: str, ts_code: str) -> set:
-            """获取板块成分股代码集合"""
+            """获取板块成分股代码集合（统一格式: 6位数字.交易所后缀）"""
             if not ts_code:
                 return set()
             try:
                 members_df = self.sector_tracker.get_sector_members(ts_code)
                 if not members_df.empty:
-                    if 'con_code' in members_df.columns:
-                        return set(str(c).split('.')[0].zfill(6) for c in members_df['con_code'].values)
-                    elif 'code' in members_df.columns:
-                        return set(str(c).split('.')[0].zfill(6) for c in members_df['code'].values)
+                    col = 'con_code' if 'con_code' in members_df.columns else ('code' if 'code' in members_df.columns else None)
+                    if col:
+                        codes = set()
+                        for c in members_df[col].values:
+                            code_str = str(c).strip().upper()
+                            if '.' in code_str:
+                                parts = code_str.split('.')
+                                code_str = parts[0].zfill(6) + '.' + parts[1]
+                            else:
+                                code_str = code_str.zfill(6)
+                                code_str += '.SH' if (code_str.startswith('688') or code_str.startswith('6')) else '.SZ'
+                            codes.add(code_str)
+                        return codes
             except Exception as e:
                 logger.debug(f"[_build_hot_sectors] 获取{sector_name}成分股失败: {e}")
             return set()
