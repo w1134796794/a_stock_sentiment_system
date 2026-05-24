@@ -56,8 +56,201 @@ class DragonSecondWaveStrategyV2:
             "min_rise_5d": 0.25,         # 轨道2：5日累计涨幅>25%
             "min_rise_10d": 0.40,        # 轨道2：10日累计涨幅>40%
             "min_limit_up_count": 4,     # 轨道3：10天内至少4次涨停
+
+            # Layer 2: 技术确认参数（新增）
+            "min_volume_ratio": 1.5,      # 启动量能≥1.5倍（资金记忆苏醒）
+            "min_seal_ratio": 0.02,       # 封单强度≥2%（市场认可）
+            "volume_abs_max": 5.0,        # 量能绝对上限5倍（防异常放量）
+
+            # Layer 3: 质量指标参数（新增）
+            "max_limit_up_time": "10:30", # 龙二波最晚10:30封板
+            "max_float_cap": 100.0,       # 流通市值上限100亿
+            "max_5d_rise": 0.15,          # 5日涨幅上限15%（低位启动）
+            "max_break_count": 1,         # 开板次数上限1次
         }
     
+    def _parse_time(self, time_str: str) -> Optional[Tuple[int, int]]:
+        """解析时间字符串 HH:MM 或 HH:MM:SS"""
+        if not time_str or not str(time_str).strip():
+            return None
+        try:
+            parts = str(time_str).strip().split(':')
+            return (int(parts[0]), int(parts[1]))
+        except Exception:
+            return None
+
+    def _is_valid_limit_time(self, limit_up_time: str, max_time_str: str) -> bool:
+        """检查涨停时间是否在规定时间之前"""
+        parsed = self._parse_time(limit_up_time)
+        max_parsed = self._parse_time(max_time_str)
+        if not parsed:
+            return False
+        if not max_parsed:
+            return True
+        return (parsed[0] < max_parsed[0]) or (parsed[0] == max_parsed[0] and parsed[1] <= max_parsed[1])
+
+    def _add_suffix(self, stock_code: str) -> str:
+        """为股票代码添加交易所后缀"""
+        code = str(stock_code).strip()
+        if '.' not in code:
+            code = code.zfill(6)
+            if code.startswith('6'):
+                return f"{code}.SH"
+            else:
+                return f"{code}.SZ"
+        return code
+
+    def _get_daily_data(self, stock_code: str, date_str: str) -> Optional[Dict]:
+        """获取日线数据并计算 MA / 量比 / 5日涨幅"""
+        try:
+            dt = datetime.strptime(date_str, "%Y%m%d")
+            end_date = date_str
+            start_date = (dt - timedelta(days=30)).strftime("%Y%m%d")
+
+            if hasattr(self.dm, 'get_stock_daily'):
+                ts_code = self._add_suffix(stock_code.split('.')[0].zfill(6))
+                df = self.dm.get_stock_daily(ts_code, start_date, end_date)
+
+                if not df.empty and len(df) >= 10:
+                    df = df.sort_values('trade_date')
+
+                    df['ma5'] = df['close'].rolling(window=5).mean()
+                    df['ma10'] = df['close'].rolling(window=10).mean()
+
+                    latest = df.iloc[-1]
+                    prev_5d = df.iloc[-6] if len(df) >= 6 else df.iloc[0]
+
+                    rise_5d = (latest['close'] - prev_5d['close']) / prev_5d['close'] if prev_5d['close'] > 0 else 0
+
+                    if len(df) >= 6:
+                        avg_vol_5d = df.iloc[-6:-1]['vol'].mean()
+                        volume_ratio = latest['vol'] / avg_vol_5d if avg_vol_5d > 0 else 0
+                    else:
+                        volume_ratio = 0
+
+                    return {
+                        'rise_5d': rise_5d,
+                        'volume_ratio': volume_ratio,
+                        'close': latest['close'],
+                        'ma5': latest['ma5'],
+                        'ma10': latest['ma10'],
+                    }
+        except Exception as e:
+            logger.debug(f"[龙二波] 获取日线数据失败 {stock_code}: {e}")
+
+        return None
+
+    def _filter_layer_0_hard_exclusions(self, today_data: pd.Series) -> Optional[str]:
+        """
+        Layer 0: 硬性排除（零成本 — 仅用 today_data 自带字段）
+
+        排除条件（按判断成本从低到高）：
+        1. 今日未涨停 / 非首板
+        2. 一字板（无换手）
+        3. 尾盘板（14:30后）
+        """
+        change = today_data.get('涨跌幅', 0)
+        if isinstance(change, str):
+            change = float(change.replace('%', ''))
+        if change < 9.5:
+            return f"涨幅不足({change:.2f}%<9.5%)"
+
+        today_consecutive = 1
+        for col in ['连板数', '连板', 'consecutive', 'limit_up_days', '连板天数']:
+            if col in today_data.index:
+                today_consecutive = int(today_data[col])
+                break
+        if today_consecutive > 1:
+            return f"非首板(连板{today_consecutive})"
+
+        break_count = today_data.get('开板次数', 0)
+        limit_type = str(today_data.get('涨停类型', ''))
+        if break_count == 0 and ('一字' in limit_type or limit_type == '1'):
+            return "一字板(无换手)"
+
+        limit_up_time = str(today_data.get('首次封板时间', '')).strip()
+        parsed = self._parse_time(limit_up_time)
+        if parsed:
+            hour, minute = parsed
+            if hour > 14 or (hour == 14 and minute >= 30):
+                return f"尾盘板({limit_up_time})"
+
+        return None
+
+    def _calculate_sector_effect_score(self, is_hot_sector: bool,
+                                         sector_limit_up_count: int = 0) -> float:
+        """
+        Layer 4 评分：板块效应（加分项，非硬排除）
+
+        评分逻辑：
+        - 板块涨停家数 → 板块强度分（0.00 ~ 0.06）
+        - 是否热点板块 → 热点分（0.00 ~ 0.04）
+
+        Returns:
+            float: 板块效应评分（0.00 ~ 0.10）
+        """
+        score = 0.0
+
+        if sector_limit_up_count >= 8:
+            score += 0.06
+        elif sector_limit_up_count >= 5:
+            score += 0.04
+        elif sector_limit_up_count >= 3:
+            score += 0.02
+
+        if is_hot_sector:
+            score += 0.04
+
+        return min(score, 0.10)
+
+    def _get_dynamic_thresholds(self, board_height: int, days_since_peak: int,
+                                 is_hot_sector: bool) -> Tuple[float, float]:
+        """
+        根据市场上下文动态调整量能/封单阈值
+
+        调整因素：
+        1. 连板高度越高 → 龙越真 → 阈值越宽松（资金记忆更强）
+        2. 调整天数越短 → 记忆越新鲜 → 阈值越宽松
+        3. 热点板块 → 情绪助攻 → 阈值越宽松
+
+        Returns:
+            (min_vol_ratio, min_seal_ratio): 调整后的阈值
+        """
+        base_vol = self.params['min_volume_ratio']      # 1.5
+        base_seal = self.params['min_seal_ratio']        # 0.02
+
+        # 因子1: 连板高度调整
+        if board_height >= 7:
+            vol_adj = -0.30
+            seal_adj = -0.008
+        elif board_height >= 5:
+            vol_adj = -0.20
+            seal_adj = -0.005
+        elif board_height >= 3:
+            vol_adj = -0.10
+            seal_adj = -0.003
+        else:
+            vol_adj = 0.0
+            seal_adj = 0.0
+
+        # 因子2: 调整天数调整
+        if days_since_peak <= 5:
+            vol_adj += -0.15
+            seal_adj += -0.003
+        elif days_since_peak <= 10:
+            vol_adj += -0.05
+            seal_adj += -0.001
+
+        # 因子3: 板块热度调整
+        if is_hot_sector:
+            vol_adj += -0.10
+            seal_adj += -0.003
+
+        dyn_vol = max(0.8, base_vol + vol_adj)
+        dyn_seal = max(0.005, base_seal + seal_adj)
+
+        return dyn_vol, dyn_seal
+
     def detect_second_wave(self,
                           stock_code: str,
                           stock_name: str,
@@ -65,202 +258,395 @@ class DragonSecondWaveStrategyV2:
                           recent_zt_pools: Dict[str, pd.DataFrame],  # 近20日每日涨停池
                           today_data: pd.Series,
                           sector_hot: bool,
-                          hist_data: pd.DataFrame = None) -> Optional[TradeSignal]:
+                          hist_data: pd.DataFrame = None,
+                          sector_info: Dict = None) -> Optional[TradeSignal]:
         """
-        检测龙二波机会 - 双轨制判断第一波
-        recent_zt_pools: {日期: 当日涨停池DataFrame}
-        hist_data: 历史日线数据（用于涨幅统计，双轨制判断）
-        """
-        # 标准化代码格式：去除后缀，保留6位数字
-        stock_code_padded = str(stock_code).split('.')[0].zfill(6)
-        logger.debug(f"[{stock_code_padded}] 开始检测龙二波 - 名称:{stock_name}, 日期:{today_str}, 板块热度:{sector_hot}")
+        四层优先级过滤管线 — 检测龙二波机会
 
-        # ========== 步骤1：双轨制判断第一波（连板 或 涨幅）==========
-        # 使用 stock_code_padded (6位数字) 确保代码格式一致
+        设计原则：先确认"今天是不是首板"（零成本），再查历史"是不是真龙"（核心），
+        最后用技术指标验证"二波是否有效"（资金确认+质量过滤）。
+
+        ┌──────────────────────────────────────────────────────────────┐
+        │ Layer 0: 硬性排除（零成本 — 仅用 today_data 自带字段）       │
+        │   ├── 今日未涨停 (pct_chg < 9.5%)                            │
+        │   ├── 非首板 (连板数 > 1)                                    │
+        │   ├── 一字板（无换手）                                       │
+        │   └── 尾盘板（14:30后）                                      │
+        ├──────────────────────────────────────────────────────────────┤
+        │ Layer 1: 前身验证（策略核心 — 扫描历史涨停池 + 日线涨幅）     │
+        │   ├── 双轨制第一波识别（连板 / 5日涨幅 / 10日涨幅 / 涨停次数）│
+        │   ├── 调整期时间窗口（2-15个交易日）                          │
+        │   ├── 第一波高度确认（真龙标准）                              │
+        │   └── 调整期形态质量（深度5%-30% + MA10/MA20支撑）           │
+        ├──────────────────────────────────────────────────────────────┤
+        │ Layer 2: 技术确认（拉取日线数据 — 新增）                      │
+        │   ├── 启动日量能确认（量比 ≥ 1.5 → 资金记忆苏醒）            │
+        │   ├── 封单强度确认（封单 ≥ 2% → 市场认可）                   │
+        │   └── MA5/MA10突破确认（低位启动确认）                        │
+        ├──────────────────────────────────────────────────────────────┤
+        │ Layer 3: 质量指标（硬性过滤 — 新增）                          │
+        │   ├── 涨停时间 ≤ 10:30（跟风板排除）                          │
+        │   ├── 开板次数 ≤ 1                                           │
+        │   ├── 流通市值 ≤ 100亿                                       │
+        │   └── 5日涨幅 ≤ 15%（低位启动）                               │
+        ├──────────────────────────────────────────────────────────────┤
+        │ Layer 4: 板块效应评分 + 信号生成                              │
+        │   ├── 板块涨停家数 → 板块强度分                               │
+        │   ├── 是否热点板块 → 热点分                                   │
+        │   ├── 综合置信度（基础0.60 + 各层加分）                       │
+        │   └── TradeSignal 生成                                       │
+        └──────────────────────────────────────────────────────────────┘
+        """
+        code_padded = str(stock_code).split('.')[0].zfill(6)
+        name = stock_name
+
+        # ══════════════════════════════════════════════════════════
+        # Layer 0: 硬性排除（零成本 — 仅用 today_data 自带字段）
+        # ══════════════════════════════════════════════════════════
+        skip_reason = self._filter_layer_0_hard_exclusions(today_data)
+        if skip_reason:
+            logger.debug(f"[龙二波-L0] ✗ {name}({code_padded}) 排除: {skip_reason}")
+            return None
+
+        limit_up_time = str(today_data.get('首次封板时间', '')).strip()
+        break_count = int(today_data.get('开板次数', 0))
+        float_cap = float(today_data.get('流通市值', 0)) / 100000000
+        if isinstance(today_data.get('流通市值', 0), str):
+            float_cap = float(str(today_data.get('流通市值', '')).replace('亿', ''))
+
+        logger.info(f"[龙二波-L0] ✓ {name}({code_padded}) 通过硬性排除 "
+                    f"(首板 {limit_up_time}封, 开板{break_count}次, 市值{float_cap:.1f}亿)")
+
+        # ══════════════════════════════════════════════════════════
+        # Layer 1: 前身验证（策略核心 — 扫描历史涨停池）
+        # ══════════════════════════════════════════════════════════
         consecutive_record = self._rebuild_consecutive_from_pools(
-            stock_code_padded, recent_zt_pools, hist_data
+            code_padded, recent_zt_pools, hist_data
         )
 
         if not consecutive_record['is_valid']:
-            logger.debug(f"[{stock_code_padded}] 过滤: 第一波记录无效 - {consecutive_record.get('reason', '未知原因')}")
+            logger.info(f"[龙二波-L1] ✗ {name}({code_padded}) 过滤: 第一波记录无效 "
+                        f"- {consecutive_record.get('reason', '未知原因')}")
             return None
 
         first_wave_info = consecutive_record['first_wave']
         wave_type = first_wave_info.get('wave_type', 'consecutive')
-        
-        logger.debug(f"[{stock_code_padded}] 第一波记录: 类型={wave_type}, 强度={first_wave_info['max_boards']}板, "
-                    f"5日涨幅={first_wave_info.get('rise_5d', 0)*100:.1f}%, "
-                    f"10日涨幅={first_wave_info.get('rise_10d', 0)*100:.1f}%, "
-                    f"涨停次数={first_wave_info.get('limit_up_count', 0)}, "
-                    f"起涨日={first_wave_info['start_date']}, 见顶日={first_wave_info['peak_date']}")
 
-        # 检查是否是近期这一波（非历史久远）
+        # 1a. 调整期时间窗口
         days_since_peak = self._calculate_days_since_peak(
             first_wave_info['peak_date'], today_str
         )
 
         if days_since_peak > self.params["max_adjust_days"] + 5:
-            logger.debug(f"[{stock_code_padded}] 过滤: 第一波距今太久 ({days_since_peak}天 > {self.params['max_adjust_days'] + 5}天)")
+            logger.info(f"[龙二波-L1] ✗ {name}({code_padded}) 过滤: 第一波距今太久 "
+                        f"({days_since_peak}天 > {self.params['max_adjust_days'] + 5}天)")
             return None
 
-        min_adjust = self.params["min_adjust_days"]
-        if days_since_peak < min_adjust:
-            logger.debug(f"[{stock_code_padded}] 过滤: 第一波距今仅{days_since_peak}天(<{min_adjust}天)，尚未形成有效调整期，仍属第一波")
+        if days_since_peak < self.params["min_adjust_days"]:
+            logger.info(f"[龙二波-L1] ✗ {name}({code_padded}) 过滤: 仅{days_since_peak}天，未形成有效调整期")
             return None
 
-        logger.debug(f"[{stock_code_padded}] 通过: 第一波距今{days_since_peak}天")
-
-        # ========== 步骤2：判断第一波高度（真龙标准）==========
-        # 双轨制：连板3-15板 或 5日涨幅>25% 或 10日涨幅>40% 或 10天4次涨停
+        # 1b. 第一波高度确认（真龙标准 — 双轨制）
         max_boards = first_wave_info['max_boards']
         rise_5d = first_wave_info.get('rise_5d', 0)
         rise_10d = first_wave_info.get('rise_10d', 0)
         limit_up_count = first_wave_info.get('limit_up_count', 0)
-        
+
         is_consecutive_valid = self.params["min_first_wave"] <= max_boards <= self.params["max_first_wave"]
         is_rise_5d_valid = rise_5d >= self.params["min_rise_5d"]
         is_rise_10d_valid = rise_10d >= self.params["min_rise_10d"]
         is_limit_up_count_valid = limit_up_count >= self.params["min_limit_up_count"]
-        
+
         if not (is_consecutive_valid or is_rise_5d_valid or is_rise_10d_valid or is_limit_up_count_valid):
-            logger.debug(f"[{stock_code_padded}] 过滤: 第一波强度不符合 ("
-                        f"连板{max_boards}板, 5日涨幅{rise_5d*100:.1f}%, 10日涨幅{rise_10d*100:.1f}%, 涨停{limit_up_count}次)")
+            logger.info(f"[龙二波-L1] ✗ {name}({code_padded}) 过滤: 第一波强度不符合 "
+                        f"(连板{max_boards}, 5日{rise_5d*100:.1f}%, 10日{rise_10d*100:.1f}%, 涨停{limit_up_count}次)")
             return None
-        
-        # 记录通过的具体标准
+
         passed_criteria = []
         if is_consecutive_valid:
             passed_criteria.append(f"连板{max_boards}板")
         if is_rise_5d_valid:
-            passed_criteria.append(f"5日涨幅{rise_5d*100:.1f}%")
+            passed_criteria.append(f"5日{rise_5d*100:.1f}%")
         if is_rise_10d_valid:
-            passed_criteria.append(f"10日涨幅{rise_10d*100:.1f}%")
+            passed_criteria.append(f"10日{rise_10d*100:.1f}%")
         if is_limit_up_count_valid:
             passed_criteria.append(f"{limit_up_count}次涨停")
-        
-        logger.debug(f"[{stock_code_padded}] 通过: 第一波强度达标 ({', '.join(passed_criteria)})")
 
-        # ========== 步骤3：检查调整期形态 ==========
+        # 1c. 调整期形态质量（深度 + MA支撑）
         adjust_period = self._get_adjust_period(
             stock_code, first_wave_info['peak_date'], today_str
         )
 
         if not adjust_period:
-            logger.debug(f"[{stock_code_padded}] 过滤: 无法获取调整期数据")
+            logger.info(f"[龙二波-L1] ✗ {name}({code_padded}) 过滤: 无法获取调整期数据")
             return None
-
-        logger.debug(f"[{stock_code_padded}] 调整期数据: 深度{adjust_period.get('depth', 0)*100:.1f}%, MA10:{adjust_period.get('ma10', 0):.2f}, 天数{adjust_period.get('days', 0)}")
 
         if not self._check_adjust_quality(adjust_period):
-            logger.debug(f"[{stock_code_padded}] 过滤: 调整期质量不符合要求")
-            return None
-        logger.debug(f"[{stock_code_padded}] 通过: 调整期质量检查")
-
-        # ========== 步骤4：今日启动确认（必须是首板）==========
-        today_change = today_data.get('涨跌幅', 0)
-
-        if today_change < 9.5:  # 今日未涨停
-            logger.debug(f"[{stock_code_padded}] 过滤: 今日未涨停 ({today_change:.2f}% < 9.5%)")
-            return None
-        logger.debug(f"[{stock_code_padded}] 通过: 今日涨停 {today_change:.2f}%")
-
-        today_pool = recent_zt_pools.get(today_str, pd.DataFrame())
-        if today_pool.empty:
-            logger.debug(f"[{stock_code_padded}] 过滤: 今日涨停池为空")
+            logger.info(f"[龙二波-L1] ✗ {name}({code_padded}) 过滤: 调整期质量不符合")
             return None
 
-        # 兼容不同的列名
-        code_col = None
-        if '代码' in today_pool.columns:
-            code_col = '代码'
-        elif 'Code' in today_pool.columns:
-            code_col = 'Code'
-        elif 'ts_code' in today_pool.columns:
-            code_col = 'ts_code'
-
-        if code_col is None:
-            logger.debug(f"[{stock_code_padded}] 过滤: 涨停池缺少代码列")
-            return None
-
-        # 确保代码格式一致（都是字符串）
-        today_pool[code_col] = today_pool[code_col].astype(str).str.zfill(6)
-        
-        # 查找该股票在今日涨停池中的数据
-        today_stock_row = today_pool[today_pool[code_col] == stock_code_padded]
-        if today_stock_row.empty:
-            logger.debug(f"[{stock_code_padded}] 过滤: 不在今日涨停池中")
-            return None
-        logger.debug(f"[{stock_code_padded}] 通过: 在今日涨停池中")
-        
-        # 检查今日是否是首板（连板数=1）
-        today_consecutive = 1  # 默认为1（首板）
-        for col in ['连板数', '连板', 'consecutive', 'limit_up_days', '连板天数']:
-            if col in today_stock_row.columns:
-                today_consecutive = int(today_stock_row[col].iloc[0])
-                break
-        
-        if today_consecutive > 1:
-            logger.debug(f"[{stock_code_padded}] 过滤: 今日不是首板（是{today_consecutive}连板），龙二波要求今日首板")
-            return None
-        logger.debug(f"[{stock_code_padded}] 通过: 今日是首板")
-        
-        # ========== 构建信号 ==========
-        # 使用真正的调整天数（从见顶到二波涨停前一天）
         actual_adjust_days = adjust_period.get('days', days_since_peak)
         decline_days = adjust_period.get('decline_days', actual_adjust_days // 2)
         consolidation_days = adjust_period.get('consolidation_days', actual_adjust_days - decline_days)
-        
-        logger.debug(f"[{stock_code_padded}] 生成龙二波信号: {first_wave_info['max_boards']}板龙头, "
-                    f"调整{actual_adjust_days}天(下跌{decline_days}天+震荡{consolidation_days}天), 板块热度:{sector_hot}")
-        
-        # 构建描述 - 区分连板龙和趋势龙
-        wave_type = first_wave_info.get('wave_type', 'consecutive')
-        max_boards = first_wave_info['max_boards']
-        limit_up_count = first_wave_info.get('limit_up_count', 0)
-        
+
+        logger.info(f"[龙二波-L1] ✓ {name}({code_padded}) 通过前身验证 "
+                    f"({', '.join(passed_criteria)}, 调整{actual_adjust_days}天(跌{decline_days}+震{consolidation_days}), "
+                    f"深度{adjust_period.get('depth', 0)*100:.1f}%)")
+
+        # ══════════════════════════════════════════════════════════
+        # Layer 2: 技术确认（量能/封单 → 弹性评分，非硬排除）
+        # ══════════════════════════════════════════════════════════
+        daily_data = self._get_daily_data(stock_code, today_str)
+        vol_ratio = 0.0
+        seal_ratio = 0.0
+        ma_breakthrough = False
+        layer2_penalty = 0.0
+        layer2_details = []
+
+        if not daily_data:
+            logger.info(f"[龙二波-L2] ✗ {name}({code_padded}) 过滤: 无日线数据")
+            return None
+
+        # 量能数据
+        if 'volume_ratio' in daily_data:
+            vol_ratio = daily_data['volume_ratio']
+        else:
+            logger.info(f"[龙二波-L2] ✗ {name}({code_padded}) 过滤: 无量比数据")
+            return None
+
+        # 动态阈值
+        dyn_vol_min, dyn_seal_min = self._get_dynamic_thresholds(
+            max_boards, days_since_peak, sector_hot
+        )
+
+        # 2a. 量能检查 — 弹性
+        if vol_ratio < 0.8:
+            logger.info(f"[龙二波-L2] ✗ {name}({code_padded}) 过滤: 缩量启动(量比{vol_ratio:.2f}<0.8)")
+            return None
+
+        if vol_ratio > self.params['volume_abs_max']:
+            logger.info(f"[龙二波-L2] ✗ {name}({code_padded}) 过滤: 异常放量(量比{vol_ratio:.2f}>{self.params['volume_abs_max']})")
+            return None
+
+        vol_target = dyn_vol_min
+        if vol_ratio < vol_target:
+            vol_shortfall = (vol_target - vol_ratio) / vol_target
+            penalty = min(0.05, vol_shortfall * 0.10)  # 最高扣0.05
+            layer2_penalty += penalty
+            layer2_details.append(f"量能偏弱(量比{vol_ratio:.2f}<动态阈值{vol_target:.2f}, 扣{penalty:.2f})")
+
+        # 2b. 封单强度 — 弹性
+        seal_amount = float(today_data.get('封单额', 0) or
+                           today_data.get('封板资金', 0) or
+                           today_data.get('封单金额', 0))
+        float_cap_raw = float(today_data.get('流通市值', 0))
+
+        free_float_cap = 0
+        if hasattr(self.dm, 'get_stock_daily_basic'):
+            try:
+                daily_basic_data = self.dm.get_stock_daily_basic(code_padded, today_str)
+                if daily_basic_data:
+                    free_share = daily_basic_data.get('free_share', 0)
+                    close_price = daily_basic_data.get('close', 0)
+                    free_float_cap = free_share * close_price * 10000
+            except Exception:
+                pass
+
+        base_cap = free_float_cap if free_float_cap > 0 else float_cap_raw
+        seal_ratio = seal_amount / base_cap if base_cap > 0 and seal_amount > 0 else 0
+
+        if seal_ratio < dyn_seal_min:
+            seal_shortfall = (dyn_seal_min - seal_ratio) / dyn_seal_min
+            penalty = min(0.05, seal_shortfall * 0.15)
+            layer2_penalty += penalty
+            layer2_details.append(f"封单偏弱({seal_ratio*100:.2f}%<动态阈值{dyn_seal_min*100:.1f}%, 扣{penalty:.2f})")
+
+        # 2c. MA5/MA10突破确认（低位启动）— 硬性要求
+        if all(k in daily_data for k in ['close', 'ma5', 'ma10']):
+            if daily_data['close'] > daily_data['ma5'] and daily_data['close'] > daily_data['ma10']:
+                ma_breakthrough = True
+
+        if not ma_breakthrough:
+            close_val = daily_data.get('close', 0)
+            ma5_val = daily_data.get('ma5', 0)
+            ma10_val = daily_data.get('ma10', 0)
+            logger.info(f"[龙二波-L2] ✗ {name}({code_padded}) 过滤: 未突破MA5/MA10 "
+                        f"(close:{close_val:.2f}, ma5:{ma5_val:.2f}, ma10:{ma10_val:.2f})")
+            return None
+
+        # 累计扣分超过阈值 → 淘汰
+        if layer2_penalty >= 0.06:
+            logger.info(f"[龙二波-L2] ✗ {name}({code_padded}) 过滤: 累计扣分{layer2_penalty:.2f}≥0.06 "
+                        f"({'; '.join(layer2_details)})")
+            return None
+
+        volume_pass = vol_ratio <= 3.0
+
+        if layer2_penalty > 0:
+            logger.info(f"[龙二波-L2] ⚠ {name}({code_padded}) 技术确认扣分{layer2_penalty:.2f} "
+                        f"(量比{vol_ratio:.2f}|动态{vol_target:.1f}, 封单{seal_ratio*100:.2f}%|动态{dyn_seal_min*100:.1f}%, "
+                        f"MA突破) [{'; '.join(layer2_details)}]")
+        else:
+            logger.info(f"[龙二波-L2] ✓ {name}({code_padded}) 通过技术确认 "
+                        f"(量比{vol_ratio:.2f}|动态{vol_target:.1f}, 封单{seal_ratio*100:.2f}%|动态{dyn_seal_min*100:.1f}%, "
+                        f"MA突破, 量能{'健康' if volume_pass else '偏大'})")
+
+        # ══════════════════════════════════════════════════════════
+        # Layer 3: 质量指标（硬性过滤 — 新增）
+        # ══════════════════════════════════════════════════════════
+        layer3_fail = []
+
+        # 3a. 涨停时间
+        if not self._is_valid_limit_time(limit_up_time, self.params['max_limit_up_time']):
+            layer3_fail.append(f"涨停时间过晚({limit_up_time}>{self.params['max_limit_up_time']})")
+
+        # 3b. 开板次数
+        if break_count > self.params['max_break_count']:
+            layer3_fail.append(f"开板过多({break_count}次)")
+
+        # 3c. 流通市值
+        if float_cap > self.params['max_float_cap']:
+            layer3_fail.append(f"市值过大({float_cap:.1f}亿)")
+
+        # 3d. 5日涨幅
+        if daily_data and 'rise_5d' in daily_data:
+            if daily_data['rise_5d'] >= self.params['max_5d_rise']:
+                layer3_fail.append(f"5日涨幅过高({daily_data['rise_5d']*100:.1f}%)")
+
+        if layer3_fail:
+            logger.info(f"[龙二波-L3] ✗ {name}({code_padded}) 过滤: {'; '.join(layer3_fail)}")
+            return None
+
+        logger.info(f"[龙二波-L3] ✓ {name}({code_padded}) 通过质量指标 "
+                    f"(时间{limit_up_time}, 开板{break_count}次, 市值{float_cap:.1f}亿, "
+                    f"5日涨幅{daily_data.get('rise_5d', 0)*100:.1f}%)")
+
+        # ══════════════════════════════════════════════════════════
+        # Layer 4: 板块效应评分 + 信号生成
+        # ══════════════════════════════════════════════════════════
+        sector_limit_up_count = sector_info.get('stats', {}).get('涨停家数', 0) if sector_info else 0
+        sector_score = self._calculate_sector_effect_score(sector_hot, sector_limit_up_count)
+
+        # 计算动态置信度
+        confidence = 0.60  # 基础分（通过Layer 1/2/3已证质量）
+
+        # 前身验证分（最高+0.12）
+        if max_boards >= 5:
+            confidence += 0.06  # 5板以上真龙
+        elif max_boards >= 3:
+            confidence += 0.04  # 3-4板龙
+        if days_since_peak <= 7:
+            confidence += 0.04  # 调整7天以内，记忆新鲜
+        elif days_since_peak <= 10:
+            confidence += 0.02  # 调整7-10天
+        confidence += min(actual_adjust_days * 0.002, 0.02)  # 调整天数恰到好处
+
+        # 技术确认分（最高+0.07 — 减去L2扣分）
+        tech_bonus = min(seal_ratio * 2, 0.04)  # 封单强度
+        if volume_pass:
+            excess_vol = daily_data.get('volume_ratio', 0) - vol_target
+            tech_bonus += min(max(excess_vol, 0) * 0.02, 0.03)  # 量能超预期
+        confidence += tech_bonus
+        confidence -= layer2_penalty  # 减去L2扣分
+
+        # 质量分（最高+0.03）
+        if break_count == 0:
+            confidence += 0.02
+        if limit_up_time and limit_up_time <= '09:40':
+            confidence += 0.01
+
+        # 板块效应分（最高+0.10）
+        confidence += sector_score
+
+        confidence = min(confidence, 0.95)
+
+        # 确定仓位
+        if sector_hot and sector_limit_up_count >= 5:
+            position_size = "heavy"
+        elif sector_hot:
+            position_size = "medium"
+        else:
+            position_size = "light"
+
+        # 构建龙类型描述
         if wave_type == 'consecutive' and max_boards >= 3:
-            # 真正的连板龙：连续涨停3板以上
             wave_type_desc = "连板"
             wave_detail = f"{max_boards}连板"
         else:
-            # 趋势龙：10天内多次涨停但不是连续
             wave_type_desc = "趋势"
             wave_detail = f"{limit_up_count}次涨停"
-        
-        # 构建调整天数描述：总天数(下跌X天+震荡Y天)
-        adjust_desc = f"调整{actual_adjust_days}天(下跌{decline_days}天+震荡{consolidation_days}天)"
+
+        adjust_desc = f"调整{actual_adjust_days}天(下跌{decline_days}+震荡{consolidation_days})"
         description = f"龙二波+{wave_detail}{wave_type_desc}龙+{adjust_desc}+深度{adjust_period['depth']*100:.1f}%"
-        
+
+        reason_parts = [
+            f"龙二波+{wave_detail}{wave_type_desc}龙",
+            adjust_desc,
+            f"深度{adjust_period['depth']*100:.1f}%",
+            f"量比{vol_ratio:.1f}",
+            f"封单{seal_ratio*100:.1f}%",
+        ]
+        if ma_breakthrough:
+            reason_parts.append("突破均线")
+
+        key_metrics = {
+            "第一波强度": f"{max_boards}板",
+            "第一波类型": wave_type_desc,
+            "第一波日期": f"{first_wave_info['start_date']}至{first_wave_info['peak_date']}",
+            "调整天数": actual_adjust_days,
+            "下跌天数": decline_days,
+            "震荡天数": consolidation_days,
+            "调整深度": f"{adjust_period['depth']*100:.1f}%",
+            "支撑均线": f"MA10:{adjust_period['ma10']:.2f}",
+            "启动量比": f"{vol_ratio:.2f}",
+            "封单强度": f"{seal_ratio*100:.1f}%",
+            "涨停时间": limit_up_time,
+            "板块效应": f"{sector_score*100:.0f}分(板块涨停{sector_limit_up_count}家)",
+        }
+        if daily_data and 'rise_5d' in daily_data:
+            key_metrics["5日涨幅"] = f"{daily_data['rise_5d']*100:.1f}%"
+            key_metrics["均线突破"] = "是"
+
+        validation_rules = [
+            f"近{self.params['max_adjust_days']}日内{max_boards}连板（真龙）",
+            f"{adjust_desc}（记忆未散）",
+            f"回踩MA10获支撑（{adjust_period['ma10']:.2f}）",
+            f"放量启动(量比{vol_ratio:.2f})",
+            f"封单{seal_ratio*100:.1f}%",
+            f"涨停时间{limit_up_time}",
+            "板块热度未退" if sector_hot else "板块已冷（风险）",
+        ]
+
+        if sector_hot:
+            buy_strategy = "主买点: 回封时扫板（确认二波启动）"
+        else:
+            buy_strategy = "次买点: 次日竞价确认（非热点需额外验证）"
+
+        if sector_hot and sector_limit_up_count >= 5:
+            next_day_expectation = "超预期: 一字板或T字板（板块共振）"
+        elif sector_hot:
+            next_day_expectation = "正常: 高开3%-7%（龙记忆+板块热度）"
+        else:
+            next_day_expectation = "低于预期: 高开<3%（需竞价确认）"
+
+        logger.info(f"[龙二波-L4] ✓ {name}({code_padded}) 生成信号: "
+                    f"置信度{confidence:.2f}, 仓位{position_size}, "
+                    f"板块效应{sector_score*100:.0f}分, "
+                    f"{'热点' if sector_hot else '非热点'}")
+
         return TradeSignal(
             pattern_type=PatternType.DRAGON_SECOND_WAVE,
             stock_code=stock_code,
             stock_name=stock_name,
-            trigger_time=today_data.get('首次封板时间', ''),
-            confidence=0.82,
+            trigger_time=limit_up_time,
+            confidence=confidence,
             entry_price=today_data.get('涨停价', 0),
             stop_loss=adjust_period['ma10'] * 0.97,
             take_profit=today_data.get('涨停价', 0) * 1.15,
-            position_size="medium",
-            reason=f"近期{wave_detail}{wave_type_desc}龙，{adjust_desc}后二波启动",
-            key_metrics={
-                "第一波强度": f"{first_wave_info['max_boards']}板",
-                "第一波类型": wave_type_desc,
-                "第一波日期": f"{first_wave_info['start_date']}至{first_wave_info['peak_date']}",
-                "调整天数": actual_adjust_days,
-                "下跌天数": decline_days,
-                "震荡天数": consolidation_days,
-                "调整深度": f"{adjust_period['depth']*100:.1f}%",
-                "5日涨幅": f"{first_wave_info.get('rise_5d', 0)*100:.1f}%",
-                "10日涨幅": f"{first_wave_info.get('rise_10d', 0)*100:.1f}%",
-                "支撑均线": f"MA10:{adjust_period['ma10']:.2f}"
-            },
-            validation_rules=[
-                f"近15日内{first_wave_info['max_boards']}连板（真龙）",
-                f"{adjust_desc}（记忆未散）",
-                "回踩MA10获支撑",
-                "地量后放量首板",
-                "板块热度未退" if sector_hot else "板块已冷（风险）"
-            ],
+            position_size=position_size,
+            reason="+".join(reason_parts),
+            key_metrics=key_metrics,
+            validation_rules=validation_rules,
             description=description
         )
     

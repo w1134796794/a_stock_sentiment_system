@@ -142,6 +142,57 @@ class HotspotFirstBoardStrategy:
 
         return thresholds.get(chip_level, thresholds["medium"])
 
+    def _calculate_sector_effect_score(self, stock: pd.Series, sector_info: Dict,
+                                        today_zt_for_sector: pd.DataFrame = None,
+                                        is_hot_sector: bool = False,
+                                        is_dual_resonance: bool = False) -> float:
+        """
+        Layer 4 评分：板块效应（加分项，非硬排除）
+
+        设计原则：板块效应是加分维度，不是硬排除条件。
+        好的首板本身就是板块效应的发起者（先有龙头首板，后带动板块发酵）。
+        因此板块效应弱不等于标的不行，只是置信度降低。
+
+        评分逻辑：
+        - 板块涨停家数 → 板块强度分（0.00 ~ 0.06）
+        - 是否热点板块 → 热点分（0.00 ~ 0.02）
+        - 概念+行业双共振 → 共振分（0.00 ~ 0.02）
+        - 总分上限 0.10
+
+        Args:
+            stock: 股票数据
+            sector_info: 行业/板块信息
+            today_zt_for_sector: 今日涨停池（用于统计板块内涨停数，可选）
+            is_hot_sector: 是否热点板块
+            is_dual_resonance: 是否双共振
+
+        Returns:
+            float: 板块效应评分（0.00 ~ 0.10）
+        """
+        score = 0.0
+
+        # 板块涨停家数得分（板块效应强度的直接衡量）
+        sector_stats = sector_info.get('stats', {})
+        sector_limit_up_count = sector_stats.get('涨停家数', 0)
+
+        if sector_limit_up_count >= 8:
+            score += 0.06  # 强板块效应：涨停≥8家
+        elif sector_limit_up_count >= 5:
+            score += 0.04  # 中等板块效应：涨停5-7家
+        elif sector_limit_up_count >= 3:
+            score += 0.02  # 弱板块效应：涨停3-4家
+        else:
+            score += 0.00  # 独狼板：不扣分，只是不加分
+
+        # 热点板块加分
+        if is_dual_resonance:
+            score += 0.04  # 双共振：概念+行业同时热点
+        elif is_hot_sector:
+            score += 0.02  # 单一热点：概念或行业热点
+
+        # 限制上限
+        return min(score, 0.10)
+
     def detect_first_board_by_sectors(self,
                                       today_zt: pd.DataFrame,
                                       history_pools: Dict[str, pd.DataFrame],
@@ -149,7 +200,10 @@ class HotspotFirstBoardStrategy:
                                       hot_sectors: List[Dict] = None,
                                       concept_hierarchy: Dict = None,
                                       all_hot_member_codes: set = None,
-                                      stock_to_hot_sectors: Dict[str, list] = None) -> List[TradeSignal]:
+                                      stock_to_hot_sectors: Dict[str, list] = None,
+                                      stock_to_ths_industry: Dict[str, str] = None,
+                                      stock_to_ths_concept: Dict[str, str] = None,
+                                      stock_to_ths_ts_code: Dict[str, str] = None) -> List[TradeSignal]:
         """
         基于二级行业的首板突破检测
 
@@ -218,19 +272,42 @@ class HotspotFirstBoardStrategy:
         yesterday_date = self._get_date_offset(date_str, -1)
         yesterday_zt = history_pools.get(yesterday_date, pd.DataFrame())
 
-        # 3. 构建 stock→THS行业/概念 反向映射（用于替换东财行业数据）
-        stock_to_ths_industry = {}  # stock_code → THS行业名称
-        stock_to_ths_concept = {}   # stock_code → THS概念名称
-        stock_to_ths_ts_code = {}   # stock_code → THS板块代码
-        ths_sector_limit_up_counts = {}  # THS板块名称 → 涨停家数
+        # 3. THS行业/概念/板块代码映射
+        #    若外部已传入（来自 pattern_recognition 集中查询，覆盖所有股票），直接使用
+        #    否则回退旧逻辑：从 hot_sectors.member_codes 构建（仅覆盖热点板块成分股）
+        if stock_to_ths_industry is not None and stock_to_ths_concept is not None:
+            ths_industry_map = stock_to_ths_industry
+            ths_concept_map = stock_to_ths_concept
+            ths_ts_code_map = stock_to_ths_ts_code if stock_to_ths_ts_code is not None else {}
+            logger.info(f"[首板突破] 使用外部传入的THS映射: 行业{len(ths_industry_map)}只, "
+                       f"概念{len(ths_concept_map)}只")
+        else:
+            ths_industry_map = {}
+            ths_concept_map = {}
+            ths_ts_code_map = {}
+            for hs in hot_sectors:
+                sector_name = hs.get('sector_name', '')
+                sector_type = hs.get('sector_type', '')
+                ts_code = hs.get('ts_code', '')
+                member_codes = hs.get('member_codes', set())
+                if sector_type == '行业':
+                    for code in member_codes:
+                        if code not in ths_industry_map:
+                            ths_industry_map[code] = sector_name
+                            ths_ts_code_map[code] = ts_code
+                elif sector_type == '概念':
+                    for code in member_codes:
+                        if code not in ths_concept_map:
+                            ths_concept_map[code] = sector_name
+                            ths_ts_code_map[code] = ts_code
+            logger.info(f"[首板突破] 从hot_sectors构建THS映射: 行业{len(ths_industry_map)}只, "
+                       f"概念{len(ths_concept_map)}只")
 
+        # THS板块涨停家数统计（从hot_sectors统计，用于板块强度）
+        ths_sector_limit_up_counts = {}
         for hs in hot_sectors:
             sector_name = hs.get('sector_name', '')
-            sector_type = hs.get('sector_type', '')
-            ts_code = hs.get('ts_code', '')
             member_codes = hs.get('member_codes', set())
-
-            # 统计该THS板块在今日涨停池中的涨停家数
             ths_limit_up_count = 0
             for _, zt_stock in today_zt.iterrows():
                 zt_code = str(zt_stock.get('代码', '')).zfill(6)
@@ -238,20 +315,11 @@ class HotspotFirstBoardStrategy:
                     ths_limit_up_count += 1
             ths_sector_limit_up_counts[sector_name] = ths_limit_up_count
 
-            # 构建反向映射
-            if sector_type == '行业':
-                for code in member_codes:
-                    if code not in stock_to_ths_industry:
-                        stock_to_ths_industry[code] = sector_name
-                        stock_to_ths_ts_code[code] = ts_code
-            elif sector_type == '概念':
-                for code in member_codes:
-                    if code not in stock_to_ths_concept:
-                        stock_to_ths_concept[code] = sector_name
-                        stock_to_ths_ts_code[code] = ts_code
+        # 将映射统一到 stock_to_ths_* 变量名，供后续代码使用
+        stock_to_ths_industry = ths_industry_map
+        stock_to_ths_concept = ths_concept_map
+        stock_to_ths_ts_code = ths_ts_code_map
 
-        logger.info(f"[首板突破] THS行业映射: {len(stock_to_ths_industry)}只股票, "
-                    f"THS概念映射: {len(stock_to_ths_concept)}只股票")
         logger.info(f"[首板突破] THS板块涨停统计: {len(ths_sector_limit_up_counts)}个板块")
 
         # 4. 分析所有涨停股票中的首板（不限于热点板块）
@@ -503,57 +571,59 @@ class HotspotFirstBoardStrategy:
 
         return result
 
-    def _should_skip_stock(self, stock: pd.Series, sector_info: Dict, date_str: str) -> Optional[str]:
+    def _filter_layer_0_hard_exclusions(self, stock: pd.Series, sector_info: Dict, date_str: str) -> Optional[str]:
         """
-        检查放弃信号（严格模式）
-        
-        放弃信号（满足任一即放弃）：
-        1. 尾盘板（14:30后）
-        2. 独狼板（无板块效应，板块涨停<3家）
-        3. 一字板（无换手）
-        4. 缩量板（<前5日均量）
-        
+        Layer 0: 硬性排除（零成本过滤 — 仅用涨停池自带字段，不拉取任何额外数据）
+
+        优先级最高：这些是任何情况下都不应通过的条件，必须最先判断以避免浪费后续计算。
+
+        排除条件（按判断成本从低到高）：
+        1. 非涨停 / 非首板 — 连板数 != 1 或 涨跌幅 < 9.5%
+        2. 一字板 — 无换手，次日大概率高开低走
+        3. 尾盘板 — 14:30后涨停，偷袭板确定性低
+
         Returns:
-            str: 放弃原因，None表示不放弃
+            str: 排除原因，None表示通过Layer 0
         """
         code = str(stock.get('代码', '')).zfill(6)
-        
-        # 1. 检查尾盘板（14:30后涨停）
+        name = stock.get('名称', '')
+
+        # 1. 首板确认：连板数必须为1
+        board_height = stock.get('连板数', 0)
+        if board_height != 1:
+            return f"非首板(连板数={board_height})"
+
+        # 2. 涨停确认：涨幅必须>=9.5%
+        change = stock.get('涨跌幅', 0)
+        if isinstance(change, str):
+            change = float(change.replace('%', ''))
+        if change < 9.5:
+            return f"涨幅不足({change:.2f}%<9.5%)"
+
+        # 3. 一字板排除：无开板+一字类型
+        break_count = stock.get('开板次数', 0)
+        limit_type = stock.get('涨停类型', '')
+        if break_count == 0 and ('一字' in str(limit_type) or limit_type == '1'):
+            return f"一字板(无换手)"
+
+        # 4. 尾盘板排除：14:30后首次封板
         limit_up_time = str(stock.get('首次封板时间', '')).strip()
         parsed = self._parse_time(limit_up_time)
         if parsed:
             hour, minute = parsed
-            # 14:30后涨停视为尾盘板
             if hour > 14 or (hour == 14 and minute >= 30):
                 return f"尾盘板({limit_up_time})"
-        
-        # 2. 检查独狼板（板块效应不足）
-        sector_stats = sector_info.get('stats', {})
-        sector_limit_up_count = sector_stats.get('涨停家数', 0)
-        if sector_limit_up_count < self.params['min_sector_limit_up']:
-            sector_name = sector_info.get('sector_name', '未知')
-            sector_ts = sector_info.get('ts_code', '')
-            return (f"独狼板(板块[{sector_name}]{sector_ts} 涨停{sector_limit_up_count}家"
-                    f"<{self.params['min_sector_limit_up']}家)")
-        
-        # 3. 检查一字板（无换手）
-        # 通过开板次数和涨停类型判断
-        break_count = stock.get('开板次数', 0)
-        limit_type = stock.get('涨停类型', '')
-        if break_count == 0 and ('一字' in str(limit_type) or limit_type == '1'):
-            return "一字板(无换手)"
-        
-        # 4. 检查缩量板（获取日线数据对比）
-        try:
-            daily_data = self._get_daily_data(code, date_str)
-            if daily_data and 'volume_ratio' in daily_data:
-                # 量比<1表示缩量（低于前5日均量）
-                if daily_data['volume_ratio'] < 1.0:
-                    return f"缩量板(量比{daily_data['volume_ratio']:.2f}<1.0)"
-        except Exception as e:
-            logger.debug(f"[{code}] 检查缩量板失败: {e}")
-        
+
         return None
+
+    def _should_skip_stock(self, stock: pd.Series, sector_info: Dict, date_str: str) -> Optional[str]:
+        """
+        旧版兼容入口 — 内部转发到 Layer 0 硬性排除
+
+        注意：独狼板检查已移至 Layer 4 评分阶段（板块效应作为加分项而非硬排除）；
+              缩量板检查已移至 Layer 2 资金验证阶段。
+        """
+        return self._filter_layer_0_hard_exclusions(stock, sector_info, date_str)
 
     def _analyze_first_board(self, stock: pd.Series,
                             yesterday_zt: pd.DataFrame,
@@ -565,260 +635,270 @@ class HotspotFirstBoardStrategy:
                             matched_sector_type: str = "",
                             concept_hierarchy: Dict = None) -> Optional[TradeSignal]:
         """
-        分析单只股票是否为首板突破
+        四层优先级过滤管线 — 分析单只股票是否为首板突破信号
 
-        核心逻辑：根据套牢盘情况动态调整因子要求
-        - 套牢盘多（距前高近）→ 量能、封单、涨停时间等要求更高
-        - 套牢盘少（距前高远/突破前高）→ 相关要求降低
+        设计原则：按判断成本从低到高、按策略权重从核心到外围排列
+        - 每一层不通过直接返回 None，避免后续无效计算
+        - 板块效应从硬排除降级为 Layer 4 评分因子
 
-        Args:
-            stock: 股票数据（来自涨停池）
-            yesterday_zt: 昨日涨停池
-            sector_info: 行业信息
-            date_str: 日期字符串
-            is_hot_sector: 是否属于热点板块（影响仓位权重）
-            is_dual_resonance: 是否同时属于热点概念+热点行业（双共振加成）
-            matched_sector_name: 匹配到的热点板块名称
-            matched_sector_type: 匹配到的热点板块类型（概念/行业/概念+行业）
-            concept_hierarchy: 概念连板梯队数据（用于复盘参考）
-
-        Returns:
-            TradeSignal or None: 符合条件的交易信号
+        ┌─────────────────────────────────────────────────────────┐
+        │ Layer 0: 硬性排除（零成本，仅用涨停池自带字段）          │
+        │   ├── 非首板/非涨停                                     │
+        │   ├── 一字板（无换手）                                  │
+        │   └── 尾盘板（14:30后）                                 │
+        ├─────────────────────────────────────────────────────────┤
+        │ Layer 1: 技术结构突破（策略核心，需拉取日线数据）        │
+        │   ├── 平台/前高/历史新高突破                             │
+        │   ├── 筹码结构 → 确定动态阈值等级                        │
+        │   └── MA5/MA10均线突破（确认低位启动）                   │
+        ├─────────────────────────────────────────────────────────┤
+        │ Layer 2: 资金验证（复用Layer 1日线数据）                 │
+        │   ├── 量能检查（动态阈值）                               │
+        │   ├── 缩量排除（量比<0.8）                               │
+        │   └── 封单强度（动态阈值）                               │
+        ├─────────────────────────────────────────────────────────┤
+        │ Layer 3: 质量指标（硬性过滤）                            │
+        │   ├── 涨停时间（动态阈值）                               │
+        │   ├── 开板次数 ≤ 1                                      │
+        │   ├── 流通市值 ≤ 100亿                                   │
+        │   └── 5日涨幅 ≤ 15%（低位要求）                          │
+        ├─────────────────────────────────────────────────────────┤
+        │ Layer 4: 板块效应评分 + 信号生成（加分项，非硬排除）     │
+        │   ├── 板块涨停家数 → 板块强度分                          │
+        │   ├── 是否热点板块 → 热点分                              │
+        │   ├── 概念+行业双共振 → 共振分                           │
+        │   └── 综合置信度计算 + TradeSignal生成                   │
+        └─────────────────────────────────────────────────────────┘
         """
         code = str(stock.get('代码', '')).zfill(6)
         name = stock.get('名称', '')
         sector_name = sector_info['sector_name']
-        sector_ts_code = sector_info.get('ts_code', '')
 
-        if is_hot_sector:
-            logger.debug(f"[{code}] 开始分析首板 - 名称:{name}, 行业:{sector_name}, "
-                         f"板块代码:{sector_ts_code or '无'}, 热点:True"
-                         f"({matched_sector_type}:{matched_sector_name})")
-        else:
-            logger.debug(f"[{code}] 开始分析首板 - 名称:{name}, 行业:{sector_name}, "
-                         f"板块代码:{sector_ts_code or '无'}, 热点:False")
-
-        # ===== 步骤1: 基础过滤（必检项）=====
-        skip_reason = self._should_skip_stock(stock, sector_info, date_str)
+        # ══════════════════════════════════════════════════════════
+        # Layer 0: 硬性排除（零成本 — 仅用涨停池自带字段）
+        # ══════════════════════════════════════════════════════════
+        skip_reason = self._filter_layer_0_hard_exclusions(stock, sector_info, date_str)
         if skip_reason:
-            logger.debug(f"[{code}] 放弃信号: {skip_reason}")
+            logger.debug(f"[首板-L0] ✗ {name}({code}) 排除: {skip_reason}")
             return None
 
-        # 条件1: 今日涨停确认
-        change = stock.get('涨跌幅', 0)
-        if isinstance(change, str):
-            change = float(change.replace('%', ''))
-        if change < 9.5:
-            logger.debug(f"[{code}] 过滤: 涨幅不足9.5% ({change:.2f}%)")
-            return None
-        logger.debug(f"[{code}] 通过: 今日涨停 ({change:.2f}%)")
-
-        # 条件2: 首板确认（连板数=1）
-        board_height = stock.get('连板数', 0)
-        if board_height != 1:
-            logger.debug(f"[{code}] 过滤: 非首板（连板数={board_height}）")
-            return None
-        logger.debug(f"[{code}] 通过: 首板确认（连板数=1）")
-
-        # 获取基础数据
-        float_cap = stock.get('流通市值', 0) / 100000000
-        if isinstance(float_cap, str):
-            float_cap = float(float_cap.replace('亿', ''))
         limit_up_time = str(stock.get('首次封板时间', '')).strip()
         break_count = stock.get('开板次数', 0)
+        float_cap = float(stock.get('流通市值', 0)) / 100000000  # 亿
+        if isinstance(stock.get('流通市值', 0), str):
+            float_cap = float(str(stock.get('流通市值', '')).replace('亿', ''))
 
-        # ===== 步骤2: 技术形态和筹码结构分析（用于动态阈值）=====
-        # 检查平台/前高突破
+        logger.info(f"[首板-L0] ✓ {name}({code}) 通过硬性排除 "
+                    f"(首板 {limit_up_time}封, 开板{break_count}次, 市值{float_cap:.1f}亿)")
+
+        # ══════════════════════════════════════════════════════════
+        # Layer 1: 技术结构突破（策略核心 — 拉取日线数据）
+        # ══════════════════════════════════════════════════════════
+        daily_data = self._get_daily_data(code, date_str)
+
+        # 1a. 平台/前高突破
         is_breakout, platform_info = self._check_platform_breakout(code, date_str)
         if not is_breakout:
-            logger.debug(f"[{code}] 过滤: 未突破平台或前高 ({platform_info.get('reason', '')})")
+            logger.info(f"[首板-L1] ✗ {name}({code}) 过滤: 未突破平台/前高 "
+                        f"({platform_info.get('reason', '')})")
             return None
-        breakout_type = platform_info.get('breakout_type', '')
-        logger.debug(f"[{code}] 技术形态: {breakout_type}")
+        breakout_type = platform_info.get('breakout_type', '未知')
 
-        # 检查筹码结构（距前高距离）
+        # 1b. 筹码结构 → 确定动态阈值等级
         chip_ok, chip_info = self._check_chip_structure(code, date_str)
         if not chip_ok:
-            logger.debug(f"[{code}] 过滤: 筹码结构不佳 ({chip_info.get('distance_from_high', 'N/A')}距前高)")
+            logger.info(f"[首板-L1] ✗ {name}({code}) 过滤: 筹码结构不佳 "
+                        f"(距前高{chip_info.get('distance_from_high', 'N/A')})")
             return None
 
-        # 解析距前高距离
         distance_str = chip_info.get('distance_from_high', '100%').replace('%', '')
         try:
             distance_from_high_pct = float(distance_str) / 100.0
-        except:
+        except Exception:
             distance_from_high_pct = 1.0
-        logger.debug(f"[{code}] 筹码结构: {chip_info.get('distance_from_high', 'N/A')}距前高")
 
-        # 获取动态阈值（基于套牢盘情况）
         thresholds = self._get_dynamic_thresholds(distance_from_high_pct, breakout_type)
-        logger.debug(f"[{code}] 动态阈值: 量能>{thresholds['min_volume_ratio']}, "
-                    f"涨停时间<{thresholds['max_limit_up_time']}, "
-                    f"封单>{thresholds['min_seal_ratio']*100:.1f}%")
 
-        # ===== 步骤3: 应用动态阈值进行筛选 =====
-        # 条件3: 流通市值 < 100亿
-        if float_cap > self.params['max_float_cap']:
-            logger.debug(f"[{code}] 过滤: 流通市值过大 ({float_cap:.2f}亿 > {self.params['max_float_cap']}亿)")
+        # 1c. MA5/MA10均线突破（确认低位启动 — 必须通过）
+        ma_breakthrough = False
+        if daily_data and all(k in daily_data for k in ['close', 'ma5', 'ma10']):
+            if daily_data['close'] > daily_data['ma5'] and daily_data['close'] > daily_data['ma10']:
+                ma_breakthrough = True
+
+        if not ma_breakthrough:
+            close_val = daily_data.get('close', 0) if daily_data else 0
+            ma5_val = daily_data.get('ma5', 0) if daily_data else 0
+            ma10_val = daily_data.get('ma10', 0) if daily_data else 0
+            logger.info(f"[首板-L1] ✗ {name}({code}) 过滤: 未突破MA5/MA10均线 "
+                        f"(close:{close_val:.2f}, ma5:{ma5_val:.2f}, ma10:{ma10_val:.2f})")
             return None
-        logger.debug(f"[{code}] 通过: 流通市值 {float_cap:.2f}亿")
 
-        # 条件4: 涨停时间检查（动态阈值）
-        if not self._is_valid_limit_time_dynamic(limit_up_time, thresholds['max_limit_up_time']):
-            logger.debug(f"[{code}] 过滤: 涨停时间过晚 ({limit_up_time} > {thresholds['max_limit_up_time']})")
+        logger.info(f"[首板-L1] ✓ {name}({code}) 通过技术结构 "
+                    f"({breakout_type}, 距前高{distance_from_high_pct*100:.1f}%, "
+                    f"MA突破, 动态阈值: 量>{thresholds['min_volume_ratio']} "
+                    f"封单>{thresholds['min_seal_ratio']*100:.1f}%)")
+
+        # ══════════════════════════════════════════════════════════
+        # Layer 2: 资金验证（复用Layer 1日线数据）
+        # ══════════════════════════════════════════════════════════
+        volume_pass = True  # 量能是否优秀（≤3倍为佳）
+
+        # 2a. 量能检查（动态阈值）
+        if daily_data and 'volume_ratio' in daily_data:
+            vol_ratio = daily_data['volume_ratio']
+            min_vol_ratio = thresholds['min_volume_ratio']
+
+            # 缩量板（量比<0.8）→ 排除
+            if vol_ratio < 0.8:
+                logger.info(f"[首板-L2] ✗ {name}({code}) 过滤: 缩量板(量比{vol_ratio:.2f}<0.8)")
+                return None
+
+            if vol_ratio < min_vol_ratio:
+                logger.info(f"[首板-L2] ✗ {name}({code}) 过滤: 量能不足 "
+                            f"(量比{vol_ratio:.2f}<{min_vol_ratio}, {thresholds['volume_desc']})")
+                return None
+
+            if vol_ratio > self.params['volume_abs_max']:
+                logger.info(f"[首板-L2] ✗ {name}({code}) 过滤: 量能过大 "
+                            f"(量比{vol_ratio:.2f}>{self.params['volume_abs_max']})")
+                return None
+
+            volume_pass = vol_ratio <= self.params['volume_max_ratio']
+        else:
+            logger.info(f"[首板-L2] ✗ {name}({code}) 过滤: 无日线数据，无法验证量能")
             return None
-        logger.debug(f"[{code}] 通过: 涨停时间 {limit_up_time} (要求<{thresholds['max_limit_up_time']})")
 
-        # 条件5: 开板次数≤1
-        if break_count > self.params['max_break_count']:
-            logger.debug(f"[{code}] 过滤: 开板次数过多 ({break_count} > {self.params['max_break_count']})")
-            return None
-        logger.debug(f"[{code}] 通过: 开板次数 {break_count}次")
-
-        # 条件4: 封单强度 > 2%
-        # 尝试获取封单额（不同数据源可能使用不同列名）
+        # 2b. 封单强度（动态阈值）
         seal_amount = float(stock.get('封单额', 0) or stock.get('封板资金', 0) or stock.get('封单金额', 0))
-        float_cap = float(stock.get('流通市值', 0))  # 流通市值单位是元
-
-        # 从daily_basic接口获取自由流通股本计算自由流通市值
+        float_cap_raw = float(stock.get('流通市值', 0))
         free_float_cap = 0
-        daily_basic_data = None
+
         if hasattr(self.dm, 'get_stock_daily_basic'):
             try:
                 daily_basic_data = self.dm.get_stock_daily_basic(code, date_str)
                 if daily_basic_data:
-                    free_share = daily_basic_data.get('free_share', 0)  # 自由流通股本（万股）
-                    close_price = daily_basic_data.get('close', 0)  # 收盘价
-                    # 自由流通市值 = 自由流通股本 * 收盘价 * 10000（转换为元）
+                    free_share = daily_basic_data.get('free_share', 0)
+                    close_price = daily_basic_data.get('close', 0)
                     free_float_cap = free_share * close_price * 10000
-                    logger.debug(f"[{code}] 从daily_basic获取: 自由流通股本={free_share:.2f}万股, "
-                                f"收盘价={close_price:.2f}, 自由流通市值={free_float_cap/100000000:.2f}亿")
             except Exception as e:
-                logger.debug(f"[{code}] 获取daily_basic数据失败: {e}")
+                logger.debug(f"[{code}] 获取daily_basic失败: {e}")
 
-        # 使用自由流通市值计算封单强度，如果没有则使用流通市值
-        base_cap = free_float_cap if free_float_cap > 0 else float_cap
+        base_cap = free_float_cap if free_float_cap > 0 else float_cap_raw
+        seal_ratio = seal_amount / base_cap if base_cap > 0 and seal_amount > 0 else 0
 
-        # 统一单位计算封单强度（都转换为元）
-        if base_cap > 0 and seal_amount > 0:
-            seal_ratio = seal_amount / base_cap
-        else:
-            seal_ratio = 0
-
-        # 打印详细的debug日志
-        logger.debug(f"[{code}] 封单强度计算: 封单={seal_amount/10000:.0f}万, "
-                    f"流通市值={float_cap/100000000:.2f}亿, "
-                    f"自由流通市值={free_float_cap/100000000:.2f}亿, "
-                    f"使用基数={base_cap/100000000:.2f}亿, "
-                    f"封单强度={seal_ratio*100:.4f}%")
-
-        # 条件6: 封单强度检查（使用动态阈值）
         if seal_ratio < thresholds['min_seal_ratio']:
-            logger.debug(f"[{code}] 过滤: 封单强度不足 ({seal_ratio*100:.2f}% < {thresholds['min_seal_ratio']*100:.1f}%)")
+            logger.info(f"[首板-L2] ✗ {name}({code}) 过滤: 封单强度不足 "
+                        f"({seal_ratio*100:.2f}%<{thresholds['min_seal_ratio']*100:.1f}%)")
             return None
-        logger.debug(f"[{code}] 通过: 封单强度 {seal_ratio*100:.2f}% (要求>{thresholds['min_seal_ratio']*100:.1f}%)")
 
-        # 获取日线数据进行进一步分析
-        daily_data = self._get_daily_data(code, date_str)
-        if daily_data:
-            logger.debug(f"[{code}] 日线数据: 5日涨幅{daily_data.get('rise_5d', 0)*100:.2f}%, 量比{daily_data.get('volume_ratio', 0):.2f}")
-        else:
-            logger.debug(f"[{code}] 未获取到日线数据")
+        logger.info(f"[首板-L2] ✓ {name}({code}) 通过资金验证 "
+                    f"(量比{vol_ratio:.2f}≥{min_vol_ratio}, 封单{seal_ratio*100:.2f}%≥{thresholds['min_seal_ratio']*100:.1f}%, "
+                    f"量能{'健康' if volume_pass else '偏大'})")
 
-        # ===== 步骤4: 量能检查（使用动态阈值）=====
-        volume_pass = False
-        if daily_data and 'volume_ratio' in daily_data:
-            vol_ratio = daily_data['volume_ratio']
-            min_vol_ratio = thresholds['min_volume_ratio']
+        # ══════════════════════════════════════════════════════════
+        # Layer 3: 质量指标（硬性过滤）
+        # ══════════════════════════════════════════════════════════
+        layer3_fail = []
 
-            if vol_ratio < min_vol_ratio:
-                logger.debug(f"[{code}] 过滤: 量能不足 ({vol_ratio:.2f} < {min_vol_ratio}), {thresholds['volume_desc']}")
-                return None
-            if vol_ratio > self.params['volume_abs_max']:
-                logger.debug(f"[{code}] 过滤: 量能过大 ({vol_ratio:.2f} > {self.params['volume_abs_max']})")
-                return None
-            volume_pass = vol_ratio <= self.params['volume_max_ratio']
-            logger.debug(f"[{code}] 通过: 量比{vol_ratio:.2f} (最低{min_vol_ratio*100:.0f}%), {thresholds['volume_desc']}, 理想<3倍:{volume_pass}")
+        # 3a. 涨停时间（动态阈值）
+        if not self._is_valid_limit_time_dynamic(limit_up_time, thresholds['max_limit_up_time']):
+            layer3_fail.append(f"涨停时间过晚({limit_up_time}>{thresholds['max_limit_up_time']})")
 
-        # 涨幅检查
+        # 3b. 开板次数 ≤ 1
+        if break_count > self.params['max_break_count']:
+            layer3_fail.append(f"开板过多({break_count}次)")
+
+        # 3c. 流通市值 ≤ 100亿
+        if float_cap > self.params['max_float_cap']:
+            layer3_fail.append(f"市值过大({float_cap:.1f}亿)")
+
+        # 3d. 5日涨幅 ≤ 15%（低位启动）
         if daily_data and 'rise_5d' in daily_data:
             if daily_data['rise_5d'] >= self.params['max_5d_rise']:
-                logger.debug(f"[{code}] 过滤: 5日涨幅过高 ({daily_data['rise_5d']*100:.2f}% >= {self.params['max_5d_rise']*100:.0f}%)")
-                return None
-            logger.debug(f"[{code}] 通过: 5日涨幅 {daily_data['rise_5d']*100:.2f}%")
+                layer3_fail.append(f"5日涨幅过高({daily_data['rise_5d']*100:.1f}%)")
 
-        # 条件7: 当天日线穿过5日、10日线
-        ma_breakthrough = False
-        if daily_data and all(k in daily_data for k in ['close', 'ma5', 'ma10']):
-            # 当天收盘价上穿5日线和10日线
-            if daily_data['close'] > daily_data['ma5'] and daily_data['close'] > daily_data['ma10']:
-                ma_breakthrough = True
-                logger.debug(f"[{code}] 通过: 突破MA5/MA10均线 (close:{daily_data['close']:.2f}, ma5:{daily_data['ma5']:.2f}, ma10:{daily_data['ma10']:.2f})")
-            else:
-                logger.debug(f"[{code}] 未突破均线 (close:{daily_data['close']:.2f}, ma5:{daily_data['ma5']:.2f}, ma10:{daily_data['ma10']:.2f})")
+        if layer3_fail:
+            logger.info(f"[首板-L3] ✗ {name}({code}) 过滤: {'; '.join(layer3_fail)}")
+            return None
 
-        # 计算置信度
-        confidence = 0.70  # 基础置信度
-        confidence += min(seal_ratio * 2, 0.15)  # 封单强度加成
-        if daily_data and 'volume_ratio' in daily_data:
-            # 使用动态阈值计算量比加成（超过最低要求越多，加成越高）
-            vol_ratio = daily_data['volume_ratio']
-            min_vol_ratio = thresholds['min_volume_ratio']
-            confidence += min((vol_ratio - min_vol_ratio) * 0.05, 0.10)  # 量比加成
-        if ma_breakthrough:
-            confidence += 0.05  # 均线突破加成
-        if is_hot_sector:
-            confidence += 0.05  # 热点板块加成
-        if is_dual_resonance:
-            confidence += 0.08  # 双热点共振额外加成（概念+行业同时热点）
+        logger.info(f"[首板-L3] ✓ {name}({code}) 通过质量指标 "
+                    f"(时间{limit_up_time}<{thresholds['max_limit_up_time']}, "
+                    f"开板{break_count}次, 市值{float_cap:.1f}亿, "
+                    f"5日涨幅{daily_data.get('rise_5d', 0)*100:.1f}%)")
+
+        # ══════════════════════════════════════════════════════════
+        # Layer 4: 板块效应评分 + 信号生成
+        # ══════════════════════════════════════════════════════════
+        sector_score = self._calculate_sector_effect_score(
+            stock, sector_info, today_zt_for_sector=None,
+            is_hot_sector=is_hot_sector, is_dual_resonance=is_dual_resonance
+        )
+        sector_limit_up_count = sector_info.get('stats', {}).get('涨停家数', 0)
+
+        # 计算综合置信度
+        confidence = 0.60  # 基础分（通过Layer 1/2/3已证明质量）
+
+        # 技术结构分（最高+0.10）
+        confidence += 0.05  # 突破平台/前高
+        if breakout_type == '前高突破':
+            confidence += 0.05  # 突破前高额外加成
+
+        # 资金确认分（最高+0.10）
+        confidence += min(seal_ratio * 2, 0.05)  # 封单强度
+        if volume_pass and daily_data:
+            excess_vol = daily_data.get('volume_ratio', 0) - thresholds['min_volume_ratio']
+            confidence += min(max(excess_vol, 0) * 0.03, 0.05)  # 量能超预期加成
+
+        # 质量分（最高+0.05）
+        if break_count == 0:
+            confidence += 0.03  # 零开板
+        if limit_up_time and limit_up_time <= '09:40':
+            confidence += 0.02  # 早盘秒封
+
+        # 板块效应分（最高+0.10）
+        confidence += sector_score
+
         confidence = min(confidence, 0.95)
 
-        # 确定仓位权重：热点板块 -> medium, 非热点 -> light
-        position_size = "medium" if is_hot_sector else "light"
+        # 确定仓位权重
+        if is_dual_resonance:
+            position_size = "heavy"
+        elif is_hot_sector:
+            position_size = "medium"
+        else:
+            position_size = "light"
 
-        logger.debug(f"[{code}] 生成信号: 置信度{confidence:.2f}, 仓位{position_size}, 热点{is_hot_sector}")
-
-        # ===== 获取所属概念和连板梯队信息 =====
+        # 获取概念梯队信息
         concept_info_list = []
         hierarchy_info = ""
         if concept_hierarchy:
-            # 遍历所有概念，找出包含该股票的概念
             for concept_name, data in concept_hierarchy.items():
                 stocks = data.get('stocks', [])
-                stock_codes = [str(s.get('code', '')).zfill(6) for s in stocks]
-                if code in stock_codes:
-                    # 找到该股票在该概念中的连板数
-                    board_height = 0
+                stock_codes_in_concept = [str(s.get('code', '')).zfill(6) for s in stocks]
+                if code in stock_codes_in_concept:
+                    board_h = 0
                     for s in stocks:
                         if str(s.get('code', '')).zfill(6) == code:
-                            board_height = s.get('board_height', 1)
+                            board_h = s.get('board_height', 1)
                             break
-                    
-                    # 获取该概念的最高连板数
-                    max_height = data.get('max_board_height', 0)
-                    total_limit_up = data.get('total_limit_up', 0)
-                    
                     concept_info_list.append({
                         'name': concept_name,
-                        'board_height': board_height,
-                        'max_height': max_height,
-                        'total_limit_up': total_limit_up
+                        'board_height': board_h,
+                        'max_height': data.get('max_board_height', 0),
+                        'total_limit_up': data.get('total_limit_up', 0),
                     })
-            
-            # 按最高连板数排序，取前3个概念
+
             concept_info_list.sort(key=lambda x: x['max_height'], reverse=True)
             top_concepts = concept_info_list[:3]
-            
-            # 构建概念梯队信息
             if top_concepts:
                 concept_parts = []
                 for c in top_concepts:
                     if c['max_height'] > 0:
                         concept_parts.append(f"{c['name']}({c['max_height']}板)")
                     else:
-                        concept_parts.append(f"{c['name']}")
+                        concept_parts.append(c['name'])
                 hierarchy_info = " | ".join(concept_parts)
-        
+
         # 构建理由
         if is_dual_resonance:
             reason_parts = [f"首板突破+{sector_name}热点(双共振)"]
@@ -826,75 +906,79 @@ class HotspotFirstBoardStrategy:
             reason_parts = [f"首板突破+{sector_name}热点"]
         else:
             reason_parts = [f"首板突破+{sector_name}"]
+
         if daily_data:
             if 'rise_5d' in daily_data:
                 reason_parts.append(f"5日涨幅{daily_data['rise_5d']*100:.1f}%")
-            if 'volume_ratio' in daily_data:
-                reason_parts.append(f"量比{daily_data['volume_ratio']:.1f}")
-        reason_parts.append(f"封单强度{seal_ratio*100:.1f}%")
+            reason_parts.append(f"量比{vol_ratio:.1f}")
+        reason_parts.append(f"封单{seal_ratio*100:.1f}%")
         if ma_breakthrough:
             reason_parts.append("突破均线")
-        # 添加所属概念信息
         if hierarchy_info:
-            reason_parts.append(f"概念: {hierarchy_info}")
+            reason_parts.append(f"概念:{hierarchy_info}")
 
-        # 构建关键指标
+        # 关键指标
         key_metrics = {
             "涨停时间": limit_up_time,
             "封单额": f"{seal_amount/1e4:.0f}万",
             "封单强度": f"{seal_ratio*100:.1f}%",
             "所属行业": sector_name,
-            "行业趋势": sector_info['trend_stage'],
+            "行业趋势": sector_info.get('trend_stage', ''),
             "距前高": chip_info.get('distance_from_high', 'N/A'),
-            "量能说明": thresholds.get('volume_desc', '标准量能')
+            "量能说明": thresholds.get('volume_desc', '标准量能'),
+            "板块效应": f"{sector_score*100:.0f}分(板块涨停{sector_limit_up_count}家)",
         }
-        # 添加所属概念和梯队信息
         if concept_info_list:
             key_metrics["所属概念"] = ", ".join([c['name'] for c in concept_info_list[:3]])
-            key_metrics["概念梯队"] = hierarchy_info if hierarchy_info else "无"
+            key_metrics["概念梯队"] = hierarchy_info or "无"
         if daily_data:
             if 'rise_5d' in daily_data:
                 key_metrics["5日涨幅"] = f"{daily_data['rise_5d']*100:.1f}%"
-            if 'volume_ratio' in daily_data:
-                key_metrics["量比"] = f"{daily_data['volume_ratio']:.1f}"
-            if ma_breakthrough:
-                key_metrics["均线突破"] = "是"
+            key_metrics["量比"] = f"{vol_ratio:.2f}"
+            key_metrics["均线突破"] = "是"
 
-        # 构建验证规则
+        # 验证规则
         validation_rules = [
-            "今日涨停",
-            "昨日未涨停（首板）",
-            f"涨停时间<{thresholds['max_limit_up_time']}（非偷袭）",
-            f"封单强度>{thresholds['min_seal_ratio']*100:.1f}%",
-            f"技术形态: {breakout_type}",
-            f"筹码结构: 距前高{chip_info.get('distance_from_high', 'N/A')}"
+            "今日涨停(首板)",
+            f"突破形态: {breakout_type}",
+            f"筹码: 距前高{chip_info.get('distance_from_high', 'N/A')}",
+            f"均线: MA5/MA10突破",
+            f"涨停时间<{thresholds['max_limit_up_time']}",
+            f"封单>{thresholds['min_seal_ratio']*100:.1f}%",
+            f"量比>{thresholds['min_volume_ratio']}",
         ]
         if is_hot_sector:
             if matched_sector_type:
-                validation_rules.append(f"属于热点{matched_sector_type}: {matched_sector_name}")
+                validation_rules.append(f"热点{matched_sector_type}: {matched_sector_name}")
             else:
-                validation_rules.append(f"属于热点板块: {sector_name}")
+                validation_rules.append(f"热点板块: {sector_name}")
         else:
-            validation_rules.append(f"行业: {sector_name}（非热点）")
+            validation_rules.append(f"行业: {sector_name}（非热点，板块效应{sector_score*100:.0f}分）")
         if daily_data and 'rise_5d' in daily_data:
-            validation_rules.append(f"近5日涨幅<{self.params['max_5d_rise']*100:.0f}%（低位）")
-        if daily_data and 'volume_ratio' in daily_data:
-            validation_rules.append(f"量比>{thresholds['min_volume_ratio']}（资金介入）")
+            validation_rules.append(f"5日涨幅<{self.params['max_5d_rise']*100:.0f}%（低位）")
 
-        # 确定买点策略（基于动态阈值和板块强度）
+        # 买点策略
         if is_hot_sector and seal_ratio > 0.08 and break_count <= 1:
-            buy_strategy = "主买点: 回封时扫板（防止假突破）"
+            buy_strategy = "主买点: 回封时扫板（热点+强封单）"
+        elif is_hot_sector:
+            buy_strategy = "次买点: 次日排板（热点板块中封单适中）"
+        elif seal_ratio > 0.05:
+            buy_strategy = "次买点: 次日竞价观察（非热点但封单尚可）"
         else:
-            buy_strategy = "次买点: 次日排板（板块龙头已确定）"
+            buy_strategy = "观察: 需板块效应确认后再介入"
 
         # 次日预期
-        sector_limit_up_count = sector_info.get('stats', {}).get('涨停家数', 0)
         if is_hot_sector and sector_limit_up_count >= 5:
             next_day_expectation = "超预期: 一字板或T字板（板块发酵）"
         elif is_hot_sector:
             next_day_expectation = "正常: 高开3%-7%，竞价量能达昨日5%-10%"
         else:
-            next_day_expectation = "低于预期: 低开或高开<3%（考虑竞价卖出）"
+            next_day_expectation = "低于预期: 低开或高开<3%（需竞价确认）"
+
+        logger.info(f"[首板-L4] ✓ {name}({code}) 生成信号: "
+                    f"置信度{confidence:.2f}, 仓位{position_size}, "
+                    f"板块效应{sector_score*100:.0f}分, "
+                    f"{'双共振' if is_dual_resonance else '热点' if is_hot_sector else '非热点'}")
 
         return TradeSignal(
             pattern_type=PatternType.HOTSPOT_FIRST_BOARD,

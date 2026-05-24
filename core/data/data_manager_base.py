@@ -79,6 +79,7 @@ class DataManagerBase:
         self.sector_dir = self.cache_dir / "sector"
         (self.sector_dir / "ths_index").mkdir(parents=True, exist_ok=True)
         (self.sector_dir / "ths_member").mkdir(parents=True, exist_ok=True)
+        (self.sector_dir / "stock_sectors").mkdir(parents=True, exist_ok=True)
         (self.sector_dir / "ths_daily").mkdir(parents=True, exist_ok=True)
         (self.sector_dir / "moneyflow").mkdir(parents=True, exist_ok=True)
 

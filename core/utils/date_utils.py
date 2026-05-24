@@ -179,6 +179,38 @@ class DateUtils:
         # 返回倒序列表
         return self._trade_dates[start_idx:idx+1][::-1]
 
+    def get_n_trade_dates_before(self, n: int, date: Optional[str] = None) -> str:
+        """
+        获取N个交易日之前的日期（向前回溯N个交易日）
+
+        Args:
+            n: 回溯的交易日数量
+            date: 起始日期，格式YYYYMMDD，默认为今日
+
+        Returns:
+            N个交易日之前的日期字符串
+        """
+        if date is None:
+            date = self.get_today_str()
+
+        # 确保起始日期是交易日
+        if not self.is_trade_date(date):
+            date = self.get_nearest_trade_date(date)
+
+        # 在有序列表中找到起始日期的位置，向前回溯N个交易日
+        try:
+            idx = self._trade_dates.index(date)
+        except ValueError:
+            # 理论上不会发生，因为 date 已经是交易日
+            return date
+
+        target_idx = idx - n
+        if target_idx < 0:
+            # 如果N个交易日前超出最早交易日，返回最早交易日
+            return self._trade_dates[0]
+
+        return self._trade_dates[target_idx]
+
 
 # 创建单例实例
 _date_utils = DateUtils()
@@ -194,6 +226,7 @@ get_nearest_trade_date = _date_utils.get_nearest_trade_date
 get_prev_trade_date = _date_utils.get_prev_trade_date
 get_next_trade_date = _date_utils.get_next_trade_date
 get_last_n_trade_dates = _date_utils.get_last_n_trade_dates
+get_n_trade_dates_before = _date_utils.get_n_trade_dates_before
 
 
 # ==================== 简单测试 ====================

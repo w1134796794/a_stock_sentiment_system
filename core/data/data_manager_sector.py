@@ -167,6 +167,117 @@ class SectorDataManager(DataManagerBase):
         logger.info(f"[批量获取成分] 完成: {len(results)}/{len(ts_codes)} 个板块")
         return results
 
+    def get_stock_sectors(self, stock_code: str) -> pd.DataFrame:
+        """
+        反向查询：根据股票代码获取所属所有同花顺板块
+
+        第一步：用 ths_member(code=stock_code) 拿到该股票所有的板块 ts_code
+        第二步：用 ths_index 的 type 字段分类（N=概念, I=行业, S=特色指数等）
+
+        Args:
+            stock_code: 股票代码（如 '002031.SZ'）
+
+        Returns:
+            DataFrame: 包含字段 ts_code, name, type, market
+        """
+        if not self.ts_pro:
+            logger.warning("[get_stock_sectors] Tushare未初始化")
+            return pd.DataFrame()
+
+        if not stock_code:
+            logger.warning("[get_stock_sectors] 必须提供stock_code参数")
+            return pd.DataFrame()
+
+        code_with_suffix = stock_code
+        if '.' not in stock_code:
+            from core.utils.stock_code_utils import StockCodeUtils
+            code_with_suffix = StockCodeUtils.standardize_code(stock_code, add_suffix=True)
+            if not code_with_suffix:
+                logger.warning(f"[get_stock_sectors] 无法标准化代码: {stock_code}")
+                return pd.DataFrame()
+
+        cache_file = self.sector_dir / "stock_sectors" / f"{code_with_suffix}.csv"
+
+        if cache_file.exists():
+            file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+            if (datetime.now() - file_time).days < 7:
+                return pd.read_csv(cache_file)
+
+        try:
+            df = self.ts_pro.ths_member(con_code=code_with_suffix)
+
+            if df is None or df.empty:
+                logger.debug(f"[get_stock_sectors] {stock_code} 未找到所属板块")
+                return pd.DataFrame()
+
+            ths_index = self.get_ths_index()
+            if ths_index.empty:
+                logger.warning("[get_stock_sectors] ths_index为空，无法分类板块类型")
+                return df
+
+            if 'type' in ths_index.columns:
+                merge_cols = ['ts_code', 'name', 'type']
+                for extra_col in ['exchange']:
+                    if extra_col in ths_index.columns:
+                        merge_cols.append(extra_col)
+                ths_index_filtered = ths_index[ths_index['type'].isin(['N', 'I'])]
+                result = df.merge(
+                    ths_index_filtered[merge_cols],
+                    on='ts_code',
+                    how='inner'
+                )
+                if 'name' in result.columns:
+                    result['name'] = result['name'].fillna(result.get('ts_code', ''))
+            else:
+                result = df
+
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            result.to_csv(cache_file, index=False)
+            logger.debug(f"[get_stock_sectors] {stock_code} 属于 {len(result)} 个板块")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[get_stock_sectors] 获取 {stock_code} 的板块归属异常: {e}")
+            return pd.DataFrame()
+
+    def get_stock_sectors_batch(self, stock_codes: List[str]) -> Dict[str, pd.DataFrame]:
+        """
+        批量获取多个股票的板块归属
+
+        Args:
+            stock_codes: 股票代码列表（支持带后缀或不带后缀格式）
+
+        Returns:
+            Dict[str, DataFrame]: stock_code → 板块归属DataFrame
+        """
+        results = {}
+        codes_to_fetch = []
+
+        from core.utils.stock_code_utils import StockCodeUtils
+        for code in stock_codes:
+            code_with_suffix = code if '.' in code else StockCodeUtils.standardize_code(code, add_suffix=True)
+            if not code_with_suffix:
+                code_with_suffix = code
+
+            cache_file = self.sector_dir / "stock_sectors" / f"{code_with_suffix}.csv"
+            if cache_file.exists():
+                file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+                if (datetime.now() - file_time).days < 7:
+                    df = pd.read_csv(cache_file)
+                    results[code] = df
+                    continue
+            codes_to_fetch.append(code)
+
+        if codes_to_fetch:
+            logger.info(f"[get_stock_sectors_batch] 需要获取 {len(codes_to_fetch)} 只股票的板块归属")
+            for code in codes_to_fetch:
+                df = self.get_stock_sectors(code)
+                results[code] = df
+                time.sleep(0.05)
+
+        return results
+
     def get_sectors_daily_batch(self,
                                 ts_codes: List[str],
                                 trade_date: str = None,

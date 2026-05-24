@@ -46,6 +46,7 @@ class PatternType(Enum):
 class DragonType(Enum):
     CONTINUOUS = "连板龙头"  # 连续涨停
     TREND = "趋势龙头"       # 趋势上涨（间断涨停）
+    SPACE = "空间龙头"       # 高连板回撤后的二波机会
 
 
 class DragonStatus(Enum):
@@ -232,18 +233,19 @@ class WeakToStrongStrategy:
         
         # ========== 参数配置 - 优化版本（支持动态调整）==========
         self.params = {
-            # 龙头识别标准 - 基础阈值
-            "min_board_height": 4,           # 连板龙头：最少4连板
-            "min_total_rise": 0.40,          # 趋势龙头：近10日涨幅>=40%（已弃用，改用斜率）
+            # 龙头识别标准 - 基础阈值（优化版：适当放宽以增加候选）
+            "min_board_height": 3,           # 连板龙头：最少3连板（原4）
+            "min_total_rise": 0.30,          # 趋势龙头：近10日涨幅>=30%（原40%）
             "min_limit_up_count": 2,         # 趋势龙头：期间至少2个涨停
             "max_limit_up_gap": 2,           # 趋势龙头：涨停间隔不超过2天
-            "min_slope_daily": 0.03,         # 趋势龙头：日均斜率>=3%（新增）
-            "min_r_squared": 0.5,            # 趋势龙头：R²>=0.5（新增，衡量趋势性）
+            "min_slope_daily": 0.015,        # 趋势龙头：日均斜率>=1.5%（原3%，约10日16%涨幅）
+            "min_r_squared": 0.30,           # 趋势龙头：R²>=0.3（原0.5，允许适度波动）
+            "min_board_height_for_space": 5,  # 空间龙头：至少5连板后回撤
             
             # 走弱确认标准
             "weakening_types": ["烂板", "断板", "尾盘板", "放量滞涨", "趋势回调"],
-            "max_drawdown_for_recovery": 0.15,  # 最大允许回调15%（防A杀）
-            "max_monitor_days": 5,              # 最多观察5天
+            "max_drawdown_for_recovery": 0.20,  # 最大允许回调20%（防A杀，原15%）
+            "max_monitor_days": 7,              # 最多观察7天（原5天，给更多时间）
             
             # 转强信号标准 - 基础阈值（支持动态调整）
             "min_gap": 0.03,                 # 高开>3%
@@ -452,10 +454,11 @@ class WeakToStrongStrategy:
                     logger.debug(f"[弱转强] 通过data_manager获取价格失败 {code}: {e}")
             
             if current_price > 0:
-                weakening.current_price = current_price
-                # 计算回调幅度
-                weakening.max_drawdown = (weakening.peak_price - weakening.current_price) / weakening.peak_price
-                logger.info(f"[弱转强] 更新{weakening.stock_name}({code})价格: {weakening.current_price:.2f}, 回调{weakening.max_drawdown*100:.1f}%")
+                prev_close = weakening.current_price  # 昨日收盘价（Stage 3 在上次执行时写入的值）
+                yesterday_drawdown = (weakening.peak_price - prev_close) / weakening.peak_price if prev_close > 0 else 0
+                weakening.max_drawdown = max(weakening.max_drawdown, yesterday_drawdown)
+                weakening.current_price = current_price  # 今日收盘价（明天用作"昨日"收盘）
+                logger.info(f"[弱转强] 更新{weakening.stock_name}({code}) 昨收={prev_close:.2f}→今收={current_price:.2f}, 历史最大回调{weakening.max_drawdown*100:.1f}%")
             else:
                 logger.warning(f"[弱转强] 无法获取{weakening.stock_name}({code})的当前价格")
             
@@ -616,9 +619,54 @@ class WeakToStrongStrategy:
                     trend_in_progress_count += 1
             
             logger.info(f"[弱转强-龙头识别] 趋势中龙头识别完成: {trend_in_progress_count}只")
-        
+
+        # ========== 第3步：识别空间龙头（高位连板后回调中）==========
+        if self.dm and history_pools:
+            space_params = self.params.get('min_board_height_for_space', 5)
+            logger.info(f"[弱转强-龙头识别] 搜索空间龙头：≥{space_params}板后回调中的...")
+            space_count = 0
+            for code, info in list(recent_limit_up_stocks.items())[:50]:
+                if any(d.stock_code == code for d in new_dragons):
+                    continue
+                space_dragon = self._check_space_dragon(code, info['name'], info['sector'], date_str, history_pools)
+                if space_dragon:
+                    logger.info(f"[弱转强-龙头识别] ✓ 空间龙头: {info['name']}({code}) - "
+                               f"{space_dragon.peak_board_height}板后回调{space_dragon._drawdown_pct:.1f}%")
+                    new_dragons.append(space_dragon)
+                    space_count += 1
+            logger.info(f"[弱转强-龙头识别] 空间龙头识别完成: {space_count}只")
+
+        # ========== 回退模式：若无任何龙头入选，放宽连板龙阈值 ==========
+        if len(new_dragons) == 0 and not today_zt.empty:
+            fallback_board = max(2, self.params['min_board_height'] - 1)
+            logger.info(f"[弱转强-龙头识别] 主模式无龙头，回退模式：放宽至≥{fallback_board}板...")
+            for _, row in today_zt.iterrows():
+                code = str(row.get('代码', '')).zfill(6)
+                name = row.get('名称', '')
+                board_height = row.get('连板数', 0)
+
+                if board_height >= fallback_board and board_height < self.params['min_board_height']:
+                    if any(d.stock_code == code for d in new_dragons):
+                        continue
+                    ths_ind = (stock_to_ths_industry or {}).get(code, '')
+                    ths_con = (stock_to_ths_concept or {}).get(code, '')
+                    sector = ths_ind or ths_con or row.get('所属行业', '') or row.get('L2_Industry', '')
+                    current_price = row.get('最新价', 0)
+                    total_rise_10d, limit_up_count = self._calc_10d_stats(code, date_str)
+
+                    dragon = DragonCandidate(
+                        stock_code=code, stock_name=name,
+                        dragon_type=DragonType.CONTINUOUS,
+                        peak_board_height=board_height, peak_price=current_price,
+                        peak_date=date_str, entry_date=date_str, sector_name=sector,
+                        total_rise_10d=total_rise_10d,
+                        limit_up_count=limit_up_count if limit_up_count > 0 else board_height,
+                    )
+                    new_dragons.append(dragon)
+                    logger.info(f"[弱转强-龙头识别] ✓ 回退连板龙: {name}({code}) - {board_height}板")
+
         logger.info(f"[弱转强-龙头识别] ========== 识别完成 ==========")
-        logger.info(f"[弱转强-龙头识别] 总计: 连板龙头{continuous_count}只，趋势龙头{trend_count}只，共{len(new_dragons)}只")
+        logger.info(f"[弱转强-龙头识别] 总计: 连板龙头{continuous_count}只，趋势龙头{trend_count}只，空间龙头{space_count}只，共{len(new_dragons)}只")
         return new_dragons
     
     def _check_trend_dragon_by_daily_for_non_limit(self,
@@ -734,7 +782,94 @@ class WeakToStrongStrategy:
             logger.debug(f"[弱转强-趋势龙头] 非涨停股检查失败 {code}: {e}")
         
         return None
-    
+
+    def _check_space_dragon(self,
+                            code: str,
+                            name: str,
+                            sector: str,
+                            date_str: str,
+                            history_pools: Dict[str, pd.DataFrame]) -> Optional[DragonCandidate]:
+        """
+        识别空间龙头：曾经高位连板（≥5板），近期不在涨停池，处于回调中但未A杀
+
+        核心特征：高位连板后的回调蓄力，预期二波机会
+        """
+        try:
+            min_boards = self.params.get('min_board_height_for_space', 5)
+
+            # 从历史涨停池中找到该股票的最高连板记录
+            sorted_dates = sorted(history_pools.keys(), reverse=True)[:15]
+            max_board = 0
+            peak_price = 0.0
+            peak_date = date_str
+
+            for pool_date in sorted_dates:
+                pool = history_pools.get(pool_date, pd.DataFrame())
+                if pool.empty:
+                    continue
+
+                pool_code_col = self._get_code_col(pool)
+                if not pool_code_col:
+                    continue
+
+                pool_codes = pool[pool_code_col].astype(str).str.replace(r'\.\w+$', '', regex=True).str.zfill(6)
+                stock_row = pool[pool_codes == code]
+                if not stock_row.empty:
+                    boards = stock_row.iloc[0].get('连板数', 0)
+                    price = stock_row.iloc[0].get('最新价', 0)
+                    if boards > max_board:
+                        max_board = boards
+                        peak_price = price
+                        peak_date = pool_date
+
+            if max_board < min_boards:
+                return None
+
+            # 获取当前日线数据检查回调幅度
+            if not self.dm:
+                return None
+
+            start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
+            daily_df = self.dm.get_stock_daily(code, start_date, date_str)
+            if daily_df is None or daily_df.empty:
+                return None
+
+            daily_df = daily_df.sort_values('trade_date')
+            last_10d = daily_df.tail(10)
+            high_10d = last_10d['high'].max()
+            last_close = last_10d.iloc[-1]['close']
+            drawdown = (high_10d - last_close) / high_10d if high_10d > 0 else 0
+
+            # 回调在5%~20%之间（不是A杀，也不是高位震荡）
+            if drawdown < 0.05 or drawdown > 0.20:
+                return None
+
+            # 计算涨停次数
+            pct_col = 'pct_chg' if 'pct_chg' in daily_df.columns else 'pct_change'
+            limit_up_count = len(last_10d[last_10d[pct_col] >= 9.5])
+
+            total_rise_10d = (last_close - last_10d.iloc[0]['close']) / last_10d.iloc[0]['close']
+
+            dragon = DragonCandidate(
+                stock_code=code,
+                stock_name=name,
+                dragon_type=DragonType.SPACE,
+                peak_board_height=max_board,
+                peak_price=peak_price,
+                peak_date=peak_date,
+                entry_date=date_str,
+                sector_name=sector,
+                total_rise_10d=total_rise_10d,
+                limit_up_count=limit_up_count,
+            )
+            dragon._drawdown_pct = drawdown * 100
+            return dragon
+
+        except Exception as e:
+            logger.debug(f"[弱转强-空间龙头] 检查失败 {code}: {e}")
+
+        return None
+
     def _check_trend_dragon(self, 
                            code: str, 
                            name: str,
@@ -1452,6 +1587,31 @@ class WeakToStrongStrategy:
             'weakening_pool': [w.to_dict() for w in self.weakening_pool.values()],
             'recovery_signals': [s.to_dict() for s in self.recovery_signals],
         }
+
+    @staticmethod
+    def _parse_time(time_str: str) -> Optional[Tuple[int, int]]:
+        """解析时间字符串为(hour, minute)"""
+        if not time_str:
+            return None
+        try:
+            parts = str(time_str).strip().replace('：', ':').split(':')
+            if len(parts) >= 2:
+                return (int(parts[0]), int(parts[1]))
+        except (ValueError, IndexError):
+            pass
+        return None
+
+    @staticmethod
+    def _is_valid_limit_time(limit_up_time: str, max_time_str: str) -> bool:
+        """检查涨停时间是否在规定时间之前"""
+        parsed = WeakToStrongStrategy._parse_time(limit_up_time)
+        max_parsed = WeakToStrongStrategy._parse_time(max_time_str)
+        if not parsed:
+            return False
+        if not max_parsed:
+            return True
+        return (parsed[0] < max_parsed[0]) or \
+               (parsed[0] == max_parsed[0] and parsed[1] <= max_parsed[1])
 
 
 # ==================== 兼容旧接口 ====================

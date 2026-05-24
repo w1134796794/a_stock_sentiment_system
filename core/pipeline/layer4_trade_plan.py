@@ -16,6 +16,8 @@ import numpy as np
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
+from core.utils.date_utils import DateUtils
+from datetime import timedelta
 import loguru
 
 logger = loguru.logger
@@ -93,6 +95,7 @@ class TradePlanLayer:
 
     def __init__(self, data_manager):
         self.dm = data_manager
+        self.date_utils = DateUtils()
 
     def analyze(self, trade_date: str, ranked_signals: List,
                 composite_scores: List, market_env=None,
@@ -402,8 +405,7 @@ class TradePlanLayer:
             float: 胜率 0.0~1.0
         """
         try:
-            from datetime import datetime, timedelta
-            prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+            prev_date = self.date_utils.get_n_trade_dates_before(1, trade_date)
 
             prev_zt = self.dm.get_limit_up_pool(prev_date)
             if prev_zt is None or prev_zt.empty:

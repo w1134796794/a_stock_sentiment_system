@@ -100,11 +100,11 @@ class SecondBoardDragonStrategy:
         买点：竞价末段或开盘第一笔，绝非打板！
         """
         signals = []
-        
-        # 前置：统计各板块二板数量（判断板块地位）
+
+        # ══════════════════════════════════════════════════════════
+        # 前置：统计板块数据（Layer 3/4 板块地位判断用）
+        # ══════════════════════════════════════════════════════════
         sector_second_board_count = {}
-        
-        # 严格模式：统计各板块首板数量（板块梯队）
         sector_first_board_count = {}
         if self.mode == "strict" and today_first_board is not None:
             if '所属行业' in today_first_board.columns:
@@ -112,95 +112,190 @@ class SecondBoardDragonStrategy:
             elif 'L2_Industry' in today_first_board.columns:
                 sector_first_board_count = today_first_board['L2_Industry'].value_counts().to_dict()
             logger.info(f"[二板定龙] 板块首板统计: {len(sector_first_board_count)}个行业有首板")
-        
+
+        # 统计各层过滤数量
+        l0_no_board = 0
+        l0_one_word = 0
+        l1_skipped = 0
+        l2_skipped = 0
+        l3_skipped = 0
+        total_checked = 0
+
         for _, yest_row in yesterday_zt.iterrows():
             code = str(yest_row['代码']).zfill(6)
             name = yest_row['名称']
-            
-            # ========== 前置过滤：今日是否二板 ==========
+            total_checked += 1
+
+            # ═══════════ Layer 0: 硬性排除（零成本 — 仅用today_auction字段）═══════════
             today_row = today_auction[today_auction['代码'] == code]
             if today_row.empty:
-                continue  # 今日没动静，放弃
-            
+                l0_no_board += 1
+                continue
             today_row = today_row.iloc[0]
-            
-            # 获取板块信息
+
             sector = sector_mapping.get(code, '未知')
             first_board_count = sector_first_board_count.get(sector, 0)
-            
-            # ========== 严格模式：放弃信号检查 ==========
+
+            # L0a: 一字板排除
+            first_time = str(today_row.get('首次封板时间', '')).strip()
+            if first_time in ('09:25:00', '09:25'):
+                l0_one_word += 1
+                logger.debug(f"[二板定龙-L0] ✗ {name}({code}) 过滤: 一字板，无博弈空间")
+                continue
+
+            # L0b: 尾盘二板排除
+            parsed_ft = self._parse_time(first_time)
+            if parsed_ft:
+                h, m = parsed_ft
+                if h > 14 or (h == 14 and m >= 30):
+                    l0_one_word += 1
+                    logger.info(f"[二板定龙-L0] ✗ {name}({code}) 过滤: 尾盘二板({first_time})")
+                    continue
+
+            logger.info(f"[二板定龙-L1] ── 检测 {name}({code}), 板块={sector} ——")
+
+            # ═══════════ Layer 1: 前身验证（昨日首板质量）═══════════
             if self.mode == "strict":
                 skip_reason = self._should_skip_stock(yest_row, today_row, first_board_count)
                 if skip_reason:
-                    logger.debug(f"[{code}] 放弃信号: {skip_reason}")
+                    l1_skipped += 1
+                    logger.info(f"[二板定龙-L1] ✗ {name}({code}) 过滤: {skip_reason}")
                     continue
-            
-            # 必须高开（低开直接排除，资金不认可）
-            open_price = today_row['开盘价']
-            yest_close = yest_row['收盘价']
-            gap_ratio = (open_price - yest_close) / yest_close
-            
-            # 严格模式：高开5%-8%
-            if self.mode == "strict":
-                if gap_ratio < self.strict_params["min_gap"]:
-                    logger.debug(f"[{code}] 高开不足: {gap_ratio*100:.1f}% < {self.strict_params['min_gap']*100:.0f}%")
-                    continue
-                if gap_ratio > self.strict_params["max_gap"]:
-                    logger.debug(f"[{code}] 高开过多(一字板): {gap_ratio*100:.1f}% > {self.strict_params['max_gap']*100:.0f}%")
-                    continue
-            else:
-                if gap_ratio < self.params["min_gap"]:
-                    continue  # 低开=资金不认可，直接放弃
-            
-            # ========== 条件1：首板质量（硬逻辑） ==========
+
             quality = self._check_first_board_quality(yest_row)
             if not quality['is_hard_logic']:
+                l1_skipped += 1
+                logger.info(f"[二板定龙-L1] ✗ {name}({code}) 过滤: 首板无硬逻辑(得分{quality['score']})")
                 continue
-            
-            # ========== 条件2：次日资金态度（核心） ==========
+
+            logger.info(f"[二板定龙-L1] ✓ {name}({code}) 通过前身验证 "
+                        f"(硬逻辑:{quality['hard_logic']}, 分值{quality['score']})")
+
+            # ═══════════ Layer 2: 资金确认（高开gap + 竞价量 + 资金态度）═══════════
+            open_price = float(today_row.get('开盘价', 0) or today_row.get('open', 0))
+            yest_close = float(yest_row.get('收盘价', 0) or yest_row.get('close', 0))
+            gap_ratio = (open_price - yest_close) / yest_close if open_price > 0 and yest_close > 0 else 0
+
+            # 动态gap阈值
+            if self.mode == "strict":
+                min_gap_dyn = self.strict_params["min_gap"]  # strict: 5%
+                max_gap_dyn = self.strict_params["max_gap"]  # strict: 8%
+            else:
+                min_gap_dyn = self.params["min_gap"]  # normal: 3%
+
+            l2_penalty = 0.0
+
+            if self.mode == "strict":
+                if gap_ratio < min_gap_dyn:
+                    l2_skipped += 1
+                    logger.info(f"[二板定龙-L2] ✗ {name}({code}) 过滤: 高开不足({gap_ratio*100:.1f}%<{min_gap_dyn*100:.0f}%)")
+                    continue
+                if gap_ratio > max_gap_dyn:
+                    l2_skipped += 1
+                    logger.info(f"[二板定龙-L2] ✗ {name}({code}) 过滤: 高开过多({gap_ratio*100:.1f}%>{max_gap_dyn*100:.0f}%)")
+                    continue
+            else:
+                if gap_ratio < min_gap_dyn:
+                    l2_skipped += 1
+                    logger.info(f"[二板定龙-L2] ✗ {name}({code}) 过滤: 低开({gap_ratio*100:.1f}%<{min_gap_dyn*100:.0f}%)")
+                    continue
+
+            # 竞价量弹性评分
+            auction_vol_ratio = 0
+            try:
+                auction_vol = float(today_row.get('竞价成交量', 0))
+                yest_vol = float(yest_row.get('成交量', 1))
+                if yest_vol > 0:
+                    auction_vol_ratio = auction_vol / yest_vol
+            except Exception:
+                pass
+
+            if auction_vol_ratio > 0:  # 有竞价数据时做弹性检查
+                base_auction_min = self.strict_params.get('min_auction_vol', 0.08) if self.mode == "strict" else 0.05
+                if auction_vol_ratio < base_auction_min:
+                    shortfall = (base_auction_min - auction_vol_ratio) / base_auction_min
+                    penalty = min(0.04, shortfall * 0.10)
+                    l2_penalty += penalty
+                    logger.info(f"[二板定龙-L2] ⚠ {name} 竞价量不足(量比{auction_vol_ratio*100:.1f}%<{base_auction_min*100:.0f}%), 扣{penalty:.2f}")
+
             attitude = self._check_fund_attitude(today_row, yest_row)
             if not attitude['is_strong_attitude']:
+                l2_skipped += 1
+                logger.info(f"[二板定龙-L2] ✗ {name}({code}) 过滤: 资金态度不积极(量比{attitude['auction_vol_ratio']*100:.1f}%)")
                 continue
-            
-            # ========== 条件3：板块地位（卡位优势） ==========
-            # 检查是否是板块内前2个二板
+
+            # L2累计扣分上限
+            if l2_penalty >= 0.05:
+                l2_skipped += 1
+                logger.info(f"[二板定龙-L2] ✗ {name}({code}) 过滤: L2累计扣分{l2_penalty:.2f}≥0.05")
+                continue
+
+            logger.info(f"[二板定龙-L2] {'✓' if l2_penalty == 0 else '⚠'} {name}({code}) 通过资金确认 "
+                        f"(高开{gap_ratio*100:.1f}%|动态{min_gap_dyn*100:.0f}%, 竞价量比{attitude['auction_vol_ratio']*100:.1f}%, 扣分{l2_penalty:.2f})")
+
+            # ═══════════ Layer 3: 质量指标 — 弹性评分 ═══════════
+            l3_penalty = 0.0
+
+            # L3a: 竞价金额弹性检查
+            auction_amount = attitude.get('auction_amount', 0)
+            if auction_amount > 0 and auction_amount < 5_000_000:
+                l3_penalty += 0.02
+                logger.info(f"[二板定龙-L3] ⚠ {name} 竞价金额偏低({auction_amount/1e4:.0f}万<500万), 扣{0.02:.2f}")
+
+            # L3b: 市值上限
+            float_cap = float(today_row.get('流通市值', 0))
+            if float_cap > 150:
+                l3_penalty += 0.02
+                logger.info(f"[二板定龙-L3] ⚠ {name} 市值偏大({float_cap:.1f}亿>150亿), 扣{0.02:.2f}")
+
+            # L3c: 严格模式 - 封板速度
+            limit_up_time_str = str(today_row.get('首次封板时间', '')).strip()
+            if self.mode == "strict" and limit_up_time_str:
+                parsed_lt = self._parse_time(limit_up_time_str)
+                if parsed_lt:
+                    h, m = parsed_lt
+                    max_h = int(self.strict_params['max_limit_up_time'][:2])
+                    max_m = int(self.strict_params['max_limit_up_time'][3:5])
+                    if h > max_h or (h == max_h and m > max_m):
+                        l3_penalty += 0.04
+                        logger.info(f"[二板定龙-L3] ⚠ {name} 封板过晚({limit_up_time_str}>{self.strict_params['max_limit_up_time']}), 扣{0.04:.2f}")
+
+            # L3d: 严格模式 - 换手检查
+            if self.mode == "strict":
+                turnover = float(today_row.get('换手率', 0))
+                if turnover < self.strict_params['min_turnover'] * 100:
+                    l3_penalty += 0.03
+                    logger.info(f"[二板定龙-L3] ⚠ {name} 换手不足({turnover:.1f}%<{self.strict_params['min_turnover']*100:.0f}%), 扣{0.03:.2f}")
+
+            # L3e: 封单强度弹性检查
+            seal_amount = float(today_row.get('封单额', 0) or today_row.get('封板资金', 0) or 0)
+            base_cap = float_cap
+            seal_ratio = seal_amount / (base_cap * 1e8) if base_cap > 0 and seal_amount > 0 else 0
+            if seal_amount > 0 and seal_ratio < 0.01:
+                l3_penalty += 0.02
+                logger.info(f"[二板定龙-L3] ⚠ {name} 封单偏弱({seal_ratio*100:.2f}%<1%), 扣{0.02:.2f}")
+
+            if l3_penalty >= 0.05:
+                l3_skipped += 1
+                logger.info(f"[二板定龙-L3] ✗ {name}({code}) 过滤: L3累计扣分{l3_penalty:.2f}≥0.05")
+                continue
+
+            logger.info(f"[二板定龙-L3] {'✓' if l3_penalty == 0 else '⚠'} {name}({code}) 通过质量检查 "
+                        f"(市值{float_cap:.1f}亿, 扣分{l3_penalty:.2f})")
+
+            # ═══════════ Layer 4: 板块地位 + 信号生成 ═══════════
+            # 板块地位判断
             current_count = sector_second_board_count.get(sector, 0)
             if current_count >= self.params["max_sector_second_board"]:
-                # 已经有2只二板了，这只可能是跟风
                 is_leader = False
             else:
                 is_leader = True
                 sector_second_board_count[sector] = current_count + 1
-            
-            # ========== 严格模式：分时质量检查 ==========
-            if self.mode == "strict":
-                limit_up_time = str(today_row.get('首次封板时间', '')).strip()
-                if limit_up_time:
-                    parsed = self._parse_time(limit_up_time)
-                    if parsed:
-                        hour, minute = parsed
-                        max_hour = int(self.strict_params['max_limit_up_time'][:2])
-                        max_minute = int(self.strict_params['max_limit_up_time'][3:5])
-                        if hour > max_hour or (hour == max_hour and minute > max_minute):
-                            logger.debug(f"[{code}] 封板过晚: {limit_up_time} > 10:00")
-                            continue
-                
-                # 换手检查
-                turnover = today_row.get('换手率', 0)
-                if turnover < self.strict_params['min_turnover'] * 100:  # 转换为百分比
-                    logger.debug(f"[{code}] 换手不足: {turnover:.1f}% < {self.strict_params['min_turnover']*100:.0f}%")
-                    continue
-            
-            # ========== 条件4：分时坚决（开盘确认） ==========
-            # 这里用tick数据实时监控，竞价阶段先标记候选
-            tick_data = today_tick[today_tick['代码'] == code]
-            
-            # 计算买点
+
             entry_price, buy_timing = self._calculate_entry(
                 gap_ratio, attitude['auction_vol_ratio'], today_row
             )
-            
-            # 严格模式：确定买点策略
+
             if self.mode == "strict":
                 if is_leader and gap_ratio >= 0.05 and first_board_count >= 2:
                     buy_strategy = "主买点: 回封时扫板（确认资金态度）"
@@ -214,18 +309,23 @@ class SecondBoardDragonStrategy:
             else:
                 buy_strategy = "主买点: 回封时扫板"
                 next_day_expectation = "正常预期"
-            
-            # 构建信号（竞价阶段输出，盘中确认）
+
+            confidence = self._calculate_confidence(quality, attitude, is_leader)
+            confidence -= (l2_penalty + l3_penalty)
+            confidence = max(0.50, min(confidence, 0.95))
+
+            position_size = "heavy" if is_leader and attitude['auction_vol_ratio'] > 0.15 else "medium"
+
             signal = TradeSignal(
                 pattern_type=PatternType.SECOND_BOARD_DRAGON,
                 stock_code=code,
                 stock_name=name,
                 trigger_time="09:25:00" if buy_timing == "竞价" else "09:30:00",
-                confidence=self._calculate_confidence(quality, attitude, is_leader),
+                confidence=round(confidence, 2),
                 entry_price=entry_price,
                 stop_loss=entry_price * 0.95,
-                take_profit=entry_price * 1.12,  # 二板后看高一线
-                position_size="heavy" if is_leader and attitude['auction_vol_ratio'] > 0.15 else "medium",
+                take_profit=entry_price * 1.12,
+                position_size=position_size,
                 reason=self._generate_reason(quality, attitude, is_leader, gap_ratio),
                 key_metrics={
                     "首板质量分": quality['score'],
@@ -236,6 +336,8 @@ class SecondBoardDragonStrategy:
                     "板块地位": "龙头" if is_leader else "跟风",
                     "板块内排名": current_count + 1,
                     "首板助攻": f"{first_board_count}家",
+                    "L2扣分": f"{l2_penalty:.2f}",
+                    "L3扣分": f"{l3_penalty:.2f}",
                     "买点时机": buy_timing,
                     "买点策略": buy_strategy,
                     "次日预期": next_day_expectation
@@ -252,10 +354,15 @@ class SecondBoardDragonStrategy:
                 buy_strategy=buy_strategy,
                 next_day_expectation=next_day_expectation
             )
-            
+
             signals.append(signal)
-        
-        # 按置信度排序，只取前3（避免过多干扰）
+            logger.info(f"[二板定龙-L4] ✓ {name}({code}) 生成信号: "
+                        f"置信度{confidence:.2f}, {'龙头' if is_leader else '跟风'}, {position_size}")
+
+        logger.info(f"[二板定龙] 检测完成: 共{len(signals)}个信号 "
+                    f"(共检查{total_checked}只→无动静{l0_no_board}→一字/尾盘{l0_one_word}→"
+                    f"L1过滤{l1_skipped}→L2过滤{l2_skipped}→L3过滤{l3_skipped}→通过{len(signals)})")
+
         signals.sort(key=lambda x: x.confidence, reverse=True)
         return signals[:3]
     

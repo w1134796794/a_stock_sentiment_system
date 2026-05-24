@@ -105,6 +105,7 @@ class DataManager:
         self.sector_dir = self.cache_dir / "sector"
         (self.sector_dir / "ths_index").mkdir(parents=True, exist_ok=True)
         (self.sector_dir / "ths_member").mkdir(parents=True, exist_ok=True)
+        (self.sector_dir / "stock_sectors").mkdir(parents=True, exist_ok=True)
         (self.sector_dir / "ths_daily").mkdir(parents=True, exist_ok=True)
         (self.sector_dir / "dc_industry").mkdir(parents=True, exist_ok=True)
         (self.sector_dir / "industry").mkdir(parents=True, exist_ok=True)
@@ -1693,6 +1694,127 @@ class DataManager:
             logger.error(f"[get_ths_member] 获取同花顺板块{ts_code}成分异常: {e}")
 
         return pd.DataFrame()
+
+    def get_stock_sectors(self, stock_code: str) -> pd.DataFrame:
+        """
+        反向查询：根据股票代码获取所属所有同花顺板块
+        
+        第一步：用 ths_member(code=stock_code) 拿到该股票所有的板块 ts_code
+        第二步：用 ths_index 的 type 字段分类（N=概念, I=行业, S=特色指数等）
+        
+        这是更直接的"倒推"逻辑：不遍历所有板块成员去匹配，
+        而是直接从member接口反查股票所属板块。
+
+        Args:
+            stock_code: 股票代码（支持 '002031.SZ' 或 '002031' 两种格式）
+
+        Returns:
+            DataFrame: 包含字段 ts_code, name, type, market
+        """
+        if not self.ts_pro:
+            logger.warning("[get_stock_sectors] Tushare未初始化")
+            return pd.DataFrame()
+
+        if not stock_code:
+            logger.warning("[get_stock_sectors] 必须提供stock_code参数")
+            return pd.DataFrame()
+
+        # 标准化代码格式（确保带后缀）
+        code_with_suffix = stock_code
+        if '.' not in stock_code:
+            from core.utils.stock_code_utils import StockCodeUtils
+            code_with_suffix = StockCodeUtils.standardize_code(stock_code, add_suffix=True)
+            if not code_with_suffix:
+                logger.warning(f"[get_stock_sectors] 无法标准化代码: {stock_code}")
+                return pd.DataFrame()
+
+        cache_key = f"stock_sectors_{code_with_suffix}"
+        cache_file = self.sector_dir / "stock_sectors" / f"{code_with_suffix}.csv"
+
+        # 缓存有效期7天（板块归属相对稳定）
+        if cache_file.exists():
+            file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+            if (datetime.now() - file_time).days < 7:
+                return pd.read_csv(cache_file)
+
+        try:
+            # 第一步：调用 ths_member(code=stock_code) 反查板块
+            df = self.ts_pro.ths_member(code=code_with_suffix)
+
+            if df is None or df.empty:
+                logger.debug(f"[get_stock_sectors] {stock_code} 未找到所属板块")
+                return pd.DataFrame()
+
+            # df 应包含 ts_code 列（板块代码列表）
+
+            # 第二步：获取 ths_index 分类信息
+            ths_index = self.get_ths_index()
+            if ths_index.empty:
+                logger.warning("[get_stock_sectors] ths_index为空，无法分类板块类型")
+                return df
+
+            # 第三步：合并 type 分类
+            if 'type' in ths_index.columns:
+                result = df.merge(
+                    ths_index[['ts_code', 'name', 'type', 'market']],
+                    on='ts_code',
+                    how='left'
+                )
+                # 填充缺失的 name
+                if 'name' in result.columns:
+                    result['name'] = result['name'].fillna(result.get('ts_code', ''))
+            else:
+                result = df
+
+            # 缓存
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            result.to_csv(cache_file, index=False)
+            logger.debug(f"[get_stock_sectors] {stock_code} 属于 {len(result)} 个板块")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[get_stock_sectors] 获取 {stock_code} 的板块归属异常: {e}")
+            return pd.DataFrame()
+
+    def get_stock_sectors_batch(self, stock_codes: List[str]) -> Dict[str, pd.DataFrame]:
+        """
+        批量获取多个股票的板块归属
+        
+        Args:
+            stock_codes: 股票代码列表（支持带后缀或不带后缀格式）
+
+        Returns:
+            Dict[str, DataFrame]: stock_code → 板块归属DataFrame
+        """
+        results = {}
+        codes_to_fetch = []
+
+        # 第一步：从缓存获取
+        from core.utils.stock_code_utils import StockCodeUtils
+        for code in stock_codes:
+            code_with_suffix = code if '.' in code else StockCodeUtils.standardize_code(code, add_suffix=True)
+            if not code_with_suffix:
+                code_with_suffix = code
+
+            cache_file = self.sector_dir / "stock_sectors" / f"{code_with_suffix}.csv"
+            if cache_file.exists():
+                file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+                if (datetime.now() - file_time).days < 7:
+                    df = pd.read_csv(cache_file)
+                    results[code] = df
+                    continue
+            codes_to_fetch.append(code)
+
+        # 第二步：逐个获取缺失数据（接口限制，无法批量传参）
+        if codes_to_fetch:
+            logger.info(f"[get_stock_sectors_batch] 需要获取 {len(codes_to_fetch)} 只股票的板块归属")
+            for code in codes_to_fetch:
+                df = self.get_stock_sectors(code)
+                results[code] = df
+                time.sleep(0.05)  # 控制调用频率，避免超限
+
+        return results
 
     # ==================== 新增：多级缓存管理方法 ====================
     

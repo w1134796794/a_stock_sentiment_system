@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from core.utils.date_utils import DateUtils
 import loguru
 
 logger = loguru.logger
@@ -121,6 +122,7 @@ class MarketEnvAnalyzer:
 
     def __init__(self, data_manager):
         self.dm = data_manager
+        self.date_utils = DateUtils()
 
         # 指数代码映射
         self.index_codes = {
@@ -216,7 +218,7 @@ class MarketEnvAnalyzer:
         """分析指数趋势（多指数综合评分：上证/深证/创业板/科创50/北证50）"""
         try:
             end_date = trade_date
-            start_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=120)).strftime("%Y%m%d")
+            start_date = self.date_utils.get_n_trade_dates_before(120, trade_date)
 
             index_scores = {}
             index_trends = {}
@@ -321,7 +323,7 @@ class MarketEnvAnalyzer:
         """分析市场量能（全市场总成交额 + 各指数成交额明细）"""
         try:
             end_date = trade_date
-            start_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
+            start_date = self.date_utils.get_n_trade_dates_before(30, trade_date)
 
             total_amount = 0.0
             index_volumes = {}
@@ -460,7 +462,7 @@ class MarketEnvAnalyzer:
     def _analyze_limit_up_continuity(self, trade_date: str, result: MarketEnvResult):
         """分析昨日涨停股今日表现（高开比例 + 收红比例），同时拆解首板子集"""
         try:
-            prev_date = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+            prev_date = self.date_utils.get_n_trade_dates_before(1, trade_date)
 
             prev_zt = self.dm.get_limit_up_pool(prev_date)
             if prev_zt is None or prev_zt.empty:
