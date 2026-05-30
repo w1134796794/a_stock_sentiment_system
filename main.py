@@ -171,7 +171,7 @@ class SentimentSystem:
                                         emotion_result: Dict):
         """
         生成散户决策支持报告 - V2版本
-        包含：隔夜预判、板块分析、散户指标、剧本推演等
+        包含：隔夜预判、板块分析、散户指标（V2 已移除主观"次日剧本推演"）
         """
         try:
             # 初始化散户支持模块V2
@@ -209,17 +209,12 @@ class SentimentSystem:
                 '次日策略建议': temperature
             }
             
-            # 4. 推演次日剧本
-            scenarios = self.retail_support.forecast_scenarios_v2(
-                indicators, sector_analysis, today_zt
-            )
-            
-            # 5. 生成报告
+            # 4. 生成报告（V2 已移除主观"次日剧本推演"，一切以真实数据说话）
             report = self.retail_support.generate_overnight_report_v2(
-                decisions, indicators, scenarios, sector_analysis
+                decisions, indicators, sector_analysis
             )
             
-            # 6. 保存报告
+            # 5. 保存报告
             report_file = Path(OUTPUT_DIR) / f"散户决策报告_{date}.txt"
             with open(report_file, 'w', encoding='utf-8') as f:
                 f.write(report)
@@ -251,13 +246,6 @@ class SentimentSystem:
             for decision in decisions[:5]:
                 print(f"  - {decision.stock_name}({decision.stock_code}) - {decision.decision_type}")
                 print(f"    适配度: {decision.retail_suitability} | {decision.suggested_action}")
-            
-            print(f"\n[次日剧本推演]:")
-            for i, scenario in enumerate(scenarios[:3], 1):
-                print(f"  {i}. {scenario.scenario_name} (概率{scenario.probability:.0%})")
-                print(f"     描述: {scenario.description}")
-                if hasattr(scenario, 'actions_if_empty') and scenario.actions_if_empty:
-                    print(f"     空仓动作: {scenario.actions_if_empty[0]}")
             
             print("="*60)
             

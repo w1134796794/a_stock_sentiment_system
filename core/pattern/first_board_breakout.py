@@ -380,9 +380,18 @@ class HotspotFirstBoardStrategy:
                         matched_hot_industry = hs
                         break
 
+            # 优先使用行业热点信息，其次概念热点信息
+            # 注意：is_hot_sector 来自外部预计算的 all_hot_member_codes，可能与本地
+            # hot_sectors 明细不一致（个股命中热点集合，却在 hot_sectors 里找不到对应板块），
+            # 此时 matched_* 均为 None。旧逻辑直接 primary_hs['sector_name'] 会触发
+            # "'NoneType' object is not subscriptable"，导致整个首板检测异常退出、丢失全部信号。
+            # 这里安全降级为非热点处理。
+            primary_hs = matched_hot_industry or matched_hot_concept
+            if is_hot_sector and primary_hs is None:
+                logger.debug(f"[{stock_code}] 命中热点成分股集合但未匹配到具体板块明细，按非热点处理")
+                is_hot_sector = False
+
             if is_hot_sector:
-                # 优先使用行业热点信息，其次概念热点信息
-                primary_hs = matched_hot_industry or matched_hot_concept
                 sector_info = {
                     'sector_name': primary_hs['sector_name'],
                     'sector_type': primary_hs.get('sector_type', '概念'),

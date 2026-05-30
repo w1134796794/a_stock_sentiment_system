@@ -1183,7 +1183,8 @@ class PatternRecognition:
             logger.info(f"[首板突破] 检测完成: 共{len(signals)}个信号")
 
         except Exception as e:
-            logger.error(f"[首板突破] 检测失败: {e}", exc_info=True)
+            # 注意：loguru 不识别标准库的 exc_info 参数，需用 opt(exception=True) 才会记录堆栈
+            logger.opt(exception=True).error(f"[首板突破] 检测失败: {e}")
 
         return signals
 
