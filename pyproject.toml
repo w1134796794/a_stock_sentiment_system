@@ -1,0 +1,87 @@
+[project]
+name = "a_stock_sentiment_system"
+version = "0.2.0"
+description = "A股短线情绪量化系统 - 五层分析流水线"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# 运行时依赖以 requirements.txt 为准；本文件仅承载工具配置（ruff / pyright / pytest）
+
+# =============================================================================
+# Ruff —— 快速 lint / format（P3-3）
+# 安装：pip install ruff
+# 使用：ruff check core main.py
+#       ruff format core main.py
+# =============================================================================
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    ".history",
+    ".venv",
+    "archive",
+    "data",
+    "output",
+    "logs",
+    "cache",
+]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: isort, B: bugbear, UP: pyupgrade
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = [
+    "E501",   # 行长度由 ruff format 接管
+    "E402",   # 部分模块在 import 之前需要做 sys.path 调整
+    "E731",   # lambda 表达式（已用于 pipeline 短回调）
+    "B008",   # 函数默认值调用（pandas/dataclasses 中常见）
+    "B007",   # 未使用的循环变量
+    "UP006",  # PEP 585 类型升级（保留 Dict/List 风格更易读）
+    "UP007",  # Optional[X] -> X | None
+    "UP035",  # 类型导入升级
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]
+"tests/**" = ["F401", "F811"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "config"]
+
+# =============================================================================
+# Pyright —— 类型检查（P3-3）
+# 安装：pip install pyright
+# 使用：pyright core main.py
+# 基线选择 basic，初期容忍部分动态字段；后续逐步收紧
+# =============================================================================
+[tool.pyright]
+include = ["core", "main.py", "config"]
+exclude = [
+    "**/__pycache__",
+    ".history",
+    ".venv",
+    "archive",
+    "cache",
+    "data",
+    "logs",
+    "output",
+    "tests",
+]
+typeCheckingMode = "basic"
+pythonVersion = "3.10"
+reportMissingImports = "warning"
+reportMissingTypeStubs = false
+reportGeneralTypeIssues = "warning"
+reportOptionalMemberAccess = "none"
+reportOptionalSubscript = "none"
+
+# =============================================================================
+# Pytest（P3-2，预留）
+# =============================================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning:core.data.data_manager_extensions",
+    "ignore::DeprecationWarning:core.analysis.pattern_recognition",
+]

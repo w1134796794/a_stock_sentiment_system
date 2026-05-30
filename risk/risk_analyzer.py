@@ -307,3 +307,4 @@ class RiskAnalyzer:
         report['recommendations'] = recommendations
 
         return report
+

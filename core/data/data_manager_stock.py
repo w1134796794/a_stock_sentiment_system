@@ -283,22 +283,33 @@ class StockDataManager(DataManagerBase):
             codes_to_fetch.append(code)
 
         if codes_to_fetch and self.ts_pro:
-            logger.info(f"[批量获取] 需要获取 {len(codes_to_fetch)} 只股票数据")
-            for code in codes_to_fetch:
+            logger.info(f"[批量获取] 需要获取 {len(codes_to_fetch)} 只股票数据 (并发)")
+
+            def _fetch_one(code: str):
                 try:
                     df = self.ts_pro.daily(ts_code=code, start_date=start_date, end_date=end_date)
-                    if not df.empty:
-                        df['trade_date'] = pd.to_datetime(df['trade_date'])
-                        cache_file = self.stock_dir / "daily" / f"{code}_{start_date}_{end_date}.csv"
-                        df.to_csv(cache_file, index=False)
-                        cache_key = f"stock_daily_{code}_{start_date}_{end_date}"
-                        self._set_memory_cache(cache_key, df)
-                        results[code] = df
-                    else:
+                    if df is None or df.empty:
                         logger.warning(f"[批量获取] {code} 返回空数据")
+                        return code, pd.DataFrame()
+                    df['trade_date'] = pd.to_datetime(df['trade_date'])
+                    cache_file = self.stock_dir / "daily" / f"{code}_{start_date}_{end_date}.csv"
+                    df.to_csv(cache_file, index=False)
+                    return code, df
                 except Exception as e:
                     logger.error(f"[批量获取] 获取 {code} 失败: {e}")
-                time.sleep(0.1)
+                    return code, pd.DataFrame()
+
+            # P3-8：并发拉取（默认 4 worker，避免 Tushare 限流）
+            from core.utils.parallel import parallel_map
+            fetched = parallel_map(_fetch_one, codes_to_fetch, max_workers=4)
+            for entry in fetched:
+                if entry is None:
+                    continue
+                code, df = entry
+                if not df.empty:
+                    cache_key = f"stock_daily_{code}_{start_date}_{end_date}"
+                    self._set_memory_cache(cache_key, df)
+                    results[code] = df
 
         logger.info(f"[批量获取] 完成: {len(results)}/{len(ts_codes)} 只股票")
         return results

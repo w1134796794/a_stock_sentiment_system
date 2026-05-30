@@ -5,6 +5,8 @@
 使用方式：
     pr = PatternRecognition(data_manager)
     results = pr.scan_all_patterns(today_date, yesterday_date)
+
+注：``PatternSignal`` 已统一到 ``core.pattern.base``，本模块仅做向后兼容重导出。
 """
 import pandas as pd
 import numpy as np
@@ -13,29 +15,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import loguru
 
+# PatternSignal 统一契约位于 core.pattern.base
+from core.pattern.base import PatternSignal  # noqa: F401  re-export for backward compat
+
 logger = loguru.logger
-
-
-@dataclass
-class PatternSignal:
-    """模式信号数据结构"""
-    pattern_type: str
-    stock_code: str
-    stock_name: str
-    confidence: float
-    description: str
-    key_metrics: Dict
-    entry_price: Optional[float] = None
-    stop_loss: Optional[float] = None
-    take_profit: Optional[float] = None
-    position_size: str = "medium"  # light/medium/heavy
-    validation_rules: List[str] = None
-    l2_industry: str = ""  # 二级行业
-    is_dual_resonance: bool = False  # 是否双热点共振
-
-    def __post_init__(self):
-        if self.validation_rules is None:
-            self.validation_rules = []
 
 
 class PatternRecognition:
@@ -709,11 +692,22 @@ class PatternRecognition:
                 is_fast_limit = self._is_fast_limit(limit_up_time, max_time="09:40:00")
                 logger.debug(f"[二板定龙]   {name} 涨停时间={limit_up_time}, 是否快速={is_fast_limit}")
 
+                # 涨停价：涨停池一般只给"最新价"（≈涨停价），fallback 到昨收×1.1
+                entry_price = (today_row.get('涨停价', 0) or
+                               today_row.get('最新价', 0) or
+                               today_row.get('close', 0))
+                if not entry_price or entry_price <= 0:
+                    yest_close = yest_row.get('最新价', 0) or yest_row.get('close', 0) or yest_row.get('收盘价', 0)
+                    if yest_close and yest_close > 0:
+                        # 创业板/科创板 20%，其余 10%
+                        rate = 0.20 if code.startswith(('30', '68', '8')) else 0.10
+                        entry_price = round(float(yest_close) * (1 + rate), 2)
+
                 # 获取封单金额，尝试多个可能的字段名
-                seal_amount = (today_row.get('封单额', 0) or 
-                              today_row.get('封板资金', 0) or 
+                seal_amount = (today_row.get('封单额', 0) or
+                              today_row.get('封板资金', 0) or
                               today_row.get('封单金额', 0) or
-                              today_row.get('封单量', 0) * today_row.get('涨停价', 0))
+                              today_row.get('封单量', 0) * entry_price)
                 float_cap = today_row.get('流通市值', 1)
                 seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
                 logger.debug(f"[二板定龙]   {name} 封单额={seal_amount}, 流通市值={float_cap}, 封单强度: {seal_ratio*100:.2f}%")
@@ -739,9 +733,9 @@ class PatternRecognition:
                         "封单强度": f"{seal_ratio*100:.2f}%",
                         "买点时机": "竞价" if gap_ratio >= 0.04 else "开盘"
                     },
-                    entry_price=today_row.get('涨停价', 0),
-                    stop_loss=today_row.get('涨停价', 0) * 0.95,
-                    take_profit=today_row.get('涨停价', 0) * 1.12,
+                    entry_price=entry_price,
+                    stop_loss=round(entry_price * 0.95, 2) if entry_price else 0,
+                    take_profit=round(entry_price * 1.12, 2) if entry_price else 0,
                     position_size="heavy" if confidence >= 0.85 else "medium",
                     validation_rules=[
                         f"首板{first_board_quality.get('type', '硬板')}（硬逻辑）",

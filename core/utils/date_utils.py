@@ -1,17 +1,19 @@
 """
 日期工具模块 - 提供日期格式化和基于交易日历的交易日查询功能
-交易日历文件路径：/data/trade_calendar.csv
+交易日历文件路径由 config.settings.TRADE_CALENDAR_FILE 指定
 """
 from datetime import datetime, timedelta
 from typing import List, Optional
 from pathlib import Path
 import pandas as pd
 
+from config.settings import TRADE_CALENDAR_FILE
+
 
 class DateUtils:
     """日期工具类 - 提供日期格式化和交易日查询功能"""
 
-    _CALENDAR_PATH = Path("G:/a_stock_sentiment_system/data/trade_calendar.csv")
+    _CALENDAR_PATH = Path(TRADE_CALENDAR_FILE)
     _instance = None
     _initialized = False
 

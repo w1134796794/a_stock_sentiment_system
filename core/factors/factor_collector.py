@@ -65,7 +65,9 @@ class FactorCollector:
             "meta": {
                 "trade_date": trade_date,
                 "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                # version：保留兼容旧消费者；schema_version 是后续单调递增的契约号
                 "version": "1.0",
+                "schema_version": "1.1",
             },
             "layer1_market_env": self._collect_layer1(ctx),
             "emotion_cycle": self._collect_emotion(ctx),

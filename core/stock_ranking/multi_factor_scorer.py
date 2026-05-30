@@ -15,6 +15,23 @@ import loguru
 logger = loguru.logger
 
 
+def action_for_score(total_score: float) -> Tuple[str, float]:
+    """综合分 → (建议操作, 建议仓位比例)。
+
+    单一事实来源：``_assign_actions`` 与 Sprint F-7 游资调整后重算建议均复用此函数，
+    避免阈值散落多处。
+    """
+    if total_score >= 80:
+        return "重仓买入", 0.40
+    if total_score >= 70:
+        return "标准仓位", 0.25
+    if total_score >= 60:
+        return "轻仓试错", 0.15
+    if total_score >= 50:
+        return "观察", 0.05
+    return "放弃", 0.0
+
+
 @dataclass
 class FactorScore:
     """单因子评分"""
@@ -44,6 +61,10 @@ class CompositeScore:
     # 交易建议
     suggested_action: str = ""               # 建议操作
     suggested_position_pct: float = 0.0      # 建议仓位比例
+
+    # Sprint F-7：龙虎榜游资信誉调整
+    lhb_adjust_delta: float = 0.0            # 因游资信誉对总分的增减
+    lhb_adjust_note: str = ""                # 调整说明（黑名单接盘/优质游资进场等）
 
 
 class MultiFactorScorer:
@@ -209,21 +230,7 @@ class MultiFactorScorer:
     def _assign_actions(self, results: List[CompositeScore]):
         """根据评分分配交易建议"""
         for r in results:
-            if r.total_score >= 80:
-                r.suggested_action = "重仓买入"
-                r.suggested_position_pct = 0.40
-            elif r.total_score >= 70:
-                r.suggested_action = "标准仓位"
-                r.suggested_position_pct = 0.25
-            elif r.total_score >= 60:
-                r.suggested_action = "轻仓试错"
-                r.suggested_position_pct = 0.15
-            elif r.total_score >= 50:
-                r.suggested_action = "观察"
-                r.suggested_position_pct = 0.05
-            else:
-                r.suggested_action = "放弃"
-                r.suggested_position_pct = 0.0
+            r.suggested_action, r.suggested_position_pct = action_for_score(r.total_score)
 
     def to_dataframe(self, results: List[CompositeScore]) -> pd.DataFrame:
         """将评分结果转换为DataFrame"""

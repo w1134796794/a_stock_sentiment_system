@@ -223,9 +223,19 @@ class MarketEnvAnalyzer:
             index_scores = {}
             index_trends = {}
 
-            for idx_name, idx_code in self.index_codes.items():
+            # P3-8：5 个指数并发拉取（每个独立 HTTP 调用）
+            from core.utils.parallel import parallel_fetch
+
+            def _fetch_index(item):
+                idx_name, idx_code = item
+                return self.dm.get_index_daily(idx_code, start_date, end_date)
+
+            index_items = list(self.index_codes.items())
+            index_dfs = parallel_fetch(index_items, _fetch_index, max_workers=5)
+
+            for idx_name, idx_code in index_items:
                 try:
-                    df = self.dm.get_index_daily(idx_code, start_date, end_date)
+                    df = index_dfs.get((idx_name, idx_code))
                     if df is None or df.empty:
                         logger.warning(f"[Layer1] 获取{idx_name}指数数据为空")
                         continue
@@ -660,4 +670,9 @@ class MarketEnvAnalyzer:
             'suggested_position': result.suggested_position,
             'cross_judgment': result.cross_judgment,
             'analysis_summary': result.analysis_summary,
+            # P1-1：把 A4/A5/A6 三个大盘因子原始值透出来，
+            # 给报告层的因子总览 sheet 使用。
+            'amount_change_ratio': result.amount_change_ratio,
+            'limit_down_count': result.limit_down_count,
+            'blasted_next_day_pct': result.blasted_next_day_pct,
         }

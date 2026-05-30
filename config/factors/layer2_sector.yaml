@@ -62,3 +62,4 @@ layer2_sector:
       - "C5_sector_rotation_speed"
     factor_weights:
       C5_sector_rotation_speed: 1.0
+

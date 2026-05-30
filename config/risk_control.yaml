@@ -1,0 +1,53 @@
+# ============================================================
+# 统一风控配置（R-1a）
+# 由 risk/risk_config.py::RiskConfig.load() 读取。
+# 缺失任一键会回退到代码默认值；删除本文件则全部用默认值。
+# 这是风控参数的唯一事实来源——回测引擎、实盘风控闸门、熔断器共用。
+# ============================================================
+
+# ---- 账户 ----
+initial_capital: 100000.0        # 虚拟账户初始资金（元）
+
+# ---- 组合层：仓位限制 ----
+max_position_per_stock: 0.20     # 单票最大仓位（占总权益）
+max_total_position: 0.80         # 总仓位上限
+min_cash_ratio: 0.20             # 最小现金比例
+max_positions: 8                 # 最多同时持仓只数
+
+# ---- 组合层：板块集中度 ----
+max_sector_concentration: 0.40   # 单一板块最大仓位
+max_correlated_positions: 3      # 相关板块最多持仓数
+
+# ---- 个股层：止损止盈（回测/实盘统一）----
+hard_stop_loss: 0.05             # 硬止损（亏损达此比例强制卖出）
+trailing_stop: 0.08              # 移动止损（从持仓最高点回撤比例）
+trailing_activation: 0.05        # 盈利达此比例后才启动移动止损
+take_profit: 0.10                # 基础止盈
+time_stop_days: 5                # 时间止损：持仓超过 N 天
+time_stop_profit_threshold: 0.02 # 时间止损触发时的盈利下限
+
+# ---- 流动性 ----
+min_daily_amount: 10000000.0     # 最小日成交额（元，1000万）
+max_volume_participation: 0.10   # 持仓不超过日成交额的比例
+
+# ---- 账户层：熔断 / kill switch（R-3）----
+max_daily_loss: 0.03             # 当日已实现亏损达此比例 → 当日停开新仓
+max_drawdown: 0.15               # 权益较峰值回撤达此比例 → 强制降仓 + 冷静
+drawdown_reduce_to: 0.30         # 触发回撤熔断后总仓位降到此上限
+cooldown_days: 2                 # 回撤熔断后的冷静期（交易日）
+freeze_cycles:                   # 命中这些情绪周期 → 总仓位封顶
+  - 冰点期
+  - 退潮期
+freeze_position_cap: 0.20        # 冰点/退潮时的总仓位封顶
+
+# ---- 交易成本（回测）----
+commission_rate: 0.0003          # 佣金率
+stamp_duty_rate: 0.001           # 印花税（卖出）
+slippage: 0.002                  # 滑点
+min_holding_days: 1              # 最小持仓天数（T+1）
+
+# ---- 凯利仓位（R-4 落地用，当前仅占位）----
+kelly_fraction: 0.5              # 半凯利
+kelly_min_samples: 20            # 单模式最小样本数，不足则回退固定风险法
+kelly_max_position: 0.25         # 凯利结果单票封顶
+

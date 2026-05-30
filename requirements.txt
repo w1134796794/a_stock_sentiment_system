@@ -9,3 +9,11 @@ mplfinance>=0.12.10b0
 loguru>=0.6.0
 openpyxl>=3.0.0
 schedule>=1.1.0
+# 环境变量管理（.env 文件，缺失时 settings.py 会优雅降级）
+python-dotenv>=1.0.0
+
+# ===== 开发依赖（可选，按需安装）=====
+# pytest>=7.4.0
+# pytest-mock>=3.11.0
+# ruff>=0.4.0
+# pyright>=1.1.0

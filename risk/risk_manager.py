@@ -240,3 +240,4 @@ class RiskManager:
                 'max_sector_concentration': self.limits.max_sector_concentration
             }
         }
+

@@ -51,6 +51,7 @@ class TradePlan:
 
     position_level: PositionLevel = PositionLevel.OBSERVE
     position_pct: float = 0.0
+    sizing_basis: str = "启发式"   # C-7：仓位来源（启发式 / 凯利 / 负期望回避 / 样本不足回退）
 
     auction_condition: AuctionCondition = AuctionCondition.ANY
     auction_gap_min: float = -3.0
@@ -58,12 +59,16 @@ class TradePlan:
     auction_volume_ratio: float = 1.0
 
     entry_price_range: str = ""
+    entry_price: float = 0.0
     stop_loss_pct: float = -5.0
     take_profit_pct: float = 10.0
 
     next_day_expectation: str = ""
     risk_warning: str = ""
     key_metrics: Dict = field(default_factory=dict)
+
+    hot_resonance: bool = False
+    resonance_sectors: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -93,9 +98,26 @@ class TradePlanLayer:
     基于Layer 1-3的分析结果，生成可执行的交易计划
     """
 
-    def __init__(self, data_manager):
+    def __init__(self, data_manager, kelly_table_path=None):
         self.dm = data_manager
         self.date_utils = DateUtils()
+        # C-7：闭环——若存在凯利仓位标定表，则分模式仓位优先采用标定结果
+        self.kelly_table = self._load_kelly_table(kelly_table_path)
+
+    def _load_kelly_table(self, path) -> Dict:
+        """加载 config/kelly_sizing.json（由 calibrate 闭环产出）；缺失则返回空表。"""
+        try:
+            from pathlib import Path
+            from risk.kelly_sizer import KellySizer
+
+            p = Path(path) if path else Path("config") / "kelly_sizing.json"
+            table = KellySizer.load_table(p)
+            if table:
+                logger.info(f"[Layer4] 已加载凯利仓位标定表: {p} ({len(table)} 项)")
+            return table or {}
+        except Exception as e:  # pragma: no cover - 容错
+            logger.debug(f"[Layer4] 加载凯利标定表失败，使用启发式仓位: {e}")
+            return {}
 
     def analyze(self, trade_date: str, ranked_signals: List,
                 composite_scores: List, market_env=None,
@@ -175,10 +197,14 @@ class TradePlanLayer:
             plan.composite_score, plan.priority, market_env, emotion_cycle
         )
 
+        # C-7：用回测标定的分模式凯利仓位覆盖启发式（带回退）
+        self._apply_kelly_sizing(plan)
+
         plan.auction_condition, plan.auction_gap_min, plan.auction_gap_max = \
             self._determine_auction_condition(plan.pattern_type, plan.composite_score)
 
         plan.entry_price_range = self._calculate_entry_range(signal)
+        plan.entry_price = float(getattr(signal, 'entry_price', 0) or 0)
         plan.stop_loss_pct, plan.take_profit_pct = self._calculate_stop_profit(
             plan.pattern_type, plan.composite_score, emotion_cycle
         )
@@ -187,6 +213,17 @@ class TradePlanLayer:
             plan.pattern_type, plan.composite_score, emotion_cycle
         )
         plan.risk_warning = self._generate_risk_warning(plan, market_env, emotion_cycle)
+
+        # Sprint F-7：把"黑名单游资接盘"等降权原因并入风险提示，让降仓决策可解释
+        lhb_note = getattr(signal, 'lhb_adjust_note', '') or ''
+        if lhb_note.startswith('⚠'):
+            plan.risk_warning = f"{lhb_note}；{plan.risk_warning}" if plan.risk_warning else lhb_note
+
+        plan.hot_resonance = bool(getattr(signal, 'hot_resonance', False))
+        resonance = getattr(signal, 'resonance_sectors', []) or []
+        if isinstance(resonance, str):
+            resonance = [s.strip() for s in resonance.split(',') if s.strip()]
+        plan.resonance_sectors = list(resonance)
 
         plan.key_metrics = {
             'confidence': getattr(signal, 'confidence', 0),
@@ -211,6 +248,57 @@ class TradePlanLayer:
             return PositionLevel.OBSERVE, 0.05
         else:
             return PositionLevel.AVOID, 0.0
+
+    def _apply_kelly_sizing(self, plan: TradePlan) -> None:
+        """
+        C-7 闭环：分模式仓位优先采用回测标定的凯利结果。
+
+        策略（保留启发式的"是否参与"门槛，由标定决定"下多大注"）：
+        - 启发式已判 AVOID（不参与）→ 不动；
+        - 标定 method='kelly'（样本充足、正期望）→ 用标定仓位，并按比例反推仓位等级；
+        - 标定 method='reject_negative_edge'（历史负期望）→ 降为 AVOID，并写明原因；
+        - 标定 method='fallback_insufficient_samples' / 无该模式 → 保持启发式不动。
+        """
+        if not self.kelly_table or plan.position_level == PositionLevel.AVOID:
+            return
+        entry = self.kelly_table.get(plan.pattern_type) or self.kelly_table.get("__overall__")
+        if not entry:
+            return
+
+        method = entry.get("method", "")
+        pct = float(entry.get("position_pct", 0.0) or 0.0)
+
+        if method == "kelly":
+            plan.position_pct = round(pct, 4)
+            plan.position_level = self._pct_to_level(pct)
+            src = "模式" if plan.pattern_type in self.kelly_table else "整体"
+            fk = entry.get("full_kelly")
+            fk_str = f" f*={fk:.2f}" if isinstance(fk, (int, float)) else ""
+            plan.sizing_basis = f"凯利·{src} {pct:.0%}{fk_str}"
+            plan.key_metrics["kelly_sizing"] = {
+                "position_pct": pct,
+                "full_kelly": entry.get("full_kelly"),
+                "source": "pattern" if plan.pattern_type in self.kelly_table else "overall",
+            }
+        elif method == "reject_negative_edge":
+            plan.position_level = PositionLevel.AVOID
+            plan.position_pct = 0.0
+            plan.sizing_basis = "凯利·负期望回避"
+            note = "凯利标定:该模式历史负期望,回避"
+            plan.risk_warning = f"{note}; {plan.risk_warning}" if plan.risk_warning else note
+        elif method == "fallback_insufficient_samples":
+            plan.sizing_basis = "标定样本不足→启发式"
+
+    @staticmethod
+    def _pct_to_level(pct: float) -> PositionLevel:
+        """仓位比例 → 展示用仓位等级。"""
+        if pct >= 0.20:
+            return PositionLevel.HEAVY
+        if pct >= 0.13:
+            return PositionLevel.NORMAL
+        if pct > 0:
+            return PositionLevel.LIGHT
+        return PositionLevel.OBSERVE
 
     def _determine_auction_condition(self, pattern_type: str, composite_score: float) -> tuple:
         """确定竞价条件"""
@@ -329,6 +417,7 @@ class TradePlanLayer:
                 '综合评分': round(p.composite_score, 1),
                 '仓位等级': p.position_level.value,
                 '建议仓位': f"{p.position_pct:.0%}",
+                '仓位依据': p.sizing_basis,
                 '竞价条件': p.auction_condition.value,
                 '竞价区间': f"{p.auction_gap_min:+.1f}%~{p.auction_gap_max:+.1f}%",
                 '入场区间': p.entry_price_range,
@@ -339,6 +428,85 @@ class TradePlanLayer:
             })
 
         return pd.DataFrame(records)
+
+    # ------------------------------------------------------------------
+    # 落盘：生成兼容 backtest 的 CSV / TXT
+    # ------------------------------------------------------------------
+    _POSITION_LEVEL_TO_BACKTEST = {
+        PositionLevel.HEAVY: "heavy",
+        PositionLevel.NORMAL: "medium",
+        PositionLevel.LIGHT: "light",
+        PositionLevel.OBSERVE: "light",
+        PositionLevel.AVOID: "light",
+    }
+
+    def _auction_to_entry_timing(self, condition: AuctionCondition) -> str:
+        """竞价条件 -> backtest 介入时机字符串"""
+        if condition == AuctionCondition.STRONG_OPEN:
+            return "09:25-09:35"
+        if condition == AuctionCondition.NORMAL_OPEN:
+            return "09:31-10:00"
+        if condition == AuctionCondition.WEAK_OPEN:
+            return "10:00-11:30"
+        return "09:31-10:00"
+
+    def save_to_disk(self, result: TradePlanResult, output_dir) -> Optional[str]:
+        """
+        把交易计划写到磁盘，文件名 `交易计划_{date}.csv`，列名与 backtest_engine 期望对齐。
+
+        Args:
+            result: TradePlanResult
+            output_dir: 输出目录（str 或 Path）
+
+        Returns:
+            写入的 CSV 路径；如果没有 plan 返回 None
+        """
+        if not result.plans:
+            logger.info(f"[Layer4] {result.trade_date} 无可落盘的交易计划")
+            return None
+
+        from pathlib import Path
+        out_path = Path(output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+
+        records = []
+        for p in result.plans:
+            if p.position_level == PositionLevel.AVOID:
+                continue
+            entry = p.entry_price
+            stop_price = round(entry * (1 + p.stop_loss_pct / 100), 2) if entry > 0 else 0.0
+            target_price = round(entry * (1 + p.take_profit_pct / 100), 2) if entry > 0 else 0.0
+            records.append({
+                '代码': p.stock_code,
+                '名称': p.stock_name,
+                '模式': p.pattern_type,
+                '动作': '买入',
+                '目标价': target_price,
+                '止损价': stop_price,
+                '止盈价': target_price,
+                '仓位': self._POSITION_LEVEL_TO_BACKTEST.get(p.position_level, "light"),
+                '介入时机': self._auction_to_entry_timing(p.auction_condition),
+                '热点共振': p.hot_resonance,
+                '共振板块': ",".join(p.resonance_sectors) if p.resonance_sectors else '',
+                '综合评分': round(p.composite_score, 1),
+                '优先级': p.priority,
+                '所属板块': ",".join(p.resonance_sectors) if p.resonance_sectors else '',
+            })
+
+        if not records:
+            logger.info(f"[Layer4] {result.trade_date} 全部计划为回避，跳过落盘")
+            return None
+
+        df = pd.DataFrame(records)
+        csv_file = out_path / f"交易计划_{result.trade_date}.csv"
+        df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+        logger.info(f"[Layer4] 交易计划已落盘: {csv_file} ({len(df)}条)")
+
+        if result.plan_summary:
+            txt_file = out_path / f"交易计划报告_{result.trade_date}.txt"
+            txt_file.write_text(result.plan_summary, encoding='utf-8')
+
+        return str(csv_file)
 
     def _generate_summary(self, result: TradePlanResult) -> str:
         """生成交易计划摘要"""

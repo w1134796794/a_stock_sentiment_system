@@ -15,10 +15,25 @@ CACHE_DIR = DATA_DIR / "cache"
 OUTPUT_DIR = BASE_DIR / "output"
 
 # ============================================
+# .env 加载（P3-5）
+# 优先级：os 环境变量 > .env > .env.example > 代码默认值
+# 仅在 python-dotenv 可用时启用；缺失依赖不会破坏现有运行
+# ============================================
+try:
+    from dotenv import load_dotenv  # type: ignore
+
+    _env_file = BASE_DIR / ".env"
+    if _env_file.exists():
+        # override=False：已设置的 os 环境变量优先
+        load_dotenv(dotenv_path=_env_file, override=False)
+except ImportError:  # pragma: no cover
+    # python-dotenv 未安装时跳过；项目仍按既有 os.getenv 行为工作
+    pass
+
+# ============================================
 # API配置
 # ============================================
-TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN")  # 请替换为您的token
-AKSHARE_ENABLE = True
+TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN")  # 通过 .env 或环境变量提供
 
 # ============================================
 # 数据获取配置
@@ -32,6 +47,11 @@ LIMIT_UP_THRESHOLD = 0.095  # 涨停阈值（9.5%）
 # 行业映射配置
 # ============================================
 INDUSTRY_MAPPING_FILE = DATA_DIR / "Industry_Mapping.csv"
+
+# ============================================
+# 交易日历
+# ============================================
+TRADE_CALENDAR_FILE = DATA_DIR / "trade_calendar.csv"
 
 # ============================================
 # 核心标的筛选条件

@@ -93,6 +93,13 @@ class StockSelectionLayer:
         """
         result = StockSelectionResult(trade_date=trade_date)
 
+        # P2-5: 入口轻量校验，发现脏数据时记日志（非 strict，不阻断 pipeline）
+        try:
+            from core.utils.schema_validator import assert_schema, LIMIT_UP_POOL
+            assert_schema(zt_pool, LIMIT_UP_POOL, strict=False)
+        except Exception as e:
+            logger.debug(f"[Layer3] zt_pool 契约校验异常: {e}")
+
         try:
             self._analyze_emotion_cycle(result, zt_pool, limit_down_df, day_before_prev, market_env)
 
@@ -185,7 +192,7 @@ class StockSelectionLayer:
                              trade_date: str, prev_trade_date: str,
                              hot_sectors: List = None):
         """模式识别"""
-        from core.analysis.pattern_recognition import PatternRecognition
+        from core.pattern.pattern_recognition import PatternRecognition
 
         if self._pattern_recognition is None:
             self._pattern_recognition = PatternRecognition(
@@ -364,13 +371,19 @@ class StockSelectionLayer:
 
             codes = zt_pool[ts_code_col].astype(str).tolist()[:30]
 
+            # P2-1: 单次批量拉取所有候选股票的历史日线，避免 N+1
+            from datetime import datetime, timedelta
+            lookback_start = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
+            hist_map = self.dm.get_stocks_daily_batch(codes, lookback_start, trade_date)
+
             for code in codes:
                 try:
-                    daily = self.dm.get_stock_daily(code, trade_date, trade_date)
-                    if daily is None or daily.empty:
+                    hist = hist_map.get(code)
+                    if hist is None or hist.empty:
                         continue
 
-                    row = daily.iloc[-1]
+                    # 历史 DataFrame 末行作为当日行情；旧实现额外拉了一次单日数据，去除以减少一半 API 调用
+                    row = hist.iloc[-1]
                     close = float(row.get('close', 0))
                     pre_close = float(row.get('pre_close', 0))
                     vol = float(row.get('vol', 0))
@@ -380,9 +393,6 @@ class StockSelectionLayer:
                     factors = {}
 
                     # D1: N日高低位 (默认20日)
-                    from datetime import datetime, timedelta
-                    lookback_start = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
-                    hist = self.dm.get_stock_daily(code, lookback_start, trade_date)
                     if hist is not None and not hist.empty and len(hist) >= 5:
                         n_high = float(hist['high'].max())
                         n_low = float(hist['low'].min())
@@ -502,28 +512,46 @@ class StockSelectionLayer:
 
             codes = zt_pool[ts_code_col].astype(str).tolist()[:30]
 
+            # P2-1: 单次 moneyflow_summary 拉全市场当日资金流，并按 ts_code 索引
+            summary_df = pd.DataFrame()
+            try:
+                summary_df = self.dm.get_moneyflow_summary(trade_date)
+            except Exception as e:
+                logger.debug(f"[Layer3] 资金流汇总拉取失败: {e}")
+            summary_map = {}
+            if not summary_df.empty and 'ts_code' in summary_df.columns:
+                summary_map = {row['ts_code']: row for _, row in summary_df.iterrows()}
+
+            # P2-1: 近5日趋势用 N 次全市场汇总（5 次），替代 N x 5 次单股调用
+            hist_dates = []
+            hist_maps: List[dict] = []
+            try:
+                date_list = self.dm.date_utils.get_last_n_trade_dates(5, trade_date)
+            except Exception:
+                date_list = []
+            for d in date_list:
+                try:
+                    df_d = self.dm.get_moneyflow_summary(d)
+                    if not df_d.empty and 'ts_code' in df_d.columns:
+                        hist_dates.append(d)
+                        hist_maps.append({row['ts_code']: row for _, row in df_d.iterrows()})
+                except Exception:
+                    continue
+
             for code in codes:
                 try:
                     factors = {}
 
-                    # 尝试获取资金流向数据
-                    mf_data = None
-                    try:
-                        if hasattr(self.dm, 'get_moneyflow'):
-                            mf_data = self.dm.get_moneyflow(code, trade_date)
-                    except Exception:
-                        pass
-
-                    if mf_data is not None and not mf_data.empty:
-                        row = mf_data.iloc[-1]
-                        buy_elg = float(row.get('buy_elg_amount', 0))
-                        sell_elg = float(row.get('sell_elg_amount', 0))
-                        buy_lg = float(row.get('buy_lg_amount', 0))
-                        sell_lg = float(row.get('sell_lg_amount', 0))
-                        buy_md = float(row.get('buy_md_amount', 0))
-                        sell_md = float(row.get('sell_md_amount', 0))
-                        buy_sm = float(row.get('buy_sm_amount', 0))
-                        sell_sm = float(row.get('sell_sm_amount', 0))
+                    row = summary_map.get(code)
+                    if row is not None:
+                        buy_elg = float(row.get('buy_elg_amount', 0) or 0)
+                        sell_elg = float(row.get('sell_elg_amount', 0) or 0)
+                        buy_lg = float(row.get('buy_lg_amount', 0) or 0)
+                        sell_lg = float(row.get('sell_lg_amount', 0) or 0)
+                        buy_md = float(row.get('buy_md_amount', 0) or 0)
+                        sell_md = float(row.get('sell_md_amount', 0) or 0)
+                        buy_sm = float(row.get('buy_sm_amount', 0) or 0)
+                        sell_sm = float(row.get('sell_sm_amount', 0) or 0)
 
                         total_amount = buy_elg + sell_elg + buy_lg + sell_lg + buy_md + sell_md + buy_sm + sell_sm
 
@@ -537,31 +565,24 @@ class StockSelectionLayer:
                                 (buy_elg + buy_lg) / total_amount * 100, 2
                             )
 
-                            # E4: 资金流向趋势（近5日主力净流入方向）
-                            try:
-                                if hasattr(self.dm, 'get_moneyflow'):
-                                    hist_mf = self.dm.get_moneyflow(code, lookback_days=5)
-                                    if hist_mf is not None and not hist_mf.empty:
-                                        net_flows = []
-                                        for _, r in hist_mf.iterrows():
-                                            b_elg = float(r.get('buy_elg_amount', 0))
-                                            s_elg = float(r.get('sell_elg_amount', 0))
-                                            b_lg = float(r.get('buy_lg_amount', 0))
-                                            s_lg = float(r.get('sell_lg_amount', 0))
-                                            net_flows.append((b_elg + b_lg) - (s_elg + s_lg))
+                            # E4: 近 5 日主力净流入趋势（基于全市场汇总）
+                            net_flows = []
+                            for hist_map in hist_maps:
+                                hr = hist_map.get(code)
+                                if hr is None:
+                                    continue
+                                b_elg = float(hr.get('buy_elg_amount', 0) or 0)
+                                s_elg = float(hr.get('sell_elg_amount', 0) or 0)
+                                b_lg = float(hr.get('buy_lg_amount', 0) or 0)
+                                s_lg = float(hr.get('sell_lg_amount', 0) or 0)
+                                net_flows.append((b_elg + b_lg) - (s_elg + s_lg))
 
-                                        if net_flows:
-                                            positive_days = sum(1 for nf in net_flows if nf > 0)
-                                            factors['E4_moneyflow_trend'] = round(
-                                                positive_days / len(net_flows) * 100, 1
-                                            )
-                                        else:
-                                            factors['E4_moneyflow_trend'] = 50.0
-                                    else:
-                                        factors['E4_moneyflow_trend'] = 50.0
-                                else:
-                                    factors['E4_moneyflow_trend'] = 50.0
-                            except Exception:
+                            if net_flows:
+                                positive_days = sum(1 for nf in net_flows if nf > 0)
+                                factors['E4_moneyflow_trend'] = round(
+                                    positive_days / len(net_flows) * 100, 1
+                                )
+                            else:
                                 factors['E4_moneyflow_trend'] = 50.0
                         else:
                             factors['E1_main_net_ratio'] = 0.0

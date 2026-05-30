@@ -251,36 +251,9 @@ class StockCodeUtils:
 
 # ==================== 字段命名标准化 ====================
 
-class FieldNames:
-    """
-    统一字段命名规范
-    
-    规范说明：
-    1. 股票代码字段：
-       - 内部统一使用 'code'（6位数字，如 '000001'）
-       - Tushare API 使用 'ts_code'（带后缀，如 '000001.SZ'）
-       - 同花顺成分股使用 'con_code'（带后缀，如 '000001.SZ'）
-       - 中文报表使用 '代码'
-    
-    2. 股票名称字段：
-       - 内部统一使用 'name'
-       - 中文报表使用 '名称'
-    
-    3. 板块代码字段：
-       - 统一使用 'ts_code'（带后缀，如 '885001.TI'）
-    """
-
-    # 股票代码字段（按优先级排序）
-    STOCK_CODE_FIELDS = ['code', 'ts_code', 'con_code', '股票代码', '代码', 'stock_code']
-    
-    # 股票名称字段
-    STOCK_NAME_FIELDS = ['name', '股票名称', '名称', 'stock_name']
-    
-    # 板块代码字段
-    SECTOR_CODE_FIELDS = ['ts_code', 'sector_code', '板块代码']
-    
-    # 板块名称字段
-    SECTOR_NAME_FIELDS = ['name', 'sector_name', '板块名称']
+# FieldNames 的权威定义已迁移至 core.utils.field_names。
+# 此处仅做向后兼容 re-export。
+from core.utils.field_names import FieldNames  # noqa: F401  (re-export)
 
 
 class DataFrameFieldMapper:

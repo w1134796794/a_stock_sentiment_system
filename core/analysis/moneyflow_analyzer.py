@@ -84,16 +84,14 @@ class MoneyFlowAnalyzer:
 
     def __init__(self, data_manager):
         self.dm = data_manager
-        # 懒加载扩展模块
-        self._extensions = None
 
     @property
     def extensions(self):
-        """懒加载DataManagerExtensions"""
-        if self._extensions is None:
-            from core.data.data_manager_extensions import DataManagerExtensions
-            self._extensions = DataManagerExtensions(self.dm)
-        return self._extensions
+        """[Deprecated] 历史兼容入口，等价于 self.dm。
+
+        新版 DataManager 已直接合并资金流向 / 龙虎榜 / 北向 / 筹码接口，可直接使用 self.dm 调用。
+        """
+        return self.dm
 
     # =========================================================================
     # 个股资金流向分析

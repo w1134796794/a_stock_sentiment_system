@@ -63,8 +63,8 @@ class DragonSecondWaveStrategyV2:
             "volume_abs_max": 5.0,        # 量能绝对上限5倍（防异常放量）
 
             # Layer 3: 质量指标参数（新增）
-            "max_limit_up_time": "10:30", # 龙二波最晚10:30封板
-            "max_float_cap": 100.0,       # 流通市值上限100亿
+            "max_limit_up_time": "11:30", # 龙二波最晚11:30封板
+            "max_float_cap": 200.0,       # 流通市值上限200亿
             "max_5d_rise": 0.15,          # 5日涨幅上限15%（低位启动）
             "max_break_count": 1,         # 开板次数上限1次
         }

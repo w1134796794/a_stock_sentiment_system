@@ -25,7 +25,17 @@
 
 # 导出工具类
 from .date_utils import DateUtils
-from .stock_code_utils import StockCodeUtils, FieldNames, DataFrameFieldMapper
+from .stock_code_utils import StockCodeUtils, DataFrameFieldMapper
+from .field_names import FieldNames, ColumnSchema
+from .schema_validator import (
+    Column as SchemaColumn,
+    Schema,
+    SchemaReport,
+    SchemaValidationError,
+    assert_schema,
+)
+from .logging_setup import setup_logging, with_context
+from .parallel import parallel_map, parallel_fetch
 from .time_utils import TimeUtils
 from .calculation_utils import CalculationUtils
 from .validation_utils import ValidationUtils
@@ -127,6 +137,18 @@ __all__ = [
     # 工具类（推荐）
     'DateUtils',
     'StockCodeUtils',
+    'DataFrameFieldMapper',
+    'FieldNames',
+    'ColumnSchema',
+    'Schema',
+    'SchemaColumn',
+    'SchemaReport',
+    'SchemaValidationError',
+    'assert_schema',
+    'setup_logging',
+    'with_context',
+    'parallel_map',
+    'parallel_fetch',
     'TimeUtils',
     'CalculationUtils',
     'ValidationUtils',

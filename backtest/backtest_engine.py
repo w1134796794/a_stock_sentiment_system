@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import loguru
 
+from backtest.trade_calendar import TradeCalendar
+
 logger = loguru.logger
 
 
@@ -50,6 +52,9 @@ class BacktestConfig:
     slippage: float = 0.002  # 滑点0.2%
     min_holding_days: int = 1  # 最小持仓天数（T+1）
 
+    # 数据缺失时是否用随机价格兜底（B-1：默认关闭，缺数据则跳过该票，避免回测失真）
+    use_simulated_prices: bool = False
+
 
 @dataclass
 class TradeRecord:
@@ -81,6 +86,7 @@ class BacktestEngine:
     def __init__(self, data_manager, config: BacktestConfig = None):
         self.dm = data_manager
         self.config = config or BacktestConfig()
+        self.calendar = TradeCalendar()
         self.trade_history: List[TradeRecord] = []
         self.daily_nav: List[Dict] = []  # 每日净值
         self.current_positions: Dict[str, Dict] = {}  # 当前持仓
@@ -120,20 +126,8 @@ class BacktestEngine:
         return report
 
     def _get_trade_dates(self, start_date: str, end_date: str) -> List[str]:
-        """获取交易日列表"""
-        # 简化实现，实际应从数据库获取交易日历
-        dates = []
-        start = datetime.strptime(start_date, "%Y%m%d")
-        end = datetime.strptime(end_date, "%Y%m%d")
-
-        current = start
-        while current <= end:
-            # 跳过周末
-            if current.weekday() < 5:
-                dates.append(current.strftime("%Y%m%d"))
-            current += timedelta(days=1)
-
-        return dates
+        """获取交易日列表（B-1：使用真实交易日历，自动剔除节假日）"""
+        return self.calendar.get_trade_dates(start_date, end_date)
 
     def _process_date(self, date: str, trade_plans_dir: str):
         """处理单日回测
@@ -159,15 +153,8 @@ class BacktestEngine:
         self._calculate_daily_nav(date)
 
     def _get_prev_trade_date(self, date: str) -> str:
-        """获取前一个交易日"""
-        current = datetime.strptime(date, "%Y%m%d")
-        prev = current - timedelta(days=1)
-        
-        # 跳过周末
-        while prev.weekday() >= 5:
-            prev -= timedelta(days=1)
-        
-        return prev.strftime("%Y%m%d")
+        """获取前一个交易日（B-1：真实交易日历）"""
+        return self.calendar.prev(date)
 
     def _load_trade_plans(self, date: str, trade_plans_dir: str) -> pd.DataFrame:
         """加载交易计划"""
@@ -615,6 +602,11 @@ class BacktestEngine:
         except Exception as e:
             logger.debug(f"获取真实价格失败 {stock_code}({standardized_code}) {date}: {e}")
 
+        # B-1：默认不再用随机价格兜底（回测失真之源）。仅当显式开启
+        # use_simulated_prices 时才回退模拟价格，否则返回 None 由调用方跳过。
+        if not self.config.use_simulated_prices:
+            return None
+
         # 如果没有真实数据，使用模拟价格（基于前一日收盘价或持仓成本）
         if normalized_code in self.current_positions:
             position = self.current_positions[normalized_code]
@@ -667,17 +659,9 @@ class BacktestEngine:
             return f"{code}.SH"
 
     def _get_prev_close(self, stock_code: str, date: str) -> Optional[float]:
-        """获取昨日收盘价"""
+        """获取昨日收盘价（B-1：真实交易日历取前一交易日）"""
         try:
-            # 计算昨日日期
-            current_date = datetime.strptime(date, "%Y%m%d")
-            prev_date = current_date - timedelta(days=1)
-
-            # 跳过周末
-            while prev_date.weekday() >= 5:
-                prev_date -= timedelta(days=1)
-
-            prev_date_str = prev_date.strftime("%Y%m%d")
+            prev_date_str = self.calendar.prev(date)
             standardized_code = self._standardize_stock_code(stock_code)
 
             result = self.dm.get_stock_daily_data(standardized_code, prev_date_str)
@@ -688,10 +672,8 @@ class BacktestEngine:
         return None
 
     def _calculate_holding_days(self, entry_date: str, exit_date: str) -> int:
-        """计算持仓天数"""
-        entry = datetime.strptime(entry_date, "%Y%m%d")
-        exit = datetime.strptime(exit_date, "%Y%m%d")
-        return (exit - entry).days
+        """计算持仓天数（B-1：按交易日计，时间止损更准确）"""
+        return self.calendar.holding_days(entry_date, exit_date)
 
     def _calculate_daily_nav(self, date: str):
         """计算每日净值"""

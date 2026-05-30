@@ -2,9 +2,10 @@
 散户交易支持模块 V2 - 修复版
 修复内容：
 1. 隔夜决策清单为空问题 - 增加数据验证和备选方案
-2. 剧本推演无效 - 基于真实数据的动态推演
-3. 板块关注逻辑错误 - 短期T+0视角替代20日滞后数据
-4. 标的描述不精准 - 明确历史数据vs预判条件，增加执行细节
+2. 板块关注逻辑错误 - 短期T+0视角替代20日滞后数据
+3. 标的描述不精准 - 明确历史数据vs预判条件，增加执行细节
+
+注：原"次日剧本推演（情景预测）"已移除——一切以真实数据说话，不做主观情景推演。
 
 作者：量化交易系统
 版本：2.0.0
@@ -68,24 +69,6 @@ class OvernightDecision:
     retail_suitability: str = ""
     suggested_action: str = ""
     risk_level: str = "中"  # 低/中/高
-
-
-@dataclass
-class ScenarioForecast:
-    """剧本推演 - 基于真实数据的动态推演"""
-    scenario_name: str
-    probability: float  # 基于数据计算，非硬编码
-    trigger_conditions: List[str]  # 触发条件（量化）
-    description: str  # 具体表现
-    
-    # 散户动作（分情况）
-    actions_if_holding: List[str]  # 若持仓
-    actions_if_empty: List[str]    # 若空仓
-    actions_avoid: List[str]       # 放弃什么
-    
-    risk_signals: List[str]  # 风险信号（实时监控）
-    fallback_sectors: List[str]  # 备选板块
-    key_stocks: List[str]  # 关键观察标的
 
 
 @dataclass
@@ -522,211 +505,7 @@ class RetailTraderSupportV2:
         
         return decisions[:2]  # 最多2只
     
-    # ==================== 2. 剧本推演（基于真实数据）====================
-    
-    def forecast_scenarios_v2(self,
-                             indicators: Dict,
-                             sector_analysis: Dict[str, SectorAnalysis],
-                             today_zt_pool: pd.DataFrame) -> List[ScenarioForecast]:
-        """
-        基于真实数据的动态剧本推演
-        
-        Args:
-            indicators: 散户特供指标（昨日涨停溢价率、一字板占比等）
-            sector_analysis: 板块分析
-            today_zt_pool: 当日涨停池
-        
-        Returns:
-            List[ScenarioForecast]
-        """
-        scenarios = []
-        
-        # 提取关键指标
-        premium_rate = indicators.get('昨日涨停溢价率', 0)  # 昨日涨停今日平均溢价
-        one_word_ratio = indicators.get('一字板占比', 0)   # 一字板占比
-        blast_rate = self._calculate_blast_rate(today_zt_pool)  # 今日炸板率
-        
-        # 识别主线板块
-        main_sectors = [s for s in sector_analysis.values() if s.priority in [SectorPriority.S_TIER, SectorPriority.A_TIER]]
-        main_sector_names = [s.sector_name for s in main_sectors]
-        main_sector_strength = main_sectors[0].today_limit_up if main_sectors else 0
-        
-        # 剧本1：情绪延续，主线强化（概率最高的情况）
-        if premium_rate > 5 and one_word_ratio > 10 and main_sector_strength > 30:
-            prob = min(0.7, 0.4 + premium_rate/100)
-            scenarios.append(self._create_scenario_continuation(
-                prob, premium_rate, one_word_ratio, main_sectors, indicators
-            ))
-        
-        # 剧本2：主线分化，资金挖掘低位
-        if premium_rate > 3 and blast_rate > 15:
-            prob = 0.5 if len(main_sectors) > 0 else 0.3
-            scenarios.append(self._create_scenario_differentiation(
-                prob, main_sectors, blast_rate
-            ))
-        
-        # 剧本3：情绪退潮，全面防守
-        if premium_rate < 2 or blast_rate > 25:
-            prob = min(0.6, 0.3 + (25 - premium_rate)/100)
-            scenarios.append(self._create_scenario_retreat(
-                prob, premium_rate, blast_rate
-            ))
-        
-        # 剧本4：板块轮动，新主线启动（低概率但高盈亏比）
-        if len(main_sectors) == 0 or main_sectors[0].growth_3d < 0:
-            prob = 0.25
-            scenarios.append(self._create_scenario_rotation(
-                prob, sector_analysis
-            ))
-        
-        # 按概率排序
-        scenarios.sort(key=lambda x: x.probability, reverse=True)
-        
-        return scenarios
-    
-    def _create_scenario_continuation(self, prob, premium, one_word, main_sectors, indicators) -> ScenarioForecast:
-        """剧本1：情绪延续，主线强化"""
-        main = main_sectors[0] if main_sectors else None
-        main_name = main.sector_name if main else "主线板块"
-        
-        return ScenarioForecast(
-            scenario_name="情绪延续，主线强化",
-            probability=prob,
-            trigger_conditions=[
-                f"昨日涨停溢价率{premium:.1f}% > 5%（情绪高涨）",
-                f"一字板占比{one_word:.1f}% > 10%（一致性强）",
-                f"{main_name}板块涨停{main.today_limit_up if main else 0}家（主线明确）"
-            ],
-            description=f"{main_name}板块继续强势，龙头一字或秒板，跟风股高开5%+，昨日涨停普遍有溢价",
-            actions_if_holding=[
-                f"持仓{main_name}龙头：持有，开板不封死则减仓30%",
-                f"持仓{main_name}跟风：冲高减仓，切换到龙头"
-            ],
-            actions_if_empty=[
-                f"9:25竞价介入{main_name}板块2板换手标（实际换手>25%，非一字）",
-                f"放弃：{main_name}板块已3板以上高位股",
-                f"备选：{main_sectors[1].sector_name if len(main_sectors) > 1 else '次主线'}1板转2板"
-            ],
-            actions_avoid=[
-                f"回避：非{main_name}板块的高位股（无板块支撑）",
-                "回避：昨日烂板且今日低开股"
-            ],
-            risk_signals=[
-                f"{main_name}板块竞价封单<昨日50%",
-                f"{main_name}龙头开盘瀑布杀（1分钟跌>3%）",
-                "昨日涨停股普遍低开"
-            ],
-            fallback_sectors=[s.sector_name for s in main_sectors[1:3]],
-            key_stocks=[f"{main.sector_name}龙头"] if main else []
-        )
-    
-    def _create_scenario_differentiation(self, prob, main_sectors, blast_rate) -> ScenarioForecast:
-        """剧本2：主线分化，资金挖掘低位"""
-        main = main_sectors[0] if main_sectors else None
-        
-        return ScenarioForecast(
-            scenario_name="主线分化，资金挖掘低位",
-            probability=prob,
-            trigger_conditions=[
-                f"炸板率{blast_rate:.1f}% > 15%（分歧加大）",
-                f"{main.sector_name if main else '主线'}板块涨停数减少但仍有龙头",
-                "部分跟风股开始掉队"
-            ],
-            description="龙头继续强势但跟风乏力，资金开始挖掘低位补涨或切换板块",
-            actions_if_holding=[
-                "持仓龙头：持有，但设置移动止损（跌破分时均线减仓）",
-                "持仓跟风：冲高减仓，不幻想二波"
-            ],
-            actions_if_empty=[
-                "9:35前介入低位首板（同板块内低位补涨）",
-                "关注1板转2板的换手板（非一字）",
-                "放弃：中位股（3-4板，最容易A杀）"
-            ],
-            actions_avoid=[
-                "回避：跟风股（已经掉队）",
-                "回避：中位股接力",
-                "回避：非主线板块的高位股"
-            ],
-            risk_signals=[
-                "龙头炸板后30分钟未回封",
-                "低位补涨股无资金关注",
-                "炸板率持续上升"
-            ],
-            fallback_sectors=[],
-            key_stocks=["低位首板标的"]
-        )
-    
-    def _create_scenario_retreat(self, prob, premium, blast_rate) -> ScenarioForecast:
-        """剧本3：情绪退潮，全面防守"""
-        return ScenarioForecast(
-            scenario_name="情绪退潮，全面防守",
-            probability=prob,
-            trigger_conditions=[
-                f"昨日涨停溢价率{premium:.1f}% < 2%（无溢价）",
-                f"炸板率{blast_rate:.1f}% > 25%（分歧极大）",
-                "昨日涨停股普遍低开"
-            ],
-            description="情绪退潮，昨日涨停普遍低开，炸板率高，资金观望",
-            actions_if_holding=[
-                "全部持仓：开盘即减仓，不幻想反包",
-                "仅保留最强龙头（如果开板即走）"
-            ],
-            actions_if_empty=[
-                "空仓观望，或1成仓试错1板（仅竞价超预期）",
-                "关注逆势抗跌股（大盘跌它不跌）",
-                "等待情绪冰点后的反弹"
-            ],
-            actions_avoid=[
-                "回避：所有接力（1板以上都不做）",
-                "回避：昨日涨停股（低开风险大）",
-                "回避：中位股（最容易A杀）"
-            ],
-            risk_signals=[
-                "跌停股数量>涨停股数量",
-                "昨日龙头今日跌停",
-                "炸板率>40%"
-            ],
-            fallback_sectors=[],
-            key_stocks=[]
-        )
-    
-    def _create_scenario_rotation(self, prob, sector_analysis) -> ScenarioForecast:
-        """剧本4：板块轮动，新主线启动"""
-        # 找出潜在的新主线（3日增长高但当前涨停数中等）
-        potential = [s for s in sector_analysis.values() if s.growth_3d > 20 and s.today_limit_up >= 5]
-        potential_names = [s.sector_name for s in potential[:2]]
-        
-        return ScenarioForecast(
-            scenario_name="板块轮动，新主线启动",
-            probability=prob,
-            trigger_conditions=[
-                "原主线退潮（涨停数减少，炸板增多）",
-                f"新板块异动：{', '.join(potential_names)} 3日增长>20%",
-                "资金开始试错新方向"
-            ],
-            description="老主线资金流出，新板块开始异动，试错阶段",
-            actions_if_holding=[
-                "清仓老主线，不恋战",
-                "小仓位试错新板块首板"
-            ],
-            actions_if_empty=[
-                "1成仓试错新板块首板（打板确认）",
-                "关注新板块1板转2板机会",
-                "放弃：老主线任何标的"
-            ],
-            actions_avoid=[
-                "回避：老主线（资金流出）",
-                "回避：非新板块的高位股"
-            ],
-            risk_signals=[
-                "新板块一日游（次日无溢价）",
-                "轮动过快（每天一个新板块）"
-            ],
-            fallback_sectors=potential_names,
-            key_stocks=[f"{potential_names[0]}首板"] if potential_names else []
-        )
-    
-    # ==================== 3. 板块分析（T+0短期视角）====================
+    # ==================== 2. 板块分析（T+0短期视角）====================
     
     def analyze_sectors_v2(self,
                           today_zt_pool: pd.DataFrame,
@@ -861,7 +640,6 @@ class RetailTraderSupportV2:
     def generate_overnight_report_v2(self,
                                     decisions: List[OvernightDecision],
                                     indicators: Dict,
-                                    scenarios: List[ScenarioForecast],
                                     sector_analysis: Dict[str, SectorAnalysis]) -> str:
         """生成隔夜决策报告 - 修复版"""
         report = []
@@ -927,29 +705,6 @@ class RetailTraderSupportV2:
                     for k, v in d.execution_plan.items():
                         report.append(f"       • {k}: {v}")
         
-        # 4. 剧本推演
-        report.append("\n\n[推演] 【次日剧本推演（基于真实数据）】")
-        report.append("-" * 70)
-        
-        for i, scenario in enumerate(scenarios[:3], 1):
-            report.append(f"\n  剧本{i}: {scenario.scenario_name} (概率{scenario.probability:.0%})")
-            report.append(f"     触发条件:")
-            for cond in scenario.trigger_conditions:
-                report.append(f"       • {cond}")
-            report.append(f"     具体表现: {scenario.description}")
-            
-            report.append(f"     若持仓:")
-            for action in scenario.actions_if_holding:
-                report.append(f"       → {action}")
-            
-            report.append(f"     若空仓:")
-            for action in scenario.actions_if_empty:
-                report.append(f"       → {action}")
-            
-            report.append(f"     风险信号:")
-            for signal in scenario.risk_signals:
-                report.append(f"       [警告] {signal}")
-        
         report.append("\n" + "=" * 70)
         return "\n".join(report)
 
@@ -962,11 +717,10 @@ if __name__ == "__main__":
     print("=" * 70)
     print("\n修复内容：")
     print("1. 隔夜决策清单为空 → 增加数据验证和备选方案")
-    print("2. 剧本推演无效 → 基于真实数据的动态推演")
-    print("3. 板块关注逻辑错误 → T+0短期视角替代20日滞后数据")
-    print("4. 标的描述不精准 → 明确历史数据vs预判条件")
+    print("2. 板块关注逻辑错误 → T+0短期视角替代20日滞后数据")
+    print("3. 标的描述不精准 → 明确历史数据vs预判条件")
     print("\n核心改进：")
     print("• 板块优先级：S/A/B/C/D五级（基于当日涨停+3日趋势）")
-    print("• 剧本推演：基于溢价率/一字板占比/炸板率动态计算概率")
     print("• 决策清单：每项包含历史数据+次日条件+执行计划+取消条件")
     print("=" * 70)
+

@@ -21,45 +21,33 @@ import loguru
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config.settings import (
-    TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR,
-    INDUSTRY_MAPPING_FILE, TRADE_HOUR, TRADE_MINUTE
-)
+from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR
 from core.data.data_manager_main import DataManager
 from core.data.industry_mapper import IndustryMapper
-from core.analysis.pattern_recognition import PatternRecognition
-from core.analysis.emotion_cycle_engine import EmotionCycleEngine
-from core.analysis.ths_sector_tracker import THSSectorTracker
-from core.analysis.sector_analysis_orchestrator import SectorAnalysisOrchestrator
 from core.report.report_generator_v2 import ReportGeneratorV2
-from core.execution.execution_engine import UnifiedExecutionEngine
 from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
 from core.utils import DateUtils
-
-from core.analysis.moneyflow_analyzer import create_moneyflow_analyzer
-from core.analysis.chip_structure_analyzer import create_chip_analyzer
-from core.analysis.emotion_cycle_integrated import create_integrated_engine
 
 from core.pipeline.review_pipeline import ReviewPipeline, SharedContext
 
 logger = loguru.logger
 
 class SentimentSystem:
+    """A股短线情绪量化系统主入口
+
+    职责被收敛为：
+      - 持有共享的 DataManager / IndustryMapper / Reporter
+      - 通过 ReviewPipeline 执行五层复盘流程
+      - 生成 Excel 报告与散户决策报告
+    """
+
     def __init__(self):
         self.dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
         self.mapper = IndustryMapper(self.dm)
-        self.emotion_engine = EmotionCycleEngine(dm=self.dm)
-        self.sector_tracker = THSSectorTracker(self.dm)
-        self.sector_orchestrator = SectorAnalysisOrchestrator(self.dm, cache_enabled=True)
         self.reporter = ReportGeneratorV2(OUTPUT_DIR)
-        self.execution_engine = None
-        self.retail_support = None
+        self.retail_support: RetailTraderSupportV2 | None = None
         self.today = datetime.now().strftime("%Y%m%d")
         self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-
-        self.moneyflow_analyzer = None
-        self.chip_analyzer = None
-        self.integrated_emotion_engine = None
 
         self.pipeline = ReviewPipeline(self.dm, self.mapper)
 
@@ -178,183 +166,6 @@ class SentimentSystem:
             ctx.patterns, ctx.emotion_result
         )
 
-    def _generate_trade_plans(self, date: str, patterns: Dict, mainline_df: pd.DataFrame, emotion_result: Dict):
-        """
-        生成次日交易计划
-        整合所有模式信号，生成可执行的交易计划
-        
-        筛选逻辑：
-        1. 必须是模式选股选出来的标的
-        2. 必须与热点主线共振（属于主线板块或概念相关）
-        3. 考虑情绪周期调整仓位
-        """
-        try:
-            # 初始化执行引擎
-            if self.execution_engine is None:
-                self.execution_engine = UnifiedExecutionEngine(self.dm, None)
-            
-            # 获取热点主线板块名称列表
-            hot_sectors = []
-            if not mainline_df.empty:
-                # 共振分析结果使用'主线名称'列（格式：概念+行业）
-                if '主线名称' in mainline_df.columns:
-                    hot_sectors = mainline_df['主线名称'].tolist()
-                elif '核心概念' in mainline_df.columns:
-                    hot_sectors = mainline_df['核心概念'].tolist()
-                elif '核心行业' in mainline_df.columns:
-                    hot_sectors = mainline_df['核心行业'].tolist()
-                else:
-                    hot_sectors = []
-                logger.info(f"【交易计划】热点主线板块: {hot_sectors}")
-            
-            # 获取情绪周期建议仓位
-            emotion_cycle = emotion_result.get('cycle_name', '震荡期')
-            suggested_position = emotion_result.get('strategy', {}).position if hasattr(emotion_result.get('strategy'), 'position') else "30-50%"
-            logger.info(f"【交易计划】当前情绪周期: {emotion_cycle}, 建议仓位: {suggested_position}")
-            
-            # 过滤与热点共振的模式信号
-            filtered_patterns = self._filter_resonance_signals(patterns, mainline_df)
-            
-            # 统计过滤结果
-            total_before = sum(len(signals) for signals in patterns.values())
-            total_after = sum(len(signals) for signals in filtered_patterns.values())
-            logger.info(f"【交易计划】模式信号过滤: {total_before} -> {total_after} (保留与热点共振的标的)")
-            
-            # 生成并保存交易计划
-            trade_plans_dir = Path(OUTPUT_DIR) / "trade_plans"
-            trade_plans_dir.mkdir(parents=True, exist_ok=True)
-
-            plans_df, report = self.execution_engine.generate_and_save_plans(
-                analysis_date=date,
-                all_signals=filtered_patterns,
-                output_dir=str(trade_plans_dir)
-            )
-            
-            if not plans_df.empty:
-                logger.info(f"✅ 交易计划生成完成: {len(plans_df)} 条计划")
-                # 打印交易报告摘要
-                print("\n" + "="*60)
-                print("【次日交易计划摘要】")
-                print(f"情绪周期: {emotion_cycle} | 建议仓位: {suggested_position}")
-                print(f"热点主线: {', '.join(hot_sectors[:3])}")
-                print("="*60)
-                # 按介入时机分组显示
-                for timing in plans_df['介入时机'].unique():
-                    group = plans_df[plans_df['介入时机'] == timing]
-                    print(f"\n【{timing}】{len(group)}只")
-                    for _, row in group.head(3).iterrows():
-                        resonance_tag = "[共振]" if row.get('热点共振', False) else ""
-                        print(f"  - {row['名称']}({row['代码']}) - {row['模式']} {resonance_tag}")
-                        print(f"    目标价:{row['目标价']:.2f} 止损:{row['止损价']:.2f} 仓位:{row['仓位']}")
-                print("="*60)
-            else:
-                logger.info("当日无交易计划生成")
-                
-        except Exception as e:
-            logger.error(f"生成交易计划失败: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-    
-    def _filter_resonance_signals(self, patterns: Dict, mainline_df: pd.DataFrame) -> Dict:
-        """
-        过滤与热点主线共振的模式信号
-
-        Args:
-            patterns: 所有模式信号
-            mainline_df: 热点主线板块DataFrame，包含板块名称和热度评分
-
-        Returns:
-            过滤后的模式信号
-        """
-        if mainline_df.empty:
-            logger.warning("【_filter_resonance_signals】无热点主线数据，返回所有信号")
-            return patterns
-
-        # 构建板块名称到热度评分的映射
-        # 共振分析结果使用'主线名称'、'核心概念'、'核心行业'列
-        if '主线名称' in mainline_df.columns:
-            sector_column = '主线名称'
-        elif '核心概念' in mainline_df.columns:
-            sector_column = '核心概念'
-        elif '核心行业' in mainline_df.columns:
-            sector_column = '核心行业'
-        else:
-            logger.warning(f"【_filter_resonance_signals】未知的列名，可用列: {list(mainline_df.columns)}")
-            return patterns
-        
-        score_column = '综合评分' if '综合评分' in mainline_df.columns else 'Strength_Score'
-
-        hot_sectors = mainline_df[sector_column].tolist()
-        sector_heat_map = {}
-        for _, row in mainline_df.iterrows():
-            sector_name = row[sector_column]
-            heat_score = row.get(score_column, 0)
-            sector_heat_map[sector_name] = heat_score
-
-        filtered = {}
-
-        for pattern_name, signals in patterns.items():
-            filtered_signals = []
-
-            for signal in signals:
-                # 检查信号是否与热点共振
-                is_resonance = False
-                resonance_sectors = []
-                max_heat_score = 0
-
-                # 检查股票所属行业/概念是否在热点主线中
-                signal_industry = getattr(signal, 'l2_industry', '') or getattr(signal, 'industry', '')
-                signal_concepts = getattr(signal, 'concepts', []) or getattr(signal, 'concept', '')
-
-                # 将concepts转换为列表
-                if isinstance(signal_concepts, str):
-                    signal_concepts = [c.strip() for c in signal_concepts.split(',') if c.strip()]
-
-                # 检查行业匹配
-                if signal_industry and any(sector in signal_industry or signal_industry in sector
-                                           for sector in hot_sectors):
-                    is_resonance = True
-                    resonance_sectors.append(signal_industry)
-                    # 获取该板块的热度评分
-                    for sector in hot_sectors:
-                        if sector in signal_industry or signal_industry in sector:
-                            heat_score = sector_heat_map.get(sector, 0)
-                            max_heat_score = max(max_heat_score, heat_score)
-
-                # 检查概念匹配
-                for concept in signal_concepts:
-                    if any(sector in concept or concept in sector for sector in hot_sectors):
-                        is_resonance = True
-                        if concept not in resonance_sectors:
-                            resonance_sectors.append(concept)
-                        # 获取该概念对应板块的热度评分
-                        for sector in hot_sectors:
-                            if sector in concept or concept in sector:
-                                heat_score = sector_heat_map.get(sector, 0)
-                                max_heat_score = max(max_heat_score, heat_score)
-
-                # 如果与热点共振，添加到过滤后的信号
-                if is_resonance:
-                    # 给信号添加共振标记和热度评分
-                    signal.hot_resonance = True
-                    signal.resonance_sectors = resonance_sectors
-                    signal.sector_heat_score = max_heat_score
-                    filtered_signals.append(signal)
-                    logger.debug(f"【共振】{signal.stock_name}({signal.stock_code}) 与热点共振: {resonance_sectors}, 热度:{max_heat_score:.1f}")
-                else:
-                    # 如果不共振但置信度>=0.9，也保留（优质独立逻辑）
-                    if getattr(signal, 'confidence', 0) >= 0.9:
-                        signal.hot_resonance = False
-                        signal.resonance_sectors = []
-                        signal.sector_heat_score = 0
-                        filtered_signals.append(signal)
-                        logger.debug(f"【高置信】{signal.stock_name}({signal.stock_code}) 置信度{signal.confidence}，虽非热点但保留")
-
-            if filtered_signals:
-                filtered[pattern_name] = filtered_signals
-
-        return filtered
-    
     def _generate_retail_support_report(self, date: str, today_zt: pd.DataFrame,
                                         hierarchy_df: pd.DataFrame, patterns: Dict,
                                         emotion_result: Dict):
@@ -518,73 +329,6 @@ class SentimentSystem:
         
         print("="*60)
     
-    def run_backtest_mode(self, start_date: str, end_date: str):
-        """回测模式"""
-        logger.info(f"启动回测: {start_date} 至 {end_date}")
-        # 实现多日期回测逻辑
-        pass
-
-    def _is_core_stock(self, row) -> bool:
-        """
-        判断是否为10点半前封板的核心标的
-        """
-        # 检查涨停时间
-        limit_up_time = str(row.get('LimitUpTime', ''))
-        if limit_up_time.isdigit():
-            limit_up_time = limit_up_time.zfill(6)
-        if len(limit_up_time) == 6:
-            limit_up_time = f"{limit_up_time[:2]}:{limit_up_time[2:4]}:{limit_up_time[4:]}"
-        
-        # 只保留10:30前封板的
-        if limit_up_time and limit_up_time <= '10:30:00':
-            l1 = row.get('L1_Industry', '')
-            l2 = row.get('L2_Industry', '')
-            l3 = row.get('L2_Industry', '')
-            
-            # 跳过"其他"行业
-            if l3 != '其他' and l2 != '其他' and l1 != '其他':
-                return True
-        
-        return False
-    
-    def update_industry_mapping(self):
-        """手动更新行业映射"""
-        logger.info("更新行业映射数据...")
-        # 从AkShare获取最新行业列表并更新Excel
-        try:
-            concept_df = self.dm.get_concept_industry()
-            if not concept_df.empty:
-                logger.info(f"获取到 {len(concept_df)} 个行业板块")
-                # 这里可以实现自动映射逻辑
-        except Exception as e:
-            logger.error(f"更新失败: {e}")
-
-def main():
-    parser = argparse.ArgumentParser(description='A股短线情绪量化系统')
-    parser.add_argument('--date', type=str, help='分析日期(YYYYMMDD)，默认今日')
-    parser.add_argument('--mode', type=str, default='daily', 
-                       choices=['daily', 'backtest', 'update'], help='运行模式')
-    parser.add_argument('--start', type=str, help='回测开始日期')
-    parser.add_argument('--end', type=str, help='回测结束日期')
-    
-    args = parser.parse_args()
-    
-    # 配置日志
-    setup_logging()
-    
-    system = SentimentSystem()
-    
-    if args.mode == 'daily':
-        date = args.date if args.date else system.today
-        system.run_daily_analysis(date)
-    elif args.mode == 'backtest':
-        if not args.start or not args.end:
-            print("回测模式需要指定 --start 和 --end 日期")
-            return
-        system.run_backtest_mode(args.start, args.end)
-    elif args.mode == 'update':
-        system.update_industry_mapping()
-
 def setup_logging():
     """配置日志输出"""
     # 移除默认的 stderr handler

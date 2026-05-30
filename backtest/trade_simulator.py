@@ -299,3 +299,4 @@ class TradeSimulator:
             results.append(result)
 
         return pd.DataFrame(results)
+

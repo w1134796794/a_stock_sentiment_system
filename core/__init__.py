@@ -26,12 +26,11 @@ from core.analysis import (
 
 # 执行层
 from core.execution import (
-    UnifiedExecutionEngine,
     RetailTraderSupportV2,
 )
 
 # 报告层
-from core.report import ReportGenerator
+from core.report import ReportGeneratorV2
 
 # 工具层 - 导出工具类和函数
 from core.utils import (
@@ -48,6 +47,21 @@ from core.utils import (
     get_next_trade_date,
 )
 
+# 异常层级（P3-1）
+from core.exceptions import (
+    StockSentimentError,
+    DataError,
+    DataFetchError,
+    ApiRateLimitError,
+    CacheError,
+    PipelineError,
+    LayerExecutionError,
+    EmptyResultError,
+    PatternEvaluationError,
+    ConfigError,
+    ReportGenerationError,
+)
+
 __all__ = [
     # 数据层
     'DataManager',
@@ -59,10 +73,9 @@ __all__ = [
     'SectorRotationTracker',
     'SectorStage',
     # 执行层
-    'UnifiedExecutionEngine',
     'RetailTraderSupportV2',
     # 报告层
-    'ReportGenerator',
+    'ReportGeneratorV2',
     # 工具层 - 工具类
     'DateUtils',
     'StockCodeUtils',
@@ -74,4 +87,16 @@ __all__ = [
     'get_nearest_trade_date',
     'get_prev_trade_date',
     'get_next_trade_date',
+    # 异常层级
+    'StockSentimentError',
+    'DataError',
+    'DataFetchError',
+    'ApiRateLimitError',
+    'CacheError',
+    'PipelineError',
+    'LayerExecutionError',
+    'EmptyResultError',
+    'PatternEvaluationError',
+    'ConfigError',
+    'ReportGenerationError',
 ]

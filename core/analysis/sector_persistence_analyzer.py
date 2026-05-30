@@ -508,3 +508,4 @@ class SectorPersistenceAnalyzer:
             logger.info(f"  - {row['板块名称']}: {lookback_days}天内{row['热点天数']}次热点, 评分{row['持续性评分']:.1f}")
 
         return result_df.head(top_n)
+
