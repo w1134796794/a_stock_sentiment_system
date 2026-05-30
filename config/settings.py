@@ -15,8 +15,8 @@ CACHE_DIR = DATA_DIR / "cache"
 OUTPUT_DIR = BASE_DIR / "output"
 
 # ============================================
-# .env 加载（P3-5）
-# 优先级：os 环境变量 > .env > .env.example > 代码默认值
+# .env 加载（必须在任何 os.getenv 之前）
+# 优先级：os 环境变量 > .env > 代码默认值
 # 仅在 python-dotenv 可用时启用；缺失依赖不会破坏现有运行
 # ============================================
 try:
@@ -24,11 +24,71 @@ try:
 
     _env_file = BASE_DIR / ".env"
     if _env_file.exists():
-        # override=False：已设置的 os 环境变量优先
-        load_dotenv(dotenv_path=_env_file, override=False)
+        load_dotenv(dotenv_path=_env_file, override=False)  # 已设置的 os 环境变量优先
 except ImportError:  # pragma: no cover
-    # python-dotenv 未安装时跳过；项目仍按既有 os.getenv 行为工作
     pass
+
+# ============================================
+# Web / 快照 / 知识库 存储（P0：与 Excel 同源的结构化快照）
+# 收盘跑批时，喂给 Excel 的 data_dict 会同步落到这里，供 Web 页面与 KB 复用。
+# ============================================
+WEB_DATA_DIR = BASE_DIR / "webdata"
+SNAPSHOT_DIR = WEB_DATA_DIR / "snapshots"        # 每日整页 JSON 快照
+APP_DB_PATH = WEB_DATA_DIR / "app.sqlite"        # 结构化索引（计划/信号/快照）
+FACTOR_DB_PATH = WEB_DATA_DIR / "factors.duckdb"  # 因子大表（定量查询，可选）
+KB_DB_PATH = WEB_DATA_DIR / "kb.sqlite"          # 知识库块存储（向量 + 词法）
+WINRATE_PATH = WEB_DATA_DIR / "winrate_matrix.json"  # 周期×模式胜率矩阵（复盘工具产物）
+
+# ============================================
+# 大模型 / 知识库（P2-P3）
+# 全部走 OpenAI 兼容 HTTP 接口（用 requests 直连，无需额外 SDK）。
+# 单 key 自动识别 provider：
+#   - 配 DEEPSEEK_API_KEY（或通用 LLM_API_KEY）→ 对话走 DeepSeek(deepseek-chat)
+#   - 配 DASHSCOPE_API_KEY（阿里云通义）→ 对话走 qwen-plus，且嵌入走 text-embedding-v3
+# 嵌入仅 DashScope 提供：配了 DASHSCOPE/EMBEDDING key 才启用向量检索，
+# 否则知识库自动降级为零依赖中文词法检索（离线可用）。
+# 未配置任何 key 时，AI 解读 / 问答返回明确提示，绝不报错。
+# 显式 LLM_BASE_URL / LLM_MODEL / EMBEDDING_* 始终优先于自动识别。
+# ============================================
+def _resolve_llm_config() -> dict:
+    llm_key = os.getenv("LLM_API_KEY", "").strip()
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    dashscope_key = os.getenv("DASHSCOPE_API_KEY", "").strip()
+
+    base_url = os.getenv("LLM_BASE_URL", "").strip()
+    model = os.getenv("LLM_MODEL", "").strip()
+
+    if llm_key or deepseek_key:                      # DeepSeek（或通用）优先
+        api_key = llm_key or deepseek_key
+        base_url = base_url or "https://api.deepseek.com/v1"
+        model = model or "deepseek-chat"
+    elif dashscope_key:                              # 阿里云通义
+        api_key = dashscope_key
+        base_url = base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        model = model or "qwen-plus"
+    else:                                            # 未配置
+        api_key = ""
+        base_url = base_url or "https://api.deepseek.com/v1"
+        model = model or "deepseek-chat"
+
+    # 嵌入：仅 DashScope 体系提供；显式 EMBEDDING_* 优先
+    embed_key = os.getenv("EMBEDDING_API_KEY", "").strip() or dashscope_key
+    embed_base = os.getenv("EMBEDDING_BASE_URL", "").strip() \
+        or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    embed_model = os.getenv("EMBEDDING_MODEL", "").strip() or "text-embedding-v3"
+
+    return {
+        "api_key": api_key,
+        "base_url": base_url,
+        "model": model,
+        "timeout": int(os.getenv("LLM_TIMEOUT", "60")),
+        "embed_api_key": embed_key,
+        "embed_base_url": embed_base,
+        "embed_model": embed_model,
+    }
+
+
+LLM_CONFIG = _resolve_llm_config()
 
 # ============================================
 # API配置

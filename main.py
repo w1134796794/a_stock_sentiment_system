@@ -21,7 +21,10 @@ import loguru
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR
+from config.settings import (
+    TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR,
+    SNAPSHOT_DIR, APP_DB_PATH, FACTOR_DB_PATH, KB_DB_PATH,
+)
 from core.data.data_manager_main import DataManager
 from core.data.industry_mapper import IndustryMapper
 from core.report.report_generator_v2 import ReportGeneratorV2
@@ -157,6 +160,24 @@ class SentimentSystem:
         report_file_name = f"短线情绪分析报告_{ctx.trade_date}_{timestamp}.xlsx"
         report_path = self.reporter.create_daily_report(report_data, file_name=report_file_name)
         logger.info(f"[OK] 分析报告保存至: {report_path}")
+
+        # P0：与 Excel 同源，把 data_dict 落成结构化快照（供 Web / KB 复用）。
+        # 任何失败都不得影响既有 Excel 产出，故整体 try/except 兜底。
+        try:
+            from snapshot import SnapshotWriter
+            SnapshotWriter(SNAPSHOT_DIR, APP_DB_PATH, FACTOR_DB_PATH).write(report_data)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[Snapshot] 快照写出失败（不影响 Excel）: {e}")
+
+        # P2：把当日快照灌入知识库（无 key 走词法检索，离线可用），供 Web 问答检索。
+        try:
+            from snapshot.writer import build_snapshot
+            from kb.store import KBStore
+            from kb.ingest import ingest_snapshot
+            from kb.embeddings import get_embedder
+            ingest_snapshot(build_snapshot(report_data), KBStore(KB_DB_PATH), get_embedder())
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[KB] 知识库灌库失败（不影响主流程）: {e}")
 
     def _generate_retail_support_report_v2(self, ctx: SharedContext):
         """生成散户决策支持报告"""

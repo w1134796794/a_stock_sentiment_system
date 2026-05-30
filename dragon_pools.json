@@ -133,7 +133,7 @@
       "weakening_type": "断板",
       "weakening_price": 113.08,
       "current_price": 106.84,
-      "max_drawdown": 0.02370003537318706,
+      "max_drawdown": 0.055182171913689376,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -191,7 +191,7 @@
       "weakening_type": "烂板(2次)",
       "weakening_price": 24.7,
       "current_price": 20.83,
-      "max_drawdown": 0.14858299595141694,
+      "max_drawdown": 0.15668016194331988,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -278,7 +278,7 @@
       "weakening_type": "烂板(3次)",
       "weakening_price": 4.54,
       "current_price": 3.5,
-      "max_drawdown": 0.1380145278450363,
+      "max_drawdown": 0.15254237288135591,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -307,7 +307,7 @@
       "weakening_type": "烂板(5次)",
       "weakening_price": 5.16,
       "current_price": 5.11,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.00968992248062012,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -365,7 +365,7 @@
       "weakening_type": "烂板(2次)",
       "weakening_price": 53.71,
       "current_price": 44.2,
-      "max_drawdown": 0.11413144665797807,
+      "max_drawdown": 0.17706199962762983,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -481,7 +481,7 @@
       "weakening_type": "烂板(4次)",
       "weakening_price": 16.87,
       "current_price": 13.84,
-      "max_drawdown": 0.11025489033787796,
+      "max_drawdown": 0.17960877296976888,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -510,7 +510,7 @@
       "weakening_type": "烂板(2次)",
       "weakening_price": 170.82,
       "current_price": 165.33,
-      "max_drawdown": 0.021601685985247615,
+      "max_drawdown": 0.032139093782929284,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -597,36 +597,7 @@
       "weakening_type": "断板",
       "weakening_price": 62.25,
       "current_price": 59.66,
-      "max_drawdown": 0.0,
-      "recovery_signals": {
-        "min_gap": 0.03,
-        "ideal_gap": 0.05,
-        "max_gap": 0.08,
-        "min_auction_vol_ratio": 0.1,
-        "ideal_auction_vol_ratio": 0.15,
-        "min_auction_amount": 5000000
-      }
-    },
-    "002442.SZ": {
-      "stock_code": "002442.SZ",
-      "stock_name": "龙星科技",
-      "dragon_type": "DragonType.CONTINUOUS",
-      "peak_board_height": 3.0,
-      "peak_price": 8.11,
-      "peak_date": "20260522",
-      "entry_date": "20260522",
-      "sector_name": "炭黑",
-      "total_rise_10d": 0.30806451612903213,
-      "limit_up_count": 3,
-      "status": "DragonStatus.WEAKENING",
-      "status_change_date": "20260525",
-      "weakening_data": {},
-      "max_monitor_days": 5,
-      "weakening_date": "20260525",
-      "weakening_type": "断板",
-      "weakening_price": 8.11,
-      "current_price": 5.91,
-      "max_drawdown": 0.18988902589395798,
+      "max_drawdown": 0.0416064257028113,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -655,7 +626,7 @@
       "weakening_type": "断板",
       "weakening_price": 68.22,
       "current_price": 64.74,
-      "max_drawdown": 0.01949574904720021,
+      "max_drawdown": 0.051011433597185636,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -771,7 +742,7 @@
       "weakening_type": "尾盘板",
       "weakening_price": 38.42,
       "current_price": 35.81,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.06793336803748046,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -800,7 +771,7 @@
       "weakening_type": "尾盘板",
       "weakening_price": 171.94,
       "current_price": 151.92,
-      "max_drawdown": 0.07014074677212982,
+      "max_drawdown": 0.11643596603466332,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -829,7 +800,7 @@
       "weakening_type": "尾盘板",
       "weakening_price": 128.15,
       "current_price": 107.67,
-      "max_drawdown": 0.09980491611392904,
+      "max_drawdown": 0.15981271946937187,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -916,7 +887,7 @@
       "weakening_type": "烂板(2次)",
       "weakening_price": 43.05,
       "current_price": 41.04,
-      "max_drawdown": 0.000929152148664324,
+      "max_drawdown": 0.046689895470383234,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -945,7 +916,7 @@
       "weakening_type": "烂板(2次)",
       "weakening_price": 25.62,
       "current_price": 21.45,
-      "max_drawdown": 0.10382513661202186,
+      "max_drawdown": 0.16276346604215464,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -974,7 +945,7 @@
       "weakening_type": "断板",
       "weakening_price": 64.13,
       "current_price": 58.87,
-      "max_drawdown": 0.006705130204272457,
+      "max_drawdown": 0.08202089505691562,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1061,7 +1032,7 @@
       "weakening_type": "断板",
       "weakening_price": 116.38,
       "current_price": 109.22,
-      "max_drawdown": 0.0238872658532394,
+      "max_drawdown": 0.06152259838460214,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1119,7 +1090,7 @@
       "weakening_type": "烂板(3次)",
       "weakening_price": 71.36,
       "current_price": 71.0,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.005044843049327346,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1149,35 +1120,6 @@
       "weakening_price": 68.35,
       "current_price": 72.13,
       "max_drawdown": 0.0,
-      "recovery_signals": {
-        "min_gap": 0.03,
-        "ideal_gap": 0.05,
-        "max_gap": 0.08,
-        "min_auction_vol_ratio": 0.1,
-        "ideal_auction_vol_ratio": 0.15,
-        "min_auction_amount": 5000000
-      }
-    },
-    "600186.SH": {
-      "stock_code": "600186.SH",
-      "stock_name": "莲花控股",
-      "dragon_type": "DragonType.TREND",
-      "peak_board_height": 0,
-      "peak_price": 12.93,
-      "peak_date": "20260525",
-      "entry_date": "20260525",
-      "sector_name": "食品加工制造",
-      "total_rise_10d": 0.2942942942942942,
-      "limit_up_count": 3,
-      "status": "DragonStatus.WEAKENING",
-      "status_change_date": "20260526",
-      "weakening_data": {},
-      "max_monitor_days": 5,
-      "weakening_date": "20260526",
-      "weakening_type": "断板",
-      "weakening_price": 12.93,
-      "current_price": 10.15,
-      "max_drawdown": 0.15313225058004645,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1264,7 +1206,7 @@
       "weakening_type": "断板",
       "weakening_price": 35.78,
       "current_price": 31.24,
-      "max_drawdown": 0.07909446618222465,
+      "max_drawdown": 0.12688652878703194,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1351,7 +1293,7 @@
       "weakening_type": "烂板(3次)",
       "weakening_price": 10.87,
       "current_price": 10.23,
-      "max_drawdown": 0.011039558417663223,
+      "max_drawdown": 0.05887764489420413,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1409,7 +1351,7 @@
       "weakening_type": "尾盘板",
       "weakening_price": 88.19,
       "current_price": 82.05,
-      "max_drawdown": 0.03912008164190955,
+      "max_drawdown": 0.06962240616849984,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1438,7 +1380,7 @@
       "weakening_type": "断板",
       "weakening_price": 5.73,
       "current_price": 5.16,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.09947643979057595,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1467,7 +1409,7 @@
       "weakening_type": "断板",
       "weakening_price": 18.07,
       "current_price": 16.65,
-      "max_drawdown": 0.017708909795240747,
+      "max_drawdown": 0.07858328721638083,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1525,7 +1467,7 @@
       "weakening_type": "断板",
       "weakening_price": 14.6,
       "current_price": 14.08,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.035616438356164355,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1554,7 +1496,7 @@
       "weakening_type": "放量滞涨(换手40.4%)",
       "weakening_price": 18.19,
       "current_price": 17.15,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.05717427157779014,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1583,7 +1525,7 @@
       "weakening_type": "烂板(2次)",
       "weakening_price": 49.79,
       "current_price": 45.44,
-      "max_drawdown": 0.00502108857200241,
+      "max_drawdown": 0.08736694115284196,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1612,7 +1554,7 @@
       "weakening_type": "断板",
       "weakening_price": 9.65,
       "current_price": 7.82,
-      "max_drawdown": 0.09948186528497417,
+      "max_drawdown": 0.18963730569948187,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1699,7 +1641,7 @@
       "weakening_type": "尾盘板",
       "weakening_price": 26.97,
       "current_price": 25.21,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.0652576937337782,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1728,7 +1670,7 @@
       "weakening_type": "烂板(2次)",
       "weakening_price": 95.4,
       "current_price": 88.28,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.0746331236897275,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1757,7 +1699,7 @@
       "weakening_type": "烂板(5次)",
       "weakening_price": 33.22,
       "current_price": 32.1,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.03371462974111973,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1786,7 +1728,7 @@
       "weakening_type": "烂板(2次)",
       "weakening_price": 26.85,
       "current_price": 24.17,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.09981378026070761,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1815,7 +1757,7 @@
       "weakening_type": "尾盘板",
       "weakening_price": 56.78,
       "current_price": 51.1,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.10003522367030644,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1844,7 +1786,7 @@
       "weakening_type": "尾盘板",
       "weakening_price": 23.53,
       "current_price": 21.18,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.09987250318742037,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1902,7 +1844,7 @@
       "weakening_type": "烂板(4次)",
       "weakening_price": 109.99,
       "current_price": 104.08,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.05373215746886078,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1931,7 +1873,7 @@
       "weakening_type": "尾盘板",
       "weakening_price": 182.45,
       "current_price": 178.33,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.02258152918607825,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -1960,7 +1902,7 @@
       "weakening_type": "烂板(5次)",
       "weakening_price": 78.18,
       "current_price": 72.27,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.07559478127398325,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -2076,7 +2018,7 @@
       "weakening_type": "断板",
       "weakening_price": 4.92,
       "current_price": 4.43,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.09959349593495939,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -2105,7 +2047,7 @@
       "weakening_type": "断板",
       "weakening_price": 69.82,
       "current_price": 69.2,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.008879977083929968,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -2192,7 +2134,7 @@
       "weakening_type": "断板",
       "weakening_price": 16.81,
       "current_price": 16.17,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.038072575847709525,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -2221,7 +2163,7 @@
       "weakening_type": "断板",
       "weakening_price": 27.69,
       "current_price": 25.38,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.08342361863488632,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -2279,7 +2221,7 @@
       "weakening_type": "断板",
       "weakening_price": 70.06,
       "current_price": 69.26,
-      "max_drawdown": 0.0,
+      "max_drawdown": 0.01141878389951466,
       "recovery_signals": {
         "min_gap": 0.03,
         "ideal_gap": 0.05,
@@ -2377,5 +2319,5 @@
       }
     }
   },
-  "update_time": "20260530 00:31:35"
+  "update_time": "20260530 15:14:41"
 }

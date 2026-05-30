@@ -1,0 +1,10 @@
+<div>
+  {% if not brief.configured %}
+  <div class="text-amber-300/90 text-sm leading-relaxed">{{ brief.content }}</div>
+  {% else %}
+  <div class="text-slate-200 text-sm leading-relaxed whitespace-pre-line">{{ brief.content }}</div>
+  <div class="mt-2 text-[11px] text-slate-500">
+    {{ '缓存' if brief.cached else '实时生成' }} · 模型解读，仅供参考
+  </div>
+  {% endif %}
+</div>

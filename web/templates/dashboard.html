@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% block title %}明日计划 · {{ date }}{% endblock %}
+
+{% block header_extra %}
+  {% if dates %}
+  <label class="text-sm text-slate-400">交易日</label>
+  <select onchange="location.href='/report/'+this.value"
+          class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    {% for d in dates %}
+      <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if snapshot is none %}
+  <div class="card border border-slate-800 rounded-xl p-10 text-center">
+    <div class="text-xl font-semibold mb-1">没有找到 {{ date }} 的快照</div>
+    <div class="text-slate-400">请确认该日已运行收盘分析。</div>
+  </div>
+{% else %}
+
+{# ===== 情绪温度计 ===== #}
+{% set m = market %}
+<section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">情绪周期</div>
+    <div class="text-xl font-bold text-emerald-300">{{ m.get('cycle_name') or '--' }}</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">建议仓位</div>
+    <div class="text-xl font-bold">{{ m.get('position') or '--' }}</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">策略基调</div>
+    <div class="text-base font-semibold text-slate-200">{{ m.get('strategy') or '--' }}</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">交易计划数</div>
+    <div class="text-xl font-bold mono">{{ plans|length }}</div>
+  </div>
+</section>
+
+{# ===== 风控闸门摘要 ===== #}
+{% if risk_gate %}
+<section class="card border border-slate-800 rounded-xl p-4 mb-6">
+  <div class="flex items-center gap-6 flex-wrap">
+    <div class="font-semibold text-slate-200">风控闸门</div>
+    <div class="text-sm"><span class="text-emerald-400 font-bold mono">{{ risk_gate.get('passed', 0) }}</span> 通过</div>
+    <div class="text-sm"><span class="text-amber-400 font-bold mono">{{ risk_gate.get('downgraded', 0) }}</span> 降级</div>
+    <div class="text-sm"><span class="text-rose-400 font-bold mono">{{ risk_gate.get('rejected', 0) }}</span> 拒绝</div>
+    {% if risk_gate.get('effective_total_cap') is not none %}
+    <div class="text-sm text-slate-400">有效总仓上限
+      <span class="mono text-slate-200">{{ '%.0f'|format((risk_gate.get('effective_total_cap') or 0) * 100) }}%</span></div>
+    {% endif %}
+    {% if risk_gate.get('summary') %}<div class="text-sm text-slate-400">· {{ risk_gate.get('summary') }}</div>{% endif %}
+  </div>
+</section>
+{% endif %}
+
+{# ===== AI 每日解读 ===== #}
+<section class="card border border-indigo-500/20 bg-indigo-500/[0.03] rounded-xl p-4 mb-6">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-base font-bold flex items-center gap-2">
+      <span class="text-indigo-300">AI 每日解读</span>
+      <span class="text-xs font-normal text-slate-500">今日复盘 · 明日策略</span>
+    </h2>
+    <button class="text-xs text-slate-400 hover:text-indigo-300 transition"
+            hx-get="/report/{{ date }}/brief?_r=1" hx-target="#ai-brief" hx-swap="innerHTML">重新生成</button>
+  </div>
+  <div id="ai-brief" hx-get="/report/{{ date }}/brief" hx-trigger="load" hx-swap="innerHTML">
+    <div class="text-slate-500 text-sm animate-pulse">AI 正在解读…</div>
+  </div>
+</section>
+
+{# ===== 周期 × 模式 历史胜率矩阵 ===== #}
+{% if winrate and winrate.cells %}
+<section class="card border border-slate-800 rounded-xl p-4 mb-6">
+  <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+    <h2 class="text-base font-bold flex items-center gap-2">周期 × 模式 历史胜率
+      <span class="text-xs font-normal text-slate-500">T+1 · 窗口 {{ winrate.window[0] }}~{{ winrate.window[1] }} · 样本 {{ winrate.sample_total }}</span>
+    </h2>
+    {% if cur_cycle %}<span class="text-xs text-emerald-300">当前：{{ cur_cycle }}（高亮行）</span>{% endif %}
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead>
+        <tr class="text-slate-400">
+          <th class="text-left font-medium px-2 py-1.5">周期 \ 模式</th>
+          {% for p in winrate.patterns %}<th class="px-2 py-1.5 font-medium whitespace-nowrap">{{ p }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in winrate.cycles %}
+        <tr class="border-t border-slate-800 {% if c == cur_cycle %}bg-emerald-500/[0.06]{% endif %}">
+          <td class="px-2 py-1.5 font-semibold {% if c == cur_cycle %}text-emerald-300{% else %}text-slate-300{% endif %} whitespace-nowrap">{{ c }}</td>
+          {% for p in winrate.patterns %}
+            {% set cell = winrate.cells.get(c ~ '|' ~ p) %}
+            <td class="px-2 py-1.5 text-center mono">
+              {% if cell and cell.n >= 3 %}
+                {% set wr = cell.win_rate %}
+                <span class="font-bold {% if wr >= 0.6 %}text-emerald-400{% elif wr >= 0.45 %}text-amber-300{% else %}text-rose-400{% endif %}">{{ '%.0f'|format(wr*100) }}%</span>
+                <span class="text-[10px] text-slate-500">/{{ cell.n }}</span>
+              {% else %}
+                <span class="text-slate-600">{% if cell %}n={{ cell.n }}{% else %}—{% endif %}</span>
+              {% endif %}
+            </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="mt-2 text-[11px] text-slate-500">单元格 = T+1收盘胜率 / 样本数；样本&lt;3 不显示胜率。历史统计不代表未来。</div>
+</section>
+{% endif %}
+
+{# ===== 明日计划卡片 ===== #}
+<section class="mb-8">
+  <h2 class="text-lg font-bold mb-3 flex items-center gap-2">明日交易计划
+    <span class="text-xs font-normal text-slate-500">买什么 · 什么价位 · 为什么</span></h2>
+  {% if not plans %}
+    <div class="card border border-slate-800 rounded-xl p-8 text-center text-slate-400">
+      今日无交易计划（信号数为 0 或大盘风险过高）
+    </div>
+  {% else %}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    {% for p in plans %}
+    {% set act = p.get('风控动作') %}
+    <div class="card border border-slate-800 rounded-xl p-4 hover:border-slate-600 transition">
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div class="font-bold text-lg">{{ p.get('股票名称') or '--' }}
+            <span class="mono text-sm text-slate-400">{{ p.get('股票代码') or '' }}</span></div>
+          <div class="text-xs text-slate-400 mt-0.5">
+            {{ p.get('模式类型') or '' }} · 优先级 {{ p.get('优先级') or '--' }}</div>
+        </div>
+        <div class="text-right">
+          <div class="text-2xl font-extrabold mono
+            {% set sc = p.get('综合评分') %}
+            {% if sc and sc|float >= 70 %}text-emerald-400{% elif sc and sc|float <= 35 %}text-rose-400{% else %}text-amber-300{% endif %}">
+            {{ p.get('综合评分') or '--' }}</div>
+          <div class="text-[10px] text-slate-500 -mt-1">综合评分</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 text-sm mb-3">
+        <div class="bg-slate-900/60 rounded-lg px-2 py-1.5">
+          <div class="text-[10px] text-slate-500">建议仓位</div>
+          <div class="font-semibold">{{ p.get('建议仓位') or p.get('仓位等级') or '--' }}</div>
+        </div>
+        <div class="bg-slate-900/60 rounded-lg px-2 py-1.5">
+          <div class="text-[10px] text-slate-500">入场区间</div>
+          <div class="font-semibold mono text-xs">{{ p.get('入场区间') or '--' }}</div>
+        </div>
+        <div class="bg-slate-900/60 rounded-lg px-2 py-1.5">
+          <div class="text-[10px] text-slate-500">止损 / 止盈</div>
+          <div class="font-semibold mono text-xs">{{ p.get('止损') or '--' }} / {{ p.get('止盈') or '--' }}</div>
+        </div>
+      </div>
+
+      {# ----- 为什么 ----- #}
+      <div class="border-t border-slate-800 pt-2 space-y-1.5 text-sm">
+        {% if p.get('仓位依据') %}<div><span class="text-slate-500">仓位依据：</span>{{ p.get('仓位依据') }}</div>{% endif %}
+        {% if p.get('竞价条件') %}<div><span class="text-slate-500">竞价条件：</span>{{ p.get('竞价条件') }} {{ p.get('竞价区间') or '' }}</div>{% endif %}
+        {% if p.get('次日预期') %}<div><span class="text-slate-500">次日预期：</span>{{ p.get('次日预期') }}</div>{% endif %}
+        {% if p.get('风险提示') %}<div class="text-amber-300/90"><span class="text-slate-500">风险提示：</span>{{ p.get('风险提示') }}</div>{% endif %}
+      </div>
+
+      {# ----- 风控判定 ----- #}
+      {% if act %}
+      <div class="mt-3 flex items-center gap-2 text-xs">
+        <span class="px-2 py-0.5 rounded-full font-semibold
+          {% if act == 'PASS' %}bg-emerald-500/15 text-emerald-300
+          {% elif act == 'REJECT' %}bg-rose-500/15 text-rose-300
+          {% else %}bg-amber-500/15 text-amber-300{% endif %}">{{ act }}</span>
+        {% if p.get('风控后仓位') %}<span class="text-slate-400 mono">→ {{ p.get('风控后仓位') }}</span>{% endif %}
+        {% if p.get('风控提示') %}<span class="text-slate-500 truncate">{{ p.get('风控提示') }}</span>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+{# ===== 数据浏览（18-sheet） ===== #}
+<section>
+  <h2 class="text-lg font-bold mb-3">数据浏览</h2>
+  <div class="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4">
+    <nav class="card border border-slate-800 rounded-xl p-2 h-max">
+      {% for s in sections %}
+      <button
+        class="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-800/70 transition flex items-center justify-between"
+        hx-get="/report/{{ date }}/section/{{ loop.index0 }}"
+        hx-target="#section-panel" hx-swap="innerHTML"
+        {% if loop.first %}hx-trigger="load, click"{% endif %}>
+        <span>{{ s.name }}</span>
+        <span class="mono text-xs text-slate-500">{{ s.rows|length }}</span>
+      </button>
+      {% else %}
+      <div class="px-3 py-2 text-sm text-slate-500">无可浏览数据</div>
+      {% endfor %}
+    </nav>
+    <div id="section-panel" class="card border border-slate-800 rounded-xl p-4 min-h-[200px] overflow-x-auto">
+      <div class="text-slate-500 text-sm">选择左侧分类查看明细…</div>
+    </div>
+  </div>
+</section>
+
+{# ===== 问 AI ===== #}
+<section class="card border border-slate-800 rounded-xl p-4 mt-8" id="ask-ai" data-date="{{ date }}">
+  <h2 class="text-lg font-bold mb-1 flex items-center gap-2">问 AI
+    <span class="text-xs font-normal text-slate-500">基于历史知识库的检索增强问答</span></h2>
+  <div class="flex flex-wrap gap-1.5 my-2 text-xs">
+    {% for q in ["今天为什么是这个仓位？", "明日重点关注哪只？为什么？", "首板突破最近出现频率如何？", "宁波中百历史上出现过几次？"] %}
+    <button class="ask-suggest px-2 py-1 rounded-full bg-slate-800/70 hover:bg-slate-700 text-slate-300">{{ q }}</button>
+    {% endfor %}
+  </div>
+  <div class="flex gap-2">
+    <input id="ask-input" type="text" placeholder="问点什么，例如：今天为什么减仓？"
+           class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+           onkeydown="if(event.key==='Enter')askAI()">
+    <button onclick="askAI()" id="ask-btn"
+            class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition">发送</button>
+  </div>
+  <div id="ask-answer" class="mt-3 text-sm text-slate-200 whitespace-pre-line leading-relaxed min-h-[1.5rem]"></div>
+</section>
+
+<script>
+  document.querySelectorAll('.ask-suggest').forEach(b => b.addEventListener('click', () => {
+    document.getElementById('ask-input').value = b.textContent.trim();
+    askAI();
+  }));
+
+  async function askAI() {
+    const input = document.getElementById('ask-input');
+    const ansEl = document.getElementById('ask-answer');
+    const btn = document.getElementById('ask-btn');
+    const question = input.value.trim();
+    if (!question) return;
+    const date = document.getElementById('ask-ai').dataset.date;
+    btn.disabled = true; btn.textContent = '思考中…';
+    ansEl.textContent = '';
+    try {
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, date })
+      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (data === '[DONE]') continue;
+          try { ansEl.textContent += (JSON.parse(data).delta || ''); } catch (e) {}
+        }
+      }
+    } catch (e) {
+      ansEl.textContent = '请求失败：' + e;
+    } finally {
+      btn.disabled = false; btn.textContent = '发送';
+    }
+  }
+</script>
+
+{% endif %}
+{% endblock %}
