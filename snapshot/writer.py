@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 import loguru
 
 from snapshot.serialize import to_jsonable, tabulate
+from snapshot.section_format import SECTION_FORMATTERS
 
 logger = loguru.logger
 
@@ -161,6 +162,14 @@ def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
     for name, resolver in _SECTION_SPEC:
         src = _safe(lambda: resolver(data_dict))
         if src is None:
+            continue
+        # 富格式化 section（梯队/龙虎榜/资金流向/复盘/周期矩阵等）：把结构化数据
+        # 规整成干净表格，替代把整段嵌套 JSON 塞进单格的 tabulate。
+        formatter = SECTION_FORMATTERS.get(name)
+        if formatter is not None:
+            section = _safe(lambda: formatter(to_jsonable(src)))
+            if section and section.get("rows"):
+                sections.append(section)
             continue
         columns, rows = _safe(lambda: tabulate(src), ([], []))
         if not rows:

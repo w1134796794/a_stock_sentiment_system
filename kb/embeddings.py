@@ -36,7 +36,7 @@ class CloudEmbedder:
                 batch = texts[i:i + batch_size]
                 resp = requests.post(
                     url, headers=headers,
-                    json={"model": self.model, "input": batch, "encoding_format": "float"},
+                    json={"model": self.model, "input": batch},
                     timeout=self.timeout,
                 )
                 resp.raise_for_status()
