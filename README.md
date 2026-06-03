@@ -1,272 +1,143 @@
-# A股情绪周期与板块轮动量化系统 V2
+# A股情绪周期与板块轮动量�化系统 V2
 
 基于情绪周期识别、板块轮动追踪、概念-行业交叉验证的短线交易辅助系统。
 
-## 🎯 核心功能
+## 🎯 核心架构：五层复盘流水线
+
+```
+Layer 1: 看大盘（定仓位）   →  MarketEnvAnalyzer
+Layer 2: 看板块（定方向）   →  SectorAnalysisOrchestrator
+Layer 3: 看个股（定标的）   →  StockSelectionLayer
+Layer 4: 定计划（定执行）   →  TradePlanLayer
+Layer 5: 盘后总结          →  ReviewAnalyzer
+```
 
 ### 1. 数据层 (Data Layer)
 - **双源备份**: Tushare(历史数据) + AkShare(实时情绪)
 - **本地缓存**: 自动避免重复API调用，支持盘中/盘后增量更新
 - **智能交易日判断**: 非交易日自动关联最近交易日数据
 - **同花顺板块数据**: 集成同花顺概念/行业/特色指数数据(ths_index/ths_daily/ths_member)
+- **模块化数据管理**: 按市场/股票/板块/概念/资金流分模块，便于维护和扩展
 
 ### 2. 情绪周期引擎 (Emotion Cycle Engine)
 - **五阶段模型**: 冰点期 → 回暖期 → 上升期 → 高潮期 → 退潮期
 - **多维度评分**: 涨停家数、跌停家数、炸板率、昨日涨停溢价率
 - **动态策略**: 根据情绪周期自动生成仓位建议和禁忌操作
 - **周期切换预警**: 识别情绪拐点，提前调整策略
+- **ML增强**: 机器学习辅助情绪周期分类
 
-### 3. 板块轮动追踪器 V2 (Sector Rotation Tracker)
+### 3. 板块轮动追踪器 (Sector Rotation Tracker)
 - **多因子动态权重模型**:
   - 强度因子(30%): 涨停家数、连板数
   - 资金因子(25%): 成交额变化率、换手率
   - 趋势因子(25%): 排名动量、涨停趋势、持续性评分
   - 市场适配(20%): 根据周期动态调整
-- **市场周期适配**: 自动检测市场周期，调整因子权重
 - **板块生命周期**: 萌芽期 → 加速期 → 高潮期 → 衰退期
 - **轮动图谱**: 构建资金迁移路径，预判接力板块
+- **T+1板块预判**: 基于历史板块轮动规律，预判次日可能接力的板块
 
 ### 4. 概念-行业交叉验证 (Concept-Industry Validation)
 - **双轨制分析**: 概念维度(短线热点) + 行业维度(中线趋势)
 - **共振识别**: 概念热 + 行业热 = 强信号，重仓参与
 - **背离预警**: 概念热 + 行业冷 = 纯炒作，谨慎参与
 - **行业集中度**: 分析概念成分股的行业分布，识别真正龙头
-- **共振得分**: 0-100分量化信号强度，动态调整仓位
+- **反向板块查询**: 通过股票代码直接查询所属所有板块，区分行业(I)与概念(N)
 
-### 5. 模式识别 (Pattern Recognition)
+### 5. 模式识别 (Pattern Recognition) — 四层优先级过滤管线
+
+所有策略统一采用 **L0 → L1 → L2 → L3 → L4** 四层管线架构：
+
+| 层级 | 名称 | 职责 | 成本 |
+|------|------|------|------|
+| L0 | 硬性排除 | 一字板、尾盘板、流通市值、首/连板判定 | 极低 |
+| L1 | 前身验证 | 龙头身份、回调质量、调整期形态 | 中 |
+| L2 | 技术确认 | 量能、封单、高开gap、资金态度 | 中高 |
+| L3 | 质量指标 | 涨停时间、开板次数、市值上限 | 低 |
+| L4 | 评分生成 | 板块地位、置信度计算、信号输出 | — |
+
+L2/L3 层采用**弹性评分 + 累计扣分**机制，替代硬过滤，提高容错性。
+
+**信号优先级**: 弱转强(100) > 二板定龙(85) > 龙二波(70) > 首板突破(50)
 
 #### 5.1 首板突破 (First Board Breakout)
-**核心逻辑**: 捕捉首次涨停且具备持续上涨潜力的标的
-
-**识别条件**:
-- 当日首次涨停（非连板）
-- 涨停时间早于10:00（早盘强势）
-- 封单强度 > 3%（封单金额/流通市值）
-- 换手率 5%-20%（充分换手但不过度）
-- 突破近期均线或前高
-
-**买点**: 涨停价（打板买入）
-**止损**: 涨停价下方7%
-**止盈**: 涨停价上方10%
-**仓位**: 轻度参与（light）
-
-**次日关注**: 首板标的次日开盘表现是判断持续性的关键
-
----
+按突破→时间→量能→筹码→市值→板块效应的顺序进行四层过滤。
+- **买点**: 涨停价（打板买入）
+- **止损**: 涨停价下方7%
+- **止盈**: 涨停价上方10%
+- **仓位**: light
 
 #### 5.2 二板定龙 (Second Board Dragon)
-**核心逻辑**: 二连板是确认龙头地位的关键节点，筛选真正具备龙头气质的标的
-
-**识别条件**:
-- 昨日首板，今日二连板
-- 今日高开 3%-7%（强势但不过分）
-- 涨停时间早于10:00（早盘封板显示决心）
-- 封单强度 > 5%
-- 所属板块热度排名前10
-
-**买点**: 二板涨停价
-**止损**: 二板涨停价下方7%
-**止盈**: 二板涨停价上方15%
-**仓位**: 中度参与（medium）
-
-**关键逻辑**: 二板是分水岭，能走出二板的标的才具备成为阶段龙头的潜力
-
----
+二连板确认龙头地位，按首板质量→资金确认→质量指标→板块地位四层过滤。
+严格模式加强首板硬逻辑、动态gap阈值和封板速度检查。
+- **买点**: 二板涨停价
+- **止损**: 二板涨停价下方7%
+- **止盈**: 二板涨停价上方15%
+- **仓位**: medium（龙头）/ light（跟风）
 
 #### 5.3 弱转强 (Weak to Strong)
-**核心逻辑**: 昨日表现弱势（烂板/炸板/尾盘板），今日超预期强势开盘并涨停，是情绪修复的典型信号
+昨日弱势（烂板/炸板/尾盘板）→ 今日超预期强势。含完整龙头池管理。
+- **龙头候选池**: 自动识别趋势龙头/连板龙头/空间龙头入池
+- **龙头走弱池**: 监控烂板、断板、尾盘板、趋势回调
+- **转强监控**: 动态gap阈值、竞价量弹性评分、高开低走回退检测
+- **买点**: 今日涨停价（打板确认）
+- **止损**: 今日涨停价下方5%
+- **止盈**: 今日涨停价上方10-15%
+- **仓位**: medium
 
-**识别条件**:
-- **昨日弱势信号**（满足其一）:
-  - 烂板: 涨停后多次打开，封板质量差
-  - 炸板: 曾触及涨停但未封住
-  - 尾盘板: 收盘前30分钟内涨停
-  - 放量滞涨: 成交量放大但涨幅有限
+#### 5.4 龙二波 (Dragon Second Wave)
+龙头充分调整后开启第二波，按双轨制第一波判断（连板/涨幅/涨停次数）。
+- **动态阈值**: 量能/封单阈值根据连板高度、调整天数、板块热度自适应
+- **衰减记忆**: 调整天数越短 → 阈值越宽松
+- **买点**: 转强当日涨停价
+- **止损**: 涨停价下方7%
+- **止盈**: 前高附近或涨幅15-20%
+- **仓位**: medium
 
-- **今日转强信号**（必须全部满足）:
-  - 今日跳空高开 > 2%
-  - 今日涨停（确认转强）
-  - 涨停时间早于昨日（更快封板）
+### 6. 快照系统 (Snapshot) — P0
+收盘跑批时，喂给 Excel 的 `data_dict` 同步落结构化产物：
+- `webdata/snapshots/{date}.json`：整页 JSON 快照（前端直读）
+- `webdata/app.sqlite`：结构化索引（每日快照 / 交易计划 / 信号）
+- **零侵入设计**: 在报表生成处旁挂写入，失败不影响 Excel 产出
 
-**买点**: 今日涨停价（打板确认）
-**止损**: 今日涨停价下方5%
-**止盈**: 今日涨停价上方10-15%
-**仓位**: 中度参与（medium）
+### 7. Web 看板 (Web Dashboard) — P1
+基于 FastAPI + Jinja2 的只读看板，浏览每日快照：
+- 市场情绪概览 + 仓位建议
+- 18-section 结构化快照浏览
+- AI 解读（可选，依赖大模型 API）
+- 启动: `python run_web.py`
 
-**核心逻辑**: 弱势后的超预期表现，往往意味着资金对该标的的重新认可
+### 8. 知识库层 (Knowledge Base) — P2-P3
+把历史每日快照沉淀为可检索、可问答的记忆：
+- `store.py` — SQLite 块存储（文本 + 可选向量 BLOB）
+- `chunker.py` — 快照 → 文本块
+- `embeddings.py` — 可选云嵌入（缺省降级为零依赖中文词法检索）
+- `tools.py` — 定量只读查询（基于 app.sqlite），供 LLM 调用
+- `retriever.py` — 元数据过滤 + 向量/词法混合检索
+- `brief.py` — 每日 AI 解读（结构化 → 叙事）
+- `winrate.py` — 周期×模式胜率矩阵
 
----
+### 9. 风控回测 (Risk & Backtest)
+- **完整回测框架**: 逐日分发→标准化→估值→撮合→模拟→评测
+- **风控模块**: 仓位管理、凯利公式、回撤熔断、风险审查
+- **Point-in-Time 数据**: 消除前视偏差
+- **Walk-Forward**: 滚动窗口训练/测试
 
-#### 5.4 龙头二波 (Dragon Second Wave)
-**核心逻辑**: 龙头股经过充分调整后，再次出现转强信号，开启第二波上涨
+### 10. 多因子评分 (Multi-Factor Scoring)
+- 板块内个股排名评分
+- 龙头/跟风地位判断
+- 板块席位分配
 
-**识别条件**:
-- **第一波确认**: 标的曾是阶段龙头（连板高度≥4板或趋势涨幅≥40%）
-- **充分调整**: 从最高点回调10%-20%
-- **调整时间**: 3-10个交易日
-- **转强信号**（满足其一）:
-  - 回调后首板（缩量更佳）
-  - 回调后跳空高开并涨停
-  - 出现明显的止跌K线组合
-
-**买点**: 转强当日涨停价
-**止损**: 转强涨停价下方7%
-**止盈**: 前高附近或涨幅15-20%
-**仓位**: 中度参与（medium）
-
-**核心逻辑**: 龙头股具有记忆效应，充分调整后资金愿意再次介入
-
----
-
-#### 5.5 龙头池管理 (Dragon Pool Management)
-**核心逻辑**: 动态管理龙头候选池和走弱池，实现龙头的全生命周期跟踪
-
-**龙头候选池**:
-- **入池条件**: 识别为趋势龙头或连板龙头
-- **跟踪指标**: 10日涨幅、涨停次数、所属板块、当前状态
-- **观察天数**: 记录入池后的观察天数
-
-**龙头走弱池**:
-- **入池条件**（满足其一）:
-  - 烂板: 当日涨停打开次数≥2次
-  - 断板: 连板中断
-  - 尾盘板: 收盘前30分钟才封板
-  - 趋势回调: 从最高点回调超过阈值
-
-- **跟踪指标**:
-  - 走弱日期: 确认走弱的具体日期
-  - 走弱类型: 烂板/断板/尾盘板等
-  - 回调幅度: 从最高点的回调百分比
-  - 观察信号: 转强需要满足的条件
-
-**转强监控**:
-- 持续跟踪走弱池标的
-- 监控高开幅度、竞价量等转强信号
-- 满足条件时触发"弱转强"信号
-
-**核心逻辑**: 龙头不是一天形成的，通过池子管理实现龙头的早发现、早跟踪、早介入
-
----
-
-#### 5.6 分歧转一致 (Divergence to Consensus)
-**核心逻辑**: 昨日分歧（烂板爆量），今日一致（强势高开快速涨停），是资金共识形成的标志
-
-**识别条件**:
-- 昨日烂板且成交量放大
-- 今日高开 2%-5%
-- 30分钟内涨停
-- 封单强度 > 3%
-
----
-
-#### 5.7 卡位板 (Position Battle)
-**核心逻辑**: 同板块内低位股抢先涨停，卡位成为新龙头
-
-**识别条件**:
-- 板块内有高位龙头
-- 低位股抢先涨停（比高位股早5分钟以上）
-- 封单强度 > 高位股
-
----
-
-#### 5.8 龙头首阴 (Dragon First Yin)
-**核心逻辑**: 龙头股首次出现阴线后的反包机会
-
-**识别条件**:
-- 龙头股连板后首次收阴
-- 次日高开或快速翻红
-- 成交量不放大（缩量更佳）
-
-### 6. 热点概念分析 (Hot Concepts Analysis)
-
-#### 6.1 主线概念识别
-**核心逻辑**: 通过多维度指标识别具有持续性的主线概念，过滤一日游概念
-
-**关键指标**:
-- **当日排名**: 概念在当日的热度排名
-- **10日进前10次数**: 近10日内进入前10名的次数（主线特征）
-- **10日进前5次数**: 近10日内进入前5名的次数（强主线）
-- **10日进前3次数**: 近10日内进入前3名的次数（超级主线）
-- **连续前10天**: 连续进入前10名的天数
-- **是否主线**: 综合判断是否具有主线特征
-
-**主线判断标准**:
-- 10日内进入前10名 ≥ 3次
-- 连续前10天 ≥ 2天
-- 涨停数量 ≥ 板块平均
-
-**所处阶段**:
-- 萌芽期: 首次进入前10，持续性待观察
-- 加速期: 连续多日排名上升
-- 高潮期: 排名稳定在前3
-- 衰退期: 排名连续下滑
-
----
-
-### 7. 微信公众号自动发布 (WeChat Official Account Publishing)
-
-#### 7.1 功能说明
-系统支持将每日情绪分析报告自动发布到微信公众号，方便移动端查看
-
-#### 7.2 发布内容
-- **市场情绪概览**: 综合评分、情绪级别、操作策略
-- **热点概念排行**: 主线概念列表及关键指标
-- **首板突破**: 次日可关注的首板标的
-- **龙头候选池**: 当前观察中的龙头标的
-- **龙头走弱池**: 近期走弱的龙头及观察信号
-
-#### 7.3 配置方法
-编辑 `config/settings.py`:
-```python
-WECHAT_CONFIG = {
-    'enabled': True,
-    'app_id': '你的公众号AppID',
-    'app_secret': '你的公众号AppSecret',
-    'preview_wx': '预览微信号',
-    'auto_publish': False  # True=自动发布, False=仅生成草稿
-}
-```
-
-#### 7.4 使用方式
-```bash
-# 预览模式（发送给指定微信号预览）
-python scripts/publish_to_wechat.py --preview
-
-# 正式发布（群发给所有粉丝）
-python scripts/publish_to_wechat.py --publish
-
-# 指定日期报告
-python scripts/publish_to_wechat.py --date 20260424 --preview
-```
-
-#### 7.5 注意事项
-- 需要公众号认证才能使用群发接口
-- 订阅号每天可群发1次，服务号每月可群发4次
-- 首次使用需要配置JS接口安全域名和IP白名单
-
----
-
-### 8. 散户决策支持 (Retail Trader Support)
-- **隔夜预判**: 基于当日数据推演次日市场剧本
-- **三阶过滤**: 大盘环境 → 板块强度 → 个股质量
-- **散户特供指标**: 昨日涨停溢价率、一字板占比、策略建议
-- **决策清单**: 持仓处理、目标买入、风险规避
-
-### 7. 可视化报告 (Reporting)
-- **Excel多Sheet报表**:
-  - Dashboard: 市场情绪、主线Top5、涨停梯队
-  - 板块轮动分析: 概念评分、信号类型、共振得分
-  - 涨停梯队: 按连板高度分组
-  - 模式信号: 交易机会列表
-  - 情绪周期: 五阶段判断和策略建议
-- **Markdown分析报告**: 市场主线分析报告
-
-## 🛠️ 安装与配置
+## 🛠 安装与配置
 
 ### 步骤1: 安装依赖
 ```bash
 cd a_stock_sentiment_system
 pip install -r requirements.txt
+```
+
+Web 看板额外依赖:
+```bash
+pip install fastapi uvicorn jinja2 python-multipart
 ```
 
 ### 步骤2: 配置API Token
@@ -275,87 +146,144 @@ pip install -r requirements.txt
 TUSHARE_TOKEN = "你的tushare_token_here"
 ```
 
-### 步骤3: 准备行业映射
-系统使用 `data/Industry_Mapping.csv` 作为东财行业映射源，格式如下：
-```csv
-一级行业,二级行业,三级行业
-电力设备,光伏设备,光伏组件
-电力设备,光伏设备,光伏辅材
-...
+### 步骤3: 配置大模型（可选）
+在项目根目录创建 `.env`:
+```bash
+# 阿里云通义千问（推荐，支持嵌入+对话）
+DASHSCOPE_API_KEY = sk-xxxx
+
+# 或者 DeepSeek
+DEEPSEEK_API_KEY = sk-xxxx
 ```
 
-## 🚀 使用方式
+## 🚀 常用命令
 
-### 每日分析（收盘后）
+### 日常运行
+
 ```bash
+# 当日收盘分析（默认今天）
 python main.py
+
+# 指定日期分析
+python main.py --date 20260528
+
+# 定时任务调度（每日15:40自动执行）
+python scheduler.py
 ```
 
-### 指定日期分析
+### Web 看板
+
 ```bash
-python main.py --date 20260417
+# 启动 Web 看板（默认 http://127.0.0.1:8000）
+python run_web.py
+
+# 自定义端口
+python run_web.py --port 9000
+
+# 开发模式（热重载）
+python run_web.py --reload
 ```
 
-### 模块测试
+### 回测
+
 ```bash
-# 测试情绪周期引擎
+# 运行策略回测
+python run_backtest.py
+```
+
+### 知识库
+
+```bash
+# 构建胜率矩阵
+python scripts/build_winrate.py
+
+# 灌入历史快照到知识库
+python -c "from kb.ingest import ingest_all; ingest_all()"
+```
+
+### 报告与发布
+
+```bash
+# 生成最终报告
+python scripts/generate_final_report.py
+
+# 发布到微信公众号
+python scripts/publish_to_wechat.py --preview
+python scripts/publish_to_wechat.py --publish
+python scripts/publish_to_wechat.py --date 20260528 --preview
+
+# 重建快照 section
+python scripts/rebuild_snapshot_sections.py
+```
+
+### 工具与检查
+
+```bash
+# 查看回测交易记录
+python check_trades.py
+
+# 因子结果回填
+python scripts/backfill_factor_results.py
+
+# 更新交易日历
+python scripts/update_trade_calendar.py
+```
+
+### 模块单独测试
+
+```bash
+# 情绪周期引擎
 python core/analysis/emotion_cycle_engine.py
 
-# 测试板块轮动追踪器
-python core/analysis/sector_rotation_tracker.py
+# 板块轮动追踪器
+python core/analysis/sector_analysis_orchestrator.py
 
-# 测试概念-行业交叉验证
+# 概念-行业交叉验证
 python core/analysis/concept_industry_validator.py
+
+# LHB（龙虎榜）分析
+python core/analysis/lhb_analyzer.py
+
+# 筹码结构分析
+python core/analysis/chip_structure_analyzer.py
 ```
 
-### 定时任务（每日15:40自动运行）
+### 代码检查
+
 ```bash
-python scheduler.py
+# 语法编译检查
+python -m py_compile core/pattern/dragon_second_wave.py
+python -m py_compile core/pattern/weak_to_strong.py
+python -m py_compile core/pattern/second_board_dragon.py
+python -m py_compile core/pattern/pattern_recognition.py
+
+# Ruff Lint（需安装 ruff）
+ruff check core main.py
+
+# Ruff 格式化
+ruff format core main.py
 ```
 
 ## 📊 输出文件
 
-### 主系统输出
-- `output/短线情绪分析报告_YYYYMMDD_HHMMSS.xlsx` - 每日情绪分析报告
-  - **市场概览**: 涨停家数、跌停家数、炸板率、昨日涨停溢价、最高连板高度、情绪周期、建议仓位、操作策略
-  - **热点概念**: 概念名称、当日排名、10日进前10/5/3次数、连续前10天、是否主线、涨停数量、综合评分、所处阶段
-  - **首板突破**: 股票代码、名称、所属行业、涨停时间、封单强度、买点、止损、止盈、仓位、描述
-  - **二板定龙**: 二连板标的详细信息
-  - **弱转强**: 昨日弱势今日转强的标的
-  - **龙二波**: 龙头二波机会标的
-  - **涨停梯队**: 按连板高度分组的涨停股票
-  - **龙头池**: 当前观察中的龙头候选
-  - **走弱池**: 已确认走弱等待转强的龙头
-
-### 微信公众号HTML报告
-- `output/公众号报告_YYYYMMDD.html` - 适配微信公众号的HTML格式报告
-
-### 历史报告
-- `output/A股情绪分析报告_YYYYMMDD_HHMMSS.xlsx` - 旧版报告格式（兼容）
-
-### 散户决策支持报告
-- `output/散户决策报告_YYYYMMDD.txt` - 隔夜预判、三阶过滤、剧本推演
-
-### 交易计划
-- `output/交易计划_YYYYMMDD.xlsx` - 次日可执行的交易计划
+| 文件 | 说明 |
+|------|------|
+| `output/短线情绪分析报告_YYYYMMDD_HHMMSS.xlsx` | 每日情绪分析报告（多Sheet） |
+| `output/交易计划_YYYYMMDD.xlsx` | 次日可执行的交易计划 |
+| `output/散户决策报告_YYYYMMDD.txt` | 隔夜预判、三阶过滤、剧本推演 |
+| `webdata/snapshots/YYYYMMDD.json` | 结构化快照（Web看板消费） |
+| `webdata/app.sqlite` | 结构化索引DB |
+| `webdata/kb.sqlite` | 知识库块存储 |
+| `dragon_pools.json` | 龙头池状态持久化 |
 
 ## 🧠 交易逻辑整合
-
-### 数据流程 (15:40)
-1. 采集涨停池、跌停池、连板天梯数据
-2. 获取同花顺概念板块统计数据(limit_cpt_list)
-3. 情绪周期分析 → 判断市场阶段
-4. 板块轮动分析 → 识别热点概念
-5. 概念-行业交叉验证 → 筛选有产业支撑的热点
-6. 模式识别 → 发现交易机会
-7. 生成交易计划 → 次日执行
 
 ### 决策流程
 1. **看情绪**: 当前处于什么周期？冰点/回暖/上升/高潮/退潮？
 2. **看板块**: 哪些概念板块评分高？信号类型是共振还是背离？
 3. **看验证**: 概念热度是否有行业支撑？集中度如何？
-4. **盯模式**: 在这些板块中，谁是"首板突破"？谁是"二板定龙"？
-5. **定计划**: 根据情绪周期确定仓位，根据信号强度确定标的
+4. **盯模式**: 在这些板块中，谁是"首板突破"？谁是"弱转强"？
+5. **定计划**: 根据情绪周期确定仓位，根据信号优先级确定标的
 
 ### 仓位管理
 | 情绪周期 | 建议仓位 | 禁忌操作 |
@@ -374,139 +302,113 @@ python scheduler.py
 
 ```
 a_stock_sentiment_system/
-├── config/
-│   ├── __init__.py
-│   └── settings.py              # 配置参数(Tushare Token、微信公众号等)
+├── config/                          # 配置层
+│   ├── settings.py                  # 主配置（Tushare Token、路径、大模型API）
+│   ├── emotion_cycle_config.yaml    # 情绪周期参数
+│   ├── sector_tracker_config.yaml   # 板块追踪参数
+│   ├── risk_control.yaml            # 风控参数
+│   └── factors/                     # 因子配置
 ├── core/
-│   ├── __init__.py
-│   ├── analysis/                # 分析引擎
-│   │   ├── emotion_cycle_engine.py      # 情绪周期识别引擎
-│   │   ├── sector_rotation_tracker.py   # 板块轮动追踪器V2
-│   │   ├── concept_industry_validator.py # 概念-行业交叉验证
-│   │   └── pattern_recognition.py       # 模式识别整合
-│   ├── data/                    # 数据层
-│   │   ├── data_manager.py      # 数据获取与缓存管理
-│   │   └── industry_mapper.py   # 行业映射(东财+同花顺)
-│   ├── pattern/                 # 模式识别
-│   │   ├── first_board_breakout.py      # 首板突破
-│   │   ├── second_board_dragon.py       # 二板定龙
-│   │   ├── weak_to_strong.py            # 弱转强（含龙头池管理）
-│   │   ├── divergence_to_consensus.py   # 分歧转一致
-│   │   ├── position_battle.py           # 卡位板
-│   │   ├── dragon_second_wave.py        # 龙头二波
-│   │   └── blast_reseal.py              # 炸板回封
-│   ├── execution/               # 执行层
-│   │   ├── execution_engine.py          # 交易执行引擎
+│   ├── analysis/                    # 分析引擎
+│   │   ├── emotion_cycle_engine.py   # 情绪周期识别引擎
+│   │   ├── emotion_cycle_ml.py       # ML增强情绪分类
+│   │   ├── sector_analysis_orchestrator.py  # 板块轮动编排器
+│   │   ├── concept_industry_validator.py    # 概念-行业交叉验证
+│   │   ├── lhb_analyzer.py           # 龙虎榜分析
+│   │   ├── chip_structure_analyzer.py # 筹码结构分析
+│   │   ├── moneyflow_analyzer.py     # 资金流分析
+│   │   └── ...
+│   ├── data/                        # 数据层
+│   │   ├── data_manager_main.py      # DataManager 入口（多继承集成）
+│   │   ├── data_manager_stock.py     # 个股数据（日线/分时/竞价）
+│   │   ├── data_manager_market.py    # 市场数据（daily_basic/指数）
+│   │   ├── data_manager_sector.py    # 板块数据（同花顺ths_index/ths_member）
+│   │   ├── data_manager_moneyflow.py # 资金流数据
+│   │   └── industry_mapper.py        # 行业映射（东财+同花顺）
+│   ├── pipeline/                    # 五层流水线
+│   │   ├── review_pipeline.py        # 流水线编排器
+│   │   ├── layer1_market_env.py      # 看大盘·定仓位
+│   │   ├── layer2_sector_analysis.py # 看板块·定方向
+│   │   ├── layer3_stock_selection.py # 看个股·定标的
+│   │   ├── layer4_trade_plan.py      # 定计划·定执行
+│   │   └── layer5_review.py          # 盘后总结
+│   ├── pattern/                     # 模式识别策略
+│   │   ├── pattern_recognition.py    # 聚合策略调度
+│   │   ├── first_board_breakout.py   # 首板突破
+│   │   ├── second_board_dragon.py    # 二板定龙
+│   │   ├── weak_to_strong.py         # 弱转强（含龙头池管理）
+│   │   ├── dragon_second_wave.py     # 龙二波
+│   │   ├── signal_priority.py        # 信号优先级与互斥
+│   │   └── base.py                   # 统一契约与注册中心
+│   ├── execution/                   # 执行层
 │   │   └── retail_trader_support_v2.py  # 散户决策支持V2
-│   ├── report/                  # 报告层
-│   │   ├── report_generator.py          # 报告生成器（旧版）
-│   │   └── report_generator_v2.py       # 报告生成器V2（含龙头池）
-│   ├── publish/                 # 发布层
-│   │   ├── wechat_publisher.py          # 微信公众号发布
-│   │   └── report_formatter.py          # 报告格式化（HTML）
-│   └── utils/                   # 工具类
-│       ├── date_utils.py        # 日期工具
-│       ├── stock_code_utils.py  # 股票代码工具
-│       ├── time_utils.py        # 时间工具
-│       ├── calculation_utils.py # 计算工具
-│       ├── validation_utils.py  # 验证工具
-│       └── data_updater.py      # 数据更新工具
-├── data/
-│   ├── raw/                     # 原始数据按日期存储
-│   ├── cache/                   # 缓存文件
-│   └── Industry_Mapping.csv     # 东财行业映射表
-├── output/                      # 生成报告
-├── scripts/
-│   └── publish_to_wechat.py     # 微信公众号发布脚本
-├── examples/
-│   └── demo_usage.py            # 使用示例
-├── scheduler.py                 # 定时任务调度
-├── main.py                      # 主程序入口
-└── requirements.txt             # 依赖列表
+│   ├── report/                      # 报告层
+│   │   └── report_generator_v2.py   # 报告生成器V2
+│   ├── publish/                     # 发布层
+│   │   ├── wechat_publisher.py      # 微信公众号发布
+│   │   └── report_formatter.py      # 报告格式化（HTML）
+│   ├── stock_ranking/               # 多因子排序
+│   │   ├── multi_factor_scorer.py   # 多因子评分
+│   │   └── sector_position.py       # 板块席位
+│   └── utils/                       # 工具类
+├── backtest/                        # 回测框架
+│   ├── backtest_engine.py            # 回测引擎
+│   ├── replay_engine.py              # 行情回放引擎
+│   ├── performance_analyzer.py       # 绩效分析
+│   └── walk_forward.py               # 滚动窗口优化
+├── risk/                            # 风控模块
+│   ├── risk_manager.py              # 风控管理器
+│   ├── position_sizer.py            # 仓位计算
+│   ├── kelly_sizer.py               # 凯利公式
+│   └── circuit_breaker.py           # 回撤熔断
+├── snapshot/                        # 快照层 (P0)
+│   ├── writer.py                     # 快照写入
+│   ├── reader.py                     # 快照读取
+│   └── serialize.py                  # 序列化工具
+├── kb/                              # 知识库层 (P2-P3)
+│   ├── store.py                      # SQLite块存储
+│   ├── chunker.py                    # 文本分块
+│   ├── embeddings.py                 # 向量嵌入
+│   ├── retriever.py                  # 混合检索
+│   ├── ingest.py                     # 快照灌库
+│   ├── llm_client.py                 # LLM客户端
+│   ├── brief.py                      # AI每日解读
+│   └── tools.py                      # 定量查询工具
+├── web/                             # Web看板 (P1)
+│   ├── app.py                        # FastAPI应用
+│   ├── templates/                    # Jinja2模板
+│   └── static/                       # 静态资源
+├── scripts/                         # 辅助脚本
+│   ├── build_winrate.py             # 构建胜率矩阵
+│   ├── generate_final_report.py     # 生成最终报告
+│   └── publish_to_wechat.py         # 微信公众号发布
+├── webdata/                         # Web/KB数据存储
+│   ├── snapshots/                    # 每日JSON快照
+│   ├── app.sqlite                    # 结构化索引
+│   └── kb.sqlite                     # 知识库
+├── main.py                          # 主程序入口
+├── run_web.py                       # Web服务入口
+├── run_backtest.py                  # 回测入口
+├── scheduler.py                     # 定时任务调度
+└── requirements.txt                 # 依赖列表
 ```
-
-## 🔧 核心模块说明
-
-### emotion_cycle_engine.py
-- **五阶段识别**: 冰点期、回暖期、上升期、高潮期、退潮期
-- **多维度数据**: 涨停家数、跌停家数、炸板率、昨日涨停溢价率
-- **动态策略生成**: 根据周期自动调整仓位和禁忌操作
-- **情绪拐点预警**: 识别周期切换信号
-
-### sector_rotation_tracker.py
-- **多因子模型**: 强度、资金、趋势、分化四大因子
-- **动态权重**: 根据市场周期自动调整因子权重
-- **板块生命周期**: 萌芽期、加速期、高潮期、衰退期
-- **主线概念识别**: 10日进前10次数、连续前10天数
-
-### concept_industry_validator.py
-- **双轨验证**: 概念维度 + 行业维度
-- **共振识别**: 概念热 + 行业热 = 强信号
-- **背离预警**: 概念热 + 行业冷 = 谨慎
-- **集中度分析**: 识别真正龙头板块
-
-### weak_to_strong.py
-- **龙头池管理**: 动态维护龙头候选池和走弱池
-- **趋势龙头识别**: 10日涨幅≥40%，至少2个涨停
-- **连板龙头识别**: 连板高度≥4板
-- **走弱检测**: 烂板、断板、尾盘板、趋势回调
-- **转强监控**: 持续跟踪走弱池，监控转强信号
-- **数据持久化**: JSON格式保存池子状态
-
-### data_manager.py
-- **Tushare接口**: 涨停池、跌停池、连板天梯、概念板块
-- **同花顺接口**: ths_index(板块指数)、ths_daily(行情)、ths_member(成分)
-- **智能缓存**: 自动避免重复API调用
-- **交易日处理**: 非交易日自动关联最近交易日
-
-### industry_mapper.py
-- **东财映射**: L1(一级) → L2(二级) → L3(三级) → 个股
-- **同花顺映射**: 概念指数 → 成分股
-- **双向查询**: 支持名称和代码互查
-
-### wechat_publisher.py
-- **AccessToken管理**: 自动获取和缓存
-- **素材上传**: 封面图片上传到微信素材库
-- **草稿管理**: 创建、预览、发布草稿
-- **群发功能**: 正式发布到公众号
 
 ## 📈 数据流程
 
 ```
 1. 数据采集 (Tushare/AkShare)
    ↓
-2. 情绪周期分析 (EmotionCycleEngine)
+2. 情绪周期分析 (Layer 1)
    ↓
-3. 板块轮动分析 (SectorRotationTracker)
+3. 板块轮动分析 (Layer 2)
    ↓
-4. 概念-行业验证 (ConceptIndustryValidator)
+4. 个股筛选 + 模式识别 (Layer 3)
    ↓
-5. 模式识别 (Pattern Recognition)
+5. 交易计划生成 (Layer 4)
    ↓
-6. 散户决策支持 (RetailTraderSupport)
+6. 盘后总结 (Layer 5)
    ↓
-7. 报告生成 (Excel + Markdown)
+7. 报告生成 (Excel + 快照JSON + Web看板)
+   ↓
+8. [可选] 知识库灌入 + AI解读
 ```
-
-## 🔥 最新更新
-
-### 2026-04-18 V2.0 重大更新
-- ✅ 新增情绪周期识别引擎(EmotionCycleEngine)
-- ✅ 板块轮动追踪器升级为V2多因子动态权重模型
-- ✅ 新增概念-行业交叉验证功能
-- ✅ 新增同花顺板块数据接口(ths_index/ths_daily/ths_member)
-- ✅ 重构行业映射，分离东财和同花双体系
-- ✅ 新增散户决策支持V2(隔夜预判、三阶过滤)
-- ✅ 工具类封装为Class，简化导入
-- ✅ 删除冗余代码(sentiment_engine.py, sector_heat_v2.py)
-
-### 2026-04-17
-- ✅ 新增涨停池数据获取(limit_up_pool/limit_down_pool)
-- ✅ 新增连板天梯接口(limit_step)
-- ✅ 新增最强板块统计(limit_cpt_list)
-- ✅ 优化日期工具，修复非交易日处理逻辑
-- ✅ 新增股票代码标准化工具
-
-## 📞 联系方式
-
-如有问题或建议，欢迎提出Issue或PR。
