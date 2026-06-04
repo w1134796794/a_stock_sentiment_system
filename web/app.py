@@ -82,6 +82,47 @@ def _load_winrate() -> Optional[Dict]:
     return None
 
 
+@app.get("/config", response_class=HTMLResponse)
+def config_page(request: Request) -> Any:
+    """参数配置页：把全系统可调参数开放到网页编辑。"""
+    from config.config_registry import build_registry
+
+    return templates.TemplateResponse(
+        request,
+        "config.html",
+        {"registry": build_registry(), "dates": reader.list_dates()},
+    )
+
+
+@app.get("/api/config")
+def api_config_get() -> Any:
+    from config.config_registry import build_registry
+
+    return JSONResponse(build_registry())
+
+
+@app.post("/api/config")
+def api_config_save(payload: dict = Body(...)) -> Any:
+    """保存一批参数改动。body: {updates: [{scope, path, value}, ...]}"""
+    from config.config_registry import apply_updates
+
+    updates = (payload or {}).get("updates", [])
+    if not isinstance(updates, list):
+        return JSONResponse({"error": "updates 必须是数组"}, status_code=400)
+    result = apply_updates(updates)
+    return JSONResponse(result)
+
+
+@app.post("/api/config/reset")
+def api_config_reset(payload: dict = Body(default={})) -> Any:
+    """重置参数。body: {scope?, path?}；都不传则清空全部覆盖。"""
+    from config.config_registry import reset
+
+    scope = (payload or {}).get("scope")
+    path = (payload or {}).get("path")
+    return JSONResponse(reset(scope=scope, path=path))
+
+
 @app.get("/report/{date}/section/{idx}", response_class=HTMLResponse)
 def section_fragment(request: Request, date: str, idx: int) -> Any:
     """HTMX 片段：返回某个 section 的表格 HTML。"""

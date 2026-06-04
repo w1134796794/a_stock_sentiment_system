@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # 使用新版同花顺板块追踪器
 from core.analysis.ths_sector_tracker import THSSectorTracker as SectorRotationTracker
+from config.pattern_params import get_params
 
 logger = loguru.logger
 
@@ -68,21 +69,8 @@ class HotspotFirstBoardStrategy:
         self.sector_engine = sector_engine
         self.mapper = mapper
 
-        # 基础参数
-        self.params = {
-            "max_5d_rise": 0.15,           # 近5日涨幅<15%（低位要求）
-            "max_float_cap": 100.0,        # 流通市值上限<100亿
-            "hot_sector_heat_threshold": 5,   # 板块3日涨停数>=5（确认是热点）
-            "fast_limit_max_time": "0940",    # 早盘秒封最长时间（9:40）
-            "max_break_count": 1,          # 开板次数≤1
-            "min_sector_limit_up": 2,      # 板块涨停≥2家（避免独狼板）
-            "skip_tail_board_time": "14:30", # 尾盘板时间（14:30后放弃）
-            "volume_max_ratio": 3.0,       # 量能上限<300%
-            "volume_abs_max": 5.0,         # 绝对上限<5倍
-            "platform_days_min": 7,        # 横盘≥7天
-            "platform_days_max": 15,       # 横盘≤15天
-            "max_distance_from_high": 0.25,  # 距前高<25%
-        }
+        # 基础参数（默认值见 config/pattern_params.py，支持网页覆盖）
+        self.params = get_params("first_board_breakout")
 
     def _get_dynamic_thresholds(self, distance_from_high_pct: float, breakout_type: str) -> Dict:
         """

@@ -312,3 +312,16 @@ LOG_CONFIG = {
     "rotation": "1 day",
     "retention": "30 days",
 }
+
+# ============================================
+# 运行期覆盖（Web 可编辑）
+# 必须在所有默认定义之后套用：把 webdata/config_overrides.json 的 settings 作用域
+# 覆盖到本模块的全局常量上。首次套用会快照默认值以支持精确重置。
+# 仅依赖标准库，失败时静默回退（绝不破坏既有运行）。
+# ============================================
+try:
+    from config.overrides import apply_settings_overrides as _apply_settings_overrides
+
+    _apply_settings_overrides(globals())
+except Exception:  # pragma: no cover
+    pass

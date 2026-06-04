@@ -35,6 +35,7 @@ from core.utils import (
     DataFrameFieldMapper,
     StockCodeUtils,
 )
+from config.pattern_params import get_params
 
 logger = loguru.logger
 
@@ -231,45 +232,8 @@ class WeakToStrongStrategy:
         # 转强信号池：当日发现的转强信号
         self.recovery_signals: List[RecoverySignal] = []
         
-        # ========== 参数配置 - 优化版本（支持动态调整）==========
-        self.params = {
-            # 龙头识别标准 - 基础阈值（优化版：适当放宽以增加候选）
-            "min_board_height": 3,           # 连板龙头：最少3连板（原4）
-            "min_total_rise": 0.30,          # 趋势龙头：近10日涨幅>=30%（原40%）
-            "min_limit_up_count": 2,         # 趋势龙头：期间至少2个涨停
-            "max_limit_up_gap": 2,           # 趋势龙头：涨停间隔不超过2天
-            "min_slope_daily": 0.015,        # 趋势龙头：日均斜率>=1.5%（原3%，约10日16%涨幅）
-            "min_r_squared": 0.30,           # 趋势龙头：R²>=0.3（原0.5，允许适度波动）
-            "min_board_height_for_space": 5,  # 空间龙头：至少5连板后回撤
-            
-            # 走弱确认标准
-            "weakening_types": ["烂板", "断板", "尾盘板", "放量滞涨", "趋势回调"],
-            "max_drawdown_for_recovery": 0.20,  # 最大允许回调20%（防A杀，原15%）
-            "max_monitor_days": 7,              # 最多观察7天（原5天，给更多时间）
-            
-            # 转强信号标准 - 基础阈值（支持动态调整）
-            "min_gap": 0.03,                 # 高开>3%
-            "ideal_gap": 0.05,               # 理想高开5%
-            "max_gap": 0.08,                 # 高开<8%（避免追高）
-            "min_auction_vol_ratio": 0.10,   # 竞价量>10%
-            "ideal_auction_vol_ratio": 0.15, # 理想竞价量15%
-            "min_auction_amount": 5000000,   # 竞价金额>500万
-            
-            # 确认标准
-            "max_open_drop": 0.02,           # 开盘回踩<2%
-            "max_time_to_limit": 15,         # 15分钟内涨停
-            
-            # 新增：弹性评分系统参数
-            "enable_flexible_scoring": True,  # 启用弹性评分
-            "market_sentiment_weight": 0.3,   # 市场情绪权重
-            "sector_strength_weight": 0.3,    # 板块强度权重
-            "stock_momentum_weight": 0.4,     # 个股动量权重
-            
-            # 新增：动态参数调整
-            "dynamic_params_enabled": True,   # 启用动态参数
-            "sentiment_bullish_boost": 0.02,  # 牛市情绪下阈值降低2%
-            "sentiment_bearish_penalty": 0.02, # 熊市情绪下阈值提高2%
-        }
+        # ========== 参数配置（默认值见 config/pattern_params.py，支持网页覆盖）==========
+        self.params = get_params("weak_to_strong")
         
         # 弹性评分缓存
         self._flexible_score_cache = {}

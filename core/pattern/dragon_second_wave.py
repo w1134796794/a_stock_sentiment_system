@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from enum import Enum
 import loguru
 
+from config.pattern_params import get_params
+
 logger = loguru.logger
 
 
@@ -39,35 +41,8 @@ class DragonSecondWaveStrategyV2:
         self.dm = data_manager
         self.se = sentiment_engine
         
-        # 时间参数（近期记忆）- 优化后放宽条件
-        self.params = {
-            "recent_days": 20,           # 放宽：15→20天，给更多蓄势时间
-            "max_adjust_days": 15,       # 放宽：10→15天，允许更久调整
-            "min_adjust_days": 2,        # 新增：第一波见顶后至少2个交易日才能算调整期
-            "max_break_days": 2,         # 新增：允许断板2天（原为1天）
-            "min_adjust_depth": 0.05,    # 新增：最小调整深度5%（强势调整）
-            "max_adjust_depth": 0.30,    # 放宽：25%→30%，容忍更深回调
-            "ma10_tolerance": 0.10,      # 放宽：MA10容忍度5%→10%
-            "use_ma20_fallback": True,   # 新增：MA10不行时用MA20备选
-            
-            # 第一波判断 - 双轨制（满足任一即认可）
-            "min_first_wave": 3,         # 轨道1：连板至少3板
-            "max_first_wave": 15,        # 连板上限15板
-            "min_rise_5d": 0.25,         # 轨道2：5日累计涨幅>25%
-            "min_rise_10d": 0.40,        # 轨道2：10日累计涨幅>40%
-            "min_limit_up_count": 4,     # 轨道3：10天内至少4次涨停
-
-            # Layer 2: 技术确认参数（新增）
-            "min_volume_ratio": 1.5,      # 启动量能≥1.5倍（资金记忆苏醒）
-            "min_seal_ratio": 0.02,       # 封单强度≥2%（市场认可）
-            "volume_abs_max": 5.0,        # 量能绝对上限5倍（防异常放量）
-
-            # Layer 3: 质量指标参数（新增）
-            "max_limit_up_time": "11:30", # 龙二波最晚11:30封板
-            "max_float_cap": 200.0,       # 流通市值上限200亿
-            "max_5d_rise": 0.15,          # 5日涨幅上限15%（低位启动）
-            "max_break_count": 1,         # 开板次数上限1次
-        }
+        # 时间参数（近期记忆）- 默认值见 config/pattern_params.py，支持网页覆盖
+        self.params = get_params("dragon_second_wave")
     
     def _parse_time(self, time_str: str) -> Optional[Tuple[int, int]]:
         """解析时间字符串 HH:MM 或 HH:MM:SS"""
@@ -496,9 +471,9 @@ class DragonSecondWaveStrategyV2:
         # ══════════════════════════════════════════════════════════
         layer3_fail = []
 
-        # 3a. 涨停时间
-        if not self._is_valid_limit_time(limit_up_time, self.params['max_limit_up_time']):
-            layer3_fail.append(f"涨停时间过晚({limit_up_time}>{self.params['max_limit_up_time']})")
+        # # 3a. 涨停时间
+        # if not self._is_valid_limit_time(limit_up_time, self.params['max_limit_up_time']):
+        #     layer3_fail.append(f"涨停时间过晚({limit_up_time}>{self.params['max_limit_up_time']})")
 
         # 3b. 开板次数
         if break_count > self.params['max_break_count']:
@@ -509,9 +484,9 @@ class DragonSecondWaveStrategyV2:
             layer3_fail.append(f"市值过大({float_cap:.1f}亿)")
 
         # 3d. 5日涨幅
-        if daily_data and 'rise_5d' in daily_data:
-            if daily_data['rise_5d'] >= self.params['max_5d_rise']:
-                layer3_fail.append(f"5日涨幅过高({daily_data['rise_5d']*100:.1f}%)")
+        # if daily_data and 'rise_5d' in daily_data:
+        #     if daily_data['rise_5d'] >= self.params['max_5d_rise']:
+        #         layer3_fail.append(f"5日涨幅过高({daily_data['rise_5d']*100:.1f}%)")
 
         if layer3_fail:
             logger.info(f"[龙二波-L3] ✗ {name}({code_padded}) 过滤: {'; '.join(layer3_fail)}")
@@ -1123,27 +1098,48 @@ class DragonSecondWaveStrategyV2:
             logger.warning(f"[{stock_code}] 无法计算MA10")
             return {}
 
-        # 计算调整天数：从见顶到今日涨停前一天
+        # 计算调整天数：见顶日**之后**、二波启动日**之前**的交易日数。
+        # 见顶日(peak)是第一波的封板日（顶），二波启动日(today)是再次涨停日，
+        # 二者都不属于"调整期"，必须同时排除。
+        # 例：20260528涨停(peak) → 20260529收阴(调整) → 20260601再涨停(today)，
+        #     调整窗口仅含 20260529，故调整天数=1（而非把 peak 一起算成 2）。
         if 'trade_date' in hist.columns:
             today_dt_ts = pd.Timestamp(today)
-            # 排除today这一天（因为是二波启动日）
-            adjust_days_data = adjust_hist[adjust_hist['trade_date'] < today_dt_ts]
-            adjust_days = len(adjust_days_data)
-            
-            # 找到最低点的日期，计算下跌阶段天数
-            try:
-                lowest_idx = adjust_hist['low'].idxmin()
-                lowest_date = adjust_hist.loc[lowest_idx, 'trade_date']
-                decline_days_data = adjust_hist[adjust_hist['trade_date'] <= lowest_date]
-                decline_days = len(decline_days_data)
-            except Exception:
-                decline_days = max(1, adjust_days // 2)
-            
-            # 震荡天数 = 总调整天数 - 下跌天数
+            adjust_window = adjust_hist[
+                (adjust_hist['trade_date'] > peak_dt_ts)
+                & (adjust_hist['trade_date'] < today_dt_ts)
+            ]
+            adjust_days = len(adjust_window)
+
+            # 下跌 / 震荡天数：按调整窗口内每日**真实涨跌**统计，而非"到最低点为止
+            # 的全部交易日"。下跌天 = 当日 pct_chg < 0（真实收跌）；震荡天 = pct_chg >= 0
+            # （横盘或反弹）。如此 下跌天数 + 震荡天数 == 调整天数，且如实反映每天涨跌。
+            daily_changes: List[float] = []
+            if adjust_days > 0:
+                if 'pct_chg' in adjust_window.columns:
+                    for x in adjust_window['pct_chg'].tolist():
+                        if x is not None and not pd.isna(x):
+                            daily_changes.append(float(x))
+                else:
+                    # 无 pct_chg 列时用收盘价环比近似（见顶日收盘作为首个调整日的基准）
+                    ah = adjust_hist.sort_values('trade_date')
+                    closes = ah['close'].tolist()
+                    dates = ah['trade_date'].tolist()
+                    for i in range(1, len(closes)):
+                        d = dates[i]
+                        if peak_dt_ts < d < today_dt_ts:
+                            try:
+                                daily_changes.append(float(closes[i]) - float(closes[i - 1]))
+                            except (TypeError, ValueError):
+                                pass
+            decline_days = sum(1 for c in daily_changes if c < 0)
+
+            # 震荡天数 = 总调整天数 - 真实下跌天数
             consolidation_days = max(0, adjust_days - decline_days)
         else:
-            adjust_days = len(adjust_hist) - 1 if len(adjust_hist) > 1 else len(adjust_hist)
-            decline_days = max(1, adjust_days // 2)
+            # 无 trade_date 列时的近似：行数减去 peak 当天
+            adjust_days = max(0, len(adjust_hist) - 1)
+            decline_days = max(1, adjust_days // 2) if adjust_days else 0
             consolidation_days = max(0, adjust_days - decline_days)
 
         return {
