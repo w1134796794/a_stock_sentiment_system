@@ -96,22 +96,33 @@ class RiskConfig:
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "RiskConfig":
-        """从 YAML 加载；文件缺失或解析失败时回退默认值。"""
+        """从 YAML 加载；文件缺失或解析失败时回退默认值。
+
+        加载后再套用 webdata/config_overrides.json 的 risk 作用域覆盖（Web 可编辑），
+        优先级：Web 覆盖 > YAML 文件 > 代码默认值。
+        """
         yaml_path = Path(path) if path else _DEFAULT_YAML
+        data: Dict[str, Any] = {}
         if not yaml_path.exists():
             logger.info(f"[RiskConfig] 未找到 {yaml_path.name}，使用内置默认风控参数")
-            return cls()
-        try:
-            import yaml
+        else:
+            try:
+                import yaml
 
-            with open(yaml_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            cfg = cls.from_dict(data)
-            logger.info(f"[RiskConfig] 已加载风控配置: {yaml_path.name}")
-            return cfg
-        except Exception as e:  # pragma: no cover - 配置解析容错
-            logger.warning(f"[RiskConfig] 加载 {yaml_path} 失败，回退默认值: {e}")
-            return cls()
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                logger.info(f"[RiskConfig] 已加载风控配置: {yaml_path.name}")
+            except Exception as e:  # pragma: no cover - 配置解析容错
+                logger.warning(f"[RiskConfig] 加载 {yaml_path} 失败，回退默认值: {e}")
+                data = {}
+
+        try:
+            from config.overrides import apply_risk_overrides
+            data = apply_risk_overrides(data)
+        except Exception:  # pragma: no cover
+            pass
+
+        return cls.from_dict(data)
 
     # ------------------------------------------------------------------
     # 适配器：把统一配置投影给既有组件

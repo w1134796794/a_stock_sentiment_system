@@ -56,6 +56,15 @@ class ConfigLoader:
                 logger.warning(f"[ConfigLoader] 配置文件不存在: {filepath}")
 
         self._load_factor_configs()
+        self._apply_overrides()
+
+    def _apply_overrides(self):
+        """套用 webdata/config_overrides.json 的 yaml 作用域覆盖（就地修改 _configs）。"""
+        try:
+            from config.overrides import apply_yaml_overrides
+            apply_yaml_overrides(self._configs)
+        except Exception as e:  # pragma: no cover
+            logger.debug(f"[ConfigLoader] 套用YAML覆盖失败: {e}")
 
     def _load_factor_configs(self):
         """加载因子配置文件"""
@@ -139,9 +148,33 @@ class ConfigLoader:
             cur = cur[part]
         return cur
 
+    # 全部 YAML 配置名 -> 相对 config 目录的文件路径（供注册表读取原始默认值）
+    ALL_CONFIG_FILES: Dict[str, str] = {
+        'emotion_cycle': 'emotion_cycle_config.yaml',
+        'sector_tracker': 'sector_tracker_config.yaml',
+        'factor_registry': 'factors/factor_registry.yaml',
+        'layer1_market_env': 'factors/layer1_market_env.yaml',
+        'emotion_cycle_factors': 'factors/emotion_cycle.yaml',
+        'layer2_sector': 'factors/layer2_sector.yaml',
+        'layer3_stock_select': 'factors/layer3_stock_select.yaml',
+        'layer4_trade_plan': 'factors/layer4_trade_plan.yaml',
+    }
+
     def get_config(self, name: str) -> Dict[str, Any]:
-        """获取指定配置"""
+        """获取指定配置（已套用 Web 覆盖）"""
         return self._configs.get(name, {})
+
+    def loaded_config_names(self) -> list:
+        """返回当前已加载的配置名列表。"""
+        return list(self._configs.keys())
+
+    def pristine_config(self, name: str) -> Dict[str, Any]:
+        """读取某配置的**原始文件**内容（不含 Web 覆盖），供默认值展示/重置参考。"""
+        rel = self.ALL_CONFIG_FILES.get(name)
+        if not rel:
+            return {}
+        fp = self.config_dir / rel
+        return self._load_yaml(fp) if fp.exists() else {}
 
     # =========================================================================
     # P3-4：统一访问入口
@@ -211,6 +244,7 @@ class ConfigLoader:
                 filepath = self.config_dir / config_files[name]
                 if filepath.exists():
                     self._configs[name] = self._load_yaml(filepath)
+                    self._apply_overrides()
                     logger.info(f"[ConfigLoader] 重新加载配置: {name}")
         else:
             self._load_all_configs()
@@ -469,4 +503,3 @@ def get_layer_factor_config(layer: str) -> Dict[str, Any]:
     }
     config_name = mapping.get(layer, '')
     return config_loader.get_config(config_name) if config_name else {}
-

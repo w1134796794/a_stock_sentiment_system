@@ -10,6 +10,8 @@ from datetime import datetime
 from enum import Enum
 import loguru
 
+from config.pattern_params import get_params
+
 logger = loguru.logger
 
 
@@ -47,46 +49,9 @@ class SecondBoardDragonStrategy:
         self.sector_engine = sector_engine
         self.mode = mode
         
-        # 基础参数（新旧逻辑共用）
-        self.params = {
-            # 首板质量
-            "min_seal_ratio": 0.08,        # 封单额>流通市值8%
-            "ideal_turnover": (8, 20),     # 理想换手8-20%
-            "min_concept_heat": 3,          # 首板当日概念涨停数≥3
-            
-            # 次日态度
-            "min_gap": 0.02,                # 最低高开2%
-            "max_gap": 0.08,                # 最高高开8%
-            "min_auction_vol": 0.08,        # 竞价量>8%
-            "min_auction_amount": 5000000,  # 竞价金额>500万
-            
-            # 分时坚决
-            "max_time_to_limit": 15,        # 15分钟内涨停
-            "min_seal_growth": 0.10,        # 封单持续增加，最终>10%
-            
-            # 板块地位
-            "max_sector_second_board": 2    # 同板块最多2只二板
-        }
-        
-        # 严格模式参数（新逻辑）
-        self.strict_params = {
-            # 竞价强度
-            "min_gap": 0.05,                # 高开5%-8%
-            "max_gap": 0.08,
-            "min_auction_vol": 0.08,        # 竞价量能达首板成交量8%-15%
-            "max_auction_vol": 0.15,
-            
-            # 分时质量
-            "max_limit_up_time": "10:00",   # 10:00前封板
-            "min_turnover": 0.15,           # 实际换手>15%
-            
-            # 板块梯队
-            "min_sector_first_board": 1,    # 至少1家同板块首板助攻
-            
-            # 放弃信号阈值
-            "skip_first_board_seal": True,  # 首板一字板放弃
-            "skip_tail_board_time": "14:30", # 尾盘二板放弃
-        }
+        # 基础参数与严格模式参数（默认值见 config/pattern_params.py，支持网页覆盖）
+        self.params = get_params("second_board_dragon")
+        self.strict_params = get_params("second_board_dragon_strict")
     
     def detect_second_board_dragon(self,
                                    yesterday_zt: pd.DataFrame,      # 昨日首板池

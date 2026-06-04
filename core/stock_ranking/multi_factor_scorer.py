@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 import loguru
 
+from config.pattern_params import get_params
+
 logger = loguru.logger
 
 
@@ -75,32 +77,9 @@ class MultiFactorScorer:
     """
 
     def __init__(self):
-        # 因子权重
-        self.weights = {
-            'pattern_quality': 0.35,     # 模式质量
-            'sector_strength': 0.30,     # 板块强度
-            'stock_position': 0.20,      # 个股地位
-            'emotion_fit': 0.15,         # 情绪适配
-        }
-
-        # 情绪周期适配映射
-        self.emotion_fit_map = {
-            '冰点期': {
-                '弱转强': 90, '二板定龙': 70, '首板突破': 50, '龙二波': 40,
-            },
-            '上升期': {
-                '弱转强': 85, '二板定龙': 95, '首板突破': 80, '龙二波': 75,
-            },
-            '高潮期': {
-                '弱转强': 60, '二板定龙': 70, '首板突破': 50, '龙二波': 80,
-            },
-            '退潮期': {
-                '弱转强': 70, '二板定龙': 50, '首板突破': 30, '龙二波': 40,
-            },
-            '震荡期': {
-                '弱转强': 75, '二板定龙': 65, '首板突破': 60, '龙二波': 55,
-            },
-        }
+        # 因子权重 / 情绪周期适配映射（默认值见 config/pattern_params.py，支持网页覆盖）
+        self.weights = get_params("multi_factor_weights")
+        self.emotion_fit_map = get_params("multi_factor_emotion_fit")
 
         logger.info("[MultiFactorScorer] 初始化完成")
 

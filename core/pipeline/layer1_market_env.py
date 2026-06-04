@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from core.utils.date_utils import DateUtils
+from config.pattern_params import get_params
 import loguru
 
 logger = loguru.logger
@@ -133,44 +134,12 @@ class MarketEnvAnalyzer:
             'bj': '899050.BJ',    # 北证50
         }
 
-        # 各指数在趋势综合评分中的权重
-        self.index_trend_weights = {
-            'sh': 0.35,    # 上证权重最高
-            'sz': 0.25,    # 深证
-            'cyb': 0.20,   # 创业板
-            'kcb': 0.10,   # 科创50
-            'bj': 0.10,    # 北证50
-        }
-
-        # 评分权重
-        self.weights = {
-            'trend': 0.40,       # 趋势权重
-            'volume': 0.30,      # 量能权重
-            'width': 0.30,       # 宽度权重
-        }
-
-        # 趋势判断参数
-        self.trend_params = {
-            'ma_short': 5,       # 短期均线
-            'ma_mid': 20,        # 中期均线
-            'ma_long': 60,       # 长期均线
-            'bull_threshold': 0.01,   # 多头阈值（指数在MA20上方1%）
-            'bear_threshold': -0.01,  # 空头阈值（指数在MA20下方1%）
-        }
-
-        # 量能判断参数
-        self.volume_params = {
-            'expand_ratio': 1.2,      # 放量阈值（量比>1.2）
-            'shrink_ratio': 0.8,      # 缩量阈值（量比<0.8）
-            'lookback_days': 5,       # 均量计算天数
-        }
-
-        # 市场宽度参数
-        self.width_params = {
-            'strong_threshold': 0.70,       # 强势阈值
-            'normal_threshold': 0.40,       # 正常阈值
-            'weak_threshold': 0.20,         # 弱势阈值
-        }
+        # 权重 / 趋势 / 量能 / 宽度参数（默认值见 config/pattern_params.py，支持网页覆盖）
+        self.index_trend_weights = get_params("layer1_index_trend_weights")
+        self.weights = get_params("layer1_weights")
+        self.trend_params = get_params("layer1_trend_params")
+        self.volume_params = get_params("layer1_volume_params")
+        self.width_params = get_params("layer1_width_params")
 
         logger.info("[MarketEnvAnalyzer] 初始化完成")
 
