@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}日志 · 管理控制台{% endblock %}
+{% block page_title %}日志{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">系统运行日志 logs/system.log</div>{% endblock %}
+
+{% block header_extra %}
+  <label class="text-xs text-slate-400">行数</label>
+  <select id="log-lines" class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    <option value="200">200</option>
+    <option value="500" selected>500</option>
+    <option value="1000">1000</option>
+    <option value="2000">2000</option>
+  </select>
+  <label class="flex items-center gap-1.5 text-xs text-slate-400">
+    <input id="log-auto" type="checkbox" class="accent-emerald-500"> 自动刷新
+  </label>
+  <button id="log-refresh" class="text-sm border border-slate-700 hover:border-emerald-600 text-slate-200 rounded-md px-3 py-1">刷新</button>
+{% endblock %}
+
+{% block content %}
+<section class="card border border-slate-800 rounded-xl overflow-hidden">
+  <div class="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-900/60 text-xs text-slate-500">
+    <span id="log-status">加载中…</span>
+    <label class="flex items-center gap-1.5 text-slate-400">
+      <input id="log-autoscroll" type="checkbox" class="accent-emerald-500" checked> 自动滚动到底部
+    </label>
+  </div>
+  <pre id="log-view" class="mono text-xs leading-relaxed text-slate-200 p-4 h-[68vh] overflow-auto whitespace-pre-wrap"></pre>
+</section>
+
+<script>
+(function () {
+  const view = document.getElementById('log-view');
+  const linesSel = document.getElementById('log-lines');
+  const auto = document.getElementById('log-auto');
+  const autoscroll = document.getElementById('log-autoscroll');
+  const status = document.getElementById('log-status');
+  let timer = null;
+
+  async function load() {
+    try {
+      const r = await fetch('/api/logs?lines=' + linesSel.value);
+      const d = await r.json();
+      view.textContent = d.text || '（暂无日志）';
+      status.textContent = '更新于 ' + new Date().toLocaleTimeString();
+      if (autoscroll.checked) view.scrollTop = view.scrollHeight;
+    } catch (e) {
+      status.textContent = '读取失败: ' + e;
+    }
+  }
+
+  function applyAuto() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (auto.checked) timer = setInterval(load, 3000);
+  }
+
+  document.getElementById('log-refresh').addEventListener('click', load);
+  linesSel.addEventListener('change', load);
+  auto.addEventListener('change', applyAuto);
+  load();
+})();
+</script>
+{% endblock %}

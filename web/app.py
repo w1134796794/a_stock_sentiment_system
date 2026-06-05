@@ -25,6 +25,24 @@ BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 reader = SnapshotReader(SNAPSHOT_DIR)
 
+# ----------------------------------------------------------------------
+# 数据浏览分类：把原「明日计划 · 数据浏览」里的 section 按主题拆成独立菜单。
+# signals=True 表示纳入 kind=="signals" 的策略模式 section（弱转强/二板定龙/…）。
+# 注：龙头池 / 走弱池 由专门的「龙头池」页（/dragon）承载，这里不重复。
+# ----------------------------------------------------------------------
+DATA_CATEGORIES: List[Dict[str, Any]] = [
+    {"key": "strategy", "label": "策略信号", "signals": True, "names": []},
+    {"key": "sector", "label": "板块题材", "signals": False,
+     "names": ["热点概念", "热点行业", "概念持续性", "行业持续性", "主线主题"]},
+    {"key": "limitup", "label": "涨停梯队", "signals": False,
+     "names": ["涨停梯队", "概念连板梯队"]},
+    {"key": "capital", "label": "龙虎榜资金", "signals": False,
+     "names": ["龙虎榜", "资金流向", "筹码结构"]},
+    {"key": "review", "label": "复盘统计", "signals": False,
+     "names": ["复盘总结", "周期模式胜率", "因子原始数据", "交易计划", "风控闸门"]},
+]
+_CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
+
 app = FastAPI(title="A股情绪系统 · 明日计划看板", docs_url="/api/docs")
 
 _static_dir = BASE / "static"
@@ -36,12 +54,78 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 # 页面
 # ----------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
-def index() -> Any:
+def index(request: Request) -> Any:
+    """概览页：健康检查 + 关键产物统计（管理工具首页）。"""
+    from desktop.status import overview
+
+    return templates.TemplateResponse(request, "overview.html", {"ov": overview()})
+
+
+@app.get("/report", response_class=HTMLResponse)
+def report_index() -> Any:
     latest = reader.latest()
-    if latest:
-        return RedirectResponse(url=f"/report/{latest}")
-    # 无快照：返回空状态页
-    return HTMLResponse(_empty_state_html())
+    return RedirectResponse(url=f"/report/{latest}" if latest else "/")
+
+
+@app.get("/dragon", response_class=HTMLResponse)
+def dragon_page(request: Request) -> Any:
+    """龙头池 / 走弱池浏览（直读 dragon_pools.json）。"""
+    from desktop.status import dragon_pools
+
+    return templates.TemplateResponse(request, "dragon.html", {"dp": dragon_pools()})
+
+
+@app.get("/run", response_class=HTMLResponse)
+def run_page(request: Request) -> Any:
+    """运行分析页：一键执行收盘分析并实时查看日志。"""
+    from desktop.runner import CONTROLLER
+
+    return templates.TemplateResponse(request, "run.html", {"run": CONTROLLER.status(0)})
+
+
+@app.get("/logs", response_class=HTMLResponse)
+def logs_page(request: Request) -> Any:
+    return templates.TemplateResponse(request, "logs.html", {})
+
+
+@app.get("/about", response_class=HTMLResponse)
+def about_page(request: Request) -> Any:
+    from desktop.status import overview
+
+    return templates.TemplateResponse(request, "about.html", {"ov": overview()})
+
+
+# ----------------------------------------------------------------------
+# 管理工具 JSON API（运行 / 日志 / 概览）
+# ----------------------------------------------------------------------
+@app.post("/api/run")
+def api_run(payload: dict = Body(default={})) -> Any:
+    from desktop.runner import CONTROLLER
+
+    date = (payload or {}).get("date")
+    ok, msg = CONTROLLER.start(date)
+    return JSONResponse({"started": ok, "message": msg})
+
+
+@app.get("/api/run/status")
+def api_run_status(since: int = 0) -> Any:
+    from desktop.runner import CONTROLLER
+
+    return JSONResponse(CONTROLLER.status(since))
+
+
+@app.get("/api/logs")
+def api_logs(lines: int = 500) -> Any:
+    from desktop.status import tail_log
+
+    return JSONResponse({"text": tail_log(lines)})
+
+
+@app.get("/api/overview")
+def api_overview() -> Any:
+    from desktop.status import overview
+
+    return JSONResponse(overview())
 
 
 @app.get("/report/{date}", response_class=HTMLResponse)
@@ -121,6 +205,52 @@ def api_config_reset(payload: dict = Body(default={})) -> Any:
     scope = (payload or {}).get("scope")
     path = (payload or {}).get("path")
     return JSONResponse(reset(scope=scope, path=path))
+
+
+@app.get("/data/{cat}", response_class=HTMLResponse)
+def data_index(cat: str) -> Any:
+    """数据浏览分类入口：跳转到最新交易日。"""
+    if cat not in _CATEGORY_BY_KEY:
+        return RedirectResponse(url="/")
+    latest = reader.latest()
+    return RedirectResponse(url=f"/data/{cat}/{latest}" if latest else "/")
+
+
+@app.get("/data/{cat}/{date}", response_class=HTMLResponse)
+def data_browse(request: Request, cat: str, date: str) -> Any:
+    """某分类下的 section 浏览页（复用 /report/{date}/section/{idx} 片段）。"""
+    category = _CATEGORY_BY_KEY.get(cat)
+    if category is None:
+        return HTMLResponse('<div class="p-6 text-slate-400">无此分类</div>', status_code=404)
+    snapshot = reader.load(date)
+    return templates.TemplateResponse(
+        request,
+        "data_browse.html",
+        {
+            "category": category,
+            "cat": cat,
+            "date": date,
+            "dates": reader.list_dates(),
+            "sections": (snapshot or {}).get("sections", []),
+            "snapshot": snapshot,
+        },
+    )
+
+
+@app.get("/ask", response_class=HTMLResponse)
+def ask_index(request: Request) -> Any:
+    """问 AI 入口：默认以最新交易日为上下文。"""
+    latest = reader.latest()
+    if latest:
+        return RedirectResponse(url=f"/ask/{latest}")
+    return templates.TemplateResponse(request, "ask.html", {"date": None, "dates": []})
+
+
+@app.get("/ask/{date}", response_class=HTMLResponse)
+def ask_page(request: Request, date: str) -> Any:
+    return templates.TemplateResponse(
+        request, "ask.html", {"date": date, "dates": reader.list_dates()}
+    )
 
 
 @app.get("/report/{date}/section/{idx}", response_class=HTMLResponse)
@@ -211,15 +341,3 @@ def api_chat(payload: dict = Body(...)) -> Any:
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-
-def _empty_state_html() -> str:
-    return (
-        "<html><head><meta charset='utf-8'><title>暂无数据</title>"
-        "<script src='https://cdn.tailwindcss.com'></script></head>"
-        "<body class='bg-slate-950 text-slate-200 flex items-center justify-center h-screen'>"
-        "<div class='text-center'>"
-        "<div class='text-2xl font-semibold mb-2'>暂无快照数据</div>"
-        "<div class='text-slate-400'>请先运行一次收盘分析（main.py）生成 Excel，"
-        "系统会同步落出每日快照。</div>"
-        "</div></body></html>"
-    )

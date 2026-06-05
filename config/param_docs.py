@@ -146,10 +146,7 @@ PATTERN_DESC: Dict[str, Dict[str, str]] = {
 }
 
 # settings 基础标量补充说明（源码无行内注释时的兜底）
-_SETTINGS_FALLBACK: Dict[str, str] = {
-    "TRADE_HOUR": "跑批时刻 · 小时",
-    "TRADE_MINUTE": "跑批时刻 · 分钟",
-}
+_SETTINGS_FALLBACK: Dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------

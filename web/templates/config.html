@@ -1,9 +1,7 @@
 {% extends "base.html" %}
 {% block title %}参数配置{% endblock %}
-
-{% block header_extra %}
-  <a href="/" class="text-sm text-slate-400 hover:text-emerald-300">返回报告</a>
-{% endblock %}
+{% block page_title %}参数配置中心{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">策略/打分/大盘 · 系统设置 · YAML · 风控</div>{% endblock %}
 
 {% macro render_input(f) %}
   {%- if f.type == 'bool' -%}
@@ -37,15 +35,14 @@
 
 {% block content %}
 <div class="mb-4">
-  <h1 class="text-2xl font-bold">参数配置中心</h1>
-  <p class="text-sm text-slate-400 mt-1">
+  <p class="text-sm text-slate-400">
     全系统可调参数（策略/打分/大盘、系统设置、YAML、风控）集中在此编辑。
     改动保存后写入 <span class="mono">webdata/config_overrides.json</span>，
     <span class="text-amber-300">下次跑批（main.py / scheduler）自动生效</span>；优先级：网页覆盖 &gt; 文件/代码默认值。
   </p>
 </div>
 
-<div class="sticky top-[57px] z-10 -mx-5 px-5 py-3 bg-slate-950/90 backdrop-blur border-b border-slate-800 mb-5">
+<div class="sticky top-0 z-10 -mx-6 px-6 py-3 bg-slate-950/90 backdrop-blur border-b border-slate-800 mb-5">
   <div class="flex items-center gap-3 flex-wrap">
     <input id="cfg-search" type="text" placeholder="搜索参数名 / 路径…"
            class="flex-1 min-w-[200px] bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500">

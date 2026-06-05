@@ -12,6 +12,17 @@ schedule>=1.1.0
 # 环境变量管理（.env 文件，缺失时 settings.py 会优雅降级）
 python-dotenv>=1.0.0
 
+# ===== 桌面管理工具（run_manager.py / 内嵌看板）=====
+# 内嵌的只读看板 + 配置中心仍基于 FastAPI；pywebview 提供本机原生窗口（无需浏览器）
+fastapi>=0.110.0
+uvicorn>=0.27.0
+jinja2>=3.1.0
+pywebview>=5.0
+
+# ===== 打包成 exe（可选，仅构建机需要）=====
+# 构建：python scripts/build_manager.py  （产物在 dist/）
+# pyinstaller>=6.0
+
 # ===== 开发依赖（可选，按需安装）=====
 # pytest>=7.4.0
 # pytest-mock>=3.11.0

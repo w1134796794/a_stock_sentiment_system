@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ category.label }} · {{ date }}{% endblock %}
+{% block page_title %}{{ category.label }}{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date }} · 数据浏览</div>{% endblock %}
+
+{% block header_extra %}
+  {% if dates %}
+  <label class="text-sm text-slate-400">交易日</label>
+  <select onchange="location.href='/data/{{ cat }}/'+this.value"
+          class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    {% for d in dates %}
+      <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if snapshot is none %}
+  <div class="card border border-slate-800 rounded-xl p-10 text-center">
+    <div class="text-xl font-semibold mb-1">没有找到 {{ date }} 的快照</div>
+    <div class="text-slate-400">请确认该日已运行收盘分析。</div>
+  </div>
+{% else %}
+<div class="grid grid-cols-1 md:grid-cols-[210px_1fr] gap-4">
+  <nav class="card border border-slate-800 rounded-xl p-2 h-max">
+    {% set ns = namespace(first=true, any=false) %}
+    {% for s in sections %}
+      {% if (s.name in category.names) or (category.signals and s.kind == 'signals') %}
+      {% set ns.any = true %}
+      <button
+        class="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-800/70 transition flex items-center justify-between"
+        hx-get="/report/{{ date }}/section/{{ loop.index0 }}"
+        hx-target="#section-panel" hx-swap="innerHTML"
+        {% if ns.first %}hx-trigger="load, click"{% endif %}>
+        <span>{{ s.name }}</span>
+        <span class="mono text-xs text-slate-500">{{ s.rows|length }}</span>
+      </button>
+      {% set ns.first = false %}
+      {% endif %}
+    {% endfor %}
+    {% if not ns.any %}
+      <div class="px-3 py-2 text-sm text-slate-500">该分类当日暂无数据</div>
+    {% endif %}
+  </nav>
+  <div id="section-panel" class="card border border-slate-800 rounded-xl p-4 min-h-[240px] overflow-x-auto">
+    <div class="text-slate-500 text-sm">{% if ns.any %}加载中…{% else %}选择左侧分类查看明细…{% endif %}</div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

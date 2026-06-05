@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{% block title %}明日计划看板{% endblock %}</title>
+  <title>{% block title %}管理控制台{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,22 +14,126 @@
     ::-webkit-scrollbar { height: 8px; width: 8px; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
     .card { background: linear-gradient(180deg, rgba(30,41,59,.7), rgba(15,23,42,.7)); }
+    .nav-link { display:flex; align-items:center; gap:.6rem; padding:.5rem .7rem; border-radius:.55rem;
+                color:#94a3b8; font-size:.875rem; transition:all .15s; }
+    .nav-link:hover { background:rgba(51,65,85,.5); color:#e2e8f0; }
+    .nav-link.active { background:rgba(16,185,129,.12); color:#6ee7b7; font-weight:600; }
+    .nav-link.active svg { color:#34d399; }
+    .nav-link svg { width:18px; height:18px; flex:0 0 18px; }
+    .nav-group { font-size:.66rem; letter-spacing:.08em; text-transform:uppercase;
+                 color:#475569; padding:.6rem .7rem .25rem; font-weight:600; }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
-  <header class="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/85 backdrop-blur">
-    <div class="max-w-7xl mx-auto px-5 py-3 flex items-center gap-4">
-      <a href="/" class="flex items-center gap-2 shrink-0">
-        <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-        <span class="font-bold tracking-tight">A股情绪 · 明日计划</span>
-      </a>
-      <a href="/config" class="text-sm text-slate-400 hover:text-emerald-300 shrink-0">参数配置</a>
-      <div class="flex-1"></div>
-      {% block header_extra %}{% endblock %}
+<body class="bg-slate-950 text-slate-100">
+  <div class="flex h-screen overflow-hidden">
+    {# ===== 侧边导航（Codex++ 风格） ===== #}
+    <aside class="w-56 shrink-0 border-r border-slate-800 bg-slate-950/95 flex flex-col">
+      <div class="px-4 py-4 flex items-center gap-2.5 border-b border-slate-800">
+        <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-300 font-bold">情</span>
+        <div class="leading-tight">
+          <div class="font-bold tracking-tight">A股情绪系统</div>
+          <div class="text-[11px] text-slate-500">管理控制台</div>
+        </div>
+      </div>
+      <nav class="flex-1 overflow-y-auto p-2 space-y-0.5" id="side-nav">
+        <a class="nav-link" href="/" data-prefix="/" data-exact>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>概览</span>
+        </a>
+        <a class="nav-link" href="/report" data-prefix="/report">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V9m4 8V5m4 12v-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          <span>明日计划</span>
+        </a>
+
+        <div class="nav-group">数据浏览</div>
+        <a class="nav-link" href="/data/strategy" data-prefix="/data/strategy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+          <span>策略信号</span>
+        </a>
+        <a class="nav-link" href="/data/sector" data-prefix="/data/sector">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>
+          <span>板块题材</span>
+        </a>
+        <a class="nav-link" href="/data/limitup" data-prefix="/data/limitup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>
+          <span>涨停梯队</span>
+        </a>
+        <a class="nav-link" href="/data/capital" data-prefix="/data/capital">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5a2.5 2.5 0 00-2.5-1.5c-1.4 0-2.5.8-2.5 2s1.1 1.8 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2a2.5 2.5 0 01-2.5-1.5M12 6.5v11"/></svg>
+          <span>龙虎榜资金</span>
+        </a>
+        <a class="nav-link" href="/data/review" data-prefix="/data/review">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6a1 1 0 011 1v1h-8V4a1 1 0 011-1z"/><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 11h8M8 15h5"/></svg>
+          <span>复盘统计</span>
+        </a>
+        <a class="nav-link" href="/dragon" data-prefix="/dragon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/></svg>
+          <span>龙头池</span>
+        </a>
+
+        <div class="nav-group">智能问答</div>
+        <a class="nav-link" href="/ask" data-prefix="/ask">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg>
+          <span>问 AI</span>
+        </a>
+
+        <div class="nav-group">系统</div>
+        <a class="nav-link" href="/run" data-prefix="/run">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+          <span>运行分析</span>
+        </a>
+        <a class="nav-link" href="/config" data-prefix="/config">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-2.92.67 1.65 1.65 0 01-3.16 0 1.65 1.65 0 00-2.92-.67l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <span>参数配置</span>
+        </a>
+        <a class="nav-link" href="/logs" data-prefix="/logs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+          <span>日志</span>
+        </a>
+        <a class="nav-link" href="/about" data-prefix="/about">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+          <span>关于</span>
+        </a>
+      </nav>
+      <div class="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500 flex items-center gap-2">
+        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span>本地内嵌服务 · 离线运行</span>
+      </div>
+    </aside>
+
+    {# ===== 主区域 ===== #}
+    <div class="flex-1 min-w-0 flex flex-col">
+      <header class="shrink-0 border-b border-slate-800 bg-slate-950/85 backdrop-blur">
+        <div class="px-6 py-3 flex items-center gap-4">
+          <div class="min-w-0">
+            <h1 class="text-lg font-bold tracking-tight truncate">{% block page_title %}{% endblock %}</h1>
+            {% block page_subtitle %}{% endblock %}
+          </div>
+          <div class="flex-1"></div>
+          {% block header_extra %}{% endblock %}
+          <button onclick="location.reload()" title="刷新"
+                  class="text-slate-400 hover:text-emerald-300 border border-slate-700 hover:border-emerald-600 rounded-md p-1.5">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          </button>
+        </div>
+      </header>
+      <main class="flex-1 overflow-y-auto px-6 py-5" id="main-scroll">
+        {% block content %}{% endblock %}
+      </main>
     </div>
-  </header>
-  <main class="max-w-7xl mx-auto px-5 py-6">
-    {% block content %}{% endblock %}
-  </main>
+  </div>
+
+  <script>
+    (function () {
+      const path = location.pathname;
+      document.querySelectorAll('#side-nav .nav-link').forEach(a => {
+        const prefix = a.dataset.prefix;
+        const exact = a.hasAttribute('data-exact');
+        const hit = exact ? (path === '/' ) : (path === prefix || path.startsWith(prefix + '/') || path.startsWith(prefix));
+        if (hit) a.classList.add('active');
+      });
+    })();
+  </script>
 </body>
 </html>
+
