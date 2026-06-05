@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}回撤分析{% endblock %}
+{% block page_title %}回撤分析{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">水下回撤曲线 · 最大回撤 · 回撤区间 · 最差交易</div>{% endblock %}
+
+{% block header_extra %}
+  {% if dd.runs %}
+  <label class="text-sm text-slate-400">回测批次</label>
+  <select onchange="location.href='/drawdown?run='+this.value"
+          class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    {% for r in dd.runs %}
+      <option value="{{ r.run }}" {% if r.run == dd.run %}selected{% endif %}>{{ r.label }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if not dd.exists %}
+  <div class="card border border-slate-800 rounded-xl p-10 text-center">
+    <div class="text-xl font-semibold mb-1">暂无回测结果</div>
+    <div class="text-slate-400 text-sm">请先运行回测生成净值曲线：<span class="mono">python run_backtest.py</span></div>
+    <div class="text-slate-600 text-xs mt-2">结果目录：{{ dd.results_dir }}</div>
+  </div>
+{% else %}
+
+{# ===== 回撤指标卡 ===== #}
+<section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">最大回撤</div>
+    <div class="text-xl font-bold mono text-rose-400">{{ '%.2f'|format((dd.max_drawdown or 0)*100) }}%</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">最长回撤</div>
+    <div class="text-xl font-bold mono">{{ dd.max_dd_duration }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">交易日</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">最低点</div>
+    <div class="text-base font-bold mono text-rose-300">{{ dd.trough_date or '--' }}</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">净值新高</div>
+    <div class="text-xl font-bold mono text-emerald-300">{{ dd.new_highs }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">次</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">回撤区间</div>
+    <div class="text-xl font-bold mono">{{ dd.episode_count }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">段</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">交易日数</div>
+    <div class="text-xl font-bold mono">{{ dd.nav_days }}</div>
+    <a href="/backtest?run={{ dd.run }}" class="text-[11px] text-slate-500 hover:text-emerald-300">模拟交易 →</a>
+  </div>
+</section>
+
+{# ===== 水下回撤曲线 ===== #}
+<section class="card border border-slate-800 rounded-xl p-4 mb-6">
+  <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+    <h2 class="text-base font-bold">水下回撤曲线 <span class="text-xs font-normal text-slate-500">(距前期高点的回撤幅度)</span></h2>
+    <div class="text-xs text-slate-500 mono">{{ dd.nav_start }} ~ {{ dd.nav_end }}</div>
+  </div>
+  {% if dd.dd_chart %}
+  {% set c = dd.dd_chart %}
+  <div class="relative">
+    <svg viewBox="0 0 {{ c.w }} {{ c.h }}" preserveAspectRatio="none" class="w-full" style="height:240px">
+      <defs>
+        <linearGradient id="ddfill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#fb7185" stop-opacity="0.05"/>
+          <stop offset="100%" stop-color="#fb7185" stop-opacity="0.35"/>
+        </linearGradient>
+      </defs>
+      <line x1="0" y1="{{ '%.1f'|format(c.zero_y if c.zero_y is not none else 12) }}" x2="{{ c.w }}" y2="{{ '%.1f'|format(c.zero_y if c.zero_y is not none else 12) }}" stroke="#475569" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+      <polygon points="{{ c.area }}" fill="url(#ddfill)"/>
+      <polyline points="{{ c.line }}" fill="none" stroke="#fb7185" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <div class="flex justify-between text-[11px] text-slate-500 mono mt-1">
+      <span>0%</span>
+      <span class="text-rose-400">最深 {{ '%.2f'|format(c.vmin*100) }}%</span>
+    </div>
+  </div>
+  {% else %}
+  <div class="text-slate-500 text-sm py-6">无净值数据</div>
+  {% endif %}
+</section>
+
+{# ===== 回撤区间 ===== #}
+<section class="card border border-slate-800 rounded-xl p-4 mb-6">
+  <h2 class="text-base font-bold mb-3">回撤区间 <span class="text-xs font-normal text-slate-500">(按深度排序)</span></h2>
+  {% if dd.episode_rows %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead><tr class="text-slate-400">
+        <th class="text-left font-medium px-3 py-2">起始</th>
+        <th class="text-left font-medium px-3 py-2">最低点</th>
+        <th class="text-left font-medium px-3 py-2">结束/恢复</th>
+        <th class="text-right font-medium px-3 py-2">最大回撤</th>
+        <th class="text-right font-medium px-3 py-2">持续(交易日)</th>
+      </tr></thead>
+      <tbody>
+        {% for r in dd.episode_rows %}
+        <tr class="border-t border-slate-800">
+          <td class="px-3 py-1.5 mono text-xs text-slate-200">{{ r['起始'] }}</td>
+          <td class="px-3 py-1.5 mono text-xs text-rose-300">{{ r['最低点'] }}</td>
+          <td class="px-3 py-1.5 mono text-xs text-slate-300">{{ r['结束/恢复'] }}</td>
+          <td class="px-3 py-1.5 text-right mono text-rose-400">{{ r['最大回撤'] }}</td>
+          <td class="px-3 py-1.5 text-right mono">{{ r['持续(交易日)'] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-slate-500 text-sm py-4">该批次无回撤区间（全程未跌破前高）。</div>
+  {% endif %}
+</section>
+
+{# ===== 最差交易 ===== #}
+{% if dd.worst_rows %}
+<section class="card border border-slate-800 rounded-xl p-4">
+  <h2 class="text-base font-bold mb-3">最差交易 <span class="text-xs font-normal text-slate-500">(亏损最大的前 12 笔)</span></h2>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead><tr class="text-slate-400">
+        <th class="text-left font-medium px-3 py-2">日期</th>
+        <th class="text-left font-medium px-3 py-2">名称</th>
+        <th class="text-left font-medium px-3 py-2">代码</th>
+        <th class="text-left font-medium px-3 py-2">模式</th>
+        <th class="text-right font-medium px-3 py-2">盈亏</th>
+        <th class="text-right font-medium px-3 py-2">盈亏%</th>
+        <th class="text-center font-medium px-3 py-2">止损触发</th>
+      </tr></thead>
+      <tbody>
+        {% for r in dd.worst_rows %}
+        <tr class="border-t border-slate-800">
+          <td class="px-3 py-1.5 mono text-xs text-slate-300">{{ r['日期'] }}</td>
+          <td class="px-3 py-1.5 text-slate-200">{{ r['名称'] }}</td>
+          <td class="px-3 py-1.5 mono text-xs text-slate-400">{{ r['代码'] }}</td>
+          <td class="px-3 py-1.5 text-xs text-slate-300">{{ r['模式'] }}</td>
+          <td class="px-3 py-1.5 text-right mono text-rose-400">{{ r['盈亏'] }}</td>
+          <td class="px-3 py-1.5 text-right mono text-rose-400">{{ r['盈亏%'] }}</td>
+          <td class="px-3 py-1.5 text-center text-xs text-amber-300">{{ r['止损触发'] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% endif %}
+{% endblock %}
