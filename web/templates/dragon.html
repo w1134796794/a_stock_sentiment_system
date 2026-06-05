@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}龙头池 · 管理控制台{% endblock %}
+{% block page_title %}龙头池{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">龙头候选 · 走弱观察（dragon_pools.json）</div>{% endblock %}
+
+{% block header_extra %}
+  {% if dp.update_time %}<span class="text-xs text-slate-400">更新时间 <span class="mono text-slate-300">{{ dp.update_time }}</span></span>{% endif %}
+{% endblock %}
+
+{% macro pool_table(rows, cols, empty) %}
+  {% if not rows %}
+    <div class="card border border-slate-800 rounded-xl p-8 text-center text-slate-400">{{ empty }}</div>
+  {% else %}
+  <div class="card border border-slate-800 rounded-xl overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead class="bg-slate-900/80">
+        <tr>{% for c in cols %}<th class="text-left font-medium text-slate-400 px-3 py-2 border-b border-slate-800 whitespace-nowrap">{{ c }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="hover:bg-slate-800/40">
+          {% for c in cols %}
+          <td class="px-3 py-1.5 border-b border-slate-800/50 whitespace-nowrap {% if c in ['代码','涨停数','10日涨幅'] %}mono text-xs{% endif %} text-slate-200">{{ r.get(c) if r.get(c) not in (none, '') else '--' }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+{% if not dp.exists %}
+  <div class="card border border-slate-800 rounded-xl p-10 text-center">
+    <div class="text-lg font-semibold mb-1">暂无龙头池数据</div>
+    <div class="text-slate-400 text-sm">运行一次收盘分析后会生成 <span class="mono">dragon_pools.json</span>。</div>
+    <a href="/run" class="inline-block mt-4 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">去运行</a>
+  </div>
+{% else %}
+  <section class="mb-7">
+    <h2 class="text-base font-bold mb-3 flex items-center gap-2">龙头候选池
+      <span class="text-xs font-normal text-slate-500">{{ dp.dragon_rows|length }} 只</span></h2>
+    {{ pool_table(dp.dragon_rows, ['代码','名称','类型','板块','涨停数','10日涨幅','状态','入池日'], '龙头池为空') }}
+  </section>
+  <section>
+    <h2 class="text-base font-bold mb-3 flex items-center gap-2">龙头走弱池
+      <span class="text-xs font-normal text-slate-500">{{ dp.weak_rows|length }} 只</span></h2>
+    {{ pool_table(dp.weak_rows, ['代码','名称','类型','板块','涨停数','10日涨幅','走弱类型','走弱日','状态'], '走弱池为空') }}
+  </section>
+{% endif %}
+{% endblock %}
+

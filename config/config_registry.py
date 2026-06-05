@@ -24,26 +24,14 @@ from config import overrides as ov
 # ---------------------------------------------------------------------------
 _SECRET_SUBSTR = ("token", "secret", "key", "password", "app_id", "appid", "cookie")
 _PATH_SUFFIX = ("_DIR", "_PATH", "_FILE")
-_SKIP_SETTINGS = {"BASE_DIR", "DATA_DIR", "RAW_DATA_DIR", "CACHE_DIR", "OUTPUT_DIR",
+_SKIP_SETTINGS = {"BASE_DIR", "DATA_DIR", "CACHE_DIR", "OUTPUT_DIR",
                   "WEB_DATA_DIR", "INDUSTRY_MAPPING_FILE", "TRADE_CALENDAR_FILE"}
 
 # settings 顶层分组中文标签
 _SETTINGS_LABELS = {
     "_base": "数据获取 / 基础",
-    "CORE_STOCK_FILTER": "核心标的筛选",
-    "SENTIMENT_WEIGHTS": "情绪计算权重",
-    "SECTOR_HEAT_WEIGHTS": "板块热度权重",
-    "SECTOR_HEAT_THRESHOLDS": "板块热度阈值",
-    "WEAK_TO_STRONG": "弱转强(legacy)",
-    "SECOND_BOARD_DRAGON": "二板定龙(legacy)",
-    "BLAST_RESEAL": "炸板回封(legacy)",
-    "DRAGON_SECOND_WAVE": "龙二波(legacy)",
-    "POSITION_BATTLE": "卡位板(legacy)",
-    "DRAGON_PULLBACK": "龙回头(legacy)",
-    "RETAIL_TRADER": "散户特供",
     "THS_SECTOR_CONFIG": "同花顺板块追踪",
     "WECHAT_CONFIG": "微信公众号",
-    "LOG_CONFIG": "日志",
     "LLM_CONFIG": "大模型接口",
 }
 
@@ -377,3 +365,4 @@ def _reapply_live() -> None:
         get_config_loader().reload_config()
     except Exception:
         pass
+

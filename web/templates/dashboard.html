@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block title %}明日计划 · {{ date }}{% endblock %}
+{% block page_title %}明日交易计划{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">买什么 · 什么价位 · 为什么</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
@@ -185,94 +187,25 @@
   {% endif %}
 </section>
 
-{# ===== 数据浏览（18-sheet） ===== #}
+{# ===== 数据浏览入口（已拆分到左侧菜单：策略/板块/涨停/龙虎榜/复盘） ===== #}
 <section>
   <h2 class="text-lg font-bold mb-3">数据浏览</h2>
-  <div class="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4">
-    <nav class="card border border-slate-800 rounded-xl p-2 h-max">
-      {% for s in sections %}
-      <button
-        class="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-800/70 transition flex items-center justify-between"
-        hx-get="/report/{{ date }}/section/{{ loop.index0 }}"
-        hx-target="#section-panel" hx-swap="innerHTML"
-        {% if loop.first %}hx-trigger="load, click"{% endif %}>
-        <span>{{ s.name }}</span>
-        <span class="mono text-xs text-slate-500">{{ s.rows|length }}</span>
-      </button>
-      {% else %}
-      <div class="px-3 py-2 text-sm text-slate-500">无可浏览数据</div>
-      {% endfor %}
-    </nav>
-    <div id="section-panel" class="card border border-slate-800 rounded-xl p-4 min-h-[200px] overflow-x-auto">
-      <div class="text-slate-500 text-sm">选择左侧分类查看明细…</div>
-    </div>
-  </div>
-</section>
-
-{# ===== 问 AI ===== #}
-<section class="card border border-slate-800 rounded-xl p-4 mt-8" id="ask-ai" data-date="{{ date }}">
-  <h2 class="text-lg font-bold mb-1 flex items-center gap-2">问 AI
-    <span class="text-xs font-normal text-slate-500">基于历史知识库的检索增强问答</span></h2>
-  <div class="flex flex-wrap gap-1.5 my-2 text-xs">
-    {% for q in ["今天为什么是这个仓位？", "明日重点关注哪只？为什么？", "首板突破最近出现频率如何？", "宁波中百历史上出现过几次？"] %}
-    <button class="ask-suggest px-2 py-1 rounded-full bg-slate-800/70 hover:bg-slate-700 text-slate-300">{{ q }}</button>
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+    {% for c in [
+      {"href": "/data/strategy/" ~ date, "title": "策略信号", "desc": "四大模式信号明细"},
+      {"href": "/data/sector/" ~ date, "title": "板块题材", "desc": "热点概念/行业/持续性"},
+      {"href": "/data/limitup/" ~ date, "title": "涨停梯队", "desc": "个股梯队/概念连板"},
+      {"href": "/data/capital/" ~ date, "title": "龙虎榜资金", "desc": "游资席位/资金流向"},
+      {"href": "/data/review/" ~ date, "title": "复盘统计", "desc": "胜率/复盘/因子"},
+    ] %}
+    <a href="{{ c.href }}" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
+      <div class="font-semibold text-slate-200">{{ c.title }}</div>
+      <div class="text-xs text-slate-500 mt-1">{{ c.desc }}</div>
+    </a>
     {% endfor %}
   </div>
-  <div class="flex gap-2">
-    <input id="ask-input" type="text" placeholder="问点什么，例如：今天为什么减仓？"
-           class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
-           onkeydown="if(event.key==='Enter')askAI()">
-    <button onclick="askAI()" id="ask-btn"
-            class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition">发送</button>
-  </div>
-  <div id="ask-answer" class="mt-3 text-sm text-slate-200 whitespace-pre-line leading-relaxed min-h-[1.5rem]"></div>
+  <div class="mt-3 text-xs text-slate-500">数据明细已按主题拆分，亦可从左侧菜单直接进入；问答请见左侧「问 AI」。</div>
 </section>
-
-<script>
-  document.querySelectorAll('.ask-suggest').forEach(b => b.addEventListener('click', () => {
-    document.getElementById('ask-input').value = b.textContent.trim();
-    askAI();
-  }));
-
-  async function askAI() {
-    const input = document.getElementById('ask-input');
-    const ansEl = document.getElementById('ask-answer');
-    const btn = document.getElementById('ask-btn');
-    const question = input.value.trim();
-    if (!question) return;
-    const date = document.getElementById('ask-ai').dataset.date;
-    btn.disabled = true; btn.textContent = '思考中…';
-    ansEl.textContent = '';
-    try {
-      const resp = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, date })
-      });
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split('\n\n');
-        buf = parts.pop();
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith('data:')) continue;
-          const data = line.slice(5).trim();
-          if (data === '[DONE]') continue;
-          try { ansEl.textContent += (JSON.parse(data).delta || ''); } catch (e) {}
-        }
-      }
-    } catch (e) {
-      ansEl.textContent = '请求失败：' + e;
-    } finally {
-      btn.disabled = false; btn.textContent = '发送';
-    }
-  }
-</script>
 
 {% endif %}
 {% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}关于 · 管理控制台{% endblock %}
+{% block page_title %}关于{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">版本信息与数据位置</div>{% endblock %}
+
+{% block content %}
+<section class="card border border-slate-800 rounded-xl p-5 mb-4">
+  <div class="flex items-center gap-3 mb-3">
+    <span class="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-500/15 text-emerald-300 font-bold text-lg">情</span>
+    <div>
+      <div class="font-bold text-lg">A股情绪系统 · 管理控制台</div>
+      <div class="text-xs text-slate-500">五层复盘流水线 · 桌面工具</div>
+    </div>
+  </div>
+  <p class="text-sm text-slate-300 leading-relaxed">
+    本工具把原有 Web 看板包装为本机原生窗口：双击即用、无需手动启动服务或打开浏览器。
+    内嵌服务仅监听 <span class="mono">127.0.0.1</span> 的随机端口，离线本地运行。
+  </p>
+</section>
+
+<section class="card border border-slate-800 rounded-xl p-5">
+  <h2 class="text-base font-bold mb-3">数据位置</h2>
+  <dl class="text-sm space-y-2">
+    <div class="flex gap-3"><dt class="w-28 text-slate-400 shrink-0">程序根目录</dt><dd class="mono text-slate-200 break-all">{{ ov.base_dir }}</dd></div>
+    <div class="flex gap-3"><dt class="w-28 text-slate-400 shrink-0">最新快照</dt><dd class="mono text-slate-200">{{ ov.latest or '—' }}（共 {{ ov.snapshot_count }} 天）</dd></div>
+    <div class="flex gap-3"><dt class="w-28 text-slate-400 shrink-0">龙头池</dt><dd class="mono text-slate-200">龙头 {{ ov.dragon_count }} · 走弱 {{ ov.weak_count }} · {{ ov.pool_update_time or '—' }}</dd></div>
+  </dl>
+  <div class="text-xs text-slate-500 mt-4 leading-relaxed">
+    报告输出在 <span class="mono">output/</span>；每日快照在 <span class="mono">webdata/snapshots/</span>；
+    日志在 <span class="mono">logs/system.log</span>；龙头池状态持久化在 <span class="mono">dragon_pools.json</span>。
+  </div>
+</section>
+
+<div class="text-[11px] text-slate-600 mt-6">⚠️ 本系统仅供学习研究使用，不构成投资建议。股市有风险，投资需谨慎。</div>
+{% endblock %}
