@@ -25,6 +25,18 @@ BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 reader = SnapshotReader(SNAPSHOT_DIR)
 
+
+def _money(value: Any, signed: bool = False) -> str:
+    """千分位金额格式化（Jinja 的 % 格式化不支持逗号分组，故用自定义过滤器）。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "--"
+    return f"{v:+,.0f}" if signed else f"{v:,.0f}"
+
+
+templates.env.filters["money"] = _money
+
 # ----------------------------------------------------------------------
 # 数据浏览分类：把原「明日计划 · 数据浏览」里的 section 按主题拆成独立菜单。
 # signals=True 表示纳入 kind=="signals" 的策略模式 section（弱转强/二板定龙/…）。
@@ -253,6 +265,33 @@ def ask_page(request: Request, date: str) -> Any:
     )
 
 
+@app.get("/backtest", response_class=HTMLResponse)
+def backtest_page(request: Request, run: Optional[str] = None) -> Any:
+    """模拟交易结果：汇总指标 + 净值曲线 + 逐笔交易 + 模式表现。"""
+    from desktop.backtest import backtest_overview
+
+    return templates.TemplateResponse(
+        request, "backtest.html", {"bt": backtest_overview(run)}
+    )
+
+
+@app.get("/drawdown", response_class=HTMLResponse)
+def drawdown_page(request: Request, run: Optional[str] = None) -> Any:
+    """回撤分析：水下回撤曲线 + 最大回撤 + 回撤区间 + 最差交易。"""
+    from desktop.backtest import drawdown_overview
+
+    return templates.TemplateResponse(
+        request, "drawdown.html", {"dd": drawdown_overview(run)}
+    )
+
+
+@app.get("/api/backtest/runs")
+def api_backtest_runs() -> Any:
+    from desktop.backtest import runs_meta
+
+    return JSONResponse({"runs": runs_meta()})
+
+
 @app.get("/report/{date}/section/{idx}", response_class=HTMLResponse)
 def section_fragment(request: Request, date: str, idx: int) -> Any:
     """HTMX 片段：返回某个 section 的表格 HTML。"""
@@ -340,4 +379,3 @@ def api_chat(payload: dict = Body(...)) -> Any:
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
