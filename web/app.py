@@ -292,6 +292,24 @@ def api_backtest_runs() -> Any:
     return JSONResponse({"runs": runs_meta()})
 
 
+@app.post("/api/backtest/run")
+def api_backtest_run(payload: dict = Body(default={})) -> Any:
+    """启动一次回测（重新生成净值/交易/回撤）。body: {start_date?, end_date?, initial_capital?}"""
+    from desktop.runner import BACKTEST_CONTROLLER
+
+    p = payload or {}
+    ok, msg = BACKTEST_CONTROLLER.start(
+        p.get("start_date"), p.get("end_date"), p.get("initial_capital"))
+    return JSONResponse({"started": ok, "message": msg})
+
+
+@app.get("/api/backtest/run/status")
+def api_backtest_run_status(since: int = 0) -> Any:
+    from desktop.runner import BACKTEST_CONTROLLER
+
+    return JSONResponse(BACKTEST_CONTROLLER.status(since))
+
+
 @app.get("/report/{date}/section/{idx}", response_class=HTMLResponse)
 def section_fragment(request: Request, date: str, idx: int) -> Any:
     """HTMX 片段：返回某个 section 的表格 HTML。"""
@@ -379,3 +397,4 @@ def api_chat(payload: dict = Body(...)) -> Any:
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+

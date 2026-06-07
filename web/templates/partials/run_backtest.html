@@ -1,0 +1,102 @@
+{# 可复用的「运行回测」面板：模拟交易 / 回撤分析 两页共用。
+   需要在包含前设置 runner_redirect（完成后跳转的目标，如 '/backtest' 或 '/drawdown'）。 #}
+<section class="card border border-emerald-600/20 bg-emerald-500/[0.03] rounded-xl p-4 mb-6"
+         id="bt-runner" data-redirect="{{ runner_redirect or '/backtest' }}">
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div class="min-w-0">
+      <h2 class="text-base font-bold flex items-center gap-2">运行回测
+        <span class="text-xs font-normal text-slate-500">重新计算交易与回撤（基于 output/trade_plans 历史计划）</span>
+      </h2>
+      <div id="bt-run-state" class="text-xs text-slate-500 mt-1">空闲</div>
+    </div>
+    <div class="flex items-end gap-2 flex-wrap">
+      <div>
+        <label class="block text-[11px] text-slate-500 mb-0.5">开始日期</label>
+        <input id="bt-start" type="text" placeholder="YYYYMMDD"
+               class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+      </div>
+      <div>
+        <label class="block text-[11px] text-slate-500 mb-0.5">结束日期</label>
+        <input id="bt-end" type="text" placeholder="今日"
+               class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+      </div>
+      <div>
+        <label class="block text-[11px] text-slate-500 mb-0.5">初始资金</label>
+        <input id="bt-cap" type="text" placeholder="100000"
+               class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+      </div>
+      <button id="bt-run-btn" onclick="btRun()"
+              class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition">运行回测</button>
+      <button id="bt-log-toggle" onclick="btToggleLog()"
+              class="px-3 py-1.5 rounded-lg border border-slate-700 hover:border-emerald-600 text-slate-300 text-sm transition">日志</button>
+    </div>
+  </div>
+  <pre id="bt-log" class="hidden mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs mono text-slate-300 max-h-72 overflow-auto whitespace-pre-wrap"></pre>
+  <div class="mt-2 text-[11px] text-slate-500">日期留空则默认回测最近约 90 天；首次使用请先在「运行分析」生成交易计划。</div>
+</section>
+
+<script>
+(function () {
+  const stateEl = document.getElementById('bt-run-state');
+  const logEl = document.getElementById('bt-log');
+  const btn = document.getElementById('bt-run-btn');
+  const redirect = document.getElementById('bt-runner').dataset.redirect;
+  const LABEL = { idle: '空闲', running: '运行中', done: '已完成', error: '失败' };
+  let since = 0, timer = null;
+
+  window.btToggleLog = () => logEl.classList.toggle('hidden');
+
+  function val(id) { const v = document.getElementById(id).value.trim(); return v || null; }
+  function busy(on) { btn.disabled = on; btn.textContent = on ? '运行中…' : '运行回测'; }
+
+  window.btRun = async () => {
+    busy(true);
+    logEl.classList.remove('hidden'); logEl.textContent = ''; since = 0;
+    stateEl.textContent = '启动中…';
+    const body = { start_date: val('bt-start'), end_date: val('bt-end'), initial_capital: val('bt-cap') };
+    try {
+      const r = await fetch('/api/backtest/run', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      const j = await r.json();
+      if (!j.started) { stateEl.textContent = j.message || '无法启动'; busy(false); return; }
+      poll();
+    } catch (e) { stateEl.textContent = '请求失败：' + e; busy(false); }
+  };
+
+  async function poll() {
+    try {
+      const r = await fetch('/api/backtest/run/status?since=' + since);
+      const j = await r.json();
+      if (j.lines && j.lines.length) {
+        logEl.textContent += j.lines.join('\n') + '\n';
+        logEl.scrollTop = logEl.scrollHeight;
+        since = j.next;
+      }
+      stateEl.textContent = (LABEL[j.state] || j.state) + (j.started_at ? (' · ' + j.started_at) : '');
+      if (j.state === 'running') {
+        timer = setTimeout(poll, 1000);
+      } else {
+        busy(false);
+        if (j.state === 'done') {
+          stateEl.textContent = '完成，正在刷新结果…';
+          setTimeout(() => { location.href = redirect; }, 1200);
+        }
+      }
+    } catch (e) { timer = setTimeout(poll, 1500); }
+  }
+
+  // 进入页面时若已有回测在跑，自动接管显示
+  (async () => {
+    try {
+      const r = await fetch('/api/backtest/run/status?since=0');
+      const j = await r.json();
+      if (j.state === 'running') {
+        logEl.classList.remove('hidden');
+        if (j.lines) { logEl.textContent = j.lines.join('\n') + '\n'; since = j.next; }
+        busy(true); poll();
+      }
+    } catch (e) {}
+  })();
+})();
+</script>
