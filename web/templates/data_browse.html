@@ -22,19 +22,20 @@
     <div class="text-slate-400">请确认该日已运行收盘分析。</div>
   </div>
 {% else %}
-<div class="grid grid-cols-1 md:grid-cols-[210px_1fr] gap-4">
-  <nav class="card border border-slate-800 rounded-xl p-2 h-max">
+<div class="space-y-4">
+  <nav id="data-tabs" class="card border border-slate-800 rounded-xl p-2 flex flex-wrap gap-1.5">
     {% set ns = namespace(first=true, any=false) %}
     {% for s in sections %}
       {% if (s.name in category.names) or (category.signals and s.kind == 'signals') %}
       {% set ns.any = true %}
       <button
-        class="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-800/70 transition flex items-center justify-between"
+        class="dtab {% if ns.first %}active{% endif %}"
         hx-get="/report/{{ date }}/section/{{ loop.index0 }}"
         hx-target="#section-panel" hx-swap="innerHTML"
+        onclick="setActiveTab(this)"
         {% if ns.first %}hx-trigger="load, click"{% endif %}>
         <span>{{ s.name }}</span>
-        <span class="mono text-xs text-slate-500">{{ s.rows|length }}</span>
+        <span class="dtab-count mono">{{ s.rows|length }}</span>
       </button>
       {% set ns.first = false %}
       {% endif %}
@@ -43,9 +44,27 @@
       <div class="px-3 py-2 text-sm text-slate-500">该分类当日暂无数据</div>
     {% endif %}
   </nav>
-  <div id="section-panel" class="card border border-slate-800 rounded-xl p-4 min-h-[240px] overflow-x-auto">
-    <div class="text-slate-500 text-sm">{% if ns.any %}加载中…{% else %}选择左侧分类查看明细…{% endif %}</div>
+  <div id="section-panel" class="card border border-slate-800 rounded-xl p-4 min-h-[260px] overflow-x-auto">
+    <div class="text-slate-500 text-sm">{% if ns.any %}加载中…{% else %}选择上方分类查看明细…{% endif %}</div>
   </div>
 </div>
+
+<style>
+  .dtab { display:inline-flex; align-items:center; gap:.45rem; padding:.45rem .9rem;
+          border-radius:.6rem; font-size:.875rem; color:#cbd5e1; white-space:nowrap;
+          border:1px solid transparent; transition:all .15s; cursor:pointer; }
+  .dtab:hover { background:rgba(51,65,85,.55); color:#e2e8f0; }
+  .dtab.active { background:rgba(16,185,129,.14); color:#6ee7b7; font-weight:600;
+                 border-color:rgba(16,185,129,.35); }
+  .dtab-count { font-size:.7rem; color:#64748b; background:rgba(15,23,42,.6);
+                padding:.05rem .42rem; border-radius:.4rem; line-height:1.4; }
+  .dtab.active .dtab-count { color:#34d399; background:rgba(16,185,129,.12); }
+</style>
+<script>
+  function setActiveTab(btn) {
+    document.querySelectorAll('#data-tabs .dtab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+</script>
 {% endif %}
 {% endblock %}
