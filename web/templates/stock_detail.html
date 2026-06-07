@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}个股详情 · {{ stock_name or code }}{% endblock %}
+{% block page_title %}{{ stock_name or '个股详情' }} <span class="mono text-slate-400 text-base">{{ code }}</span>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 分时 / 日K / 集合竞价</div>{% endblock %}
+
+{% block header_extra %}
+  {% if dates %}
+  <label class="text-sm text-slate-400">交易日</label>
+  <select onchange="location.href='/stock/{{ code }}?date='+this.value"
+          class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    {% for d in dates %}
+      <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+
+<div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
+  <section class="space-y-4 min-w-0">
+    <div class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="font-bold">分时走势</h2>
+          <div id="intraday-subtitle" class="text-xs text-slate-500 mt-0.5">加载中</div>
+        </div>
+        <span id="intraday-source" class="mono text-xs text-slate-500"></span>
+      </div>
+      <div id="intraday-chart" class="chart-box"></div>
+      <div id="intraday-empty" class="hidden text-sm text-slate-500 py-12 text-center">暂无分时数据</div>
+    </div>
+
+    <div class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="font-bold">日K走势</h2>
+          <div id="daily-subtitle" class="text-xs text-slate-500 mt-0.5">加载中</div>
+        </div>
+        <span class="mono text-xs text-slate-500">KLINE</span>
+      </div>
+      <div id="daily-chart" class="chart-box"></div>
+      <div id="daily-empty" class="hidden text-sm text-slate-500 py-12 text-center">暂无日K数据</div>
+    </div>
+  </section>
+
+  <aside class="space-y-4">
+    <section class="card border border-slate-800 rounded-xl p-4">
+      <h2 class="font-bold mb-3">集合竞价</h2>
+      <div class="grid grid-cols-2 gap-2 text-sm">
+        <div class="kv"><span>开盘/竞价价</span><strong id="auction-price">--</strong></div>
+        <div class="kv"><span>成交量</span><strong id="auction-volume">--</strong></div>
+        <div class="kv"><span>成交额</span><strong id="auction-amount">--</strong></div>
+        <div class="kv"><span>数据源</span><strong id="auction-source">--</strong></div>
+      </div>
+      <div id="auction-note" class="mt-3 text-xs text-slate-500"></div>
+    </section>
+
+    <section class="card border border-slate-800 rounded-xl p-4">
+      <h2 class="font-bold mb-3">策略信号</h2>
+      <div id="signal-list" class="space-y-2"></div>
+    </section>
+
+    <section class="card border border-slate-800 rounded-xl p-4">
+      <h2 class="font-bold mb-3">交易计划</h2>
+      <div id="plan-list" class="space-y-2"></div>
+    </section>
+
+    <section class="card border border-slate-800 rounded-xl p-4">
+      <h2 class="font-bold mb-3">风控闸门</h2>
+      <div id="risk-list" class="space-y-2"></div>
+    </section>
+  </aside>
+</div>
+
+<style>
+  .chart-box { width: 100%; height: 360px; }
+  .kv { background: rgba(15,23,42,.62); border: 1px solid rgba(51,65,85,.72); border-radius: .55rem; padding: .65rem .7rem; min-height: 74px; }
+  .kv span { display:block; color:#64748b; font-size:.72rem; margin-bottom:.35rem; }
+  .kv strong { display:block; color:#e2e8f0; font-family:'JetBrains Mono', monospace; font-size:1.05rem; overflow-wrap:anywhere; }
+  .mini-row { border:1px solid rgba(51,65,85,.72); border-radius:.55rem; padding:.65rem .7rem; background:rgba(15,23,42,.48); }
+  .mini-title { display:flex; justify-content:space-between; gap:.6rem; font-size:.82rem; font-weight:700; color:#e2e8f0; }
+  .mini-text { margin-top:.35rem; color:#94a3b8; font-size:.75rem; line-height:1.45; }
+</style>
+
+<script>
+  const chartTheme = {
+    layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
+    grid: {
+      vertLines: { color: 'rgba(51,65,85,.35)' },
+      horzLines: { color: 'rgba(51,65,85,.35)' },
+    },
+    rightPriceScale: { borderColor: 'rgba(51,65,85,.8)' },
+    timeScale: { borderColor: 'rgba(51,65,85,.8)', timeVisible: true },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  };
+
+  function fmtMoney(value) {
+    const n = Number(value || 0);
+    if (!n) return '--';
+    if (Math.abs(n) >= 100000000) return (n / 100000000).toFixed(2) + '亿';
+    if (Math.abs(n) >= 10000) return (n / 10000).toFixed(0) + '万';
+    return n.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+  }
+
+  function fmtNum(value) {
+    const n = Number(value || 0);
+    return n ? n.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) : '--';
+  }
+
+  function makeChart(el) {
+    const chart = LightweightCharts.createChart(el, chartTheme);
+    new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
+    return chart;
+  }
+
+  function renderMiniRows(el, rows, emptyText, render) {
+    if (!rows || rows.length === 0) {
+      el.innerHTML = `<div class="text-sm text-slate-500">${emptyText}</div>`;
+      return;
+    }
+    el.innerHTML = rows.map(render).join('');
+  }
+
+  fetch(`/api/stock/{{ code }}/chart?date={{ date or '' }}`)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('intraday-subtitle').textContent = `${data.date || '--'} · ${data.intraday.length} 个分时点`;
+      document.getElementById('daily-subtitle').textContent = `${data.daily.length} 根日K`;
+
+      if (data.intraday.length) {
+        const chart = makeChart(document.getElementById('intraday-chart'));
+        const line = chart.addLineSeries({ color: '#20e6ad', lineWidth: 2, priceLineVisible: false });
+        line.setData(data.intraday);
+        chart.timeScale().fitContent();
+      } else {
+        document.getElementById('intraday-chart').classList.add('hidden');
+        document.getElementById('intraday-empty').classList.remove('hidden');
+      }
+
+      if (data.daily.length) {
+        const chart = makeChart(document.getElementById('daily-chart'));
+        const candles = chart.addCandlestickSeries({
+          upColor: '#ef4444', downColor: '#20e6ad',
+          borderUpColor: '#ef4444', borderDownColor: '#20e6ad',
+          wickUpColor: '#ef4444', wickDownColor: '#20e6ad',
+        });
+        candles.setData(data.daily);
+        chart.timeScale().fitContent();
+      } else {
+        document.getElementById('daily-chart').classList.add('hidden');
+        document.getElementById('daily-empty').classList.remove('hidden');
+      }
+
+      const a = data.auction || {};
+      document.getElementById('auction-price').textContent = a['开盘价'] ? Number(a['开盘价']).toFixed(2) : '--';
+      document.getElementById('auction-volume').textContent = fmtNum(a['竞价成交量']);
+      document.getElementById('auction-amount').textContent = fmtMoney(a['竞价成交额']);
+      document.getElementById('auction-source').textContent = a['数据源'] || '--';
+      document.getElementById('auction-note').textContent =
+        a['数据源'] === 'daily_open_fallback'
+          ? '当前仅有日线开盘价兜底，未取得真实集合竞价成交量。'
+          : (a['价格趋势'] && a['价格趋势'].length ? `竞价序列点数：${a['价格趋势'].length}` : '');
+
+      renderMiniRows(document.getElementById('signal-list'), data.signals, '暂无策略信号', row => `
+        <div class="mini-row">
+          <div class="mini-title"><span>${row._section || row.pattern_type || '信号'}</span><span class="mono text-emerald-300">${row.confidence || '--'}</span></div>
+          <div class="mini-text">${row.description || row.key_metrics || ''}</div>
+        </div>`);
+
+      renderMiniRows(document.getElementById('plan-list'), data.plans, '暂无交易计划', row => `
+        <div class="mini-row">
+          <div class="mini-title"><span>${row['模式类型'] || '计划'}</span><span class="mono text-amber-300">${row['综合评分'] || '--'}</span></div>
+          <div class="mini-text">仓位：${row['建议仓位'] || row['仓位等级'] || '--'} · 入场：${row['入场区间'] || '--'}</div>
+          <div class="mini-text">竞价：${row['竞价条件'] || '--'} ${row['竞价区间'] || ''}</div>
+        </div>`);
+
+      renderMiniRows(document.getElementById('risk-list'), data.risk, '暂无风控记录', row => `
+        <div class="mini-row">
+          <div class="mini-title"><span>${row.action || row['风控动作'] || '风控'}</span><span class="mono">${row.final_position_pct ?? row['风控后仓位'] ?? '--'}</span></div>
+          <div class="mini-text">${row.reason_text || row['风控提示'] || ''}</div>
+        </div>`);
+    })
+    .catch(err => {
+      document.getElementById('intraday-subtitle').textContent = '加载失败';
+      document.getElementById('daily-subtitle').textContent = String(err);
+    });
+</script>
+{% endblock %}
+

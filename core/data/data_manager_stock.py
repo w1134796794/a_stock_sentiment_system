@@ -22,6 +22,36 @@ logger = loguru.logger
 class StockDataManager(DataManagerBase):
     """个股数据管理器"""
 
+    def _get_eltdx_provider(self):
+        provider = getattr(self, "_eltdx_provider", None)
+        if provider is not None:
+            return provider
+        try:
+            from core.data.providers.eltdx_provider import EltdxProvider
+
+            if not EltdxProvider.available():
+                return None
+            provider = EltdxProvider(timeout=3.0)
+            self._eltdx_provider = provider
+            return provider
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[StockDataManager] eltdx provider unavailable: {e}")
+            return None
+
+    def _get_ashare_provider(self):
+        provider = getattr(self, "_ashare_provider", None)
+        if provider is not None:
+            return provider
+        try:
+            from core.data.providers.ashare_provider import AshareProvider
+
+            provider = AshareProvider(timeout=8.0)
+            self._ashare_provider = provider
+            return provider
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[StockDataManager] Ashare provider unavailable: {e}")
+            return None
+
     def get_stock_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """获取个股历史日线数据"""
         code = ts_code
@@ -148,7 +178,10 @@ class StockDataManager(DataManagerBase):
         }
 
     def get_stock_tick(self, ts_code: str, trade_date: str) -> pd.DataFrame:
-        """获取个股分时数据（1分钟线，使用Tushare rt_min接口）"""
+        """获取个股分时数据（1分钟线）。
+
+        优先使用 eltdx 获取真实分时；Tushare rt_min 与 Ashare 作为兜底。
+        """
         cache_file = self.stock_dir / "tick" / f"{ts_code}_{trade_date}.csv"
 
         if cache_file.exists():
@@ -156,6 +189,14 @@ class StockDataManager(DataManagerBase):
                 return pd.read_csv(cache_file)
             except Exception as e:
                 logger.warning(f"读取缓存分时数据失败: {e}")
+
+        eltdx_provider = self._get_eltdx_provider()
+        if eltdx_provider is not None:
+            df = eltdx_provider.get_minute_bars(ts_code, trade_date)
+            if df is not None and not df.empty:
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_stock_tick] eltdx 获取 {ts_code} {trade_date} 分时: {len(df)}条")
+                return df
 
         if self.ts_pro:
             try:
@@ -187,6 +228,14 @@ class StockDataManager(DataManagerBase):
             except Exception as e:
                 logger.error(f"[get_stock_tick] Tushare rt_min获取失败 {code}: {e}")
 
+        ashare_provider = self._get_ashare_provider()
+        if ashare_provider is not None:
+            df = ashare_provider.get_minute_bars(ts_code, trade_date, frequency="1m", count=320)
+            if df is not None and not df.empty:
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_stock_tick] Ashare 获取 {ts_code} {trade_date} 分时: {len(df)}条")
+                return df
+
         return pd.DataFrame()
 
     def get_auction_data(self, ts_code: str, trade_date: str) -> Dict:
@@ -201,59 +250,140 @@ class StockDataManager(DataManagerBase):
                 logger.warning(f"读取竞价数据缓存失败: {e}")
 
         try:
+            eltdx_provider = self._get_eltdx_provider()
+            if eltdx_provider is not None:
+                snapshot_0925 = eltdx_provider.get_auction_0925(ts_code, trade_date)
+                series_df = eltdx_provider.get_auction_series(ts_code, trade_date)
+                if snapshot_0925:
+                    price_trend = []
+                    if series_df is not None and not series_df.empty and 'price' in series_df.columns:
+                        price_trend = [float(x) for x in series_df['price'].dropna().tolist()]
+                    result = {
+                        '开盘价': float(snapshot_0925.get('price') or 0),
+                        '竞价成交量': float(snapshot_0925.get('volume') or 0),
+                        '竞价成交额': float(snapshot_0925.get('amount') or 0),
+                        '价格趋势': price_trend,
+                        '竞价方向': snapshot_0925.get('side'),
+                        '数据源': 'eltdx',
+                    }
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(result, f, ensure_ascii=False)
+                    return result
+
+                if series_df is not None and not series_df.empty:
+                    last_row = series_df.iloc[-1]
+                    result = {
+                        '开盘价': float(last_row.get('price') or 0),
+                        '竞价成交量': float(last_row.get('matched_volume') or 0),
+                        '竞价成交额': float(last_row.get('matched_amount') or 0),
+                        '价格趋势': [float(x) for x in series_df['price'].dropna().tolist()],
+                        '未匹配量': float(last_row.get('unmatched_volume') or 0),
+                        '数据源': 'eltdx_series',
+                    }
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(result, f, ensure_ascii=False)
+                    return result
+
+            tick_df = self.get_stock_tick(ts_code, trade_date)
+            if not tick_df.empty and 'time' in tick_df.columns:
+                auction_data = tick_df[tick_df['time'].astype(str) == '09:25:00']
+                if not auction_data.empty:
+                    auction_row = auction_data.iloc[0]
+                    morning_ticks = tick_df[
+                        (tick_df['time'].astype(str) >= '09:15:00') &
+                        (tick_df['time'].astype(str) <= '09:25:00')
+                    ]
+                    price_trend = [float(x) for x in morning_ticks['close'].dropna().tolist()] if not morning_ticks.empty else []
+                    result = {
+                        '开盘价': float(auction_row.get('close') or 0),
+                        '竞价成交量': float(auction_row.get('volume') or auction_row.get('vol') or 0),
+                        '竞价成交额': float(auction_row.get('amount') or 0),
+                        '价格趋势': price_trend,
+                        '数据源': 'minute_tick',
+                    }
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(result, f, ensure_ascii=False)
+                    return result
+
             daily_price = self.get_stock_daily_price(ts_code, trade_date)
             if daily_price and daily_price.get('open', 0) > 0:
-                open_price = daily_price['open']
                 result = {
-                    '开盘价': float(open_price),
+                    '开盘价': float(daily_price['open']),
                     '竞价成交量': 0,
                     '竞价成交额': 0,
-                    '价格趋势': []
+                    '价格趋势': [],
+                    '数据源': 'daily_open_fallback',
                 }
                 with open(cache_file, 'w', encoding='utf-8') as f:
                     json.dump(result, f, ensure_ascii=False)
                 return result
 
-            tick_df = self.get_stock_tick(ts_code, trade_date)
-            if tick_df.empty:
-                return {}
-
-            auction_data = tick_df[tick_df['time'] == '09:25:00']
-            if auction_data.empty:
-                first_tick = tick_df[tick_df['time'] >= '09:30:00'].iloc[0] if not tick_df.empty else None
-                if first_tick is not None:
-                    result = {
-                        '开盘价': float(first_tick['open']),
-                        '竞价成交量': 0,
-                        '竞价成交额': 0,
-                        '价格趋势': []
-                    }
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(result, f, ensure_ascii=False)
-                    return result
-                return {}
-
-            auction_row = auction_data.iloc[0]
-            morning_ticks = tick_df[
-                (tick_df['time'] >= '09:15:00') &
-                (tick_df['time'] <= '09:25:00')
-            ]
-            price_trend = morning_ticks['close'].tolist() if not morning_ticks.empty else []
-
-            result = {
-                '开盘价': float(auction_row['close']),
-                '竞价成交量': float(auction_row['volume']),
-                '竞价成交额': float(auction_row['amount']),
-                '价格趋势': price_trend
-            }
-
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(result, f, ensure_ascii=False)
-            return result
-
         except Exception as e:
             logger.error(f"[get_auction_data] 获取竞价数据失败 {ts_code} {trade_date}: {e}")
             return {}
+
+    def get_auction_series(self, ts_code: str, trade_date: str) -> pd.DataFrame:
+        """获取集合竞价序列，用于识别抢筹/砸盘/平稳图形。"""
+        cache_file = self.stock_dir / "auction" / f"{ts_code}_{trade_date}_series.csv"
+        if cache_file.exists():
+            try:
+                return pd.read_csv(cache_file)
+            except Exception:
+                pass
+
+        eltdx_provider = self._get_eltdx_provider()
+        if eltdx_provider is None:
+            return pd.DataFrame()
+        df = eltdx_provider.get_auction_series(ts_code, trade_date)
+        if df is not None and not df.empty:
+            df.to_csv(cache_file, index=False)
+            return df
+        return pd.DataFrame()
+
+    def get_auction_0925(self, ts_code: str, trade_date: str) -> Dict:
+        """获取 09:25 集合竞价最终撮合快照。"""
+        data = self.get_auction_data(ts_code, trade_date)
+        if not data:
+            return {}
+        return {
+            'ts_code': ts_code,
+            'trade_date': trade_date,
+            'time': '09:25:00',
+            'price': data.get('开盘价'),
+            'volume': data.get('竞价成交量'),
+            'amount': data.get('竞价成交额'),
+            'source': data.get('数据源'),
+        }
+
+    def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
+        """获取个股 K 线：eltdx 优先，Ashare 兜底。
+
+        盘后批量分析仍使用 Tushare 的 ``get_stock_daily`` / ``get_all_stocks_daily``；
+        本方法主要服务前端图表与无 token 数据展示。
+        """
+        cache_file = self.stock_dir / "kline" / f"{ts_code}_{period}_{count}.csv"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        if cache_file.exists():
+            try:
+                return pd.read_csv(cache_file)
+            except Exception:
+                pass
+
+        eltdx_provider = self._get_eltdx_provider()
+        if eltdx_provider is not None:
+            df = eltdx_provider.get_kline(ts_code, period=period, count=count)
+            if df is not None and not df.empty:
+                df.to_csv(cache_file, index=False)
+                return df
+
+        ashare_provider = self._get_ashare_provider()
+        if ashare_provider is not None:
+            df = ashare_provider.get_kline(ts_code, period=period, count=count)
+            if df is not None and not df.empty:
+                df.to_csv(cache_file, index=False)
+                return df
+
+        return pd.DataFrame()
 
     def get_stocks_daily_batch(self,
                                ts_codes: List[str],

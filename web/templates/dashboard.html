@@ -44,20 +44,64 @@
   </div>
 </section>
 
-{# ===== 风控闸门摘要 ===== #}
+{# ===== 风控闸门 ===== #}
 {% if risk_gate %}
+{% set cb = risk_gate.get('cb_status') or {} %}
+{% set lvl = (cb.get('level') or 'NORMAL')|upper %}
+{% set decisions = risk_gate.get('decisions') or [] %}
 <section class="card border border-slate-800 rounded-xl p-4 mb-6">
-  <div class="flex items-center gap-6 flex-wrap">
-    <div class="font-semibold text-slate-200">风控闸门</div>
-    <div class="text-sm"><span class="text-emerald-400 font-bold mono">{{ risk_gate.get('passed', 0) }}</span> 通过</div>
-    <div class="text-sm"><span class="text-amber-400 font-bold mono">{{ risk_gate.get('downgraded', 0) }}</span> 降级</div>
-    <div class="text-sm"><span class="text-rose-400 font-bold mono">{{ risk_gate.get('rejected', 0) }}</span> 拒绝</div>
-    {% if risk_gate.get('effective_total_cap') is not none %}
-    <div class="text-sm text-slate-400">有效总仓上限
-      <span class="mono text-slate-200">{{ '%.0f'|format((risk_gate.get('effective_total_cap') or 0) * 100) }}%</span></div>
-    {% endif %}
-    {% if risk_gate.get('summary') %}<div class="text-sm text-slate-400">· {{ risk_gate.get('summary') }}</div>{% endif %}
+  {# 头部：标题 + 熔断状态 + 计数 #}
+  <div class="flex items-center gap-x-3 gap-y-2 flex-wrap mb-3">
+    <span class="font-semibold text-slate-200">风控闸门</span>
+    <span class="text-[11px] px-2 py-0.5 rounded-full font-medium
+      {% if lvl == 'NORMAL' %}bg-emerald-500/15 text-emerald-300
+      {% elif lvl == 'HALT' %}bg-rose-500/15 text-rose-300
+      {% else %}bg-amber-500/15 text-amber-300{% endif %}">熔断 {{ lvl }}{% if cb.get('halt_new_buys') %} · 停开新仓{% endif %}</span>
+    <div class="flex items-center gap-3 text-sm ml-auto">
+      <span><span class="text-emerald-400 font-bold mono">{{ risk_gate.get('passed', 0) }}</span> <span class="text-slate-400 text-xs">通过</span></span>
+      <span><span class="text-amber-400 font-bold mono">{{ risk_gate.get('downgraded', 0) }}</span> <span class="text-slate-400 text-xs">降级</span></span>
+      <span><span class="text-rose-400 font-bold mono">{{ risk_gate.get('rejected', 0) }}</span> <span class="text-slate-400 text-xs">拒绝</span></span>
+    </div>
   </div>
+
+  {# 元信息 + 熔断触发原因 #}
+  <div class="flex items-center gap-x-5 gap-y-1 flex-wrap text-xs text-slate-400 mb-3">
+    {% if risk_gate.get('effective_total_cap') is not none %}
+    <span>有效总仓上限 <span class="mono text-slate-200">{{ '%.0f'|format((risk_gate.get('effective_total_cap') or 0) * 100) }}%</span></span>
+    {% endif %}
+    {% if risk_gate.get('total_position_before') is not none %}
+    <span>开闸前持仓 <span class="mono text-slate-200">{{ '%.0f'|format((risk_gate.get('total_position_before') or 0) * 100) }}%</span></span>
+    {% endif %}
+    {% for t in cb.get('triggers') or [] %}
+    <span class="text-amber-300/80">· {{ t }}</span>
+    {% endfor %}
+  </div>
+
+  {# 决策明细：通过在前，其余在后 #}
+  {% if decisions %}
+  <div class="border border-slate-800 rounded-lg divide-y divide-slate-800/70 overflow-hidden">
+    {% for d in (decisions|selectattr('action','equalto','PASS')|list) + (decisions|rejectattr('action','equalto','PASS')|list) %}
+    {% set a = d.get('action') %}
+    {% set o = (d.get('original_position_pct') or 0) * 100 %}
+    {% set f = (d.get('final_position_pct') or 0) * 100 %}
+    <div class="flex items-center gap-3 px-3 py-1.5 text-sm">
+      <span class="shrink-0 w-10 text-center text-[11px] px-1 py-0.5 rounded font-medium
+        {% if a == 'PASS' %}bg-emerald-500/15 text-emerald-300
+        {% elif a == 'REJECT' %}bg-rose-500/15 text-rose-300
+        {% else %}bg-amber-500/15 text-amber-300{% endif %}">{% if a == 'PASS' %}通过{% elif a == 'REJECT' %}拒绝{% elif a == 'DOWNGRADE' %}降级{% else %}{{ a }}{% endif %}</span>
+      <span class="shrink-0 text-slate-200">{{ d.get('stock_name') or '--' }}</span>
+      <span class="shrink-0 mono text-[11px] text-slate-500">{{ d.get('stock_code') or '' }}</span>
+      <span class="shrink-0 text-xs text-slate-500 hidden sm:inline">{{ d.get('pattern_type') or '' }}</span>
+      <span class="shrink-0 mono text-xs text-slate-400">{{ '%.0f'|format(o) }}%{% if f != o %} <span class="text-slate-600">&rarr;</span> <span class="{% if f == 0 %}text-rose-400{% else %}text-amber-300{% endif %}">{{ '%.0f'|format(f) }}%</span>{% endif %}</span>
+      {% if d.get('reason_text') and a != 'PASS' %}
+      <span class="ml-auto min-w-0 truncate text-xs text-slate-500 pl-2" title="{{ d.get('reason_text') }}">{{ d.get('reason_text') }}</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% elif risk_gate.get('summary') %}
+  <pre class="text-xs text-slate-400 whitespace-pre-wrap leading-relaxed" style="font-family:inherit">{{ risk_gate.get('summary') }}</pre>
+  {% endif %}
 </section>
 {% endif %}
 
@@ -179,6 +223,15 @@
           {% else %}bg-amber-500/15 text-amber-300{% endif %}">{{ act }}</span>
         {% if p.get('风控后仓位') %}<span class="text-slate-400 mono">→ {{ p.get('风控后仓位') }}</span>{% endif %}
         {% if p.get('风控提示') %}<span class="text-slate-500 truncate">{{ p.get('风控提示') }}</span>{% endif %}
+      </div>
+	  {% endif %}
+      {% if p.get('股票代码') %}
+      <div class="mt-3 border-t border-slate-800 pt-3">
+        <a href="/stock/{{ p.get('股票代码') }}?date={{ date }}"
+           class="inline-flex items-center gap-1.5 text-xs text-emerald-300 hover:text-emerald-200 transition">
+          查看分时 / 日K / 竞价详情
+          <span aria-hidden="true">→</span>
+        </a>
       </div>
       {% endif %}
     </div>
