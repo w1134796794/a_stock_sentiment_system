@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from core.utils.date_utils import DateUtils
+from core.pattern.signal_priority import PatternPriority
 from datetime import timedelta
 import loguru
 
@@ -187,7 +188,8 @@ class TradePlanLayer:
         plan.stock_code = getattr(signal, 'stock_code', '')
         plan.stock_name = getattr(signal, 'stock_name', '')
         plan.pattern_type = getattr(signal, 'pattern_type', '')
-        plan.priority = getattr(signal, 'priority', 99)
+        # 缺省按最低优先级处理（PatternPriority 标度数值越大越高，未知信号给 0）
+        plan.priority = getattr(signal, 'priority', 0)
 
         key = f"{plan.stock_code}_{plan.pattern_type}"
         if key in score_map:
@@ -235,14 +237,19 @@ class TradePlanLayer:
 
     def _determine_position(self, composite_score: float, priority: int,
                              market_env, emotion_cycle: str) -> tuple:
-        """确定仓位等级和比例"""
+        """确定仓位等级和比例
+
+        priority 为 PatternPriority 标度（数值越大优先级越高）：
+        弱转强=100 > 二板定龙=85 > 龙二波=70 > 首板突破=50。
+        因此仓位档位用「>= 阈值」判定，而非旧的「<= 名次」整数比较。
+        """
         market_score = getattr(market_env, 'composite_score', 50) if market_env else 50
 
-        if market_score >= 70 and composite_score >= 70 and priority <= 3:
+        if market_score >= 70 and composite_score >= 70 and priority >= PatternPriority.SECOND_BOARD_DRAGON:
             return PositionLevel.HEAVY, 0.25
-        elif market_score >= 50 and composite_score >= 60 and priority <= 5:
+        elif market_score >= 50 and composite_score >= 60 and priority >= PatternPriority.DRAGON_SECOND_WAVE:
             return PositionLevel.NORMAL, 0.15
-        elif market_score >= 30 and composite_score >= 50 and priority <= 8:
+        elif market_score >= 30 and composite_score >= 50 and priority >= PatternPriority.FIRST_BOARD_BREAKOUT:
             return PositionLevel.LIGHT, 0.10
         elif composite_score >= 40:
             return PositionLevel.OBSERVE, 0.05
@@ -360,7 +367,7 @@ class TradePlanLayer:
         if plan.position_level == PositionLevel.HEAVY:
             warnings.append("重仓标的，严格止损")
 
-        if plan.priority > 5:
+        if plan.priority <= PatternPriority.FIRST_BOARD_BREAKOUT:
             warnings.append("优先级较低，注意仓位控制")
 
         market_score = getattr(market_env, 'composite_score', 50) if market_env else 50
@@ -386,7 +393,8 @@ class TradePlanLayer:
                 'priority': plan.priority,
             })
 
-        watchlist.sort(key=lambda x: x['priority'])
+        # 优先级数值越大越高，降序排列让高优先级标的排在前面
+        watchlist.sort(key=lambda x: x['priority'], reverse=True)
         return watchlist
 
     def _calculate_overall_position(self, market_env, emotion_cycle: str) -> tuple:

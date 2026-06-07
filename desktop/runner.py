@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 import threading
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -75,6 +75,34 @@ class _StreamTee:
             pass
 
 
+_FILE_SINK_READY = False
+
+
+def _ensure_file_sink() -> None:
+    """首次运行时挂上 logs/system.log 文件日志（进程级，只加一次，避免重复行）。"""
+    global _FILE_SINK_READY
+    if _FILE_SINK_READY:
+        return
+    try:
+        import loguru
+
+        from config.settings import BASE_DIR
+
+        log_dir = Path(BASE_DIR) / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        loguru.logger.add(
+            log_dir / "system.log",
+            rotation="1 day",
+            retention="30 days",
+            encoding="utf-8",
+            level="DEBUG",
+            enqueue=True,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    _FILE_SINK_READY = True
+
+
 class RunController:
     """单例分析控制器。"""
 
@@ -87,7 +115,6 @@ class RunController:
         self.finished_at: Optional[str] = None
         self.error: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
-        self._file_sink_ready = False
 
     # ---- 对外 API -----------------------------------------------------
     def start(self, date: Optional[str]) -> Tuple[bool, str]:
@@ -120,33 +147,10 @@ class RunController:
         }
 
     # ---- 内部实现 -----------------------------------------------------
-    def _ensure_file_sink(self) -> None:
-        """首次运行时挂上 logs/system.log 文件日志（与命令行运行表现一致）。"""
-        if self._file_sink_ready:
-            return
-        try:
-            import loguru
-
-            from config.settings import BASE_DIR
-
-            log_dir = Path(BASE_DIR) / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            loguru.logger.add(
-                log_dir / "system.log",
-                rotation="1 day",
-                retention="30 days",
-                encoding="utf-8",
-                level="DEBUG",
-                enqueue=True,
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        self._file_sink_ready = True
-
     def _worker(self, date: Optional[str]) -> None:
         import loguru
 
-        self._ensure_file_sink()
+        _ensure_file_sink()
 
         sink_id = loguru.logger.add(
             self._loguru_sink,
@@ -186,7 +190,134 @@ class RunController:
             pass
 
 
+class BacktestController:
+    """单例回测控制器：在进程内重跑回测（生成净值/交易/回撤），并实时缓冲日志。
+
+    复用 output/trade_plans 下历史交易计划，回测结果通过 run_backtest.save_backtest_results
+    落到 output/backtest_results，「模拟交易」「回撤分析」两页直接读取最新批次。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.buffer = LogBuffer()
+        self.state: str = "idle"
+        self.started_at: Optional[str] = None
+        self.finished_at: Optional[str] = None
+        self.error: Optional[str] = None
+        self.params: Dict[str, object] = {}
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self, start_date: Optional[str], end_date: Optional[str],
+              initial_capital: object = None) -> Tuple[bool, str]:
+        start_date = (str(start_date).strip() if start_date else "") or None
+        end_date = (str(end_date).strip() if end_date else "") or None
+        try:
+            capital = float(initial_capital) if initial_capital not in (None, "") else 100000.0
+        except (TypeError, ValueError):
+            capital = 100000.0
+
+        # 默认区间：结束=今日，开始=结束前 90 天（交易日历会自动剔除非交易日）
+        end = end_date or datetime.now().strftime("%Y%m%d")
+        if start_date:
+            start = start_date
+        else:
+            try:
+                start = (datetime.strptime(end, "%Y%m%d") - timedelta(days=90)).strftime("%Y%m%d")
+            except ValueError:
+                start = (datetime.now() - timedelta(days=90)).strftime("%Y%m%d")
+
+        with self._lock:
+            if self.state == "running":
+                return False, "已有回测任务在运行中，请等待完成。"
+            self.buffer.clear()
+            self.state = "running"
+            self.error = None
+            self.params = {"start_date": start, "end_date": end, "initial_capital": capital}
+            self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.finished_at = None
+            self._thread = threading.Thread(
+                target=self._worker, args=(start, end, capital), daemon=True, name="backtest-run"
+            )
+            self._thread.start()
+        return True, f"已启动回测：{start} ~ {end}"
+
+    def status(self, since: int = 0) -> Dict:
+        lines, nxt = self.buffer.read_from(since)
+        return {
+            "state": self.state,
+            "params": self.params,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error": self.error,
+            "lines": lines,
+            "next": nxt,
+        }
+
+    def _worker(self, start: str, end: str, capital: float) -> None:
+        import loguru
+
+        _ensure_file_sink()
+        sink_id = loguru.logger.add(
+            self._loguru_sink, level="INFO",
+            format="{time:HH:mm:ss} | {level: <7} | {message}", enqueue=False,
+        )
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = _StreamTee(old_out, self.buffer)
+        sys.stderr = _StreamTee(old_err, self.buffer)
+        try:
+            self.buffer.append_line(f"=== 开始回测 · {start} ~ {end} · 初始资金 {capital:,.0f} ===")
+
+            from config.settings import CACHE_DIR, OUTPUT_DIR, TUSHARE_TOKEN
+            from core.data.data_manager_main import DataManager
+            from backtest.backtest_engine import BacktestConfig, BacktestEngine
+            from backtest.performance_analyzer import PerformanceAnalyzer
+
+            if not (TUSHARE_TOKEN or "").strip():
+                self.buffer.append_line("[提示] 未配置 TUSHARE_TOKEN，将仅依赖本地缓存数据，缺数据的票会被跳过。")
+
+            trade_plans_dir = Path(OUTPUT_DIR) / "trade_plans"
+            if not trade_plans_dir.exists():
+                self.buffer.append_line(f"!!! 交易计划目录不存在：{trade_plans_dir}")
+                self.buffer.append_line("请先到「运行分析」生成每日交易计划后再回测。")
+                self.error = "trade_plans 目录不存在"
+                self.state = "error"
+                return
+
+            dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+            config = BacktestConfig(initial_capital=capital)
+            engine = BacktestEngine(dm, config)
+            result = engine.run_backtest(
+                start_date=start, end_date=end, trade_plans_dir=str(trade_plans_dir))
+
+            report = PerformanceAnalyzer().generate_performance_report(result)
+            self.buffer.append_text("\n" + report + "\n")
+
+            from run_backtest import save_backtest_results  # 复用同一套 CSV 落盘逻辑
+            save_backtest_results(result, OUTPUT_DIR)
+
+            self.buffer.append_line("=== 回测完成，结果已保存，可在「模拟交易 / 回撤分析」查看 ===")
+            self.state = "done"
+        except Exception as exc:  # noqa: BLE001
+            self.error = repr(exc)
+            self.buffer.append_line(f"!!! 回测失败: {exc!r}")
+            self.buffer.append_text(traceback.format_exc())
+            self.state = "error"
+        finally:
+            sys.stdout, sys.stderr = old_out, old_err
+            try:
+                loguru.logger.remove(sink_id)
+            except Exception:  # noqa: BLE001
+                pass
+            self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _loguru_sink(self, message) -> None:
+        try:
+            self.buffer.append_text(str(message))
+        except Exception:  # noqa: BLE001
+            pass
+
+
 # 进程级单例
 CONTROLLER = RunController()
-
+BACKTEST_CONTROLLER = BacktestController()
 
