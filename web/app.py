@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config.settings import SNAPSHOT_DIR, KB_DB_PATH, APP_DB_PATH, WINRATE_PATH
+from config.settings import SNAPSHOT_DIR, KB_DB_PATH, APP_DB_PATH, WINRATE_PATH, TUSHARE_TOKEN, CACHE_DIR
 from snapshot.reader import SnapshotReader
 
 BASE = Path(__file__).parent
@@ -169,6 +169,58 @@ def report(request: Request, date: str) -> Any:
     )
 
 
+@app.get("/stock/{code}", response_class=HTMLResponse)
+def stock_detail_page(request: Request, code: str, date: Optional[str] = None) -> Any:
+    """个股详情：分时、日K、竞价摘要、信号与风控上下文。"""
+    latest = date or reader.latest()
+    snapshot = reader.load(latest) if latest else None
+    context = _find_stock_context(snapshot, code)
+    return templates.TemplateResponse(
+        request,
+        "stock_detail.html",
+        {
+            "code": _normalize_stock_code(code),
+            "date": latest,
+            "dates": reader.list_dates(),
+            "stock_name": context.get("name") or "",
+            "context": context,
+        },
+    )
+
+
+@app.get("/api/stock/{code}/chart")
+def api_stock_chart(code: str, date: Optional[str] = None, daily_count: int = 120) -> Any:
+    """Chart payload for stock detail page."""
+    from core.data.data_manager_main import DataManager
+    from core.utils.stock_code_utils import StockCodeUtils
+
+    trade_date = date or reader.latest()
+    if not trade_date:
+        return JSONResponse({"error": "no snapshot date"}, status_code=404)
+
+    ts_code = StockCodeUtils.standardize_code(code, add_suffix=True)
+    dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+    intraday_df = dm.get_stock_tick(ts_code, trade_date)
+    daily_df = dm.get_kline(ts_code, period="day", count=max(20, min(int(daily_count or 120), 300)))
+    auction = dm.get_auction_data(ts_code, trade_date)
+
+    snapshot = reader.load(trade_date)
+    context = _find_stock_context(snapshot, ts_code)
+
+    return JSONResponse({
+        "code": StockCodeUtils.standardize_code(ts_code, add_suffix=False),
+        "ts_code": ts_code,
+        "name": context.get("name") or "",
+        "date": trade_date,
+        "intraday": _df_to_intraday_line(intraday_df, trade_date),
+        "daily": _df_to_daily_candles(daily_df),
+        "auction": auction or {},
+        "plans": context.get("plans") or [],
+        "signals": context.get("signals") or [],
+        "risk": context.get("risk") or [],
+    })
+
+
 def _load_winrate() -> Optional[Dict]:
     try:
         if WINRATE_PATH.exists():
@@ -176,6 +228,95 @@ def _load_winrate() -> Optional[Dict]:
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+def _normalize_stock_code(code: str) -> str:
+    from core.utils.stock_code_utils import StockCodeUtils
+
+    return StockCodeUtils.standardize_code(code, add_suffix=False)
+
+
+def _find_stock_context(snapshot: Optional[Dict], code: str) -> Dict[str, Any]:
+    """Find plan/signal/risk rows for the stock from a snapshot."""
+    if not snapshot:
+        return {"name": "", "plans": [], "signals": [], "risk": []}
+    pure = _normalize_stock_code(code)
+    plans = []
+    signals = []
+    risk = []
+    name = ""
+
+    for row in (snapshot.get("trade_plans", {}) or {}).get("rows", []) or []:
+        row_code = _normalize_stock_code(row.get("股票代码") or row.get("stock_code") or "")
+        if row_code == pure:
+            plans.append(row)
+            name = name or row.get("股票名称") or row.get("stock_name") or ""
+
+    for section in snapshot.get("sections", []) or []:
+        rows = section.get("rows") or []
+        for row in rows:
+            row_code = _normalize_stock_code(
+                row.get("股票代码") or row.get("stock_code") or row.get("代码") or ""
+            )
+            if row_code != pure:
+                continue
+            if section.get("kind") == "signals":
+                item = dict(row)
+                item["_section"] = section.get("name")
+                signals.append(item)
+            if section.get("name") == "风控闸门":
+                risk.append(row)
+            name = name or row.get("股票名称") or row.get("stock_name") or row.get("名称") or ""
+
+    return {"name": name, "plans": plans, "signals": signals, "risk": risk}
+
+
+def _date_to_ts(date_str: Any, time_str: Any = "15:00:00") -> int:
+    from datetime import datetime
+
+    date_s = str(date_str or "").replace("-", "")
+    if len(date_s) != 8:
+        return 0
+    time_s = str(time_str or "15:00:00")
+    if len(time_s) == 5:
+        time_s += ":00"
+    try:
+        dt = datetime.strptime(f"{date_s} {time_s[:8]}", "%Y%m%d %H:%M:%S")
+        return int(dt.timestamp())
+    except Exception:
+        return 0
+
+
+def _df_to_daily_candles(df) -> List[Dict[str, Any]]:
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        date = r.get("trade_date")
+        ts = _date_to_ts(date, r.get("time") or "15:00:00")
+        if not ts:
+            continue
+        rows.append({
+            "time": ts,
+            "open": float(r.get("open") or 0),
+            "high": float(r.get("high") or 0),
+            "low": float(r.get("low") or 0),
+            "close": float(r.get("close") or 0),
+        })
+    return [r for r in rows if r["open"] or r["close"]]
+
+
+def _df_to_intraday_line(df, trade_date: str) -> List[Dict[str, Any]]:
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        ts = _date_to_ts(r.get("date") or r.get("trade_date") or trade_date, r.get("time") or "09:30:00")
+        value = r.get("close")
+        if not ts or value is None:
+            continue
+        rows.append({"time": ts, "value": float(value)})
+    return rows
 
 
 @app.get("/config", response_class=HTMLResponse)
