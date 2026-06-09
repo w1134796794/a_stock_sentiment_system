@@ -1,10 +1,9 @@
 """
 个股数据管理模块 - 日线、分时、竞价、批量获取
 
-数据来源：Tushare
-- daily: 个股日线行情
-- daily_basic: 个股基本面指标
-- rt_min: 分时数据（1分钟线）
+数据来源：
+- Tushare daily / daily_basic：盘后历史日线行情与基本面指标
+- eltdx：实时/历史分时、K 线、集合竞价（唯一行情源，缺数据则返回空）
 """
 import json
 import time
@@ -38,20 +37,6 @@ class StockDataManager(DataManagerBase):
             logger.debug(f"[StockDataManager] eltdx provider unavailable: {e}")
             return None
 
-    def _get_ashare_provider(self):
-        provider = getattr(self, "_ashare_provider", None)
-        if provider is not None:
-            return provider
-        try:
-            from core.data.providers.ashare_provider import AshareProvider
-
-            provider = AshareProvider(timeout=8.0)
-            self._ashare_provider = provider
-            return provider
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"[StockDataManager] Ashare provider unavailable: {e}")
-            return None
-
     def get_stock_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """获取个股历史日线数据"""
         code = ts_code
@@ -72,7 +57,63 @@ class StockDataManager(DataManagerBase):
                 logger.debug(f"[get_stock_daily] Tushare未初始化")
         except Exception as e:
             logger.error(f"[get_stock_daily] 获取个股{code}历史数据失败: {e}")
+
+        # 盘中实时兜底：Tushare daily 仅在收盘后才有当日K线，盘中查询「当日」必然返回空。
+        # 此时改用 eltdx 实时行情快照拼出当日动态日线（不落盘，收盘后由 Tushare 真实日线覆盖）。
+        rt_df = self._get_realtime_daily_via_eltdx(code, start_date, end_date)
+        if rt_df is not None and not rt_df.empty:
+            return rt_df
         return pd.DataFrame()
+
+    def _get_realtime_daily_via_eltdx(self, ts_code: str, start_date: str, end_date: str):
+        """盘中用 eltdx 实时行情快照拼出「当日」日线。
+
+        仅当查询的是「当前交易日」的单日（start==end==今天，且今天是交易日）时生效；
+        其余情况返回 None（继续走 Tushare 历史日线）。返回的当日行情是动态的，
+        故**不写缓存**，避免收盘后污染真实日线。
+        """
+        from core.utils.date_utils import get_nearest_trade_date, get_today_str
+        today = get_today_str()
+        if not (str(start_date) == str(end_date) == today == get_nearest_trade_date(today)):
+            return None
+
+        provider = self._get_eltdx_provider()
+        if provider is None:
+            return None
+        try:
+            q = provider.get_quote_snapshot(ts_code) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[get_stock_daily] eltdx 实时快照失败 {ts_code}: {e}")
+            return None
+
+        last = float(q.get('last_price') or 0)
+        open_p = float(q.get('open_price') or 0)
+        pre_close = float(q.get('pre_close') or 0)
+        if last <= 0 or open_p <= 0:
+            return None
+
+        vol_hand = float(q.get('vol_hand') or 0)
+        amount_yuan = float(q.get('amount_yuan') or 0)
+        change = last - pre_close
+        pct_chg = (change / pre_close * 100.0) if pre_close > 0 else 0.0
+        row = {
+            'ts_code': ts_code,
+            'trade_date': pd.to_datetime(today),
+            'open': open_p,
+            'high': float(q.get('high_price') or last),
+            'low': float(q.get('low_price') or last),
+            'close': last,                       # 盘中以现价作为「当前收盘」
+            'pre_close': pre_close,
+            'change': change,
+            'pct_chg': pct_chg,
+            'vol': vol_hand,                     # 手，与 Tushare vol 同口径
+            'amount': amount_yuan / 1000.0,      # 千元，与 Tushare amount 同口径
+        }
+        logger.info(
+            f"[get_stock_daily] eltdx 实时快照拼当日日线 {ts_code} {today}: "
+            f"close={last} vol={vol_hand:.0f}手 amount={amount_yuan / 1e8:.2f}亿"
+        )
+        return pd.DataFrame([row])
 
     def get_stock_daily_price(self, ts_code: str, trade_date: str) -> Dict:
         """获取个股某日的开盘价、收盘价、昨收价"""
@@ -180,13 +221,17 @@ class StockDataManager(DataManagerBase):
     def get_stock_tick(self, ts_code: str, trade_date: str) -> pd.DataFrame:
         """获取个股分时数据（1分钟线）。
 
-        优先使用 eltdx 获取真实分时；Tushare rt_min 与 Ashare 作为兜底。
+        唯一数据源为 eltdx：当日走实时分时，历史交易日走 ``get_history_minute``。
+        eltdx 不可用或当日/当历史无数据时，直接返回空 DataFrame（不再走其它行情接口）。
         """
         cache_file = self.stock_dir / "tick" / f"{ts_code}_{trade_date}.csv"
 
         if cache_file.exists():
             try:
-                return pd.read_csv(cache_file)
+                cached = pd.read_csv(cache_file)
+                # 仅当缓存是“完整分时序列”时采用；历史遗留的单根收盘快照(<=1行)忽略并重取，自动修复
+                if cached is not None and len(cached) > 1:
+                    return cached
             except Exception as e:
                 logger.warning(f"读取缓存分时数据失败: {e}")
 
@@ -198,71 +243,71 @@ class StockDataManager(DataManagerBase):
                 logger.info(f"[get_stock_tick] eltdx 获取 {ts_code} {trade_date} 分时: {len(df)}条")
                 return df
 
-        if self.ts_pro:
-            try:
-                code = ts_code
-                df = self.ts_pro.rt_min(ts_code=ts_code, freq='1MIN')
-
-                if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-                    logger.warning(f"[get_stock_tick] Tushare rt_min返回空数据: {code}")
-                    return pd.DataFrame()
-
-                required_cols = ['time', 'open', 'close', 'high', 'low', 'vol', 'amount']
-                missing_cols = [col for col in required_cols if col not in df.columns]
-                if missing_cols:
-                    logger.warning(f"[get_stock_tick] 缺少列: {missing_cols}")
-                    return pd.DataFrame()
-
-                df = df.rename(columns={'vol': 'volume'})
-                df['date'] = df['time'].str[:10]
-                df['time'] = df['time'].str[11:19]
-
-                target_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
-                df = df[df['date'] == target_date]
-
-                if not df.empty:
-                    df.to_csv(cache_file, index=False)
-
-                return df
-
-            except Exception as e:
-                logger.error(f"[get_stock_tick] Tushare rt_min获取失败 {code}: {e}")
-
-        ashare_provider = self._get_ashare_provider()
-        if ashare_provider is not None:
-            df = ashare_provider.get_minute_bars(ts_code, trade_date, frequency="1m", count=320)
-            if df is not None and not df.empty:
-                df.to_csv(cache_file, index=False)
-                logger.info(f"[get_stock_tick] Ashare 获取 {ts_code} {trade_date} 分时: {len(df)}条")
-                return df
-
         return pd.DataFrame()
 
+    @staticmethod
+    def _auction_vol_hand(amount, price, raw_volume=None) -> float:
+        """集合竞价成交量统一归一为「手」(1手=100股)。
+
+        优先用 撮合额÷价格÷100（与成交额自洽、单位确定）；额或价缺失时退回
+        原始 volume（来源单位未知，仅兜底）。这样竞价量与日线成交量(vol, 手)同口径，
+        放量/缩量量比 = 竞价量(手) ÷ 昨日全天量(手) 才有意义。
+        """
+        try:
+            a = float(amount or 0)
+            p = float(price or 0)
+            if a > 0 and p > 0:
+                return round(a / p / 100.0, 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            return float(raw_volume or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _is_latest_session(self, trade_date: str) -> bool:
+        """trade_date 是否为「最近一个交易日」（行情快照/当日竞价序列仅对此日有效）。"""
+        try:
+            from core.utils.date_utils import get_nearest_trade_date, get_today_str
+            return str(trade_date) == get_nearest_trade_date(get_today_str())
+        except Exception:  # noqa: BLE001
+            return False
+
     def get_auction_data(self, ts_code: str, trade_date: str) -> Dict:
-        """获取个股竞价数据（集合竞价）"""
+        """获取个股竞价数据（集合竞价）。
+
+        数据源优先级（真实 → 兜底）：
+          eltdx 09:25 历史撮合快照 → eltdx 当日竞价序列(仅最近交易日)
+          → eltdx 行情快照开盘竞价额(仅最近交易日) → 分时 09:25 → 日线开盘价兜底。
+        """
         cache_file = self.stock_dir / "auction" / f"{ts_code}_{trade_date}.json"
 
+        # 仅信任「真实/精确」来源的缓存；兜底或不可靠来源(日线兜底、过期的当日竞价序列)
+        # 一律忽略并重取，装好 eltdx 后自动自愈。
+        trusted_sources = {'eltdx', 'eltdx_0925', 'eltdx_open', 'minute_tick'}
         if cache_file.exists():
             try:
                 with open(cache_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    cached = json.load(f)
+                if cached and cached.get('数据源') in trusted_sources:
+                    return cached
             except Exception as e:
                 logger.warning(f"读取竞价数据缓存失败: {e}")
 
         try:
             eltdx_provider = self._get_eltdx_provider()
             if eltdx_provider is not None:
+                # (a) 09:25 历史撮合快照：按日期精确扫描历史逐笔，适用于任意交易日
                 snapshot_0925 = eltdx_provider.get_auction_0925(ts_code, trade_date)
-                series_df = eltdx_provider.get_auction_series(ts_code, trade_date)
                 if snapshot_0925:
-                    price_trend = []
-                    if series_df is not None and not series_df.empty and 'price' in series_df.columns:
-                        price_trend = [float(x) for x in series_df['price'].dropna().tolist()]
+                    s_price = float(snapshot_0925.get('price') or 0)
+                    s_amount = float(snapshot_0925.get('amount') or 0)
                     result = {
-                        '开盘价': float(snapshot_0925.get('price') or 0),
-                        '竞价成交量': float(snapshot_0925.get('volume') or 0),
-                        '竞价成交额': float(snapshot_0925.get('amount') or 0),
-                        '价格趋势': price_trend,
+                        '开盘价': s_price,
+                        # 统一为「手」，与日线成交量(vol, 手)同口径，供放量/缩量量比计算
+                        '竞价成交量': self._auction_vol_hand(s_amount, s_price, snapshot_0925.get('volume')),
+                        '竞价成交额': s_amount,
+                        '价格趋势': [],
                         '竞价方向': snapshot_0925.get('side'),
                         '数据源': 'eltdx',
                     }
@@ -270,19 +315,26 @@ class StockDataManager(DataManagerBase):
                         json.dump(result, f, ensure_ascii=False)
                     return result
 
-                if series_df is not None and not series_df.empty:
-                    last_row = series_df.iloc[-1]
-                    result = {
-                        '开盘价': float(last_row.get('price') or 0),
-                        '竞价成交量': float(last_row.get('matched_volume') or 0),
-                        '竞价成交额': float(last_row.get('matched_amount') or 0),
-                        '价格趋势': [float(x) for x in series_df['price'].dropna().tolist()],
-                        '未匹配量': float(last_row.get('unmatched_volume') or 0),
-                        '数据源': 'eltdx_series',
-                    }
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(result, f, ensure_ascii=False)
-                    return result
+                # (b) 行情快照开盘竞价额：open_amount 即开盘集合竞价撮合额（仅最近交易日）。
+                # 注：当日竞价序列接口(get_call_auction)不带日期、仅在 09:15–09:25 实时有效，
+                # 盘后/历史会返回过期数据，故复盘场景不采用。
+                if self._is_latest_session(trade_date):
+                    quote = eltdx_provider.get_quote_snapshot(ts_code)
+                    price = float(quote.get('open_price') or 0) if quote else 0.0
+                    amount = float(quote.get('open_amount') or 0) if quote else 0.0
+                    if price > 0 and amount > 0:
+                        result = {
+                            '开盘价': price,
+                            # 统一为「手」(撮合额÷开盘价÷100)，与日线成交量同口径
+                            '竞价成交量': self._auction_vol_hand(amount, price),
+                            '竞价成交额': amount,
+                            '价格趋势': [],
+                            '数据源': 'eltdx_open',
+                            '说明': '集合竞价撮合额取自最新行情快照(open_amount)，成交量=撮合额÷开盘价÷100(手)。',
+                        }
+                        with open(cache_file, 'w', encoding='utf-8') as f:
+                            json.dump(result, f, ensure_ascii=False)
+                        return result
 
             tick_df = self.get_stock_tick(ts_code, trade_date)
             if not tick_df.empty and 'time' in tick_df.columns:
@@ -313,6 +365,7 @@ class StockDataManager(DataManagerBase):
                     '竞价成交额': 0,
                     '价格趋势': [],
                     '数据源': 'daily_open_fallback',
+                    '说明': '仅取到日线开盘价；该交易日 TDX 历史逐笔无 09:25 撮合记录，集合竞价成交量/额暂缺。',
                 }
                 with open(cache_file, 'w', encoding='utf-8') as f:
                     json.dump(result, f, ensure_ascii=False)
@@ -356,7 +409,7 @@ class StockDataManager(DataManagerBase):
         }
 
     def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
-        """获取个股 K 线：eltdx 优先，Ashare 兜底。
+        """获取个股 K 线：唯一数据源为 eltdx，无数据则返回空。
 
         盘后批量分析仍使用 Tushare 的 ``get_stock_daily`` / ``get_all_stocks_daily``；
         本方法主要服务前端图表与无 token 数据展示。
@@ -372,13 +425,6 @@ class StockDataManager(DataManagerBase):
         eltdx_provider = self._get_eltdx_provider()
         if eltdx_provider is not None:
             df = eltdx_provider.get_kline(ts_code, period=period, count=count)
-            if df is not None and not df.empty:
-                df.to_csv(cache_file, index=False)
-                return df
-
-        ashare_provider = self._get_ashare_provider()
-        if ashare_provider is not None:
-            df = ashare_provider.get_kline(ts_code, period=period, count=count)
             if df is not None and not df.empty:
                 df.to_csv(cache_file, index=False)
                 return df

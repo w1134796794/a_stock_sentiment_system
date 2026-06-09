@@ -37,6 +37,92 @@ def _money(value: Any, signed: bool = False) -> str:
 
 templates.env.filters["money"] = _money
 
+
+def _num2(value: Any) -> Any:
+    """数值统一保留两位小数；整数、布尔与非数值（字符串/列表/字典等）原样返回。
+
+    用于表格单元格：避免 14.658499999999998 这类浮点尾数直接显示。
+    """
+    if isinstance(value, bool) or isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return value
+
+
+templates.env.filters["num2"] = _num2
+
+# ----------------------------------------------------------------------
+# 表头英文列名 → 中文展示名。
+# 快照里部分 section（策略信号 / 板块题材 / 风控闸门 / 因子原始数据 …）的列名是英文，
+# 这里只翻译「表头显示」，底层数据键（row[col]）保持不变，故无需重生成快照即可生效。
+# 因子类（D*/E*）命名与导出报表（report_generator_v2）保持一致。
+# ----------------------------------------------------------------------
+COLUMN_LABELS: Dict[str, str] = {
+    # 策略信号
+    "pattern_type": "模式类型",
+    "stock_code": "股票代码",
+    "stock_name": "股票名称",
+    "confidence": "置信度",
+    "description": "信号描述",
+    "key_metrics": "关键指标",
+    "entry_price": "入场价",
+    "stop_loss": "止损价",
+    "take_profit": "止盈价",
+    "position_size": "建议仓位",
+    "validation_rules": "校验规则",
+    "l2_industry": "二级行业",
+    "is_dual_resonance": "双重共振",
+    # 风控闸门
+    "original_position_pct": "原始仓位",
+    "final_position_pct": "风控后仓位",
+    "action": "风控动作",
+    "reason_text": "风控原因",
+    # 板块题材（热点概念 / 热点行业）
+    "ts_code": "代码",
+    "name": "名称",
+    "type": "类型",
+    "pct_change": "涨跌幅",
+    "amount": "成交额",
+    "vol": "成交量",
+    "member_count": "成分股数",
+    "limit_cpt_rank": "涨停概念排名",
+    "limit_cpt_score": "涨停概念评分",
+    "limit_up_count": "涨停家数",
+    "limit_cons_count": "连板家数",
+    "rank": "排名",
+    "price_score": "价格评分",
+    "avg_amount": "平均成交额",
+    "amount_rank": "成交额排名",
+    "amount_score": "成交额评分",
+    "limit_score": "涨停评分",
+    "momentum_score": "动量评分",
+    "composite_score": "综合评分",
+    "is_hot": "是否热点",
+    "is_hot_concept": "是否热点概念",
+    "is_hot_industry": "是否热点行业",
+    # 因子原始数据
+    "tech_D1_n_day_high_low": "D1 N日新高",
+    "tech_D2_vol_price_coord": "D2 量价配合",
+    "tech_D3_seal_strength": "D3 封板强度",
+    "tech_D4_turnover_health": "D4 换手健康",
+    "tech_D5_ma_bull_align": "D5 均线多头",
+    "mf_E1_main_net_ratio": "E1 主力净占比",
+    "mf_E2_retail_net_ratio": "E2 散户净占比",
+    "mf_E3_large_buy_ratio": "E3 大单买入占比",
+    "mf_E4_moneyflow_trend": "E4 资金趋势",
+    # 其它
+    "_date_list": "日期明细",
+}
+
+
+def _col_label(col: Any) -> str:
+    """表头英文列名 → 中文展示名；未收录的列原样返回。"""
+    return COLUMN_LABELS.get(str(col), str(col))
+
+
+templates.env.filters["col_label"] = _col_label
+
 # ----------------------------------------------------------------------
 # 数据浏览分类：把原「明日计划 · 数据浏览」里的 section 按主题拆成独立菜单。
 # signals=True 表示纳入 kind=="signals" 的策略模式 section（弱转强/二板定龙/…）。
@@ -221,6 +307,52 @@ def api_stock_chart(code: str, date: Optional[str] = None, daily_count: int = 12
     })
 
 
+def _confirm_date_options() -> tuple[List[str], Optional[str]]:
+    """可确认日(T+1) = 每个复盘快照(T)的「次一交易日」。
+
+    下拉框列的是确认日而非快照日：例如最近复盘是 20260605(周五)，则默认确认日
+    为 20260608(周一)——即「次日开盘要确认的那天」。计划由引擎按 prev_trade_date 自动回取。
+    """
+    snaps = reader.list_dates()  # 已按日期倒序
+    if not snaps:
+        return [], None
+    try:
+        from core.utils.date_utils import get_next_trade_date
+        options = sorted({get_next_trade_date(d) for d in snaps}, reverse=True)
+    except Exception:  # noqa: BLE001 - 交易日历缺失时退回快照日，至少可用
+        options = snaps
+    return options, (options[0] if options else None)
+
+
+@app.get("/auction", response_class=HTMLResponse)
+def auction_confirm_page(request: Request, date: Optional[str] = None) -> Any:
+    """盘前竞价确认：用昨日(T)复盘计划比对今日(T+1)真实集合竞价，给操作建议。"""
+    options, default = _confirm_date_options()
+    selected = date or default
+    return templates.TemplateResponse(
+        request,
+        "auction_confirm.html",
+        {"date": selected, "dates": options},
+    )
+
+
+@app.get("/api/auction-confirm")
+def api_auction_confirm(date: Optional[str] = None) -> Any:
+    """对 date(=T+1) 做盘前竞价确认；计划取自前一交易日(T)的快照。"""
+    from core.data.data_manager_main import DataManager
+    from core.execution.auction_confirm import AuctionConfirmer
+
+    confirm_date = date or _confirm_date_options()[1]
+    if not confirm_date:
+        return JSONResponse({"error": "no snapshot date"}, status_code=404)
+    try:
+        dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+        result = AuctionConfirmer(dm, reader).confirm(confirm_date)
+        return JSONResponse(result)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 def _load_winrate() -> Optional[Dict]:
     try:
         if WINRATE_PATH.exists():
@@ -309,14 +441,30 @@ def _df_to_daily_candles(df) -> List[Dict[str, Any]]:
 def _df_to_intraday_line(df, trade_date: str) -> List[Dict[str, Any]]:
     if df is None or df.empty:
         return []
-    rows = []
+    import calendar
+    from datetime import datetime
+
+    rows: Dict[int, Dict[str, Any]] = {}
     for _, r in df.iterrows():
-        ts = _date_to_ts(r.get("date") or r.get("trade_date") or trade_date, r.get("time") or "09:30:00")
-        value = r.get("close")
-        if not ts or value is None:
+        date_s = str(r.get("date") or r.get("trade_date") or trade_date or "").replace("-", "")
+        time_s = str(r.get("time") or "09:30:00")
+        if len(time_s) == 5:
+            time_s += ":00"
+        if len(date_s) != 8:
             continue
-        rows.append({"time": ts, "value": float(value)})
-    return rows
+        value = r.get("close")
+        if value is None:
+            continue
+        try:
+            dt = datetime.strptime(f"{date_s} {time_s[:8]}", "%Y%m%d %H:%M:%S")
+            # 视作 UTC（timegm），让 lightweight-charts 的 UTC 轴直接显示北京交易时段(09:30–15:00)
+            ts = calendar.timegm(dt.timetuple())
+            v = float(value)
+        except (TypeError, ValueError):
+            continue
+        # 按时间去重（lightweight-charts 要求时间唯一且递增）
+        rows[ts] = {"time": ts, "value": v}
+    return [rows[t] for t in sorted(rows)]
 
 
 @app.get("/config", response_class=HTMLResponse)
@@ -452,8 +600,13 @@ def api_backtest_run_status(since: int = 0) -> Any:
 
 
 @app.get("/report/{date}/section/{idx}", response_class=HTMLResponse)
-def section_fragment(request: Request, date: str, idx: int) -> Any:
-    """HTMX 片段：返回某个 section 的表格 HTML。"""
+def section_fragment(request: Request, date: str, idx: int, view: str = "table") -> Any:
+    """HTMX 片段：返回某个 section 的明细 HTML。
+
+    view="table"  普通宽表（默认，兼容原有调用）；
+    view="detail" 主从视图：紧凑列表 + 点击行展开「全字段卡」，用于字段过多的分类
+                  （策略信号 / 板块题材），避免横向滚动。
+    """
     snapshot = reader.load(date)
     sections: List[Dict] = (snapshot or {}).get("sections", [])
     if not snapshot or idx < 0 or idx >= len(sections):
@@ -462,7 +615,7 @@ def section_fragment(request: Request, date: str, idx: int) -> Any:
     return templates.TemplateResponse(
         request,
         "partials/section.html",
-        {"section": section},
+        {"section": section, "view": view},
     )
 
 
