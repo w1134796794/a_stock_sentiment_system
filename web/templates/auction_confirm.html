@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}盘前竞价确认{% endblock %}
+{% block page_title %}盘前竞价确认{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">用昨日(T)复盘计划 · 比对今日(T+1)真实集合竞价 · 放量/缩量 → 操作建议</div>{% endblock %}
+
+{% block header_extra %}
+  {% if dates %}
+  <label class="text-sm text-slate-400">确认日(T+1)</label>
+  <select id="date-select" onchange="location.href='/auction?date='+this.value"
+          class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    {% for d in dates %}
+      <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+  <button id="refresh-btn" title="重新拉取实时竞价"
+          class="text-slate-300 hover:text-emerald-300 border border-slate-700 hover:border-emerald-600 rounded-md px-3 py-1 text-sm">
+    重新确认
+  </button>
+{% endblock %}
+
+{% block content %}
+<div id="summary" class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4 text-sm"></div>
+
+<div class="flex flex-wrap items-center gap-2 mb-3 text-xs text-slate-400">
+  <span class="mr-1">操作等级：</span>
+  <span class="badge" data-l="执行">执行</span>
+  <span class="badge" data-l="标准">标准</span>
+  <span class="badge" data-l="观察">观察</span>
+  <span class="badge" data-l="降级">降级</span>
+  <span class="badge" data-l="放弃">放弃</span>
+  <span class="badge" data-l="风控否决">风控否决</span>
+  <span class="badge" data-l="数据缺失">数据缺失</span>
+</div>
+
+<div class="card border border-slate-800 rounded-xl overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-900/60 text-slate-400 text-xs">
+        <tr class="text-left">
+          <th class="px-3 py-2">标的</th>
+          <th class="px-3 py-2">模式</th>
+          <th class="px-3 py-2">计划竞价</th>
+          <th class="px-3 py-2 text-right">开盘/高开</th>
+          <th class="px-3 py-2 text-right">竞价量比</th>
+          <th class="px-3 py-2 text-right">竞价额</th>
+          <th class="px-3 py-2 text-center">量能</th>
+          <th class="px-3 py-2 text-center">符合</th>
+          <th class="px-3 py-2">操作建议</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div id="empty" class="hidden text-sm text-slate-500 py-12 text-center">暂无可确认的复盘计划（检查前一交易日是否已生成快照）。</div>
+</div>
+
+<style>
+  .badge { display:inline-flex; align-items:center; padding:.1rem .5rem; border-radius:.4rem; font-size:.72rem; font-weight:600; }
+  .lv-执行   { background:rgba(16,185,129,.16); color:#6ee7b7; }
+  .lv-标准   { background:rgba(56,189,248,.16); color:#7dd3fc; }
+  .lv-观察   { background:rgba(148,163,184,.16); color:#cbd5e1; }
+  .lv-降级   { background:rgba(245,158,11,.16); color:#fcd34d; }
+  .lv-放弃   { background:rgba(244,63,94,.16); color:#fda4af; }
+  .lv-风控否决 { background:rgba(113,113,122,.22); color:#d4d4d8; }
+  .lv-数据缺失 { background:rgba(71,85,105,.22); color:#94a3b8; }
+  .vol-放量 { color:#34d399; font-weight:600; }
+  .vol-缩量 { color:#fbbf24; font-weight:600; }
+  .vol-正常 { color:#94a3b8; }
+</style>
+
+<script>
+  const LEVELS = ['执行','标准','观察','降级','放弃','风控否决','数据缺失'];
+  document.querySelectorAll('.badge[data-l]').forEach(b => b.classList.add('lv-' + b.dataset.l));
+
+  function pct(v) { return (v === null || v === undefined) ? '--' : (v*100).toFixed(1) + '%'; }
+  function signedPct(v) { return (v === null || v === undefined) ? '--' : (v >= 0 ? '+' : '') + (v*100).toFixed(1) + '%'; }
+  function wan(v) { return (v === null || v === undefined) ? '--' : (v/1e4).toFixed(0) + '万'; }
+  function esc(s) { return (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  async function load() {
+    const date = document.getElementById('date-select')?.value || '{{ date }}';
+    const tbody = document.getElementById('rows');
+    const empty = document.getElementById('empty');
+    const summary = document.getElementById('summary');
+    tbody.innerHTML = '<tr><td colspan="9" class="px-3 py-8 text-center text-slate-500">加载中…</td></tr>';
+
+    let data;
+    try {
+      const resp = await fetch('/api/auction-confirm?date=' + encodeURIComponent(date));
+      data = await resp.json();
+      if (data.error) throw new Error(data.error);
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="9" class="px-3 py-8 text-center text-rose-300">加载失败：' + esc(String(e.message||e)) + '</td></tr>';
+      return;
+    }
+
+    const th = data.thresholds || {};
+    const card = (label, val) => `<div class="card border border-slate-800 rounded-lg px-3 py-2">
+        <div class="text-[11px] text-slate-500">${label}</div><div class="font-bold mono">${val}</div></div>`;
+    summary.innerHTML =
+      card('确认日 T+1', data.confirm_date || '--') +
+      card('计划来源 T', data.prev_date || '--') +
+      card('情绪周期', data.emotion || '--') +
+      card('放量线(量比≥)', pct(th.surge_vol_ratio) + ' / 额≥' + wan(th.min_amount)) +
+      card('缩量线(量比<)', pct(th.shrink_vol_ratio));
+
+    const items = data.items || [];
+    if (!items.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+
+    tbody.innerHTML = items.map(it => `
+      <tr class="border-t border-slate-800/70 hover:bg-slate-800/30">
+        <td class="px-3 py-2">
+          <a class="hover:text-emerald-300" href="/stock/${esc(it.code)}?date=${esc(data.confirm_date)}">
+            <div class="font-medium">${esc(it.name) || it.code}</div>
+            <div class="mono text-xs text-slate-500">${esc(it.code)}</div>
+          </a>
+        </td>
+        <td class="px-3 py-2 text-slate-300">${esc(it.pattern)}</td>
+        <td class="px-3 py-2 text-xs text-slate-400">
+          <div>${esc(it.plan_cond)}</div>
+          <div class="mono">${esc(it.plan_range)} · ${esc(it.suggest_pos)}</div>
+        </td>
+        <td class="px-3 py-2 text-right mono">
+          <div>${it.open_price ? it.open_price.toFixed(2) : '--'}</div>
+          <div class="text-xs ${it.gap >= 0 ? 'text-emerald-300' : 'text-rose-300'}">${signedPct(it.gap)}</div>
+        </td>
+        <td class="px-3 py-2 text-right mono">${pct(it.vol_ratio)}</td>
+        <td class="px-3 py-2 text-right mono">${wan(it.amount)}</td>
+        <td class="px-3 py-2 text-center"><span class="vol-${it.vol_label}">${it.vol_label || '--'}</span></td>
+        <td class="px-3 py-2 text-center text-xs ${it.match === '符合' ? 'text-emerald-300' : 'text-slate-500'}">${it.match || '--'}</td>
+        <td class="px-3 py-2">
+          <span class="badge lv-${it.level}">${it.level}</span>
+          <div class="text-xs text-slate-400 mt-1 leading-snug">${esc(it.advice)}</div>
+          ${it.source ? `<div class="text-[10px] text-slate-600 mono mt-0.5">源:${esc(it.source)}</div>` : ''}
+        </td>
+      </tr>`).join('');
+  }
+
+  document.getElementById('refresh-btn')?.addEventListener('click', load);
+  load();
+</script>
+{% endblock %}

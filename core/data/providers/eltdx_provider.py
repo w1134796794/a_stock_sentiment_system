@@ -66,21 +66,48 @@ class EltdxProvider:
             return {}
 
     def get_minute_bars(self, ts_code: str, trade_date: str) -> pd.DataFrame:
-        """Get intraday minute bars/points for the requested trading day."""
+        """Get intraday minute bars/points for the requested trading day.
+
+        ``get_minute`` 是「当日分时」接口（无 trade_date 入参）；历史交易日必须走
+        ``get_history_minute(code, 'YYYY-MM-DD')``（eltdx>=0.4）。
+        """
         code = self._to_tdx_code(ts_code)
         try:
             with self._client() as client:
-                if hasattr(client, "get_minute"):
-                    series = client.get_minute(code, self._parse_trade_date(trade_date))
+                if self._is_today(trade_date):
+                    series = client.get_minute(code)
                 else:
-                    if self._is_today(trade_date):
-                        series = client.minutes.today(code)
-                    else:
-                        series = client.minutes.history(code, self._parse_trade_date(trade_date))
+                    series = client.get_history_minute(code, self._to_dash_date(trade_date))
             return self._minute_series_to_frame(series, ts_code, trade_date)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] minute bars unavailable {ts_code} {trade_date}: {e}")
             return pd.DataFrame()
+
+    def get_quote_snapshot(self, ts_code: str) -> dict:
+        """最新实时行情快照，含开盘集合竞价撮合额。
+
+        ``open_amount_yuan`` 是 09:25 开盘集合竞价的撮合成交额（元），仅对**最近/当前
+        交易日**有意义（该接口不接受日期参数，返回的是最新一笔快照）。
+        """
+        code = self._to_tdx_code(ts_code)
+        try:
+            with self._client() as client:
+                q = client.get_quote(code)
+            q = q[0] if isinstance(q, (list, tuple)) and q else q
+            if q is None:
+                return {}
+            open_price = getattr(q, "open_price", None)
+            open_amount = getattr(q, "open_amount_yuan", None)
+            return {
+                "open_price": float(open_price) if open_price else 0.0,
+                "open_amount": float(open_amount) if open_amount else 0.0,
+                "pre_close": float(getattr(q, "pre_close_price", 0) or 0),
+                "last_price": float(getattr(q, "last_price", 0) or 0),
+                "source": "eltdx_quote",
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[EltdxProvider] quote snapshot unavailable {ts_code}: {e}")
+            return {}
 
     def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
         """Get K-line bars from eltdx.
@@ -121,6 +148,12 @@ class EltdxProvider:
     @staticmethod
     def _parse_trade_date(trade_date: str):
         return datetime.strptime(str(trade_date), "%Y%m%d").date()
+
+    @staticmethod
+    def _to_dash_date(trade_date: str) -> str:
+        """``20260605`` → ``2026-06-05``（eltdx 历史接口要求带连字符的日期串）。"""
+        s = str(trade_date).replace("-", "")
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 else str(trade_date)
 
     @classmethod
     def _is_today(cls, trade_date: str) -> bool:

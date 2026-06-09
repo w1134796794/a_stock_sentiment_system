@@ -159,9 +159,10 @@
       document.getElementById('auction-amount').textContent = fmtMoney(a['竞价成交额']);
       document.getElementById('auction-source').textContent = a['数据源'] || '--';
       document.getElementById('auction-note').textContent =
-        a['数据源'] === 'daily_open_fallback'
-          ? '当前仅有日线开盘价兜底，未取得真实集合竞价成交量。'
-          : (a['价格趋势'] && a['价格趋势'].length ? `竞价序列点数：${a['价格趋势'].length}` : '');
+        a['说明']
+          || (a['数据源'] === 'daily_open_fallback'
+              ? '当前仅有日线开盘价兜底，未取得真实集合竞价成交量。'
+              : (a['价格趋势'] && a['价格趋势'].length ? `竞价序列点数：${a['价格趋势'].length}` : ''));
 
       renderMiniRows(document.getElementById('signal-list'), data.signals, '暂无策略信号', row => `
         <div class="mini-row">
