@@ -1,7 +1,13 @@
 {
   "settings": {},
   "yaml": {},
-  "risk": {},
+  "risk": {
+    "freeze_position_cap": 0.3,
+    "max_total_position": 1.0,
+    "min_cash_ratio": 0.0,
+    "take_profit": 0.15,
+    "trailing_activation": 0.1
+  },
   "patterns": {
     "multi_factor_emotion_fit": {
       "冰点期": {

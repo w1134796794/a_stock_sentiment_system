@@ -1,0 +1,4 @@
+node_modules/
+package-lock.json
+# 每日出片产物（由流水线生成，可随时重建）
+build/
