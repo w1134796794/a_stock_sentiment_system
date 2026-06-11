@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 import loguru
 
 from core.data.data_manager_base import DataManagerBase
+from core.utils.stock_code_utils import StockCodeUtils
 
 logger = loguru.logger
 
@@ -46,7 +47,10 @@ class StockDataManager(DataManagerBase):
 
         try:
             if self.ts_pro:
-                df = self.ts_pro.daily(ts_code=code, start_date=start_date, end_date=end_date)
+                # Tushare daily 必须传带交易所后缀的 ts_code（如 002119.SZ）；
+                # 系统内部统一用 6 位代码，这里在调用边界补全后缀。
+                ts_code_full = StockCodeUtils.standardize_code(code, add_suffix=True)
+                df = self.ts_pro.daily(ts_code=ts_code_full, start_date=start_date, end_date=end_date)
                 if not df.empty:
                     df['trade_date'] = pd.to_datetime(df['trade_date'])
                     df.to_csv(cache_file, index=False)
@@ -463,7 +467,9 @@ class StockDataManager(DataManagerBase):
 
             def _fetch_one(code: str):
                 try:
-                    df = self.ts_pro.daily(ts_code=code, start_date=start_date, end_date=end_date)
+                    # 内部用 6 位代码做键/缓存名，但 Tushare 需要带后缀的 ts_code
+                    ts_code_full = StockCodeUtils.standardize_code(code, add_suffix=True)
+                    df = self.ts_pro.daily(ts_code=ts_code_full, start_date=start_date, end_date=end_date)
                     if df is None or df.empty:
                         logger.warning(f"[批量获取] {code} 返回空数据")
                         return code, pd.DataFrame()

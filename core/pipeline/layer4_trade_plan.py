@@ -102,6 +102,8 @@ class TradePlanLayer:
     def __init__(self, data_manager, kelly_table_path=None):
         self.dm = data_manager
         self.date_utils = DateUtils()
+        # Phase 1：只读仓库（流水线在 run 前注入；缺省 None → analyze 内懒构造透传）
+        self.repo = None
         # C-7：闭环——若存在凯利仓位标定表，则分模式仓位优先采用标定结果
         self.kelly_table = self._load_kelly_table(kelly_table_path)
 
@@ -138,6 +140,10 @@ class TradePlanLayer:
         Returns:
             TradePlanResult: 交易计划结果
         """
+        if self.repo is None:
+            from core.data.repository import StockRepository
+            self.repo = StockRepository.passthrough(self.dm)
+
         result = TradePlanResult(trade_date=trade_date)
 
         try:
@@ -583,7 +589,7 @@ class TradePlanLayer:
         try:
             prev_date = self.date_utils.get_n_trade_dates_before(1, trade_date)
 
-            prev_zt = self.dm.get_limit_up_pool(prev_date)
+            prev_zt = self.repo.get_limit_up_pool(prev_date)
             if prev_zt is None or prev_zt.empty:
                 return 0.0
 
@@ -595,7 +601,7 @@ class TradePlanLayer:
             if ts_code_col is None:
                 return 0.0
 
-            today_df = self.dm.get_all_stocks_daily(trade_date=trade_date)
+            today_df = self.repo.get_all_stocks_daily(trade_date=trade_date)
             if today_df is None or today_df.empty:
                 return 0.0
 

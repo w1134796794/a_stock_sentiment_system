@@ -22,35 +22,35 @@ layer3_stock_select:
   # ---- 量能因子 ----
   volume:
     enabled_factors:
-      - "D2_volume_price_correlation"
+      - "D2_vol_price_coord"
     factor_weights:
-      D2_volume_price_correlation: 1.0
+      D2_vol_price_coord: 1.0
 
   # ---- 质量因子 ----
   quality:
     enabled_factors:
-      - "D3_historical_blast_rate"
-      - "D4_next_day_max_profit"
+      - "D3_seal_strength"
+      - "D4_turnover_health"
     factor_weights:
-      D3_historical_blast_rate: 0.45
-      D4_next_day_max_profit: 0.55
+      D3_seal_strength: 0.50
+      D4_turnover_health: 0.50
 
   # ---- 规模因子 ----
   size:
     enabled_factors:
-      - "D5_market_cap_percentile"
+      - "D5_ma_bull_align"
     factor_weights:
-      D5_market_cap_percentile: 1.0
+      D5_ma_bull_align: 1.0
 
-  # ---- 资金流向因子 ----
+  # ---- 资金流向因子（逐股）----
   moneyflow:
     enabled_factors:
-      - "E1_main_net_inflow_ratio"
-      - "E2_institution_buy_ratio"
-      - "E3_north_flow"
-      - "E4_margin_change_ratio"
+      - "E1_main_net_ratio"
+      - "E2_retail_net_ratio"
+      - "E3_large_buy_ratio"
+      - "E4_moneyflow_trend"
     factor_weights:
-      E1_main_net_inflow_ratio: 0.35
-      E2_institution_buy_ratio: 0.25
-      E3_north_flow: 0.20
-      E4_margin_change_ratio: 0.20
+      E1_main_net_ratio: 0.35
+      E2_retail_net_ratio: 0.25
+      E3_large_buy_ratio: 0.20
+      E4_moneyflow_trend: 0.20

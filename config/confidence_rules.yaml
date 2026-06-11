@@ -1,0 +1,108 @@
+# ============================================================
+# 置信度「满分扣分制」规则（Phase 3）
+#
+# 每个策略一套规则集：从 ceiling 起，对每条 enabled 规则按命中的分段扣分，
+# 最终 max(floor, ceiling - Σpenalty)，再归一化到 0~1。
+#
+# 分段 bands：[[阈值, 扣分], ...]，阈值降序；取第一个满足 value>=阈值 的区间扣分。
+#   - 必须连续覆盖到下界（坑②：区间空洞）。
+#   - 因子缺失 → 按该规则最大扣分计（坑①：未验证项默认重扣）。
+# ceiling<100（坑①：满分虚高）；floor 地板（坑③：叠加塌陷）。
+#
+# 接入：默认关闭。在 config/pattern_params 把对应策略的 confidence_mode 设为
+#       "deduction" 才启用本规则；否则沿用旧的「基础分+加分」逻辑。
+# ============================================================
+
+# 二板定龙：因子 = first_board_score(0-100) / gap_ratio / seal_ratio / is_fast(1/0)
+second_board_dragon:
+  ceiling: 95
+  floor: 40
+  rules:
+    - factor: seal_ratio          # 封单强度（封单额/流通市值）
+      enabled: true
+      bands: [[0.05, 0], [0.03, 3], [0.02, 5], [0.01, 10], [0.0, 15]]
+    - factor: gap_ratio           # 次日高开幅度
+      enabled: true
+      bands: [[0.05, 0], [0.03, 4], [0.02, 8], [0.0, 15]]
+    - factor: first_board_score   # 首板质量分
+      enabled: true
+      bands: [[80, 0], [70, 5], [60, 10], [0, 20]]
+    - factor: is_fast             # 是否快速封板（1=是，0=否）
+      enabled: true
+      bands: [[1, 0], [0, 10]]
+
+# 弱转强：因子 = gap_pct / auction_vol_ratio / flexible_score / weakening_type(类别)
+weak_to_strong:
+  ceiling: 95
+  floor: 50
+  rules:
+    - factor: gap_pct             # 竞价高开幅度
+      enabled: true
+      bands: [[0.04, 0], [0.02, 8], [0.0, 18]]
+    - factor: auction_vol_ratio   # 竞价量比
+      enabled: true
+      bands: [[0.15, 0], [0.10, 6], [0.0, 12]]
+    - factor: flexible_score      # 弹性评分（0-100；未启用时缺失→轻扣）
+      enabled: true
+      bands: [[80, 0], [60, 5], [0, 10]]
+    - factor: weakening_type      # 走弱类型（断板后转强更可靠）
+      enabled: true
+      mapping:
+        断板: 0
+        放量滞涨: 8
+      default: 5
+
+# 首板突破：因子 = breakout_type(类别) / seal_ratio / volume_ratio_excess / break_count / early_seal / sector_score
+first_board_breakout:
+  ceiling: 95
+  floor: 45
+  rules:
+    - factor: breakout_type       # 突破类型
+      enabled: true
+      mapping:
+        前高突破: 0
+        平台突破: 5
+      default: 5
+    - factor: seal_ratio          # 封单强度
+      enabled: true
+      bands: [[0.025, 0], [0.01, 4], [0.0, 8]]
+    - factor: volume_ratio_excess # 量能超阈值幅度（volume_ratio - 阈值）
+      enabled: true
+      bands: [[0.5, 0], [0.0, 6]]
+    - factor: break_count         # 开板次数（0=零开板最佳）
+      enabled: true
+      bands: [[1, 5], [0, 0]]     # >=1 扣 5，0 不扣
+    - factor: early_seal          # 早盘秒封（1=是）
+      enabled: true
+      bands: [[1, 0], [0, 4]]
+    - factor: sector_score        # 板块效应分（0~0.10，越高越好）
+      enabled: true
+      bands: [[0.08, 0], [0.04, 5], [0.0, 10]]
+
+# 龙头第二波：因子 = max_boards / days_since_peak / seal_ratio / break_count / early_seal / sector_score / layer2_penalty
+dragon_second_wave:
+  ceiling: 95
+  floor: 45
+  rules:
+    - factor: max_boards          # 前身最高连板数
+      enabled: true
+      bands: [[5, 0], [3, 5], [0, 12]]
+    - factor: days_since_peak     # 距前身高点天数（越近记忆越新鲜，越小越好）
+      enabled: true
+      direction: lower_better
+      bands: [[7, 0], [10, 3], [99999, 8]]
+    - factor: seal_ratio          # 封单强度
+      enabled: true
+      bands: [[0.02, 0], [0.01, 4], [0.0, 8]]
+    - factor: break_count         # 开板次数
+      enabled: true
+      bands: [[1, 4], [0, 0]]
+    - factor: early_seal          # 早盘秒封
+      enabled: true
+      bands: [[1, 0], [0, 3]]
+    - factor: sector_score        # 板块效应分（0~0.10）
+      enabled: true
+      bands: [[0.08, 0], [0.04, 5], [0.0, 10]]
+    - factor: layer2_clean        # L2 是否干净（1=无扣分，0=有扣分）
+      enabled: true
+      bands: [[1, 0], [0, 8]]

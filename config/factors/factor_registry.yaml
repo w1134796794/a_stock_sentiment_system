@@ -606,72 +606,70 @@ factors:
   # D. 个股技术类 (stock_tech)
   # ==========================================
 
+  # 逐股技术因子（Layer3 实际产出/展示，值域 0-100；compute_fn 见 core/factors/layer3_perstock.py）
   D1_n_day_high_low:
     id: "D1"
-    name: "N日新高/新低"
+    name: "N日高低位"
     category: "stock_tech"
     sub_category: "trend"
-    description: "收盘价是否为近N日最高/最低"
+    description: "当前价在近N日最高/最低之间的位置(0-100)"
     data_source: "stock_daily"
     output_type: "float"
-    value_range: [-1.0, 1.0]
-    default_weight: 0.15
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
     enabled: true
     params:
       lookback_days: 20
 
-  D2_volume_price_correlation:
+  D2_vol_price_coord:
     id: "D2"
     name: "量价配合度"
     category: "stock_tech"
     sub_category: "volume"
-    description: "pct_chg与volume_ratio的相关系数(近N日)，正相关=健康"
+    description: "涨幅与量比的匹配程度(0-100)"
     data_source: "stock_daily"
     output_type: "float"
-    value_range: [-1.0, 1.0]
-    default_weight: 0.10
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
     enabled: true
-    params:
-      lookback_days: 10
+    params: {}
 
-  D3_historical_blast_rate:
+  D3_seal_strength:
     id: "D3"
-    name: "封板后炸板率"
+    name: "封板强度"
     category: "stock_tech"
     sub_category: "quality"
-    description: "该股近N日涨停中炸板的比例，历史炸板多的票慎接"
+    description: "由首次封板时间映射的封板强度评分(0-100)"
     data_source: "limit_up_pool"
     output_type: "float"
-    value_range: [0.0, 1.0]
-    default_weight: 0.10
+    value_range: [0.0, 100.0]
+    default_weight: 0.15
     enabled: true
-    params:
-      lookback_days: 60
+    params: {}
 
-  D4_next_day_max_profit:
+  D4_turnover_health:
     id: "D4"
-    name: "涨停次日最大盈利空间"
+    name: "换手率健康度"
     category: "stock_tech"
     sub_category: "quality"
-    description: "(次日最高价-涨停价)/涨停价，历史涨停后冲高幅度"
+    description: "换手率是否处于合理区间(0-100)"
     data_source: "stock_daily"
     output_type: "float"
-    value_range: [0.0, 0.20]
-    default_weight: 0.10
+    value_range: [0.0, 100.0]
+    default_weight: 0.15
     enabled: true
-    params:
-      lookback_days: 60
+    params: {}
 
-  D5_market_cap_percentile:
+  D5_ma_bull_align:
     id: "D5"
-    name: "流通市值分位"
+    name: "均线多头排列度"
     category: "stock_tech"
     sub_category: "size"
-    description: "该股市值在全市场涨停股中的排名分位"
-    data_source: "limit_up_pool"
+    description: "MA5>MA10>MA20>MA60 与价在均线上的程度(0-100)"
+    data_source: "stock_daily"
     output_type: "float"
-    value_range: [0.0, 1.0]
-    default_weight: 0.05
+    value_range: [0.0, 100.0]
+    default_weight: 0.10
     enabled: true
     params: {}
 
@@ -679,32 +677,60 @@ factors:
   # E. 资金流向类 (moneyflow)
   # ==========================================
 
-  E1_main_net_inflow_ratio:
+  # 逐股资金流因子（Layer3 实际产出/展示；compute_fn 见 core/factors/layer3_perstock.py）
+  E1_main_net_ratio:
     id: "E1"
     name: "主力净流入占比"
     category: "moneyflow"
-    sub_category: "institution"
-    description: "涨停股中主力净流入>0的占比"
-    data_source: "moneyflow"
+    sub_category: "moneyflow"
+    description: "(大单+特大单净额)/总成交 × 100"
+    data_source: "moneyflow_summary"
     output_type: "float"
-    value_range: [0.0, 1.0]
-    default_weight: 0.15
+    value_range: [-100.0, 100.0]
+    default_weight: 0.35
     enabled: true
     params: {}
 
-  E2_institution_buy_ratio:
+  E2_retail_net_ratio:
     id: "E2"
-    name: "龙虎榜机构买入占比"
+    name: "散户净流入占比"
     category: "moneyflow"
-    sub_category: "institution"
-    description: "机构买入额/龙虎榜总买入额"
-    data_source: "top_inst"
+    sub_category: "moneyflow"
+    description: "(中单+小单净额)/总成交 × 100"
+    data_source: "moneyflow_summary"
     output_type: "float"
-    value_range: [0.0, 1.0]
-    default_weight: 0.10
+    value_range: [-100.0, 100.0]
+    default_weight: 0.25
     enabled: true
     params: {}
 
+  E3_large_buy_ratio:
+    id: "E3"
+    name: "大单买入占比"
+    category: "moneyflow"
+    sub_category: "moneyflow"
+    description: "(大单买+特大单买)/总成交 × 100"
+    data_source: "moneyflow_summary"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
+    enabled: true
+    params: {}
+
+  E4_moneyflow_trend:
+    id: "E4"
+    name: "资金流向趋势"
+    category: "moneyflow"
+    sub_category: "moneyflow"
+    description: "近N日主力净流入为正的天数占比 × 100"
+    data_source: "moneyflow_summary"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
+    enabled: true
+    params: {}
+
+  # 市场级资金流因子（Layer4 跨周期使用，保留）
   E3_north_flow:
     id: "E3"
     name: "北向资金净流入"

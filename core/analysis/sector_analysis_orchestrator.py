@@ -75,18 +75,32 @@ class SectorAnalysisOrchestrator:
     统一管理板块分析流程，提供数据缓存功能
     """
     
-    def __init__(self, data_manager, cache_enabled: bool = True):
+    def __init__(self, data_manager, cache_enabled: bool = True, repo=None):
         self.dm = data_manager
         self.cache_enabled = cache_enabled
-        
+
+        # Phase 1：只读仓库（缺省 None → 子分析器自建透传仓库）
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
+
         # 初始化分析器
-        self.sector_tracker = THSSectorTracker(self.dm)
-        self.concept_hierarchy_analyzer = ConceptBoardHierarchyAnalyzer(self.dm)
+        self.sector_tracker = THSSectorTracker(self.dm, repo=self.repo)
+        self.concept_hierarchy_analyzer = ConceptBoardHierarchyAnalyzer(self.dm, repo=self.repo)
         
         # 缓存数据
         self._cache: Dict[str, SectorAnalysisResult] = {}
         self._current_date: Optional[str] = None
         self._current_result: Optional[SectorAnalysisResult] = None
+
+    def set_repo(self, repo) -> None:
+        """刷新只读仓库（流水线每次 run 前下发当日仓库；多日复用时同步给子分析器）。"""
+        if repo is None:
+            return
+        self.repo = repo
+        self.sector_tracker.repo = repo
+        self.concept_hierarchy_analyzer.repo = repo
         
         logger.info("[SectorAnalysisOrchestrator] 初始化完成")
     

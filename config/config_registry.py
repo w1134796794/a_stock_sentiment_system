@@ -228,8 +228,14 @@ def _build_yaml() -> List[Dict[str, Any]]:
         if not isinstance(cfg, dict) or not cfg:
             continue
         pristine = loader.pristine_config(name)
+        leaves = _flatten("", cfg)
+        # factor_registry.yaml 绝大多数是因子「元数据」(name/description/data_source/
+        # value_range…)，并非可调参数。这里只保留 enabled 开关：既供「因子面板」写入校验，
+        # 又把 ~540 个无意义的可编辑字段从参数页清掉（因子开关请走 /factors 面板）。
+        if name == "factor_registry":
+            leaves = [(d, v) for d, v in leaves if d.endswith(".enabled")]
         fields: List[Dict[str, Any]] = []
-        for dotted, eff_val in _flatten("", cfg):
+        for dotted, eff_val in leaves:
             full = f"{name}.{dotted}"
             default = ov.get_dotted(pristine, dotted, eff_val)
             fields.append(_field("yaml", name, _YAML_LABELS.get(name, name),
@@ -365,4 +371,3 @@ def _reapply_live() -> None:
         get_config_loader().reload_config()
     except Exception:
         pass
-

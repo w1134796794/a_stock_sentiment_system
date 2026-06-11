@@ -125,6 +125,9 @@ class MarketEnvAnalyzer:
         self.dm = data_manager
         self.date_utils = DateUtils()
 
+        # Phase 1：只读仓库（流水线在 run 前注入；缺省 None → analyze 内懒构造透传）
+        self.repo = None
+
         # 指数代码映射
         self.index_codes = {
             'sh': '000001.SH',    # 上证指数
@@ -156,6 +159,11 @@ class MarketEnvAnalyzer:
         logger.info("=" * 60)
         logger.info(f"[Layer1-大盘环境] 开始分析: {trade_date}")
         logger.info("=" * 60)
+
+        # Phase 1：保证有只读仓库可用（Layer1 早于基础数据层，通常为透传仓库）
+        if self.repo is None:
+            from core.data.repository import StockRepository
+            self.repo = StockRepository.passthrough(self.dm)
 
         result = MarketEnvResult(trade_date=trade_date)
 
@@ -197,7 +205,7 @@ class MarketEnvAnalyzer:
 
             def _fetch_index(item):
                 idx_name, idx_code = item
-                return self.dm.get_index_daily(idx_code, start_date, end_date)
+                return self.repo.get_index_daily(idx_code, start_date, end_date)
 
             index_items = list(self.index_codes.items())
             index_dfs = parallel_fetch(index_items, _fetch_index, max_workers=5)
@@ -309,7 +317,7 @@ class MarketEnvAnalyzer:
 
             for idx_name, idx_code in self.index_codes.items():
                 try:
-                    df = self.dm.get_index_daily(idx_code, start_date, end_date)
+                    df = self.repo.get_index_daily(idx_code, start_date, end_date)
                     if df is None or df.empty:
                         continue
 
@@ -322,7 +330,7 @@ class MarketEnvAnalyzer:
                     logger.debug(f"[Layer1] 获取{idx_name}成交额失败: {e}")
 
             try:
-                all_df = self.dm.get_all_stocks_daily(trade_date=trade_date)
+                all_df = self.repo.get_all_stocks_daily(trade_date=trade_date)
                 if all_df is not None and not all_df.empty and 'amount' in all_df.columns:
                     amounts = pd.to_numeric(all_df['amount'], errors='coerce')
                     total_amount = float(amounts.sum()) / 1e5
@@ -336,7 +344,7 @@ class MarketEnvAnalyzer:
             else:
                 result.total_volume = 0.0
 
-            sh_df = self.dm.get_index_daily(
+            sh_df = self.repo.get_index_daily(
                 self.index_codes['sh'], start_date, end_date
             )
 
@@ -380,7 +388,7 @@ class MarketEnvAnalyzer:
             flat_count = 0
 
             try:
-                all_df = self.dm.get_all_stocks_daily(trade_date=trade_date)
+                all_df = self.repo.get_all_stocks_daily(trade_date=trade_date)
                 if all_df is not None and not all_df.empty:
                     if 'pct_chg' in all_df.columns:
                         pct_values = pd.to_numeric(all_df['pct_chg'], errors='coerce')
@@ -443,7 +451,7 @@ class MarketEnvAnalyzer:
         try:
             prev_date = self.date_utils.get_n_trade_dates_before(1, trade_date)
 
-            prev_zt = self.dm.get_limit_up_pool(prev_date)
+            prev_zt = self.repo.get_limit_up_pool(prev_date)
             if prev_zt is None or prev_zt.empty:
                 logger.warning(f"[Layer1] 无法获取{prev_date}涨停数据，跳过涨停连续性分析")
                 return
@@ -460,7 +468,7 @@ class MarketEnvAnalyzer:
 
             prev_zt[ts_code_col] = prev_zt[ts_code_col].astype(str)
 
-            today_df = self.dm.get_all_stocks_daily(trade_date=trade_date)
+            today_df = self.repo.get_all_stocks_daily(trade_date=trade_date)
             if today_df is None or today_df.empty:
                 logger.warning("[Layer1] 无法获取今日全市场数据")
                 return

@@ -17,6 +17,7 @@ import loguru
 
 # PatternSignal 统一契约位于 core.pattern.base
 from core.pattern.base import PatternSignal  # noqa: F401  re-export for backward compat
+from config.pattern_params import get_params
 
 logger = loguru.logger
 
@@ -24,36 +25,50 @@ logger = loguru.logger
 class PatternRecognition:
     """模式识别引擎 - 统一调度各策略模块"""
 
-    def __init__(self, data_manager, sector_engine=None, mapper=None):
+    def __init__(self, data_manager, sector_engine=None, mapper=None, repo=None):
         self.dm = data_manager
         self.se = sector_engine
         self.mapper = mapper
         self.lookback_days = 20
 
+        # Phase 1 数据解耦：业务层经只读仓库取数。未显式注入时，从 dm 懒构造
+        # 「透传仓库」——行为与改造前完全一致，便于逐调用点平滑迁移 + 回归对齐。
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
+
         # 初始化各策略模块
         self._init_strategies()
     
+    def set_repo(self, repo):
+        """刷新只读仓库并传播给各策略（多日复用时保证用当日仓库）。"""
+        if repo is None:
+            return
+        self.repo = repo
+        for strat in (getattr(self, "weak_to_strong", None),
+                      getattr(self, "first_board_breakout", None),
+                      getattr(self, "dragon_second_wave", None)):
+            if strat is not None and hasattr(strat, "repo"):
+                strat.repo = repo
+
     def _init_strategies(self):
         """初始化所有策略模块"""
         try:
             from core.pattern.weak_to_strong import WeakToStrongStrategy
-            self.weak_to_strong = WeakToStrongStrategy(self.dm, self.se)
+            self.weak_to_strong = WeakToStrongStrategy(self.dm, self.se, repo=self.repo)
             logger.info("✓ 弱转强策略加载成功")
         except Exception as e:
             logger.warning(f"✗ 弱转强策略加载失败: {e}")
             self.weak_to_strong = None
         
-        try:
-            from core.pattern.second_board_dragon import SecondBoardDragonStrategy
-            self.second_board_dragon = SecondBoardDragonStrategy(self.dm, self.se)
-            logger.info("✓ 二板定龙策略加载成功")
-        except Exception as e:
-            logger.warning(f"✗ 二板定龙策略加载失败: {e}")
-            self.second_board_dragon = None
+        # 二板定龙：检测逻辑已内联到本类 detect_second_board_dragon()（旧的
+        # SecondBoardDragonStrategy 独立类为重复实现，已删除）。此处保留启用标记。
+        self.second_board_dragon = True
         
         try:
             from core.pattern.first_board_breakout import HotspotFirstBoardStrategy
-            self.first_board_breakout = HotspotFirstBoardStrategy(self.dm, self.se, self.mapper)
+            self.first_board_breakout = HotspotFirstBoardStrategy(self.dm, self.se, self.mapper, repo=self.repo)
             logger.info("✓ 首板突破策略加载成功")
         except Exception as e:
             logger.warning(f"✗ 首板突破策略加载失败: {e}")
@@ -66,7 +81,7 @@ class PatternRecognition:
         
         try:
             from core.pattern.dragon_second_wave import DragonSecondWaveStrategyV2
-            self.dragon_second_wave = DragonSecondWaveStrategyV2(self.dm, self.se)
+            self.dragon_second_wave = DragonSecondWaveStrategyV2(self.dm, self.se, repo=self.repo)
             logger.info("✓ 龙二波策略加载成功")
         except Exception as e:
             logger.warning(f"✗ 龙二波策略加载失败: {e}")
@@ -304,9 +319,9 @@ class PatternRecognition:
 
                 # L2a: 高开gap + 竞价分析
                 auction_analysis = {}
-                if today_date and self.dm:
+                if today_date and self.repo:
                     try:
-                        auction_data = self.dm.get_auction_data(code, today_date)
+                        auction_data = self.repo.get_auction_data(code, today_date)
                         if auction_data:
                             auction_analysis = self._analyze_auction_data(auction_data, yest_row, today_row, yest_date)
                     except Exception as e:
@@ -648,6 +663,23 @@ class PatternRecognition:
             total_checked = 0
             total_passed = 0
 
+            # 定龙择优参数（可被网页覆盖；默认与旧逻辑一致）
+            sbd_params = get_params("second_board_dragon")
+            min_fb_score = sbd_params.get("min_first_board_score", 60)
+            cand_min_gap = sbd_params.get("candidate_min_gap", 0.02)
+            cand_min_conf = sbd_params.get("candidate_min_confidence", 0.70)
+            max_dragons = int(sbd_params.get("max_dragons_per_day", 3))
+            max_per_sector = int(sbd_params.get("max_per_sector", 1))
+            min_sector_fb = int(sbd_params.get("min_sector_first_board", 0))
+            w_gap = sbd_params.get("rank_w_gap", 1.0)
+            w_quality = sbd_params.get("rank_w_quality", 0.5)
+            w_seal = sbd_params.get("rank_w_seal", 0.8)
+            w_fast = sbd_params.get("rank_w_fast", 10.0)
+            w_sector = sbd_params.get("rank_w_sector_assist", 6.0)
+            # Phase 3：置信度计算模式。"legacy"=旧的基础分+加分（默认，行为不变）；
+            # "deduction"=统一满分扣分制（config/confidence_rules.yaml 的 second_board_dragon）
+            confidence_mode = sbd_params.get("confidence_mode", "legacy")
+
             # 预过滤：只保留连板数=2的股票
             board_col = '连板数' if '连板数' in today_df.columns else 'limit_times'
             if board_col not in today_df.columns:
@@ -657,6 +689,24 @@ class PatternRecognition:
             second_board_df = today_df[today_df[board_col].astype(float) == 2.0]
             skipped = len(today_df) - len(second_board_df)
             logger.debug(f"[二板定龙] 今日涨停{len(today_df)}只，连板数=2的{len(second_board_df)}只，跳过{skipped}只")
+
+            # 板块首板助攻统计：今日各行业/概念的首板(连板数=1)家数（梯队厚度）
+            def _sector_of(row, c):
+                return ((stock_to_ths_industry or {}).get(c, '')
+                        or (stock_to_ths_concept or {}).get(c, '')
+                        or row.get('所属行业', '') or '未知')
+            sector_first_board_count: Dict[str, int] = {}
+            try:
+                first_board_df = today_df[today_df[board_col].astype(float) == 1.0]
+                for _, fb_row in first_board_df.iterrows():
+                    fb_code = str(fb_row.get('代码', '')).zfill(6)
+                    sec = _sector_of(fb_row, fb_code)
+                    sector_first_board_count[sec] = sector_first_board_count.get(sec, 0) + 1
+            except Exception:
+                pass
+
+            # 阶段一：收集所有"够格"的候选（先不直接定龙）
+            candidates: List[Dict] = []
 
             for _, today_row in second_board_df.iterrows():
                 code = str(today_row.get('代码', '')).zfill(6)
@@ -677,15 +727,15 @@ class PatternRecognition:
                 first_board_quality = self._analyze_first_board_quality(yest_row)
                 logger.debug(f"[二板定龙]   {name} 首板质量: {first_board_quality}")
 
-                if first_board_quality.get('score', 0) < 60:
-                    logger.debug(f"[二板定龙]   {name} 过滤: 首板质量分{first_board_quality.get('score', 0)} < 60")
+                if first_board_quality.get('score', 0) < min_fb_score:
+                    logger.debug(f"[二板定龙]   {name} 过滤: 首板质量分{first_board_quality.get('score', 0)} < {min_fb_score}")
                     continue
 
                 gap_ratio = self._calculate_gap_ratio(today_row, yest_row, today_date, yest_date)
                 logger.debug(f"[二板定龙]   {name} 次日高开: {gap_ratio*100:.1f}%")
 
-                if gap_ratio < 0.02:
-                    logger.debug(f"[二板定龙]   {name} 过滤: 高开{gap_ratio*100:.1f}% < 2%")
+                if gap_ratio < cand_min_gap:
+                    logger.debug(f"[二板定龙]   {name} 过滤: 高开{gap_ratio*100:.1f}% < {cand_min_gap*100:.0f}%")
                     continue
 
                 limit_up_time = str(today_row.get('首次封板时间', '')).strip()
@@ -712,45 +762,103 @@ class PatternRecognition:
                 seal_ratio = seal_amount / float_cap if float_cap > 0 else 0
                 logger.debug(f"[二板定龙]   {name} 封单额={seal_amount}, 流通市值={float_cap}, 封单强度: {seal_ratio*100:.2f}%")
 
-                confidence = self._calculate_second_board_confidence(first_board_quality, gap_ratio, is_fast_limit, seal_ratio)
-                logger.debug(f"[二板定龙]   {name} 综合置信度={confidence:.2f}")
+                confidence, conf_breakdown = self._second_board_confidence(
+                    confidence_mode, first_board_quality, gap_ratio, is_fast_limit, seal_ratio
+                )
+                logger.debug(f"[二板定龙]   {name} 综合置信度={confidence:.2f} (mode={confidence_mode})")
 
-                if confidence < 0.70:
-                    logger.debug(f"[二板定龙]   {name} 过滤: 置信度{confidence:.2f} < 0.70")
+                if confidence < cand_min_conf:
+                    logger.debug(f"[二板定龙]   {name} 过滤: 置信度{confidence:.2f} < {cand_min_conf:.2f}")
                     continue
 
+                sector = _sector_of(today_row, code)
+                assist = sector_first_board_count.get(sector, 0)
+
+                # 板块首板助攻硬门槛（独龙难飞，默认关闭）
+                if min_sector_fb > 0 and assist < min_sector_fb:
+                    logger.debug(f"[二板定龙]   {name} 过滤: 板块[{sector}]首板助攻{assist}<{min_sector_fb}")
+                    continue
+
+                # 横向强度分（连续、不饱和，用于全场排序定龙；区别于会顶格到0.95的置信度）
+                rank_score = (
+                    gap_ratio * 100 * w_gap
+                    + first_board_quality.get('score', 0) * w_quality
+                    + seal_ratio * 100 * w_seal
+                    + (w_fast if is_fast_limit else 0.0)
+                    + assist * w_sector
+                )
+
+                candidates.append({
+                    'code': code, 'name': name, 'sector': sector,
+                    'confidence': confidence, 'rank_score': rank_score,
+                    'gap_ratio': gap_ratio, 'seal_ratio': seal_ratio,
+                    'assist': assist, 'limit_up_time': limit_up_time,
+                    'quality': first_board_quality, 'entry_price': entry_price,
+                    'confidence_breakdown': conf_breakdown,
+                })
+
+            # ═══════════ 阶段二：横向竞争择优定龙 ═══════════
+            # 1) 强度降序  2) 每板块最多 max_per_sector 只（去同质化）  3) 全场封顶 max_dragons
+            candidates.sort(key=lambda c: (c['rank_score'], c['confidence']), reverse=True)
+            sector_used: Dict[str, int] = {}
+            selected: List[Dict] = []
+            for c in candidates:
+                if len(selected) >= max_dragons:
+                    break
+                used = sector_used.get(c['sector'], 0)
+                if used >= max_per_sector:
+                    logger.debug(f"[二板定龙]   {c['name']} 落选: 板块[{c['sector']}]已选{used}只(上限{max_per_sector})")
+                    continue
+                sector_used[c['sector']] = used + 1
+                selected.append(c)
+
+            for rank, c in enumerate(selected, 1):
+                gap_ratio = c['gap_ratio']; seal_ratio = c['seal_ratio']
+                limit_up_time = c['limit_up_time']; first_board_quality = c['quality']
+                entry_price = c['entry_price']; confidence = c['confidence']
+                is_solo = c['assist'] == 0
                 signal = PatternSignal(
                     pattern_type="二板定龙",
-                    stock_code=code,
-                    stock_name=name,
+                    stock_code=c['code'],
+                    stock_name=c['name'],
                     confidence=round(confidence, 2),
-                    description=f"首板{first_board_quality.get('type', '硬板')}后，次日高开{gap_ratio*100:.1f}%，{limit_up_time}涨停，二板定龙",
+                    description=(f"板块[{c['sector']}]最强二板（全场第{rank}），首板{first_board_quality.get('type', '硬板')}后，"
+                                 f"次日高开{gap_ratio*100:.1f}%，{limit_up_time}涨停，二板定龙"),
                     key_metrics={
                         "首板类型": first_board_quality.get('type', ''),
                         "首板质量分": first_board_quality.get('score', 0),
                         "次日高开": f"{gap_ratio*100:.1f}%",
                         "涨停时间": limit_up_time,
                         "封单强度": f"{seal_ratio*100:.2f}%",
+                        "板块助攻": f"{c['assist']}家首板",
+                        "全场龙头排名": rank,
+                        "强度分": round(c['rank_score'], 1),
                         "买点时机": "竞价" if gap_ratio >= 0.04 else "开盘"
                     },
                     entry_price=entry_price,
                     stop_loss=round(entry_price * 0.95, 2) if entry_price else 0,
                     take_profit=round(entry_price * 1.12, 2) if entry_price else 0,
-                    position_size="heavy" if confidence >= 0.85 else "medium",
+                    # 真龙加冕：全场第一且有板块助攻 → heavy；独龙/靠后 → medium
+                    position_size="heavy" if (rank == 1 and not is_solo and confidence >= 0.85) else "medium",
                     validation_rules=[
-                        f"首板{first_board_quality.get('type', '硬板')}（硬逻辑）",
+                        f"板块[{c['sector']}]最强二板（去同质化后唯一）",
                         f"次日高开{gap_ratio*100:.1f}%（资金表态）",
                         f"{limit_up_time}涨停（速度）",
-                        f"封单强度{seal_ratio*100:.2f}%（质量）"
+                        f"板块助攻{c['assist']}家首板（梯队厚度）",
+                        f"全场强度排名第{rank}",
                     ],
-                    l2_industry=(stock_to_ths_industry or {}).get(code, '') or (stock_to_ths_concept or {}).get(code, '') or today_row.get('所属行业', '')
+                    l2_industry=c['sector'] if c['sector'] != '未知' else ''
                 )
-                
+                # Phase 3：扣分制下附上逐项扣分明细，便于复盘"为什么不是满分"
+                if c.get('confidence_breakdown'):
+                    signal.key_metrics["置信扣分明细"] = c['confidence_breakdown']
                 signals.append(signal)
                 total_passed += 1
-                logger.debug(f"[二板定龙]   {name} 生成信号 (置信度{confidence:.2f})")
+                logger.info(f"[二板定龙]   ✓ 定龙#{rank} {c['name']}({c['code']}) "
+                            f"强度{c['rank_score']:.1f} 置信{confidence:.2f} 板块[{c['sector']}]助攻{c['assist']}")
 
-            logger.info(f"[二板定龙] 检测完成: 共{len(signals)}个信号 (检查{total_checked}只, 通过{total_passed}只)")
+            logger.info(f"[二板定龙] 检测完成: 候选{len(candidates)}只 → 定龙{len(signals)}只 "
+                        f"(检查{total_checked}只, 每日上限{max_dragons}, 每板块{max_per_sector})")
 
         except Exception as e:
             logger.error(f"[二板定龙] 检测失败: {e}", exc_info=True)
@@ -825,9 +933,9 @@ class PatternRecognition:
                 yest_close = yesterday.get('最新价', 0)
         
         # 2. 如果涨停池没有，使用tushare日线数据
-        if yest_close == 0 and self.dm and yest_date and code:
+        if yest_close == 0 and self.repo and yest_date and code:
             try:
-                daily_price = self.dm.get_stock_daily_price(code, yest_date)
+                daily_price = self.repo.get_daily_price(code, yest_date)
                 if daily_price:
                     yest_close = daily_price.get('close', 0)
                     logger.debug(f"[_analyze_auction_data] {name}({code}) 从tushare获取昨日收盘价: {yest_close}")
@@ -988,24 +1096,24 @@ class PatternRecognition:
         today_open = today_row.get('开盘价', 0)
         yest_close = yest_row.get('收盘价', 0)
         
-        # 如果涨停池数据中没有开盘价/收盘价，尝试使用tushare接口获取
-        if (today_open == 0 or yest_close == 0) and self.dm and today_date and yest_date:
+        # 如果涨停池数据中没有开盘价/收盘价，经只读仓库补取（Phase 1：原 self.dm.* 已迁移到 self.repo.*）
+        if (today_open == 0 or yest_close == 0) and self.repo and today_date and yest_date:
             try:
                 # 获取今日开盘价
                 if today_open == 0:
-                    today_price = self.dm.get_stock_daily_price(code, today_date)
+                    today_price = self.repo.get_daily_price(code, today_date)
                     if today_price:
                         today_open = today_price.get('open', 0)
-                        logger.debug(f"[_calculate_gap_ratio] {name} 从tushare获取今日开盘价: {today_open}")
+                        logger.debug(f"[_calculate_gap_ratio] {name} 补取今日开盘价: {today_open}")
                 
                 # 获取昨日收盘价（close，不是pre_close）
                 if yest_close == 0:
-                    yest_price = self.dm.get_stock_daily_price(code, yest_date)
+                    yest_price = self.repo.get_daily_price(code, yest_date)
                     if yest_price:
                         yest_close = yest_price.get('close', 0)
-                        logger.debug(f"[_calculate_gap_ratio] {name} 从tushare获取昨日收盘价: {yest_close}")
+                        logger.debug(f"[_calculate_gap_ratio] {name} 补取昨日收盘价: {yest_close}")
             except Exception as e:
-                logger.debug(f"[_calculate_gap_ratio] {name} 从tushare获取价格失败: {e}")
+                logger.debug(f"[_calculate_gap_ratio] {name} 补取价格失败: {e}")
         
         # 如果仍然没有数据，尝试用最新价和涨跌幅反推（备用方案）
         if today_open == 0:
@@ -1086,9 +1194,37 @@ class PatternRecognition:
         
         return min(confidence, 0.95)
 
+    def _second_board_confidence(self, mode: str, quality: Dict, gap: float,
+                                 is_fast: bool, seal_ratio: float):
+        """
+        Phase 3：按 confidence_mode 选择置信度算法。
+
+        - "deduction"：统一满分扣分制（ConfidenceScorer + confidence_rules.yaml），
+          返回 (value, breakdown_dict)，breakdown 写入信号 key_metrics 供复盘归因。
+        - 其它（默认 "legacy"）：旧的"基础分+加分"逻辑，返回 (value, None)，行为不变。
+
+        规则缺失或加载失败时自动回退 legacy。
+        """
+        if mode == "deduction":
+            try:
+                from core.scoring.confidence_scorer import get_scorer
+                scorer = get_scorer("second_board_dragon")
+                if scorer is not None:
+                    res = scorer.score({
+                        "seal_ratio": seal_ratio,
+                        "gap_ratio": gap,
+                        "first_board_score": quality.get('score', 0),
+                        "is_fast": 1 if is_fast else 0,
+                    })
+                    return res.value, res.to_dict()
+                logger.warning("[二板定龙] 扣分制规则缺失，回退 legacy 置信度")
+            except Exception as e:
+                logger.warning(f"[二板定龙] 扣分制计算失败，回退 legacy: {e}")
+        return self._calculate_second_board_confidence(quality, gap, is_fast, seal_ratio), None
+
     def _calculate_second_board_confidence(self, quality: Dict, gap: float, 
                                             is_fast: bool, seal_ratio: float) -> float:
-        """计算二板定龙置信度"""
+        """计算二板定龙置信度（legacy：基础分+阶梯加分，封顶0.95）"""
         confidence = 0.70
         
         if quality.get('score', 0) >= 80:
@@ -1283,10 +1419,10 @@ class PatternRecognition:
                     if hasattr(self.dm, 'get_stock_daily') and hasattr(self.dm, 'date_utils'):
                         # 获取近20日历史数据用于涨幅统计
                         # 使用 get_last_n_trade_dates 获取最近25个交易日
-                        last_n_dates = self.dm.date_utils.get_last_n_trade_dates(25, today_date)
+                        last_n_dates = self.repo.date_utils.get_last_n_trade_dates(25, today_date)
                         if last_n_dates:
                             start_date = last_n_dates[-1]  # 最早的一个
-                            hist_data = self.dm.get_stock_daily(code, start_date, today_date)
+                            hist_data = self.repo.get_daily(code, start_date, today_date)
                 except Exception as e:
                     logger.debug(f"[龙二波] 获取{code}历史数据失败: {e}")
                 
@@ -1388,12 +1524,12 @@ class PatternRecognition:
         
         # 获取涨停池数据
         logger.info("获取涨停池数据...")
-        today_df = self.dm.get_limit_up_pool(today_date_ymd)
-        yesterday_df = self.dm.get_limit_up_pool(yesterday_date_ymd)
+        today_df = self.repo.get_limit_up_pool(today_date_ymd)
+        yesterday_df = self.repo.get_limit_up_pool(yesterday_date_ymd)
         
         # 获取前日数据（用于龙二波检测等，跳过周末）
         day_before_yesterday_ymd = self._get_prev_trading_day(yesterday_date_ymd, 1)
-        day_before_yesterday_df = self.dm.get_limit_up_pool(day_before_yesterday_ymd)
+        day_before_yesterday_df = self.repo.get_limit_up_pool(day_before_yesterday_ymd)
         
         # 获取最近15个交易日涨停池数据（用于龙二波检测，基于交易日历）
         logger.info("获取最近15个交易日涨停池数据...")
@@ -1403,7 +1539,7 @@ class PatternRecognition:
 
         recent_zt_pools = {}
         for i, date_str_ymd in enumerate(recent_trade_dates, 1):
-            df = self.dm.get_limit_up_pool(date_str_ymd)
+            df = self.repo.get_limit_up_pool(date_str_ymd)
             if not df.empty:
                 recent_zt_pools[date_str_ymd] = df
                 logger.debug(f"  [{i}] {date_str_ymd}: {len(df)}只涨停")
@@ -1416,7 +1552,7 @@ class PatternRecognition:
         # 使用 all_stocks_daily (daily 接口) 而非 daily_basic，因为后者缺少 open/vol 等列
         logger.info("获取今日全市场日线数据...")
         try:
-            today_daily = self.dm.get_all_stocks_daily(today_date_ymd)
+            today_daily = self.repo.get_all_stocks_daily(today_date_ymd)
             logger.info(f"获取到全市场日线数据: {len(today_daily)}只股票")
         except Exception as e:
             logger.warning(f"获取全市场日线数据失败: {e}")
@@ -1494,7 +1630,7 @@ class PatternRecognition:
         # 批量查询板块归属
         if all_stock_codes_with_suffix:
             try:
-                stock_sectors_map = self.dm.get_stock_sectors_batch(
+                stock_sectors_map = self.repo.get_stock_sectors_batch(
                     list(all_stock_codes_with_suffix)
                 )
             except Exception as e:
@@ -1783,7 +1919,7 @@ class PatternRecognition:
         try:
             if self.dm and hasattr(self.dm, 'get_stock_daily'):
                 start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=25)).strftime("%Y%m%d")
-                daily_df = self.dm.get_stock_daily(stock_code, start_date, date_str)
+                daily_df = self.repo.get_daily(stock_code, start_date, date_str)
                 if daily_df is not None and not daily_df.empty and len(daily_df) >= 5:
                     df = daily_df.sort_values('trade_date')
                     df['close'] = df['close'].astype(float)
@@ -1833,7 +1969,7 @@ class PatternRecognition:
         try:
             # 获取资金流向数据
             if self.dm and hasattr(self.dm, 'get_moneyflow_data'):
-                moneyflow = self.dm.get_moneyflow_data(stock_code, date_str)
+                moneyflow = self.repo.get_moneyflow_data(stock_code, date_str)
                 if moneyflow:
                     # 主力净流入为正
                     if moneyflow.get('main_inflow', 0) > 0:
@@ -1890,7 +2026,7 @@ class PatternRecognition:
             
             # 获取板块涨幅（如果有板块数据）
             if self.dm and hasattr(self.dm, 'get_sector_daily'):
-                sector_data = self.dm.get_sector_daily(sector_name, date_str)
+                sector_data = self.repo.get_sector_daily(sector_name, date_str)
                 if sector_data:
                     sector_change = sector_data.get('change_pct', 0)
                     if sector_change >= 2.0:

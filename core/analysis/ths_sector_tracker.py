@@ -106,8 +106,12 @@ class THSSectorTracker(
     外部 API 完全兼容，所有原方法仍可在 ``THSSectorTracker`` 实例上直接调用。
     """
 
-    def __init__(self, data_manager, config: Optional[Dict] = None):
+    def __init__(self, data_manager, config: Optional[Dict] = None, repo=None):
         self.dm = data_manager
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
         self._concept_list: Optional[pd.DataFrame] = None
         self._industry_list: Optional[pd.DataFrame] = None
         self._member_cache: Dict[str, pd.DataFrame] = {}  # 成分股缓存
@@ -238,9 +242,9 @@ class THSSectorTracker(
         """加载同花顺板块列表（概念+行业）"""
         if self._concept_list is None or self._industry_list is None:
             # 获取概念指数
-            self._concept_list = self.dm.get_ths_index(index_type='N')
+            self._concept_list = self.repo.get_ths_index(index_type='N')
             # 获取行业指数
-            self._industry_list = self.dm.get_ths_index(index_type='I')
+            self._industry_list = self.repo.get_ths_index(index_type='I')
 
             if self._concept_list.empty:
                 logger.warning("[THSSectorTracker] 无法获取同花顺概念指数列表")
@@ -265,7 +269,7 @@ class THSSectorTracker(
             DataFrame: 成分股列表
         """
         if ts_code not in self._member_cache:
-            members = self.dm.get_ths_member(ts_code=ts_code)
+            members = self.repo.get_ths_member(ts_code=ts_code)
             self._member_cache[ts_code] = members
         return self._member_cache.get(ts_code, pd.DataFrame())
 
@@ -305,7 +309,7 @@ class THSSectorTracker(
         code_to_name = dict(zip(concept_list['ts_code'], concept_list['name']))
         
         # 2. 获取行情数据
-        daily_df = self.dm.get_ths_daily(trade_date=trade_date)
+        daily_df = self.repo.get_ths_daily(trade_date=trade_date)
         if daily_df.empty:
             logger.warning(f"[analyze_concept_sectors] 无法获取 {trade_date} 板块行情")
             return pd.DataFrame()
@@ -322,7 +326,7 @@ class THSSectorTracker(
         limit_cpt_df = pd.DataFrame()
         if use_limit_cpt:
             try:
-                limit_cpt_df = self.dm.get_limit_cpt_list(trade_date)
+                limit_cpt_df = self.repo.get_limit_cpt_list(trade_date)
                 if not limit_cpt_df.empty:
                     logger.info(f"[analyze_concept_sectors] 获取到limit_cpt_list数据: {len(limit_cpt_df)}条")
             except Exception as e:
@@ -382,7 +386,7 @@ class THSSectorTracker(
         code_to_name = dict(zip(industry_list['ts_code'], industry_list['name']))
         
         # 2. 获取行情数据
-        daily_df = self.dm.get_ths_daily(trade_date=trade_date)
+        daily_df = self.repo.get_ths_daily(trade_date=trade_date)
         if daily_df.empty:
             logger.warning(f"[analyze_industry_sectors] 无法获取 {trade_date} 板块行情")
             return pd.DataFrame()
@@ -527,7 +531,7 @@ class THSSectorTracker(
             return {}
 
         # 2. 获取板块行情
-        sector_daily = self.dm.get_ths_daily(ts_code=ts_code, trade_date=trade_date)
+        sector_daily = self.repo.get_ths_daily(ts_code=ts_code, trade_date=trade_date)
 
         # 3. 统计涨停股
         up_stocks = []

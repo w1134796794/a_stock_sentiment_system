@@ -35,6 +35,13 @@ class THSIndustryMapper:
             self.dm = data_manager
             self._mapping_file = None
 
+        # Phase 1：只读仓库（仅在有 dm 时构造透传）
+        if self.dm is not None:
+            from core.data.repository import StockRepository
+            self.repo = StockRepository.passthrough(self.dm)
+        else:
+            self.repo = None
+
         self.index_df = None
         self.index_cache = {}
         self._load_index_list()
@@ -46,7 +53,7 @@ class THSIndustryMapper:
             return
 
         try:
-            self.index_df = self.dm.get_ths_index()
+            self.index_df = self.repo.get_ths_index()
             if not self.index_df.empty:
                 logger.info(f"[THSIndustryMapper] 加载同花顺板块指数: {len(self.index_df)}个")
             else:
@@ -92,7 +99,7 @@ class THSIndustryMapper:
             return pd.DataFrame()
 
         try:
-            members_df = self.dm.get_ths_member(ts_code)
+            members_df = self.repo.get_ths_member(ts_code)
             if not members_df.empty:
                 self.index_cache[ts_code] = members_df.copy()
             return members_df

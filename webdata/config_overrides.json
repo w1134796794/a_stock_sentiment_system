@@ -32,6 +32,18 @@
         "首板突破": 65,
         "龙二波": 75
       }
+    },
+    "second_board_dragon": {
+      "confidence_mode": "deduction"
+    },
+    "weak_to_strong": {
+      "confidence_mode": "deduction"
+    },
+    "first_board_breakout": {
+      "confidence_mode": "deduction"
+    },
+    "dragon_second_wave": {
+      "confidence_mode": "deduction"
     }
   }
 }

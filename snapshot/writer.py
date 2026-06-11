@@ -207,6 +207,9 @@ def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
             "date": date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "schema_version": SCHEMA_VERSION,
+            # Phase 2：因子 profile + 启用因子清单（复盘归因留痕）
+            "factor_profile": str(data_dict.get("factor_profile") or ""),
+            "enabled_factors": list(data_dict.get("enabled_factors") or []),
         },
         "market": market,
         "trade_plans": trade_plans,

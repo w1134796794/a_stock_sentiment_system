@@ -60,8 +60,12 @@ class ChipStructure:
 class ChipStructureAnalyzer:
     """筹码结构分析器"""
 
-    def __init__(self, data_manager):
+    def __init__(self, data_manager, repo=None):
         self.dm = data_manager
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
 
     @property
     def extensions(self):
@@ -315,7 +319,7 @@ class ChipStructureAnalyzer:
         """
         if stock_list is None:
             # 获取当日涨停股票
-            limit_up_df = self.dm.get_limit_up_pool(trade_date)
+            limit_up_df = self.repo.get_limit_up_pool(trade_date)
             if not limit_up_df.empty:
                 code_col = '代码' if '代码' in limit_up_df.columns else ('code' if 'code' in limit_up_df.columns else None)
                 if code_col:
@@ -355,7 +359,7 @@ class ChipStructureAnalyzer:
             DataFrame: 筹码突破股票
         """
         if stock_list is None:
-            limit_up_df = self.dm.get_limit_up_pool(trade_date)
+            limit_up_df = self.repo.get_limit_up_pool(trade_date)
             if not limit_up_df.empty:
                 code_col = '代码' if '代码' in limit_up_df.columns else ('code' if 'code' in limit_up_df.columns else None)
                 if code_col:

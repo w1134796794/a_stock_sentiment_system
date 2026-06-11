@@ -38,8 +38,12 @@ LEVEL_NODATA = "数据缺失"
 class AuctionConfirmer:
     """对复盘清单做次日竞价确认。"""
 
-    def __init__(self, data_manager, snapshot_reader=None):
+    def __init__(self, data_manager, snapshot_reader=None, repo=None):
         self.dm = data_manager
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
         if snapshot_reader is None:
             from config.settings import SNAPSHOT_DIR
             from snapshot.reader import SnapshotReader
@@ -140,8 +144,8 @@ class AuctionConfirmer:
         auction = {}
         prev_daily = {}
         try:
-            auction = self.dm.get_auction_data(code, confirm_date) or {}
-            prev_daily = self.dm.get_stock_daily_data(code, prev_date) or {}
+            auction = self.repo.get_auction_data(code, confirm_date) or {}
+            prev_daily = self.repo.get_stock_daily_data(code, prev_date) or {}
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[AuctionConfirm] {code} 取数失败: {e}")
 

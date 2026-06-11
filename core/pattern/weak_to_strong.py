@@ -216,9 +216,13 @@ class RecoverySignal:
 class WeakToStrongStrategy:
     """弱转强策略 - 动态跟踪版本"""
     
-    def __init__(self, data_manager, sector_engine=None, pool_file: str = None):
+    def __init__(self, data_manager, sector_engine=None, pool_file: str = None, repo=None):
         self.dm = data_manager
         self.se = sector_engine
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
         
         # 池子文件路径
         self.pool_file = pool_file or "dragon_pools.json"
@@ -408,7 +412,7 @@ class WeakToStrongStrategy:
             if current_price == 0 and self.dm is not None:
                 try:
                     # 获取该股票当日的日线数据
-                    stock_daily = self.dm.get_stock_daily(code, date_str, date_str)
+                    stock_daily = self.repo.get_stock_daily(code, date_str, date_str)
                     if stock_daily is not None and not stock_daily.empty:
                         current_price = stock_daily.iloc[0].get('close', 0)
                         if current_price == 0:
@@ -650,7 +654,7 @@ class WeakToStrongStrategy:
         try:
             # 获取近15个交易日数据
             if hasattr(self.dm, 'date_utils'):
-                last_n_dates = self.dm.date_utils.get_last_n_trade_dates(15, date_str)
+                last_n_dates = self.repo.date_utils.get_last_n_trade_dates(15, date_str)
                 if not last_n_dates or len(last_n_dates) < 10:
                     return None
                 start_date = last_n_dates[-1]
@@ -659,7 +663,7 @@ class WeakToStrongStrategy:
                 start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=20)).strftime("%Y%m%d")
             
             # 获取日线数据
-            daily_df = self.dm.get_stock_daily(code, start_date, date_str)
+            daily_df = self.repo.get_stock_daily(code, start_date, date_str)
             
             if daily_df is None or daily_df.empty or len(daily_df) < 10:
                 return None
@@ -794,7 +798,7 @@ class WeakToStrongStrategy:
                 return None
 
             start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
-            daily_df = self.dm.get_stock_daily(code, start_date, date_str)
+            daily_df = self.repo.get_stock_daily(code, start_date, date_str)
             if daily_df is None or daily_df.empty:
                 return None
 
@@ -872,7 +876,7 @@ class WeakToStrongStrategy:
         try:
             # 获取近15个交易日数据（确保有足够数据）
             if hasattr(self.dm, 'date_utils'):
-                last_n_dates = self.dm.date_utils.get_last_n_trade_dates(15, date_str)
+                last_n_dates = self.repo.date_utils.get_last_n_trade_dates(15, date_str)
                 if not last_n_dates or len(last_n_dates) < 10:
                     return 0.0, 0
                 start_date = last_n_dates[-1]
@@ -881,7 +885,7 @@ class WeakToStrongStrategy:
                 start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=20)).strftime("%Y%m%d")
             
             # 获取日线数据
-            daily_df = self.dm.get_stock_daily(code, start_date, date_str)
+            daily_df = self.repo.get_stock_daily(code, start_date, date_str)
             
             if daily_df is None or daily_df.empty or len(daily_df) < 5:
                 return 0.0, 0
@@ -914,7 +918,7 @@ class WeakToStrongStrategy:
         try:
             # 获取近15个交易日数据（确保有足够数据）
             if hasattr(self.dm, 'date_utils'):
-                last_n_dates = self.dm.date_utils.get_last_n_trade_dates(15, date_str)
+                last_n_dates = self.repo.date_utils.get_last_n_trade_dates(15, date_str)
                 if not last_n_dates or len(last_n_dates) < 10:
                     logger.debug(f"[弱转强-趋势龙头] {name}({code}) 无法获取足够交易日数据")
                     return None
@@ -925,7 +929,7 @@ class WeakToStrongStrategy:
                 start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=20)).strftime("%Y%m%d")
             
             # 获取日线数据
-            daily_df = self.dm.get_stock_daily(code, start_date, date_str)
+            daily_df = self.repo.get_stock_daily(code, start_date, date_str)
             
             if daily_df is None or daily_df.empty or len(daily_df) < 5:
                 logger.debug(f"[弱转强-趋势龙头] {name}({code}) 日线数据不足({len(daily_df) if daily_df is not None else 0}天)")
@@ -1419,40 +1423,17 @@ class WeakToStrongStrategy:
             gap_pct, auction_vol_ratio, auction_amount, weakening
         )
         
-        # 计算置信度（结合弹性评分）
-        confidence = 0.60  # 基础置信度
-        
-        # 高开加分
-        if gap_pct >= self.params['ideal_gap']:
-            confidence += 0.15
-        elif gap_pct >= dynamic_params['min_gap']:
-            confidence += 0.05
-        
-        # 竞价量加分
-        if auction_vol_ratio >= self.params['ideal_auction_vol_ratio']:
-            confidence += 0.10
-        elif auction_vol_ratio >= dynamic_params['min_auction_vol_ratio']:
-            confidence += 0.05
-        
-        # 弹性评分加分（如果启用）
-        if self.params.get('enable_flexible_scoring', False):
-            if flexible_score >= 80:
-                confidence += 0.10
-            elif flexible_score >= 60:
-                confidence += 0.05
-        
-        # 根据走弱类型调整置信度
-        if weakening.weakening_type == "断板":
-            confidence += 0.05  # 断板后转强更可靠
-        elif "放量滞涨" in weakening.weakening_type:
-            confidence -= 0.05  # 放量滞涨后转强需要更谨慎
-        
-        final_confidence = min(0.95, max(0.50, confidence))
+        # 计算置信度（Phase 3：confidence_mode=deduction 走统一扣分制，默认 legacy 不变）
+        final_confidence, conf_breakdown = self._auction_recovery_confidence(
+            gap_pct, dynamic_params, auction_vol_ratio, flexible_score, weakening
+        )
         
         logger.info(f"[{weakening.stock_code}] 竞价转强信号: "
                    f"高开{gap_pct*100:.1f}%, 竞价量{auction_vol_ratio*100:.1f}%, "
                    f"弹性评分{flexible_score:.0f}, 置信度{final_confidence*100:.0f}%")
-        
+        if conf_breakdown:
+            logger.debug(f"[{weakening.stock_code}] 置信扣分明细: {conf_breakdown}")
+
         return RecoverySignal(
             stock_code=weakening.stock_code,
             stock_name=weakening.stock_name,
@@ -1466,7 +1447,51 @@ class WeakToStrongStrategy:
             suggested_entry=open_price * 1.01,  # 建议买入价：开盘价+1%
             confidence=final_confidence
         )
-    
+
+    def _auction_recovery_confidence(self, gap_pct, dynamic_params,
+                                     auction_vol_ratio, flexible_score, weakening):
+        """
+        竞价转强置信度（Phase 3）。
+
+        - confidence_mode="deduction"：统一扣分制（confidence_rules.yaml 的 weak_to_strong），
+          返回 (value, breakdown_dict)。
+        - 其它（默认 "legacy"）：旧的基础分+加分逻辑，返回 (value, None)，行为不变。
+        """
+        mode = self.params.get("confidence_mode", "legacy")
+        if mode == "deduction":
+            from core.scoring.confidence_scorer import score_or_none
+            wt = weakening.weakening_type or ""
+            wt_cat = "断板" if wt == "断板" else ("放量滞涨" if "放量滞涨" in wt else "其他")
+            res = score_or_none("weak_to_strong", {
+                "gap_pct": gap_pct,
+                "auction_vol_ratio": auction_vol_ratio,
+                "flexible_score": flexible_score,
+                "weakening_type": wt_cat,
+            })
+            if res is not None:
+                return res.value, res.to_dict()
+
+        # legacy
+        confidence = 0.60
+        if gap_pct >= self.params['ideal_gap']:
+            confidence += 0.15
+        elif gap_pct >= dynamic_params['min_gap']:
+            confidence += 0.05
+        if auction_vol_ratio >= self.params['ideal_auction_vol_ratio']:
+            confidence += 0.10
+        elif auction_vol_ratio >= dynamic_params['min_auction_vol_ratio']:
+            confidence += 0.05
+        if self.params.get('enable_flexible_scoring', False):
+            if flexible_score >= 80:
+                confidence += 0.10
+            elif flexible_score >= 60:
+                confidence += 0.05
+        if weakening.weakening_type == "断板":
+            confidence += 0.05
+        elif "放量滞涨" in weakening.weakening_type:
+            confidence -= 0.05
+        return min(0.95, max(0.50, confidence)), None
+
     def _confirm_recovery(self,
                          signal: RecoverySignal,
                          tick: pd.DataFrame,

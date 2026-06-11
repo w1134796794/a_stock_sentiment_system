@@ -50,7 +50,7 @@ class THSMainThemeMixin:
         if industry_persistence_df is None:
             industry_persistence_df = self.analyze_industry_persistence(trade_date, top_n=15)
 
-        limit_up_df = self.dm.get_limit_up_pool(trade_date)
+        limit_up_df = self.repo.get_limit_up_pool(trade_date)
 
         all_candidates = []
 

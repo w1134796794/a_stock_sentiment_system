@@ -44,6 +44,8 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_float_cap": 200.0,
         "max_5d_rise": 0.15,
         "max_break_count": 1,
+        # Phase 3/4：置信度算法。"legacy"=旧加分制（默认，行为不变）；"deduction"=统一满分扣分制
+        "confidence_mode": "legacy",
     },
     # 弱转强 WeakToStrong.params
     "weak_to_strong": {
@@ -72,6 +74,7 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "dynamic_params_enabled": True,
         "sentiment_bullish_boost": 0.02,
         "sentiment_bearish_penalty": 0.02,
+        "confidence_mode": "legacy",
     },
     # 二板定龙 SecondBoardDragon.params（基础）
     "second_board_dragon": {
@@ -85,6 +88,21 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_time_to_limit": 15,
         "min_seal_growth": 0.10,
         "max_sector_second_board": 2,
+        # —— 候选准入闸（原为硬编码，现可调；默认值与旧逻辑一致）——
+        "min_first_board_score": 60,     # 首板质量分下限
+        "candidate_min_gap": 0.02,       # 次日高开下限
+        "candidate_min_confidence": 0.70,  # 置信度下限
+        # —— 定龙择优（新增：把"逐只过闸"改为"全场横向竞争择优定龙"）——
+        "max_dragons_per_day": 3,        # 每日最多输出几只"龙头"
+        "max_per_sector": 1,             # 同一板块最多保留几只（去同质化）
+        "min_sector_first_board": 0,     # 板块首板助攻硬门槛（0=关闭；≥1 则独票二板不定龙）
+        # 横向强度评分权重（用于排序定龙，连续不饱和，可分梯队）
+        "rank_w_gap": 1.0,               # ×高开%
+        "rank_w_quality": 0.5,           # ×首板质量分
+        "rank_w_seal": 0.8,              # ×封单强度%
+        "rank_w_fast": 10.0,             # 快速封板加分（固定）
+        "rank_w_sector_assist": 6.0,     # ×板块首板助攻家数
+        "confidence_mode": "legacy",     # Phase 3/4：legacy=旧加分制(默认)；deduction=满分扣分制
     },
     # 二板定龙 SecondBoardDragon.strict_params（严格模式）
     "second_board_dragon_strict": {
@@ -112,6 +130,7 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "platform_days_min": 7,
         "platform_days_max": 15,
         "max_distance_from_high": 0.25,
+        "confidence_mode": "legacy",
     },
     # 多因子打分 MultiFactorScorer.weights
     "multi_factor_weights": {

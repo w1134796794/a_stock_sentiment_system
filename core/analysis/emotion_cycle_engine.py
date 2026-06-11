@@ -166,10 +166,15 @@ class EmotionCycleEngine:
     8. 连板梯队完整性 - 生态健康度
     """
     
-    def __init__(self, thresholds: CycleThresholds = None, dm=None, factor_registry=None):
+    def __init__(self, thresholds: CycleThresholds = None, dm=None, factor_registry=None, repo=None):
         self.thresholds = thresholds or CycleThresholds()
         self.history_cycles: List[Dict] = []  # 历史周期记录
         self.dm = dm  # DataManager实例，用于获取价格数据
+        # Phase 1：只读仓库（仅在有 dm 时构造透传）
+        if repo is None and dm is not None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(dm)
+        self.repo = repo
         self.factor_registry = factor_registry  # 因子注册中心
 
         # 从因子配置加载评分权重
@@ -742,8 +747,8 @@ class EmotionCycleEngine:
             # trade_date = T-2（前天，涨停日）
             # buy_date = T-1（昨日，开盘买入）
             # sell_date = T（今日，开盘卖出）
-            buy_date = self.dm.date_utils.get_next_trade_date(str(trade_date))
-            sell_date = self.dm.date_utils.get_next_trade_date(buy_date)
+            buy_date = self.repo.date_utils.get_next_trade_date(str(trade_date))
+            sell_date = self.repo.date_utils.get_next_trade_date(buy_date)
 
             logger.info(f"[_calculate_prev_limit_up_performance] T+1模拟: "
                        f"{trade_date}涨停 → {buy_date}开盘买入 → {sell_date}开盘卖出")
@@ -752,7 +757,7 @@ class EmotionCycleEngine:
                 try:
                     ts_code = row[code_col]
 
-                    df = self.dm.get_stock_daily(ts_code, buy_date, sell_date)
+                    df = self.repo.get_stock_daily(ts_code, buy_date, sell_date)
                     if df.empty or len(df) < 2:
                         continue
 
