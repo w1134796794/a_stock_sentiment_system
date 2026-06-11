@@ -12,19 +12,43 @@
   </div>
   {% endif %}
 
-  {# ---------- 单个字段值渲染：标量 / 字典(key_metrics) / 列表(validation_rules) ---------- #}
+  {# ---------- 置信扣分明细友好渲染：得分胶囊 + 逐项扣分 ---------- #}
+  {% macro render_conf(v) %}
+    <div class="md-conf">
+      <div class="md-conf-top">
+        <span class="md-conf-score">{{ v.raw | num2 }}<span class="md-conf-u">分</span></span>
+        <span class="md-conf-meta">满分 {{ v.ceiling | num2 }} · 地板 {{ v.floor | num2 }} · 共扣 <b>{{ v.total_penalty | num2 }}</b></span>
+      </div>
+      {%- if v.breakdown -%}
+      <div class="md-conf-items">
+        {%- for it in v.breakdown -%}
+        {% set pen = (it.penalty | float(0)) %}
+        <span class="md-conf-item {% if pen > 0 %}neg{% else %}ok{% endif %}">
+          <span class="md-conf-f">{{ it.factor | col_label }}</span>
+          <span class="md-conf-val">{{ '缺失' if it.missing else (it.value | num2 if it.value is not none else '—') }}</span>
+          <span class="md-conf-p">{% if pen > 0 %}−{{ pen | num2 }}{% else %}0{% endif %}</span>
+        </span>
+        {%- endfor -%}
+      </div>
+      {%- endif -%}
+    </div>
+  {% endmacro %}
+
+  {# ---------- 单个字段值渲染：标量 / 字典(key_metrics, 递归) / 列表(validation_rules) ---------- #}
   {% macro render_value(v) %}
     {%- if v is mapping -%}
-      {%- if v -%}
+      {%- if v.get('total_penalty') is not none and 'breakdown' in v -%}
+        {{ render_conf(v) }}
+      {%- elif v -%}
       <div class="md-kv">
         {%- for k, val in v.items() -%}
-        <div class="md-kv-row"><span class="md-kv-k">{{ k | col_label }}</span><span class="md-kv-v">{{ val | num2 if val is not none else '--' }}</span></div>
+        <div class="md-kv-row"><span class="md-kv-k">{{ k | col_label }}</span><span class="md-kv-v">{{ render_value(val) }}</span></div>
         {%- endfor -%}
       </div>
       {%- else -%}--{%- endif -%}
     {%- elif v is iterable and v is not string -%}
       {%- if v|length -%}
-      <div class="md-tags">{%- for item in v -%}<span class="md-tag">{{ item | num2 }}</span>{%- endfor -%}</div>
+      <div class="md-tags">{%- for item in v -%}<span class="md-tag">{{ render_value(item) if (item is mapping or (item is iterable and item is not string)) else item | num2 }}</span>{%- endfor -%}</div>
       {%- else -%}--{%- endif -%}
     {%- else -%}
       {{ v | num2 if v is not none else '--' }}
@@ -95,7 +119,7 @@
       </thead>
       <tbody>
         {% for row in rows %}
-        <tr class="hover:bg-slate-800/40">
+        <tr class="odd:bg-slate-900/30 hover:bg-slate-800/40 transition-colors">
           {% for c in columns %}
           <td class="px-3 py-1.5 border-b border-slate-800/60 whitespace-nowrap mono text-xs text-slate-200">
             {% set v = row.get(c) %}
@@ -110,16 +134,243 @@
   {% endif %}
   {% endmacro %}
 
-  {% set _render = render_master_detail if (view | default('table')) == 'detail' else render_table %}
-  {% if section.blocks %}
-    {% for blk in section.blocks %}
-    <div class="{% if not loop.first %}mt-5{% endif %}">
-      {% if blk.title %}<div class="text-xs font-semibold text-slate-400 mb-2 pl-1 border-l-2 border-emerald-500/60">{{ blk.title }}</div>{% endif %}
-      {{ _render(blk.columns, blk.rows) }}
-    </div>
-    {% endfor %}
+  {# ---------- 涨停梯队：按连板数分层（高度板在上） ---------- #}
+  {% macro render_echelon_boards(rows) %}
+  {% if not rows %}
+    <div class="text-slate-500 text-sm py-4">无数据</div>
   {% else %}
-    {{ _render(section.columns, section.rows) }}
+    {% set lv = namespace(seen=[]) %}
+    {% for r in rows %}
+      {% set b = r.get('连板数') %}
+      {% if b is not none and b not in lv.seen %}{% set lv.seen = lv.seen + [b] %}{% endif %}
+    {% endfor %}
+    <div class="ech-wrap">
+      {% for level in lv.seen | sort(reverse=true) %}
+      <div class="ech-tier">
+        <div class="ech-tier-head">
+          <span class="ech-badge ech-b{{ level if level <= 5 else 5 }}">{{ level }}<small>板</small></span>
+          {% set ns2 = namespace(n=0) %}
+          {% for r in rows %}{% if r.get('连板数') == level %}{% set ns2.n = ns2.n + 1 %}{% endif %}{% endfor %}
+          <span class="ech-tier-n">{{ ns2.n }} 家</span>
+        </div>
+        <div class="ech-cards">
+          {% for r in rows %}
+          {% if r.get('连板数') == level %}
+          {% set zb = r.get('炸板次数') or 0 %}
+          <div class="ech-card{% if zb > 0 %} zha{% endif %}">
+            <div class="ech-card-top">
+              <span class="ech-name">{{ r.get('股票名称') }}</span>
+              <span class="ech-pct mono">{{ r.get('涨幅%') | num2 }}<small>%</small></span>
+            </div>
+            <div class="ech-card-sub">
+              <span class="ech-code mono">{{ r.get('股票代码') }}</span>
+              <span class="ech-ind">{{ r.get('行业') }}</span>
+            </div>
+            <div class="ech-card-foot">
+              <span class="mono">{{ r.get('首次涨停时间') }}</span>
+              {% if zb > 0 %}<span class="ech-zha">炸 {{ zb }}</span>{% endif %}
+            </div>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  {% endmacro %}
+
+  {# ---------- 概念连板梯队：概念卡片 ---------- #}
+  {% macro render_echelon_concepts(rows) %}
+  {% if not rows %}
+    <div class="text-slate-500 text-sm py-4">无数据</div>
+  {% else %}
+    <div class="ech-cpt-grid">
+      {% for r in rows %}
+      {% set mb = r.get('最高连板') or 0 %}
+      <div class="ech-cpt">
+        <div class="ech-cpt-head">
+          <span class="ech-cpt-name">{{ r.get('概念名称') }}</span>
+          <span class="ech-badge ech-b{{ mb if mb <= 5 else 5 }}">{{ mb }}<small>板</small></span>
+        </div>
+        <div class="ech-cpt-stats">
+          <span class="ech-cpt-zt"><b class="mono">{{ r.get('涨停总数') | num2 }}</b> 涨停</span>
+          {% if r.get('龙头股') %}<span class="ech-cpt-lead">龙头 {{ r.get('龙头股') }}</span>{% endif %}
+        </div>
+        {% if r.get('梯队分布') %}
+        <div class="ech-cpt-dist">
+          {% for seg in r.get('梯队分布').split(',') %}
+            {% if seg.strip() %}<span class="ech-seg">{{ seg.strip() }}</span>{% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  {% endmacro %}
+
+  {# ---------- 梯队视图分发：按列特征选择个股梯队 / 概念卡片 ---------- #}
+  {% macro render_echelon(columns, rows) %}
+    {%- if '连板数' in columns -%}
+      {{ render_echelon_boards(rows) }}
+    {%- elif '概念名称' in columns or '梯队分布' in columns -%}
+      {{ render_echelon_concepts(rows) }}
+    {%- else -%}
+      {{ render_table(columns, rows) }}
+    {%- endif -%}
+  {% endmacro %}
+
+  {# ---------- 资金卡：龙虎榜 / 资金流向 ---------- #}
+  {% macro render_capital_cards(columns, rows) %}
+  {% if not rows %}
+    <div class="text-slate-500 text-sm py-4">无数据</div>
+  {% else %}
+    <div class="cap-grid">
+      {% for r in rows %}
+      {% set net = r.get('净买入(万)') if '净买入(万)' in columns else r.get('主力净流入(万)') %}
+      {% set net_n = net | float(0) %}
+      <div class="cap-card">
+        <div class="cap-top">
+          <span class="cap-name">{{ r.get('股票名称') or r.get('股票代码') }}</span>
+          <span class="cap-code mono">{{ r.get('股票代码') }}</span>
+        </div>
+        <div class="cap-net mono {% if net_n > 0 %}up{% elif net_n < 0 %}down{% endif %}">
+          {{ '+' if net_n > 0 else '' }}{{ net | num2 }}<small>万</small>
+        </div>
+        <div class="cap-sub">
+          {% if '信誉加权净(万)' in columns %}<span>信誉净 <b class="mono">{{ r.get('信誉加权净(万)') | num2 }}</b></span>{% endif %}
+          {% if '买方信誉' in columns and r.get('买方信誉') %}<span class="cap-badge">{{ r.get('买方信誉') }}</span>{% endif %}
+          {% if '席位数' in columns %}<span class="mono">{{ r.get('席位数') }} 席</span>{% endif %}
+          {% if '散户净流入(万)' in columns %}<span>散户 <b class="mono">{{ r.get('散户净流入(万)') | num2 }}</b></span>{% endif %}
+          {% if '方向' in columns and r.get('方向') %}<span class="cap-badge {% if r.get('方向') == '流入' %}cap-in{% else %}cap-out{% endif %}">{{ r.get('方向') }}</span>{% endif %}
+        </div>
+        {% if r.get('主要席位') %}<div class="cap-seats">{{ r.get('主要席位') }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  {% endmacro %}
+
+  {# ---------- 模式胜率卡：复盘总结 ---------- #}
+  {% macro render_winrate_cards(rows) %}
+  {% if not rows %}
+    <div class="text-slate-500 text-sm py-4">无数据</div>
+  {% else %}
+    <div class="wr-grid">
+      {% for r in rows %}
+      {% set wr = (r.get('胜率') or '0%') | string %}
+      {% set wrn = wr.replace('%','') | float(0) %}
+      {% set avg = (r.get('平均收益') or '') | string %}
+      <div class="wr-card">
+        <div class="wr-head">
+          <span class="wr-mode">{{ r.get('模式') }}</span>
+          <span class="wr-conf mono">置信 {{ r.get('平均置信度') }}</span>
+        </div>
+        <div class="wr-ring {% if wrn >= 50 %}good{% elif wrn >= 40 %}mid{% else %}bad{% endif %}" style="--p:{{ wrn }}">
+          <span class="wr-pct mono">{{ wr }}</span>
+        </div>
+        <div class="wr-stats">
+          <span class="mono">{{ r.get('盈利数') }}/{{ r.get('信号数') }} 胜</span>
+          <span class="mono {% if avg.startswith('-') %}down{% else %}up{% endif %}">均 {{ avg or '–' }}</span>
+        </div>
+        <div class="wr-range mono">{{ r.get('最小收益') }} ~ {{ r.get('最大收益') }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  {% endmacro %}
+
+  {# ---------- 热力分桶（0~100） ---------- #}
+  {% macro heat_bucket(v) %}{%- if v >= 80 -%}h5{%- elif v >= 65 -%}h4{%- elif v >= 50 -%}h3{%- elif v >= 35 -%}h2{%- elif v > 0 -%}h1{%- else -%}h0{%- endif -%}{% endmacro %}
+
+  {# ---------- 胜率热力表：周期模式胜率（单元格形如 "53%(n=17)"） ---------- #}
+  {% macro render_winrate_matrix(columns, rows) %}
+  {% if not rows %}
+    <div class="text-slate-500 text-sm py-4">无数据</div>
+  {% else %}
+  <div class="overflow-x-auto">
+    <table class="heat-tbl">
+      <thead><tr>{% for c in columns %}<th>{{ c | col_label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          {% for c in columns %}
+          {% set v = (r.get(c) or '') | string %}
+          {% if loop.first %}
+            <th class="heat-rowhead">{{ v }}</th>
+          {% else %}
+            {% set pct = (v.split('%')[0] | float(-1)) if '%' in v else -1 %}
+            <td class="heat-cell {{ 'h0' if pct < 0 else heat_bucket(pct) }}">
+              {% if '%' in v %}
+                <span class="heat-v mono">{{ v.split('(')[0] }}</span>
+                {% if '(' in v %}<span class="heat-n">{{ v.split('(')[1].replace(')','') }}</span>{% endif %}
+              {% else %}<span class="heat-na">{{ v or '–' }}</span>{% endif %}
+            </td>
+          {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endmacro %}
+
+  {# ---------- 因子热力表：因子原始数据（0~100 打分） ---------- #}
+  {% macro render_factor_heat(columns, rows) %}
+  {% if not rows %}
+    <div class="text-slate-500 text-sm py-4">无数据</div>
+  {% else %}
+  <div class="overflow-x-auto max-h-[560px]">
+    <table class="heat-tbl">
+      <thead class="sticky top-0"><tr>{% for c in columns %}<th>{{ c | col_label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          {% for c in columns %}
+          {% set v = r.get(c) %}
+          {% if loop.first %}
+            <th class="heat-rowhead mono">{{ v }}</th>
+          {% else %}
+            {% set num = v | float(-1) %}
+            <td class="heat-cell {{ 'h0' if num < 0 else heat_bucket(num) }}"><span class="heat-v mono">{{ v | num2 if v is not none else '–' }}</span></td>
+          {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endmacro %}
+
+  {# ---------- 智能混搭分发 ---------- #}
+  {% macro render_smart(columns, rows, name) %}
+    {%- if name in ['龙虎榜', '资金流向'] -%}{{ render_capital_cards(columns, rows) }}
+    {%- elif name == '复盘总结' -%}{{ render_winrate_cards(rows) }}
+    {%- elif name == '周期模式胜率' -%}{{ render_winrate_matrix(columns, rows) }}
+    {%- elif name == '因子原始数据' -%}{{ render_factor_heat(columns, rows) }}
+    {%- elif name == '交易计划' -%}{{ render_master_detail(columns, rows) }}
+    {%- else -%}{{ render_table(columns, rows) }}
+    {%- endif -%}
+  {% endmacro %}
+
+  {% set _view = view | default('table') %}
+  {% if _view == 'smart' %}
+    {{ render_smart(section.columns, section.rows, section.name) }}
+  {% else %}
+    {% set _render = render_echelon if _view == 'echelon' else (render_master_detail if _view == 'detail' else render_table) %}
+    {% if section.blocks %}
+      {% for blk in section.blocks %}
+      <div class="{% if not loop.first %}mt-5{% endif %}">
+        {% if blk.title %}<div class="text-xs font-semibold text-slate-400 mb-2 pl-1 border-l-2 border-emerald-500/60">{{ blk.title }}</div>{% endif %}
+        {{ _render(blk.columns, blk.rows) }}
+      </div>
+      {% endfor %}
+    {% else %}
+      {{ _render(section.columns, section.rows) }}
+    {% endif %}
   {% endif %}
 
   {% if section.note %}
@@ -127,7 +378,7 @@
   {% endif %}
 </div>
 
-{% if (view | default('table')) == 'detail' %}
+{% if (view | default('table')) in ['detail', 'smart'] %}
 <style>
   .md-wrap { display:flex; flex-direction:column; gap:.5rem; }
   .md-item { border:1px solid rgba(51,65,85,.7); border-radius:.6rem; background:rgba(15,23,42,.45); overflow:hidden; }
@@ -155,5 +406,127 @@
   .md-kv-v { color:#e2e8f0; overflow-wrap:anywhere; }
   .md-tags { display:flex; flex-wrap:wrap; gap:.3rem; }
   .md-tag { background:rgba(15,23,42,.7); border:1px solid rgba(51,65,85,.6); border-radius:.35rem; padding:.05rem .4rem; font-size:.74rem; color:#cbd5e1; }
+  /* 置信扣分明细 */
+  .md-conf { display:flex; flex-direction:column; gap:.5rem; }
+  .md-conf-top { display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap; }
+  .md-conf-score { font-family:'JetBrains Mono', monospace; font-size:1.5rem; font-weight:800; color:#34d399; line-height:1; }
+  .md-conf-score .md-conf-u { font-size:.8rem; font-weight:600; color:#94a3b8; margin-left:.15rem; }
+  .md-conf-meta { font-size:.72rem; color:#94a3b8; }
+  .md-conf-meta b { color:#fbbf24; font-family:'JetBrains Mono', monospace; }
+  .md-conf-items { display:flex; flex-wrap:wrap; gap:.4rem; }
+  .md-conf-item { display:inline-flex; align-items:center; gap:.4rem; border-radius:.45rem; padding:.15rem .5rem;
+                  font-size:.72rem; border:1px solid rgba(51,65,85,.6); background:rgba(15,23,42,.6); }
+  .md-conf-item.ok { border-color:rgba(16,185,129,.35); }
+  .md-conf-item.neg { border-color:rgba(251,191,36,.4); background:rgba(120,53,15,.18); }
+  .md-conf-f { color:#cbd5e1; font-weight:600; }
+  .md-conf-val { color:#64748b; font-family:'JetBrains Mono', monospace; }
+  .md-conf-item.ok .md-conf-p { color:#34d399; font-family:'JetBrains Mono', monospace; font-weight:700; }
+  .md-conf-item.neg .md-conf-p { color:#fbbf24; font-family:'JetBrains Mono', monospace; font-weight:700; }
+</style>
+{% endif %}
+
+{% if (view | default('table')) == 'echelon' %}
+<style>
+  /* ===== 涨停梯队 ===== */
+  .ech-wrap { display:flex; flex-direction:column; gap:.7rem; max-height:600px; overflow-y:auto; padding-right:.25rem; }
+  .ech-tier { display:flex; gap:.85rem; align-items:flex-start;
+              border-left:2px solid rgba(51,65,85,.5); padding-left:.7rem; }
+  .ech-tier-head { flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:.3rem;
+                   position:sticky; top:0; padding-top:.1rem; }
+  .ech-tier-n { font-size:.66rem; color:#64748b; white-space:nowrap; }
+  .ech-cards { display:flex; flex-wrap:wrap; gap:.5rem; flex:1 1 auto; }
+  .ech-card { width:152px; border:1px solid rgba(51,65,85,.6); border-radius:.55rem;
+              background:rgba(15,23,42,.55); padding:.45rem .6rem; transition:border-color .15s; }
+  .ech-card:hover { border-color:rgba(16,185,129,.45); }
+  .ech-card.zha { border-color:rgba(251,146,60,.4); background:rgba(120,53,15,.14); }
+  .ech-card-top { display:flex; align-items:baseline; justify-content:space-between; gap:.3rem; }
+  .ech-name { font-weight:700; color:#e2e8f0; font-size:.84rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ech-pct { color:#ff5d5d; font-weight:700; font-size:.82rem; }
+  .ech-pct small { font-size:.6rem; opacity:.8; margin-left:1px; }
+  .ech-card-sub { display:flex; align-items:center; justify-content:space-between; gap:.3rem; margin-top:.2rem; }
+  .ech-code { font-size:.66rem; color:#64748b; }
+  .ech-ind { font-size:.66rem; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:72px; }
+  .ech-card-foot { display:flex; align-items:center; justify-content:space-between; gap:.3rem; margin-top:.3rem;
+                   font-size:.64rem; color:#64748b; }
+  .ech-zha { color:#fb923c; font-weight:700; }
+  /* 连板高度徽章（热度递增） */
+  .ech-badge { display:inline-flex; align-items:baseline; justify-content:center; min-width:2.4rem;
+               font-family:'JetBrains Mono', monospace; font-weight:800; font-size:1.05rem;
+               padding:.2rem .4rem; border-radius:.5rem; line-height:1; }
+  .ech-badge small { font-size:.6rem; font-weight:600; margin-left:1px; opacity:.85; }
+  .ech-b1 { background:rgba(100,116,139,.18); color:#cbd5e1; border:1px solid rgba(100,116,139,.4); }
+  .ech-b2 { background:rgba(56,189,248,.16); color:#7dd3fc; border:1px solid rgba(56,189,248,.4); }
+  .ech-b3 { background:rgba(251,191,36,.18); color:#fcd34d; border:1px solid rgba(251,191,36,.45); }
+  .ech-b4 { background:rgba(251,146,60,.2); color:#fdba74; border:1px solid rgba(251,146,60,.5); }
+  .ech-b5 { background:rgba(244,63,94,.22); color:#fda4af; border:1px solid rgba(244,63,94,.55); }
+  /* ===== 概念连板梯队 ===== */
+  .ech-cpt-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:.7rem;
+                  max-height:600px; overflow-y:auto; padding-right:.25rem; }
+  .ech-cpt { border:1px solid rgba(51,65,85,.6); border-radius:.65rem; background:rgba(15,23,42,.5); padding:.7rem .8rem; }
+  .ech-cpt:hover { border-color:rgba(16,185,129,.4); }
+  .ech-cpt-head { display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+  .ech-cpt-name { font-weight:700; color:#e2e8f0; font-size:.95rem; }
+  .ech-cpt-stats { display:flex; flex-wrap:wrap; align-items:center; gap:.3rem .8rem; margin-top:.45rem; font-size:.74rem; color:#94a3b8; }
+  .ech-cpt-zt b { color:#ff5d5d; font-size:1rem; margin-right:.15rem; }
+  .ech-cpt-lead { color:#cbd5e1; }
+  .ech-cpt-dist { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.55rem; }
+  .ech-seg { font-size:.68rem; color:#cbd5e1; background:rgba(2,6,23,.55); border:1px solid rgba(51,65,85,.6);
+             border-radius:.35rem; padding:.1rem .45rem; font-family:'JetBrains Mono', monospace; }
+</style>
+{% endif %}
+
+{% if (view | default('table')) == 'smart' %}
+<style>
+  /* ===== 资金卡：龙虎榜 / 资金流向 ===== */
+  .cap-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:.7rem;
+              max-height:600px; overflow-y:auto; padding-right:.25rem; }
+  .cap-card { border:1px solid rgba(51,65,85,.6); border-radius:.7rem; background:rgba(15,23,42,.5); padding:.7rem .85rem;
+              transition:border-color .15s, transform .15s; }
+  .cap-card:hover { border-color:rgba(16,185,129,.4); transform:translateY(-2px); }
+  .cap-top { display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; }
+  .cap-name { font-weight:700; color:#f1f5f9; font-size:.92rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cap-code { font-size:.68rem; color:#64748b; flex:0 0 auto; }
+  .cap-net { font-size:1.55rem; font-weight:800; color:#e2e8f0; line-height:1; margin-top:.5rem; }
+  .cap-net small { font-size:.7rem; font-weight:600; opacity:.7; margin-left:2px; }
+  .cap-net.up { color:#ff5d5d; } .cap-net.down { color:#3ddc97; }
+  .cap-sub { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem .7rem; margin-top:.5rem; font-size:.72rem; color:#94a3b8; }
+  .cap-sub b { color:#cbd5e1; }
+  .cap-badge { font-size:.66rem; padding:.08rem .42rem; border-radius:.35rem; background:rgba(100,116,139,.2); color:#cbd5e1; }
+  .cap-badge.cap-in { background:rgba(255,93,93,.16); color:#fca5a5; }
+  .cap-badge.cap-out { background:rgba(61,220,151,.16); color:#6ee7b7; }
+  .cap-seats { margin-top:.55rem; padding-top:.5rem; border-top:1px solid rgba(51,65,85,.4);
+               font-size:.66rem; color:#64748b; line-height:1.5; max-height:4.4em; overflow:hidden; }
+  /* ===== 模式胜率卡：复盘总结 ===== */
+  .wr-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:.8rem; }
+  .wr-card { border:1px solid rgba(51,65,85,.6); border-radius:.8rem; background:rgba(15,23,42,.5); padding:.85rem .9rem;
+             display:flex; flex-direction:column; align-items:center; }
+  .wr-head { width:100%; display:flex; align-items:center; justify-content:space-between; gap:.4rem; }
+  .wr-mode { font-weight:800; color:#f1f5f9; font-size:1rem; }
+  .wr-conf { font-size:.64rem; color:#64748b; }
+  .wr-ring { --p:0; width:104px; height:104px; border-radius:50%; margin:.7rem 0 .5rem;
+             display:flex; align-items:center; justify-content:center; position:relative;
+             background:conic-gradient(var(--rc, #64748b) calc(var(--p)*1%), rgba(51,65,85,.35) 0); }
+  .wr-ring::before { content:''; position:absolute; inset:9px; border-radius:50%; background:#0b1220; }
+  .wr-ring.good { --rc:#34d399; } .wr-ring.mid { --rc:#fbbf24; } .wr-ring.bad { --rc:#fb7185; }
+  .wr-pct { position:relative; font-size:1.25rem; font-weight:800; color:#e2e8f0; }
+  .wr-stats { width:100%; display:flex; justify-content:space-between; font-size:.74rem; color:#94a3b8; }
+  .wr-stats .up { color:#ff5d5d; } .wr-stats .down { color:#3ddc97; }
+  .wr-range { margin-top:.4rem; font-size:.66rem; color:#64748b; }
+  /* ===== 热力表：周期模式胜率 / 因子原始数据 ===== */
+  .heat-tbl { width:100%; border-collapse:separate; border-spacing:3px; font-size:.76rem; }
+  .heat-tbl thead th { background:rgba(15,23,42,.9); color:#94a3b8; font-weight:600; padding:.4rem .55rem;
+                       text-align:center; white-space:nowrap; border-radius:.4rem; }
+  .heat-rowhead { background:rgba(15,23,42,.7); color:#cbd5e1; font-weight:600; padding:.4rem .6rem;
+                  text-align:left; white-space:nowrap; border-radius:.4rem; position:sticky; left:0; }
+  .heat-cell { text-align:center; padding:.35rem .5rem; border-radius:.4rem; min-width:64px; }
+  .heat-v { font-weight:700; }
+  .heat-n { display:block; font-size:.6rem; opacity:.65; }
+  .heat-na { color:#475569; }
+  .h0 { background:rgba(30,41,59,.5); color:#475569; }
+  .h1 { background:rgba(244,63,94,.22); color:#fda4af; }
+  .h2 { background:rgba(251,146,60,.2); color:#fdba74; }
+  .h3 { background:rgba(250,204,21,.16); color:#fde047; }
+  .h4 { background:rgba(132,204,22,.18); color:#bef264; }
+  .h5 { background:rgba(16,185,129,.24); color:#6ee7b7; }
 </style>
 {% endif %}
