@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      background: #0d0c12;
+      font-family: "Georgia", serif;
+      font-variant-numeric: tabular-nums;
+    }
+    .scene {
+      position: absolute;
+      top: 0; left: 0;
+      width: 1080px; height: 1920px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    /* Z-index stacking for transitions */
+    #s-hook     { z-index: 1;  }
+    #s-emotion  { z-index: 2;  opacity: 0; }
+    #s-mainline { z-index: 3;  opacity: 0; }
+    #s-dragon   { z-index: 4;  opacity: 0; }
+    #s-capital  { z-index: 5;  opacity: 0; }
+    #s-strategy { z-index: 6;  opacity: 0; }
+    #s-st1      { z-index: 7;  opacity: 0; }
+    #s-st2      { z-index: 8;  opacity: 0; }
+    #s-st3      { z-index: 9;  opacity: 0; }
+    #s-tomorrow { z-index: 10; opacity: 0; }
+    #s-cta      { z-index: 11; opacity: 0; }
+
+    /* Shared scene-content */
+    .scene-content {
+      width: 100%;
+      height: 100%;
+      padding: 140px 80px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+      position: relative;
+      z-index: 2;
+    }
+    /* Background layers */
+    .bg-glow {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.18;
+      pointer-events: none;
+    }
+    .bg-grid {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background-image:
+        linear-gradient(rgba(212,160,64,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(212,160,64,0.04) 1px, transparent 1px);
+      background-size: 80px 80px;
+      pointer-events: none;
+    }
+    .bg-ghost-text {
+      position: absolute;
+      font-family: "Georgia", serif;
+      font-weight: 700;
+      color: rgba(212,160,64,0.06);
+      font-size: 280px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .bg-accent-line {
+      position: absolute;
+      background: rgba(212,160,64,0.15);
+      pointer-events: none;
+    }
+
+    /* Typography */
+    .headline {
+      font-family: "Georgia", serif;
+      font-weight: 700;
+      font-size: 84px;
+      line-height: 1.15;
+      color: #f0ece0;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      font-family: "Arial", sans-serif;
+      font-weight: 400;
+      font-size: 32px;
+      color: #888898;
+      letter-spacing: 0.04em;
+    }
+    .caption-text {
+      font-family: "Arial", sans-serif;
+      font-weight: 500;
+      font-size: 36px;
+      color: #d4a040;
+      letter-spacing: 0.02em;
+    }
+    .body-text {
+      font-family: "Arial", sans-serif;
+      font-weight: 400;
+      font-size: 28px;
+      color: #a0a0b0;
+      line-height: 1.5;
+    }
+
+    /* Stats grid */
+    .stats-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 28px;
+      width: 100%;
+    }
+    .stat-card {
+      background: rgba(240,236,224,0.05);
+      border: 1.5px solid rgba(240,236,224,0.08);
+      border-radius: 20px;
+      padding: 36px 32px;
+      min-width: 160px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .stat-value {
+      font-family: "Georgia", serif;
+      font-weight: 700;
+      font-size: 64px;
+      line-height: 1;
+      letter-spacing: -0.02em;
+    }
+    .stat-label {
+      font-family: "Arial", sans-serif;
+      font-weight: 500;
+      font-size: 22px;
+      color: #888898;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .stat-unit {
+      font-family: "Arial", sans-serif;
+      font-weight: 400;
+      font-size: 24px;
+      opacity: 0.7;
+    }
+    .tone-up    { color: #4ca67a; }
+    .tone-down  { color: #e05555; }
+    .tone-neutral { color: #d4a040; }
+
+    /* Ranked list */
+    .ranked-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      width: 100%;
+    }
+    .rank-row {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      background: rgba(240,236,224,0.04);
+      border: 1px solid rgba(240,236,224,0.06);
+      border-radius: 16px;
+      padding: 24px 32px;
+    }
+    .rank-num {
+      font-family: "Georgia", serif;
+      font-weight: 700;
+      font-size: 40px;
+      color: #d4a040;
+      min-width: 48px;
+      text-align: center;
+    }
+    .rank-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .rank-name {
+      font-family: "Arial", sans-serif;
+      font-weight: 700;
+      font-size: 38px;
+      color: #f0ece0;
+      line-height: 1.2;
+    }
+    .rank-sub {
+      font-size: 24px;
+      color: #888898;
+      font-weight: 400;
+    }
+    .rank-value {
+      font-family: "Courier New", monospace;
+      font-weight: 600;
+      font-size: 36px;
+      text-align: right;
+    }
+    .rank-badge {
+      display: inline-block;
+      background: rgba(212,160,64,0.15);
+      color: #d4a040;
+      font-size: 20px;
+      font-weight: 600;
+      padding: 4px 14px;
+      border-radius: 8px;
+      margin-left: 8px;
+      letter-spacing: 0.04em;
+    }
+    .rank-badge.warn {
+      background: rgba(224,85,85,0.15);
+      color: #e05555;
+    }
+
+    /* Strategy overview cards */
+    .strategy-cards {
+      display: flex;
+      gap: 24px;
+      width: 100%;
+    }
+    .strategy-card {
+      flex: 1;
+      background: rgba(240,236,224,0.05);
+      border: 1.5px solid rgba(240,236,224,0.08);
+      border-radius: 24px;
+      padding: 40px 28px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .strategy-card-num {
+      font-family: "Georgia", serif;
+      font-weight: 700;
+      font-size: 72px;
+      color: #d4a040;
+      line-height: 1;
+    }
+    .strategy-card-label {
+      font-size: 26px;
+      font-weight: 500;
+      color: #f0ece0;
+    }
+
+    /* Tomorrow scene */
+    .advice-box {
+      background: rgba(212,160,64,0.08);
+      border: 2px solid rgba(212,160,64,0.25);
+      border-radius: 24px;
+      padding: 48px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      align-items: center;
+      text-align: center;
+    }
+    .advice-value {
+      font-family: "Georgia", serif;
+      font-weight: 700;
+      font-size: 100px;
+      color: #d4a040;
+      line-height: 1;
+    }
+    .advice-label {
+      font-size: 28px;
+      color: #888898;
+      letter-spacing: 0.04em;
+    }
+    .advice-detail {
+      font-size: 26px;
+      color: #a0a0b0;
+      line-height: 1.5;
+    }
+
+    /* CTA / disclaimer */
+    .disclaimer-box {
+      background: rgba(240,236,224,0.03);
+      border: 1px solid rgba(240,236,224,0.06);
+      border-radius: 16px;
+      padding: 32px 36px;
+    }
+    .disclaimer-text {
+      font-size: 24px;
+      color: #666678;
+      line-height: 1.6;
+      text-align: center;
+    }
+
+    /* Hook scene special */
+    .hook-title {
+      font-family: "Georgia", serif;
+      font-weight: 700;
+      font-size: 96px;
+      line-height: 1.2;
+      color: #f0ece0;
+      letter-spacing: -0.02em;
+    }
+    .hook-accent {
+      color: #d4a040;
+    }
+
+    /* Divider */
+    .divider {
+      width: 100%;
+      height: 2px;
+      background: rgba(212,160,64,0.3);
+    }
+    .divider-thin {
+      width: 60px;
+      height: 2px;
+      background: rgba(212,160,64,0.5);
+    }
+
+    /* Bottom bar */
+    .bottom-bar {
+      position: absolute;
+      bottom: 60px;
+      left: 80px;
+      right: 80px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 3;
+    }
+    .date-tag {
+      font-family: "Courier New", monospace;
+      font-size: 20px;
+      color: #666678;
+      letter-spacing: 0.08em;
+    }
+    .watermark {
+      font-family: "Courier New", monospace;
+      font-size: 18px;
+      color: rgba(240,236,224,0.2);
+      letter-spacing: 0.06em;
+    }
+  </style>
+</head>
+<body>
+
+<div
+  id="root"
+  data-composition-id="main"
+  data-width="1080"
+  data-height="1920"
+  data-start="0"
+  data-duration="84"
+>
+
+  <!-- ===== SCENE 1: HOOK (0s - 4s) ===== -->
+  <div id="s-hook" class="scene">
+    <div class="bg-glow" style="width:800px;height:800px;top:10%;left:50%;transform:translateX(-50%);background:radial-gradient(circle,rgba(212,160,64,0.35),transparent 70%);"></div>
+    <div class="bg-ghost-text" style="top:8%;left:-40px;">退潮</div>
+    <div class="bg-accent-line" style="top:46%;left:80px;right:80px;height:1px;"></div>
+    <div class="scene-content" style="justify-content:center;align-items:flex-start;padding-top:400px;">
+      <div id="hook-sub" class="subtitle">2026.06.10 · A股情绪复盘</div>
+      <div id="hook-title" class="hook-title">
+        <span style="color:#d4a040;">退潮期，</span><br>资金在撤
+      </div>
+      <div id="hook-title2" class="hook-title" style="font-size:72px;color:#f0ece0;">
+        今天谁还在<span style="color:#d4a040;">硬扛</span>？
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">2026.06.10</span>
+      <span class="watermark">数据复盘</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 2: EMOTION (4s - 14s) ===== -->
+  <div id="s-emotion" class="scene">
+    <div class="bg-grid"></div>
+    <div class="bg-glow" style="width:600px;height:600px;top:20%;right:-150px;background:radial-gradient(circle,rgba(212,160,64,0.25),transparent 70%);"></div>
+    <div class="scene-content" style="justify-content:flex-start;padding-top:160px;">
+      <div id="em-title" class="caption-text">今日情绪一览</div>
+      <div id="em-headline" class="headline" style="font-size:72px;">情绪温度计</div>
+      <div id="em-phase" class="subtitle" style="color:#e05555;">退潮期 · 风险高</div>
+      <div class="divider-thin" id="em-div"></div>
+      <div id="em-stats" class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-value tone-up">71</span>
+          <span class="stat-label">涨停<span class="stat-unit">家</span></span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value tone-down">25</span>
+          <span class="stat-label">跌停<span class="stat-unit">家</span></span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value tone-up">4</span>
+          <span class="stat-label">最高板</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value tone-down">40.9</span>
+          <span class="stat-label">炸板率<span class="stat-unit">%</span></span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value tone-down">-0.4</span>
+          <span class="stat-label">上证<span class="stat-unit">%</span></span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value tone-down">-2.7</span>
+          <span class="stat-label">创业板<span class="stat-unit">%</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">06.10 · 退潮期</span>
+      <span class="watermark">数据来源：公开行情</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 3: MAINLINE (14s - 23s) ===== -->
+  <div id="s-mainline" class="scene">
+    <div class="bg-glow" style="width:500px;height:500px;top:50%;left:-100px;background:radial-gradient(circle,rgba(76,166,122,0.15),transparent 70%);"></div>
+    <div class="bg-accent-line" style="top:0;left:80px;bottom:0;width:1px;"></div>
+    <div class="scene-content" style="justify-content:flex-start;padding-top:160px;">
+      <div id="ml-title" class="caption-text">今天钱往哪儿走</div>
+      <div id="ml-headline" class="headline" style="font-size:68px;">今日主线板块</div>
+      <div class="divider-thin" id="ml-div"></div>
+      <div id="ml-list" class="ranked-list">
+        <div class="rank-row">
+          <span class="rank-num">#1</span>
+          <div class="rank-info">
+            <span class="rank-name">芯片概念</span>
+            <span class="rank-sub">最高4板 · 天娱数科(002354)</span>
+          </div>
+          <span class="rank-value tone-up">26<span class="stat-unit" style="font-size:22px;">家涨停</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#2</span>
+          <div class="rank-info">
+            <span class="rank-name">人工智能</span>
+            <span class="rank-sub">最高4板 · 天娱数科(002354)</span>
+          </div>
+          <span class="rank-value tone-up">13<span class="stat-unit" style="font-size:22px;">家涨停</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#3</span>
+          <div class="rank-info">
+            <span class="rank-name">华为概念</span>
+            <span class="rank-sub">最高2板 · 双星新材(002585)</span>
+          </div>
+          <span class="rank-value tone-up">13<span class="stat-unit" style="font-size:22px;">家涨停</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#4</span>
+          <div class="rank-info">
+            <span class="rank-name">锂电池概念</span>
+            <span class="rank-sub">最高2板 · 双星新材(002585)</span>
+          </div>
+          <span class="rank-value tone-up">12<span class="stat-unit" style="font-size:22px;">家涨停</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">芯片26家涨停领跑</span>
+      <span class="watermark">板块轮动追踪</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 4: DRAGON (23s - 32s) ===== -->
+  <div id="s-dragon" class="scene">
+    <div class="bg-grid"></div>
+    <div class="bg-glow" style="width:700px;height:700px;top:10%;right:-200px;background:radial-gradient(circle,rgba(212,160,64,0.2),transparent 70%);"></div>
+    <div class="scene-content" style="justify-content:flex-start;padding-top:160px;">
+      <div id="dr-title" class="caption-text">谁是今天的龙头</div>
+      <div id="dr-headline" class="headline" style="font-size:64px;">龙头梯队 · 连板高度</div>
+      <div class="divider-thin" id="dr-div"></div>
+      <div id="dr-list" class="ranked-list">
+        <div class="rank-row">
+          <span class="rank-num">👑</span>
+          <div class="rank-info">
+            <span class="rank-name">天娱数科 <span class="rank-badge">4板</span></span>
+            <span class="rank-sub">002354.SZ · 广告营销</span>
+          </div>
+          <span class="rank-value tone-up">4<span class="stat-unit" style="font-size:22px;">板</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#2</span>
+          <div class="rank-info">
+            <span class="rank-name">金安国纪 <span class="rank-badge">3板</span></span>
+            <span class="rank-sub">002636.SZ · 元件</span>
+          </div>
+          <span class="rank-value tone-up">3<span class="stat-unit" style="font-size:22px;">板</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#3</span>
+          <div class="rank-info">
+            <span class="rank-name">深深房A <span class="rank-badge">2板</span></span>
+            <span class="rank-sub">000029.SZ · 房地产开发</span>
+          </div>
+          <span class="rank-value tone-up">2<span class="stat-unit" style="font-size:22px;">板</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#4</span>
+          <div class="rank-info">
+            <span class="rank-name">京基智农 <span class="rank-badge">2板</span></span>
+            <span class="rank-sub">000048.SZ · 养殖业</span>
+          </div>
+          <span class="rank-value tone-up">2<span class="stat-unit" style="font-size:22px;">板</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#5</span>
+          <div class="rank-info">
+            <span class="rank-name">双星新材 <span class="rank-badge">2板</span></span>
+            <span class="rank-sub">002585.SZ · 塑料</span>
+          </div>
+          <span class="rank-value tone-up">2<span class="stat-unit" style="font-size:22px;">板</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">连板高度：4板</span>
+      <span class="watermark">龙头池追踪</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 5: CAPITAL (32s - 40s) ===== -->
+  <div id="s-capital" class="scene">
+    <div class="bg-glow" style="width:600px;height:600px;bottom:-100px;left:50%;transform:translateX(-50%);background:radial-gradient(circle,rgba(224,85,85,0.15),transparent 70%);"></div>
+    <div class="bg-accent-line" style="bottom:0;left:80px;right:80px;height:1px;background:rgba(224,85,85,0.2);"></div>
+    <div class="scene-content" style="justify-content:flex-start;padding-top:160px;">
+      <div id="cp-title" class="caption-text" style="color:#e05555;">龙虎榜谁被买最多</div>
+      <div id="cp-headline" class="headline" style="font-size:60px;">资金动向 · 净买入</div>
+      <div class="divider-thin" id="cp-div" style="background:rgba(224,85,85,0.5);"></div>
+      <div id="cp-list" class="ranked-list">
+        <div class="rank-row" style="border-color:rgba(224,85,85,0.15);">
+          <span class="rank-num" style="color:#e05555;">#1</span>
+          <div class="rank-info">
+            <span class="rank-name">天娱数科 <span class="rank-badge warn">黑买入⚠</span></span>
+            <span class="rank-sub">002354.SZ · 买方信誉标黑</span>
+          </div>
+          <span class="rank-value tone-down">+27,990<span class="stat-unit" style="font-size:22px;">万</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#2</span>
+          <div class="rank-info">
+            <span class="rank-name">金安国纪</span>
+            <span class="rank-sub">002636.SZ · 中性</span>
+          </div>
+          <span class="rank-value tone-neutral">+17,203<span class="stat-unit" style="font-size:22px;">万</span></span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#3</span>
+          <div class="rank-info">
+            <span class="rank-name">双星新材</span>
+            <span class="rank-sub">002585.SZ · 中性</span>
+          </div>
+          <span class="rank-value tone-neutral">+14,591<span class="stat-unit" style="font-size:22px;">万</span></span>
+        </div>
+      </div>
+      <div id="cp-warn" class="body-text" style="margin-top:8px;color:#e05555;text-align:center;">
+        ⚠ 天娱数科买方标的黑买入，注意甄别风险
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">龙虎榜 · 净买入TOP3</span>
+      <span class="watermark" style="color:rgba(224,85,85,0.3);">风险提示</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 6: STRATEGY OVERVIEW (40s - 47s) ===== -->
+  <div id="s-strategy" class="scene">
+    <div class="bg-grid"></div>
+    <div class="bg-glow" style="width:800px;height:800px;top:30%;left:50%;transform:translateX(-50%);background:radial-gradient(circle,rgba(212,160,64,0.12),transparent 60%);"></div>
+    <div class="scene-content" style="justify-content:center;align-items:center;padding-top:300px;">
+      <div id="st-title" class="caption-text">今日各策略选股一览</div>
+      <div id="st-headline" class="headline" style="font-size:64px;text-align:center;">策略选股 · 3大策略</div>
+      <div id="st-sub" class="subtitle" style="text-align:center;">共 19 只标的</div>
+      <div class="divider-thin" id="st-div" style="margin:0 auto;"></div>
+      <div id="st-cards" class="strategy-cards" style="margin-top:20px;">
+        <div class="strategy-card">
+          <span class="strategy-card-num">12</span>
+          <span class="strategy-card-label">二板定龙</span>
+          <span class="body-text" style="font-size:20px;">置信度 95%</span>
+        </div>
+        <div class="strategy-card">
+          <span class="strategy-card-num">6</span>
+          <span class="strategy-card-label">弱转强</span>
+          <span class="body-text" style="font-size:20px;">置信度 65%</span>
+        </div>
+        <div class="strategy-card">
+          <span class="strategy-card-num">1</span>
+          <span class="strategy-card-label">首板突破</span>
+          <span class="body-text" style="font-size:20px;">置信度 80%</span>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">仅模型信号 · 盘前确认</span>
+      <span class="watermark">策略选股</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 7: 二板定龙 (47s - 55s) ===== -->
+  <div id="s-st1" class="scene">
+    <div class="bg-glow" style="width:500px;height:500px;top:15%;right:-120px;background:radial-gradient(circle,rgba(76,166,122,0.15),transparent 70%);"></div>
+    <div class="bg-accent-line" style="top:0;left:80px;bottom:0;width:1px;"></div>
+    <div class="scene-content" style="justify-content:flex-start;padding-top:160px;">
+      <div id="s1-badge" class="caption-text" style="font-size:24px;">
+        <span style="background:rgba(76,166,122,0.15);color:#4ca67a;padding:6px 16px;border-radius:8px;font-weight:600;">二板定龙</span>
+      </div>
+      <div id="s1-headline" class="headline" style="font-size:56px;">首板次日抢二板</div>
+      <div id="s1-sub" class="subtitle" style="font-size:24px;">策略选股 · 12只 · 置信度95%</div>
+      <div class="divider-thin" id="s1-div"></div>
+      <div id="s1-list" class="ranked-list">
+        <div class="rank-row">
+          <span class="rank-num">#1</span>
+          <div class="rank-info">
+            <span class="rank-name">深深房A</span>
+            <span class="rank-sub">000029.SZ · 房地产</span>
+          </div>
+          <span class="rank-value tone-up">95%</span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#2</span>
+          <div class="rank-info">
+            <span class="rank-name">京基智农</span>
+            <span class="rank-sub">000048.SZ · 养殖业</span>
+          </div>
+          <span class="rank-value tone-up">95%</span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#3</span>
+          <div class="rank-info">
+            <span class="rank-name">双星新材</span>
+            <span class="rank-sub">002585.SZ · 膜材料</span>
+          </div>
+          <span class="rank-value tone-up">95%</span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#4</span>
+          <div class="rank-info">
+            <span class="rank-name">和远气体</span>
+            <span class="rank-sub">002971.SZ · 化学制品</span>
+          </div>
+          <span class="rank-value tone-up">95%</span>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">二板定龙 · 12只</span>
+      <span class="watermark">仅模型信号</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 8: 弱转强 (55s - 63s) ===== -->
+  <div id="s-st2" class="scene">
+    <div class="bg-glow" style="width:500px;height:500px;bottom:-100px;left:-120px;background:radial-gradient(circle,rgba(212,160,64,0.12),transparent 70%);"></div>
+    <div class="scene-content" style="justify-content:flex-start;padding-top:160px;">
+      <div id="s2-badge" class="caption-text" style="font-size:24px;">
+        <span style="background:rgba(212,160,64,0.15);color:#d4a040;padding:6px 16px;border-radius:8px;font-weight:600;">弱转强</span>
+      </div>
+      <div id="s2-headline" class="headline" style="font-size:56px;">弱势股放量转强</div>
+      <div id="s2-sub" class="subtitle" style="font-size:24px;">策略选股 · 6只 · 置信度65%</div>
+      <div class="divider-thin" id="s2-div"></div>
+      <div id="s2-list" class="ranked-list">
+        <div class="rank-row">
+          <span class="rank-num">#1</span>
+          <div class="rank-info">
+            <span class="rank-name">百合花</span>
+            <span class="rank-sub">603823.SH · 化学制品</span>
+          </div>
+          <span class="rank-value tone-neutral">65%</span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#2</span>
+          <div class="rank-info">
+            <span class="rank-name">京基智农</span>
+            <span class="rank-sub">000048.SZ · 养殖业</span>
+          </div>
+          <span class="rank-value tone-neutral">65%</span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#3</span>
+          <div class="rank-info">
+            <span class="rank-name">天娱数科</span>
+            <span class="rank-sub">002354.SZ · 文化传媒</span>
+          </div>
+          <span class="rank-value tone-neutral">65%</span>
+        </div>
+        <div class="rank-row">
+          <span class="rank-num">#4</span>
+          <div class="rank-info">
+            <span class="rank-name">康强电子</span>
+            <span class="rank-sub">002119.SZ · 半导体</span>
+          </div>
+          <span class="rank-value tone-neutral">65%</span>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">弱转强 · 6只</span>
+      <span class="watermark">仅模型信号</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 9: 首板突破 (63s - 71s) ===== -->
+  <div id="s-st3" class="scene">
+    <div class="bg-grid"></div>
+    <div class="bg-glow" style="width:600px;height:600px;top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(76,166,122,0.15),transparent 70%);"></div>
+    <div class="scene-content" style="justify-content:center;align-items:center;padding-top:300px;">
+      <div id="s3-badge" class="caption-text" style="font-size:24px;">
+        <span style="background:rgba(76,166,122,0.12);color:#4ca67a;padding:6px 16px;border-radius:8px;font-weight:600;">首板突破</span>
+      </div>
+      <div id="s3-headline" class="headline" style="font-size:60px;text-align:center;">首次涨停突破关键位</div>
+      <div id="s3-sub" class="subtitle" style="font-size:24px;text-align:center;">策略选股 · 1只 · 置信度80%</div>
+      <div class="divider-thin" id="s3-div" style="margin:0 auto;"></div>
+      <div id="s3-card" class="rank-row" style="width:600px;border-color:rgba(76,166,122,0.2);margin-top:16px;">
+        <span class="rank-num" style="color:#4ca67a;">★</span>
+        <div class="rank-info">
+          <span class="rank-name">大连圣亚</span>
+          <span class="rank-sub">600593.SH · 旅游概念</span>
+        </div>
+        <span class="rank-value" style="color:#4ca67a;">80%</span>
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">首板突破 · 1只</span>
+      <span class="watermark">仅模型信号</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 10: TOMORROW (71s - 80s) ===== -->
+  <div id="s-tomorrow" class="scene">
+    <div class="bg-glow" style="width:900px;height:900px;top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(212,160,64,0.18),transparent 60%);"></div>
+    <div class="scene-content" style="justify-content:center;align-items:center;padding:100px 80px;">
+      <div id="tm-title" class="caption-text" style="text-align:center;">明天怎么办</div>
+      <div id="tm-headline" class="headline" style="font-size:64px;text-align:center;">明日策略</div>
+      <div id="tm-sub" class="subtitle" style="text-align:center;color:#e05555;">退潮期 · 等待冰点转暖信号</div>
+      <div class="divider-thin" id="tm-div" style="margin:0 auto;"></div>
+      <div id="tm-advice" class="advice-box" style="margin-top:20px;">
+        <span class="advice-label">建议仓位</span>
+        <span class="advice-value">0-10%</span>
+        <span class="advice-detail">空仓或1成试错 · 禁止接力</span>
+      </div>
+      <div id="tm-stats" class="strategy-cards" style="margin-top:24px;">
+        <div class="strategy-card" style="border-color:rgba(76,166,122,0.2);">
+          <span class="strategy-card-num" style="color:#4ca67a;font-size:48px;">10</span>
+          <span class="strategy-card-label" style="font-size:22px;">精选计划</span>
+        </div>
+        <div class="strategy-card" style="border-color:rgba(76,166,122,0.2);">
+          <span class="strategy-card-num" style="color:#4ca67a;font-size:48px;">3</span>
+          <span class="strategy-card-label" style="font-size:22px;">风控通过</span>
+        </div>
+        <div class="strategy-card" style="border-color:rgba(224,85,85,0.2);">
+          <span class="strategy-card-num" style="color:#e05555;font-size:48px;">7</span>
+          <span class="strategy-card-label" style="font-size:22px;">风控拒绝</span>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-bar">
+      <span class="date-tag">仓位以盘前确认为准</span>
+      <span class="watermark">策略建议</span>
+    </div>
+  </div>
+
+  <!-- ===== SCENE 11: CTA / DISCLAIMER (80s - 84s) ===== -->
+  <div id="s-cta" class="scene">
+    <div class="bg-glow" style="width:600px;height:600px;top:30%;left:50%;transform:translateX(-50%);background:radial-gradient(circle,rgba(212,160,64,0.1),transparent 60%);"></div>
+    <div class="scene-content" style="justify-content:center;align-items:center;">
+      <div id="cta-title" class="headline" style="font-size:60px;text-align:center;color:#d4a040;">今日复盘结束</div>
+      <div id="cta-sub" class="subtitle" style="text-align:center;margin-top:16px;">数据说话 · 不喊单 · 不荐股</div>
+      <div class="divider-thin" id="cta-div" style="margin:16px auto;"></div>
+      <div id="cta-disclaimer" class="disclaimer-box" style="margin-top:32px;max-width:800px;">
+        <p class="disclaimer-text">
+          本视频为数据复盘，仅供学习交流，<br>不构成任何投资建议。
+        </p>
+        <p class="disclaimer-text" style="margin-top:12px;color:#e05555;font-weight:500;">
+          市场有风险，入市需谨慎。
+        </p>
+      </div>
+      <div class="bottom-bar" style="position:relative;margin-top:60px;left:0;right:0;bottom:auto;">
+        <span class="date-tag">A股情绪周期与板块轮动量产系统 V2</span>
+        <span class="watermark">2026.06.10</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+<script>
+window.__timelines = window.__timelines || {};
+
+// Scene start times (seconds)
+var T = {
+  hook: 0,
+  emotion: 4,
+  mainline: 14,
+  dragon: 23,
+  capital: 32,
+  strategy: 40,
+  st1: 47,
+  st2: 55,
+  st3: 63,
+  tomorrow: 71,
+  cta: 80,
+  end: 84
+};
+
+// Transition parameters
+var TRANS_DUR = 0.6; // crossfade duration
+var TRANS_OFFSET = 0.5; // overlap before scene change
+
+var tl = gsap.timeline({ paused: true });
+
+// ============================================================
+// SCENE VISIBILITY & CROSSFADE TRANSITIONS
+// ============================================================
+
+// Helper: set scene visible at time t with crossfade from previous scene
+function sceneIn(sceneId, t) {
+  tl.set(sceneId, { opacity: 0, visibility: 'visible' }, Math.max(0, t - TRANS_OFFSET));
+  tl.to(sceneId, { opacity: 1, duration: TRANS_DUR, ease: 'power2.inOut' }, Math.max(0, t - TRANS_OFFSET));
+}
+
+function sceneOut(sceneId, t) {
+  tl.to(sceneId, { opacity: 0, duration: TRANS_DUR, ease: 'power2.in' }, t - TRANS_OFFSET);
+  tl.set(sceneId, { visibility: 'hidden' }, t);
+}
+
+// Scene visibility sequencing
+// Hook starts visible (no opacity: 0 in CSS, it's z-index:1 and visible)
+sceneOut('#s-hook', T.emotion);
+sceneIn('#s-emotion', T.emotion);
+sceneOut('#s-emotion', T.mainline);
+sceneIn('#s-mainline', T.mainline);
+sceneOut('#s-mainline', T.dragon);
+sceneIn('#s-dragon', T.dragon);
+sceneOut('#s-dragon', T.capital);
+sceneIn('#s-capital', T.capital);
+sceneOut('#s-capital', T.strategy);
+sceneIn('#s-strategy', T.strategy);
+sceneOut('#s-strategy', T.st1);
+sceneIn('#s-st1', T.st1);
+sceneOut('#s-st1', T.st2);
+sceneIn('#s-st2', T.st2);
+sceneOut('#s-st2', T.st3);
+sceneIn('#s-st3', T.st3);
+sceneOut('#s-st3', T.tomorrow);
+sceneIn('#s-tomorrow', T.tomorrow);
+sceneOut('#s-tomorrow', T.cta);
+sceneIn('#s-cta', T.cta);
+
+// Final scene fade out
+tl.to('#s-cta', { opacity: 0, duration: 1.2, ease: 'power2.in' }, T.end - 1.2);
+
+// ============================================================
+// SCENE 1: HOOK — entrance animations
+// ============================================================
+tl.from('#hook-sub', { y: 40, opacity: 0, duration: 0.5, ease: 'power3.out' }, 0.2);
+tl.from('#hook-title', { y: 60, opacity: 0, duration: 0.7, ease: 'expo.out' }, 0.5);
+tl.from('#hook-title2', { x: -50, opacity: 0, duration: 0.6, ease: 'power3.out' }, 1.0);
+
+// Ambient: bg-glow breathing
+tl.to('#s-hook .bg-glow', { scale: 1.08, duration: 2, yoyo: true, repeat: 1, ease: 'sine.inOut', overwrite: 'auto' }, 0);
+// Ghost text drift
+tl.to('#s-hook .bg-ghost-text', { x: 30, duration: 4, ease: 'sine.inOut', overwrite: 'auto' }, 0);
+
+// ============================================================
+// SCENE 2: EMOTION — entrance animations
+// ============================================================
+tl.from('#em-title', { x: -30, opacity: 0, duration: 0.4, ease: 'power3.out' }, T.emotion + 0.2);
+tl.from('#em-headline', { y: 40, opacity: 0, duration: 0.6, ease: 'expo.out' }, T.emotion + 0.35);
+tl.from('#em-phase', { y: 20, opacity: 0, duration: 0.4, ease: 'power2.out' }, T.emotion + 0.55);
+tl.from('#em-div', { scaleX: 0, duration: 0.5, ease: 'power3.out', transformOrigin: 'left' }, T.emotion + 0.7);
+
+// Stats cards staggered entrance
+var statCards = document.querySelectorAll('#s-emotion .stat-card');
+statCards.forEach(function(card, i) {
+  tl.from(card, { y: 50, opacity: 0, scale: 0.95, duration: 0.5, ease: 'back.out(1.2)' }, T.emotion + 1.0 + i * 0.12);
+});
+
+// Ambient: bg-grid slow pan
+tl.to('#s-emotion .bg-grid', { y: 20, duration: 10, ease: 'sine.inOut' }, T.emotion);
+tl.to('#s-emotion .bg-glow', { scale: 1.05, duration: 5, yoyo: true, repeat: 1, ease: 'sine.inOut' }, T.emotion);
+
+// ============================================================
+// SCENE 3: MAINLINE — entrance animations
+// ============================================================
+tl.from('#ml-title', { y: 30, opacity: 0, duration: 0.4, ease: 'power3.out' }, T.mainline + 0.15);
+tl.from('#ml-headline', { x: -40, opacity: 0, duration: 0.6, ease: 'expo.out' }, T.mainline + 0.3);
+tl.from('#ml-div', { scaleX: 0, duration: 0.5, ease: 'power3.out', transformOrigin: 'left' }, T.mainline + 0.5);
+
+var mlRows = document.querySelectorAll('#s-mainline .rank-row');
+mlRows.forEach(function(row, i) {
+  tl.from(row, { x: -60, opacity: 0, duration: 0.5, ease: 'power2.out' }, T.mainline + 0.8 + i * 0.15);
+});
+
+tl.to('#s-mainline .bg-glow', { y: -30, duration: 9, ease: 'sine.inOut' }, T.mainline);
+
+// ============================================================
+// SCENE 4: DRAGON — entrance animations
+// ============================================================
+tl.from('#dr-title', { y: 20, opacity: 0, duration: 0.35, ease: 'power3.out' }, T.dragon + 0.15);
+tl.from('#dr-headline', { x: -30, opacity: 0, duration: 0.55, ease: 'expo.out' }, T.dragon + 0.3);
+tl.from('#dr-div', { scaleX: 0, duration: 0.45, ease: 'power3.out', transformOrigin: 'left' }, T.dragon + 0.5);
+
+var drRows = document.querySelectorAll('#s-dragon .rank-row');
+drRows.forEach(function(row, i) {
+  tl.from(row, { y: 40, opacity: 0, duration: 0.45, ease: 'back.out(1.15)' }, T.dragon + 0.7 + i * 0.13);
+});
+
+tl.to('#s-dragon .bg-grid', { y: -15, duration: 9, ease: 'sine.inOut' }, T.dragon);
+tl.to('#s-dragon .bg-glow', { scale: 1.06, duration: 4.5, yoyo: true, repeat: 1, ease: 'sine.inOut' }, T.dragon);
+
+// ============================================================
+// SCENE 5: CAPITAL — entrance animations
+// ============================================================
+tl.from('#cp-title', { y: 20, opacity: 0, duration: 0.35, ease: 'power3.out' }, T.capital + 0.15);
+tl.from('#cp-headline', { x: -30, opacity: 0, duration: 0.55, ease: 'expo.out' }, T.capital + 0.3);
+tl.from('#cp-div', { scaleX: 0, duration: 0.45, ease: 'power3.out', transformOrigin: 'left' }, T.capital + 0.5);
+
+var cpRows = document.querySelectorAll('#s-capital .rank-row');
+cpRows.forEach(function(row, i) {
+  tl.from(row, { y: 35, opacity: 0, duration: 0.45, ease: 'power2.out' }, T.capital + 0.7 + i * 0.14);
+});
+
+tl.from('#cp-warn', { opacity: 0, duration: 0.5, ease: 'power2.out' }, T.capital + 1.5);
+tl.to('#s-capital .bg-glow', { scale: 1.08, duration: 8, ease: 'sine.inOut' }, T.capital);
+
+// ============================================================
+// SCENE 6: STRATEGY OVERVIEW — entrance animations
+// ============================================================
+tl.from('#st-title', { y: 25, opacity: 0, duration: 0.35, ease: 'power3.out' }, T.strategy + 0.15);
+tl.from('#st-headline', { scale: 0.9, opacity: 0, duration: 0.55, ease: 'expo.out' }, T.strategy + 0.3);
+tl.from('#st-sub', { y: 15, opacity: 0, duration: 0.4, ease: 'power2.out' }, T.strategy + 0.5);
+tl.from('#st-div', { scaleX: 0, duration: 0.4, ease: 'power3.out' }, T.strategy + 0.7);
+
+var stCards = document.querySelectorAll('#s-strategy .strategy-card');
+stCards.forEach(function(card, i) {
+  tl.from(card, { y: 50, opacity: 0, scale: 0.9, duration: 0.5, ease: 'back.out(1.2)' }, T.strategy + 0.85 + i * 0.2);
+});
+
+tl.to('#s-strategy .bg-glow', { scale: 1.06, duration: 7, ease: 'sine.inOut' }, T.strategy);
+
+// ============================================================
+// SCENE 7: 二板定龙 — entrance animations
+// ============================================================
+tl.from('#s1-badge', { y: 20, opacity: 0, duration: 0.35, ease: 'power3.out' }, T.st1 + 0.1);
+tl.from('#s1-headline', { x: -30, opacity: 0, duration: 0.5, ease: 'expo.out' }, T.st1 + 0.25);
+tl.from('#s1-sub', { y: 15, opacity: 0, duration: 0.35, ease: 'power2.out' }, T.st1 + 0.4);
+tl.from('#s1-div', { scaleX: 0, duration: 0.4, ease: 'power3.out', transformOrigin: 'left' }, T.st1 + 0.55);
+
+var s1Rows = document.querySelectorAll('#s-st1 .rank-row');
+s1Rows.forEach(function(row, i) {
+  tl.from(row, { x: -40, opacity: 0, duration: 0.4, ease: 'power2.out' }, T.st1 + 0.7 + i * 0.12);
+});
+
+// ============================================================
+// SCENE 8: 弱转强 — entrance animations
+// ============================================================
+tl.from('#s2-badge', { y: 20, opacity: 0, duration: 0.35, ease: 'power3.out' }, T.st2 + 0.1);
+tl.from('#s2-headline', { x: -30, opacity: 0, duration: 0.5, ease: 'expo.out' }, T.st2 + 0.25);
+tl.from('#s2-sub', { y: 15, opacity: 0, duration: 0.35, ease: 'power2.out' }, T.st2 + 0.4);
+tl.from('#s2-div', { scaleX: 0, duration: 0.4, ease: 'power3.out', transformOrigin: 'left' }, T.st2 + 0.55);
+
+var s2Rows = document.querySelectorAll('#s-st2 .rank-row');
+s2Rows.forEach(function(row, i) {
+  tl.from(row, { x: -40, opacity: 0, duration: 0.4, ease: 'power2.out' }, T.st2 + 0.7 + i * 0.12);
+});
+
+// ============================================================
+// SCENE 9: 首板突破 — entrance animations
+// ============================================================
+tl.from('#s3-badge', { y: 20, opacity: 0, duration: 0.35, ease: 'power3.out' }, T.st3 + 0.1);
+tl.from('#s3-headline', { scale: 0.92, opacity: 0, duration: 0.55, ease: 'expo.out' }, T.st3 + 0.25);
+tl.from('#s3-sub', { y: 15, opacity: 0, duration: 0.35, ease: 'power2.out' }, T.st3 + 0.4);
+tl.from('#s3-div', { scaleX: 0, duration: 0.4, ease: 'power3.out' }, T.st3 + 0.55);
+tl.from('#s3-card', { y: 40, opacity: 0, scale: 0.95, duration: 0.5, ease: 'back.out(1.15)' }, T.st3 + 0.7);
+
+tl.to('#s-st3 .bg-glow', { scale: 1.08, duration: 8, ease: 'sine.inOut' }, T.st3);
+
+// ============================================================
+// SCENE 10: TOMORROW — entrance animations
+// ============================================================
+tl.from('#tm-title', { y: 20, opacity: 0, duration: 0.35, ease: 'power3.out' }, T.tomorrow + 0.1);
+tl.from('#tm-headline', { scale: 0.9, opacity: 0, duration: 0.55, ease: 'expo.out' }, T.tomorrow + 0.25);
+tl.from('#tm-sub', { y: 15, opacity: 0, duration: 0.4, ease: 'power2.out' }, T.tomorrow + 0.4);
+tl.from('#tm-div', { scaleX: 0, duration: 0.4, ease: 'power3.out' }, T.tomorrow + 0.55);
+tl.from('#tm-advice', { y: 30, opacity: 0, scale: 0.95, duration: 0.55, ease: 'back.out(1.2)' }, T.tomorrow + 0.7);
+
+var tmCards = document.querySelectorAll('#s-tomorrow .strategy-card');
+tmCards.forEach(function(card, i) {
+  tl.from(card, { y: 40, opacity: 0, duration: 0.4, ease: 'power2.out' }, T.tomorrow + 1.0 + i * 0.15);
+});
+
+tl.to('#s-tomorrow .bg-glow', { scale: 1.06, duration: 9, ease: 'sine.inOut' }, T.tomorrow);
+
+// ============================================================
+// SCENE 11: CTA — entrance + final exit
+// ============================================================
+tl.from('#cta-title', { y: 40, opacity: 0, duration: 0.6, ease: 'expo.out' }, T.cta + 0.15);
+tl.from('#cta-sub', { y: 20, opacity: 0, duration: 0.45, ease: 'power3.out' }, T.cta + 0.35);
+tl.from('#cta-div', { scaleX: 0, duration: 0.4, ease: 'power3.out' }, T.cta + 0.5);
+tl.from('#cta-disclaimer', { y: 30, opacity: 0, duration: 0.55, ease: 'power2.out' }, T.cta + 0.65);
+
+// Final scene exit animation (the only exit animation allowed)
+tl.to('#cta-title', { y: -30, opacity: 0, duration: 0.5, ease: 'power2.in', overwrite: 'auto' }, T.end - 1.0);
+tl.to('#cta-sub', { opacity: 0, duration: 0.4, ease: 'power2.in', overwrite: 'auto' }, T.end - 0.8);
+tl.to('#cta-disclaimer', { opacity: 0, duration: 0.6, ease: 'power2.in', overwrite: 'auto' }, T.end - 1.0);
+
+// Register timeline
+window.__timelines["main"] = tl;
+</script>
+
+</body>
+</html>

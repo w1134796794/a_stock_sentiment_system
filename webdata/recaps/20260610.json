@@ -1,0 +1,418 @@
+{
+  "schema": "recap.v1",
+  "date": "20260610",
+  "generated_at": "2026-06-10T19:00:23",
+  "format": {
+    "ratio": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "target_seconds": 80
+  },
+  "cycle": "退潮期",
+  "accent": "amber",
+  "title": "退潮期复盘 | 06-10",
+  "hook": "退潮期，资金在撤——今天谁还在硬扛？",
+  "disclaimer": "本视频为数据复盘，仅供学习交流，不构成任何投资建议。市场有风险，入市需谨慎。",
+  "scenes": [
+    {
+      "key": "hook",
+      "title": "退潮期，资金在撤——今天谁还在硬扛？",
+      "subtitle": "06-10 · A股情绪复盘",
+      "narration": "退潮期，先看一眼今天的市场情绪。",
+      "caption": "退潮期，资金在撤——今天谁还在硬扛？",
+      "stats": [],
+      "list": [],
+      "duration": 4,
+      "accent": "amber",
+      "start": 0.0
+    },
+    {
+      "key": "emotion",
+      "title": "情绪温度计",
+      "subtitle": "退潮期",
+      "narration": "今日71只涨停，25只跌停，最高4板，炸板率40.9%，昨日涨停股今日平均+5.3%、打板胜率40.4%。",
+      "caption": "今日情绪一览",
+      "stats": [
+        {
+          "label": "涨停",
+          "value": 71,
+          "unit": "家",
+          "tone": "up"
+        },
+        {
+          "label": "跌停",
+          "value": 25,
+          "unit": "家",
+          "tone": "down"
+        },
+        {
+          "label": "最高板",
+          "value": 4,
+          "unit": "板",
+          "tone": "up"
+        },
+        {
+          "label": "炸板率",
+          "value": 40.9,
+          "unit": "%",
+          "tone": "down"
+        },
+        {
+          "label": "上证",
+          "value": -0.4,
+          "unit": "%",
+          "tone": "down"
+        }
+      ],
+      "list": [],
+      "duration": 10,
+      "accent": "amber",
+      "start": 4.0
+    },
+    {
+      "key": "mainline",
+      "title": "今日主线",
+      "subtitle": "板块连板梯队",
+      "narration": "今天的主线是芯片概念，26家涨停，龙头天娱数科(002354)。其次是人工智能、华为概念。",
+      "caption": "今天钱往哪儿走",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "芯片概念",
+          "value": 26,
+          "unit": "家涨停",
+          "sub": "最高4板 · 龙头天娱数科(002354)",
+          "tag": 4
+        },
+        {
+          "rank": 2,
+          "name": "人工智能",
+          "value": 13,
+          "unit": "家涨停",
+          "sub": "最高4板 · 龙头天娱数科(002354)",
+          "tag": 4
+        },
+        {
+          "rank": 3,
+          "name": "华为概念",
+          "value": 13,
+          "unit": "家涨停",
+          "sub": "最高2板 · 龙头双星新材(002585)",
+          "tag": 2
+        },
+        {
+          "rank": 4,
+          "name": "锂电池概念",
+          "value": 12,
+          "unit": "家涨停",
+          "sub": "最高2板 · 龙头双星新材(002585)",
+          "tag": 2
+        }
+      ],
+      "duration": 9,
+      "accent": "amber",
+      "start": 14.0
+    },
+    {
+      "key": "dragon",
+      "title": "龙头梯队",
+      "subtitle": "今日连板高度",
+      "narration": "空间高度看天娱数科，4连板领涨。金安国纪3板紧随其后。",
+      "caption": "谁是今天的龙头",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "天娱数科",
+          "code": "002354.SZ",
+          "value": 4,
+          "unit": "板",
+          "sub": "广告营销",
+          "tag": 4
+        },
+        {
+          "rank": 2,
+          "name": "金安国纪",
+          "code": "002636.SZ",
+          "value": 3,
+          "unit": "板",
+          "sub": "元件",
+          "tag": 3
+        },
+        {
+          "rank": 3,
+          "name": "深深房Ａ",
+          "code": "000029.SZ",
+          "value": 2,
+          "unit": "板",
+          "sub": "房地产开发",
+          "tag": 2
+        },
+        {
+          "rank": 4,
+          "name": "京基智农",
+          "code": "000048.SZ",
+          "value": 2,
+          "unit": "板",
+          "sub": "养殖业",
+          "tag": 2
+        },
+        {
+          "rank": 5,
+          "name": "双星新材",
+          "code": "002585.SZ",
+          "value": 2,
+          "unit": "板",
+          "sub": "塑料",
+          "tag": 2
+        }
+      ],
+      "duration": 9,
+      "accent": "amber",
+      "start": 23.0
+    },
+    {
+      "key": "capital",
+      "title": "资金动向",
+      "subtitle": "龙虎榜·净买入前三",
+      "narration": "龙虎榜今日净买入居前的是天娱数科，约27990万。其次金安国纪。买方信誉标黑的为风险信号，注意甄别。",
+      "caption": "龙虎榜谁被买最多",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "天娱数科",
+          "code": "002354.SZ",
+          "value": 27990,
+          "unit": "万",
+          "sub": "黑买入⚠",
+          "tag": "黑买入⚠",
+          "tone": "down"
+        },
+        {
+          "rank": 2,
+          "name": "金安国纪",
+          "code": "002636.SZ",
+          "value": 17203,
+          "unit": "万",
+          "sub": "中性",
+          "tag": "中性",
+          "tone": "neutral"
+        },
+        {
+          "rank": 3,
+          "name": "双星新材",
+          "code": "002585.SZ",
+          "value": 14591,
+          "unit": "万",
+          "sub": "中性",
+          "tag": "中性",
+          "tone": "neutral"
+        }
+      ],
+      "duration": 8,
+      "accent": "amber",
+      "start": 32.0
+    },
+    {
+      "key": "strategy",
+      "title": "策略选股",
+      "subtitle": "今日 3 大策略 · 共 19 只",
+      "narration": "今日策略选股共19只：二板定龙12只、弱转强6只、首板突破1只。下面逐个策略来看。",
+      "caption": "今日各策略选股一览",
+      "stats": [
+        {
+          "label": "二板定龙",
+          "value": 12,
+          "unit": "只",
+          "tone": "neutral"
+        },
+        {
+          "label": "弱转强",
+          "value": 6,
+          "unit": "只",
+          "tone": "neutral"
+        },
+        {
+          "label": "首板突破",
+          "value": 1,
+          "unit": "只",
+          "tone": "neutral"
+        }
+      ],
+      "list": [],
+      "duration": 7,
+      "accent": "amber",
+      "start": 40.0
+    },
+    {
+      "key": "strategy_1",
+      "title": "二板定龙",
+      "subtitle": "策略选股 · 12只",
+      "narration": "二板定龙策略今日选出12只，列出前4只，深深房Ａ居首，置信度约95%。仅为模型信号，盘前竞价再确认。",
+      "caption": "首板次日抢二板，锁定梯队龙头",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "深深房Ａ",
+          "code": "000029.SZ",
+          "value": 95,
+          "unit": "%",
+          "sub": "房地产",
+          "tag": "二板定龙",
+          "tone": "up"
+        },
+        {
+          "rank": 2,
+          "name": "京基智农",
+          "code": "000048.SZ",
+          "value": 95,
+          "unit": "%",
+          "sub": "养殖业",
+          "tag": "二板定龙",
+          "tone": "up"
+        },
+        {
+          "rank": 3,
+          "name": "双星新材",
+          "code": "002585.SZ",
+          "value": 95,
+          "unit": "%",
+          "sub": "膜材料",
+          "tag": "二板定龙",
+          "tone": "up"
+        },
+        {
+          "rank": 4,
+          "name": "和远气体",
+          "code": "002971.SZ",
+          "value": 95,
+          "unit": "%",
+          "sub": "化学制品",
+          "tag": "二板定龙",
+          "tone": "up"
+        }
+      ],
+      "duration": 8,
+      "accent": "amber",
+      "start": 47.0
+    },
+    {
+      "key": "strategy_2",
+      "title": "弱转强",
+      "subtitle": "策略选股 · 6只",
+      "narration": "弱转强策略今日选出6只，列出前4只，百合花居首，置信度约65%。仅为模型信号，盘前竞价再确认。",
+      "caption": "弱势股放量转强，低吸博反包",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "百合花",
+          "code": "603823.SH",
+          "value": 65,
+          "unit": "%",
+          "sub": "化学制品",
+          "tag": "弱转强",
+          "tone": "neutral"
+        },
+        {
+          "rank": 2,
+          "name": "京基智农",
+          "code": "000048.SZ",
+          "value": 65,
+          "unit": "%",
+          "sub": "养殖业",
+          "tag": "弱转强",
+          "tone": "neutral"
+        },
+        {
+          "rank": 3,
+          "name": "天娱数科",
+          "code": "002354.SZ",
+          "value": 65,
+          "unit": "%",
+          "sub": "文化传媒",
+          "tag": "弱转强",
+          "tone": "neutral"
+        },
+        {
+          "rank": 4,
+          "name": "康强电子",
+          "code": "002119.SZ",
+          "value": 65,
+          "unit": "%",
+          "sub": "半导体",
+          "tag": "弱转强",
+          "tone": "neutral"
+        }
+      ],
+      "duration": 8,
+      "accent": "amber",
+      "start": 55.0
+    },
+    {
+      "key": "strategy_3",
+      "title": "首板突破",
+      "subtitle": "策略选股 · 1只",
+      "narration": "首板突破策略今日选出1只，大连圣亚居首，置信度约80%。仅为模型信号，盘前竞价再确认。",
+      "caption": "首次涨停突破关键位，趋势启动",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "大连圣亚",
+          "code": "600593.SH",
+          "value": 80,
+          "unit": "%",
+          "sub": "旅游概念",
+          "tag": "首板突破",
+          "tone": "neutral"
+        }
+      ],
+      "duration": 8,
+      "accent": "amber",
+      "start": 63.0
+    },
+    {
+      "key": "tomorrow",
+      "title": "明日策略",
+      "subtitle": "退潮期",
+      "narration": "明日策略：空仓或1成试错，禁止接力，建议仓位0-10%。今日精选10个计划，风控通过3、降级0、拒绝7。具体仓位以盘前竞价确认为准。",
+      "caption": "明天怎么办",
+      "stats": [
+        {
+          "label": "建议仓位",
+          "value": "0-10%",
+          "unit": "",
+          "tone": "neutral"
+        },
+        {
+          "label": "精选计划",
+          "value": 10,
+          "unit": "个",
+          "tone": "up"
+        }
+      ],
+      "list": [],
+      "duration": 9,
+      "accent": "amber",
+      "start": 71.0
+    },
+    {
+      "key": "cta",
+      "title": "今日复盘结束",
+      "subtitle": "数据说话 · 不喊单 · 不荐股",
+      "narration": "以上就是今天的A股情绪与策略复盘，所有结论均来自公开数据，请独立判断、控制仓位。",
+      "caption": "本视频为数据复盘，仅供学习交流，不构成任何投资建议。市场有风险，入市需谨慎。",
+      "stats": [],
+      "list": [],
+      "duration": 4,
+      "accent": "amber",
+      "start": 80.0
+    }
+  ],
+  "total_duration": 84.0
+}

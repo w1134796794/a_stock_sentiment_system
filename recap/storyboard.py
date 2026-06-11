@@ -108,7 +108,7 @@ def _scene_hook(date: str, cycle: str, accent: str) -> Dict[str, Any]:
         "caption": hook,
         "stats": [],
         "list": [],
-        "duration": 5,
+        "duration": 4,
         "accent": accent,
     }
 
@@ -164,7 +164,7 @@ def _scene_emotion(market: Dict[str, Any], accent: str) -> Optional[Dict[str, An
         "caption": "今日情绪一览",
         "stats": stats,
         "list": [],
-        "duration": 15,
+        "duration": 10,
         "accent": accent,
     }
 
@@ -201,7 +201,7 @@ def _scene_mainline(sections: List[Dict[str, Any]], accent: str) -> Optional[Dic
         "caption": "今天钱往哪儿走",
         "stats": [],
         "list": items,
-        "duration": 15,
+        "duration": 9,
         "accent": accent,
     }
 
@@ -237,7 +237,7 @@ def _scene_dragon(sections: List[Dict[str, Any]], accent: str) -> Optional[Dict[
         "caption": "谁是今天的龙头",
         "stats": [],
         "list": items,
-        "duration": 15,
+        "duration": 9,
         "accent": accent,
     }
 
@@ -286,70 +286,95 @@ def _scene_capital(sections: List[Dict[str, Any]], accent: str) -> Optional[Dict
         "caption": "龙虎榜谁被买最多",
         "stats": [],
         "list": items,
-        "duration": 12,
+        "duration": 8,
         "accent": accent,
     }
 
 
 _POS_LABEL = {"heavy": "重仓", "medium": "中等", "light": "轻仓", "watch": "观察"}
 
+# 策略一句话释义（上镜字幕用）；未收录的走通用文案
+STRATEGY_DESC = {
+    "弱转强": "弱势股放量转强，低吸博反包",
+    "二板定龙": "首板次日抢二板，锁定梯队龙头",
+    "首板突破": "首次涨停突破关键位，趋势启动",
+    "龙二波": "龙头分歧调整后的第二波机会",
+    "接力": "强势板块内高位接力",
+    "中军": "板块中军跟随补涨",
+    "低吸": "回调企稳处低吸",
+}
 
-def _scene_strategy(snapshot: Dict[str, Any], accent: str) -> Optional[Dict[str, Any]]:
-    """策略选股结果：把各模式（弱转强/二板定龙/…）选出的个股按置信度排出 TOP。"""
-    patterns = snapshot.get("patterns") or {}
-    picks: List[Dict[str, Any]] = []
-    by_pattern: List[tuple] = []
-    for name, blk in patterns.items():
-        rows = (blk or {}).get("rows") or []
-        if rows:
-            by_pattern.append((str(name), len(rows)))
-        picks.extend(r for r in rows if isinstance(r, dict))
-    if not picks:
-        return None
 
-    picks.sort(key=lambda r: _num(r.get("confidence")) or 0, reverse=True)
-    top = picks[:5]
-    items: List[Dict[str, Any]] = []
-    for i, r in enumerate(top, 1):
-        conf = _num(r.get("confidence"))
-        conf_pct = round(conf * 100) if conf is not None else None
-        ptype = r.get("pattern_type") or r.get("模式类型") or ""
-        ind = r.get("l2_industry") or ""
-        sub = " · ".join(x for x in (ptype, ind) if x)
-        items.append({
-            "rank": i,
-            "name": r.get("stock_name") or r.get("股票名称") or "--",
-            "code": r.get("stock_code") or r.get("股票代码") or "",
-            "value": conf_pct,
-            "unit": "%",
-            "sub": sub,
-            "tag": ptype,
-            # 置信度高 / 重仓信号用红色强调（A股惯例：红=强）
-            "tone": "up" if (conf is not None and conf >= 0.8) or r.get("position_size") == "heavy" else "neutral",
-        })
-
-    total = len(picks)
-    by_pattern.sort(key=lambda x: x[1], reverse=True)
-    bd = "、".join(f"{n}{c}只" for n, c in by_pattern[:4])
-    lead = top[0]
-    lead_conf = round((_num(lead.get("confidence")) or 0) * 100)
-    narration = f"策略选股：今日共{total}个信号"
-    if bd:
-        narration += f"，{bd}"
-    narration += (f"。置信度最高的是{lead.get('stock_name') or lead.get('股票名称', '')}，"
-                  f"{lead.get('pattern_type') or lead.get('模式类型', '')}模式，约{lead_conf}%。"
-                  f"仅为模型信号，具体以盘前竞价确认为准。")
+def _strategy_pick_item(rank: int, r: Dict[str, Any]) -> Dict[str, Any]:
+    conf = _num(r.get("confidence"))
+    conf_pct = round(conf * 100) if conf is not None else None
     return {
+        "rank": rank,
+        "name": r.get("stock_name") or r.get("股票名称") or "--",
+        "code": r.get("stock_code") or r.get("股票代码") or "",
+        "value": conf_pct,
+        "unit": "%",
+        "sub": r.get("l2_industry") or "",
+        "tag": r.get("pattern_type") or r.get("模式类型") or "",
+        # 置信度高 / 重仓信号用红色强调（A股惯例：红=强）
+        "tone": "up" if (conf is not None and conf >= 0.8) or r.get("position_size") == "heavy" else "neutral",
+    }
+
+
+def _build_strategy_scenes(snapshot: Dict[str, Any], accent: str) -> List[Dict[str, Any]]:
+    """策略选股：1 幕总览（各策略选股数）+ 每个策略 1 幕（该策略选出的个股）。"""
+    patterns = snapshot.get("patterns") or {}
+    groups: List[tuple] = []   # (策略名, 按置信度降序的选股)
+    for name, blk in patterns.items():
+        rows = [r for r in ((blk or {}).get("rows") or []) if isinstance(r, dict)]
+        rows.sort(key=lambda r: _num(r.get("confidence")) or 0, reverse=True)
+        if rows:
+            groups.append((str(name), rows))
+    if not groups:
+        return []
+
+    groups.sort(key=lambda g: len(g[1]), reverse=True)
+    total = sum(len(rows) for _, rows in groups)
+    scenes: List[Dict[str, Any]] = []
+
+    # —— 总览幕：各策略选股数（stat 卡）——
+    stats = [{"label": name, "value": len(rows), "unit": "只", "tone": "neutral"}
+             for name, rows in groups[:4]]
+    parts = "、".join(f"{name}{len(rows)}只" for name, rows in groups)
+    scenes.append({
         "key": "strategy",
         "title": "策略选股",
-        "subtitle": "今日模式信号 TOP",
-        "narration": narration,
-        "caption": "今天策略选出了谁",
-        "stats": [],
-        "list": items,
-        "duration": 15,
+        "subtitle": f"今日 {len(groups)} 大策略 · 共 {total} 只",
+        "narration": f"今日策略选股共{total}只：{parts}。下面逐个策略来看。",
+        "caption": "今日各策略选股一览",
+        "stats": stats,
+        "list": [],
+        "duration": 7,
         "accent": accent,
-    }
+    })
+
+    # —— 每个策略一幕：该策略选出的个股（按置信度 TOP4）——
+    for i, (name, rows) in enumerate(groups, 1):
+        items = [_strategy_pick_item(j, r) for j, r in enumerate(rows[:4], 1)]
+        lead = rows[0]
+        lead_conf = round((_num(lead.get("confidence")) or 0) * 100)
+        lead_name = lead.get("stock_name") or lead.get("股票名称", "")
+        cnt = len(rows)
+        shown = min(4, cnt)
+        more = f"，列出前{shown}只" if cnt > shown else ""
+        scenes.append({
+            "key": f"strategy_{i}",
+            "title": name,
+            "subtitle": f"策略选股 · {cnt}只",
+            "narration": (f"{name}策略今日选出{cnt}只{more}，{lead_name}居首，"
+                          f"置信度约{lead_conf}%。仅为模型信号，盘前竞价再确认。"),
+            "caption": STRATEGY_DESC.get(name, "策略信号选股"),
+            "stats": [],
+            "list": items,
+            "duration": 8,
+            "accent": accent,
+        })
+    return scenes
 
 
 def _top_winrate_pattern(cycle: str) -> Optional[Dict[str, Any]]:
@@ -402,7 +427,7 @@ def _scene_tomorrow(snapshot: Dict[str, Any], market: Dict[str, Any], accent: st
         "caption": "明天怎么办",
         "stats": stats,
         "list": [],
-        "duration": 15,
+        "duration": 9,
         "accent": accent,
     }
 
@@ -411,12 +436,12 @@ def _scene_cta(accent: str) -> Dict[str, Any]:
     return {
         "key": "cta",
         "title": "今日复盘结束",
-        "subtitle": "数据说话 · 不喊单 · 不荐股",
+        "subtitle": "数据说话 · 非荐股",
         "narration": "以上就是今天的A股情绪与策略复盘，所有结论均来自公开数据，请独立判断、控制仓位。",
         "caption": DISCLAIMER,
         "stats": [],
         "list": [],
-        "duration": 5,
+        "duration": 4,
         "accent": accent,
     }
 
@@ -438,7 +463,10 @@ def build_storyboard(snapshot: Dict[str, Any],
         _scene_mainline(sections, accent),
         _scene_dragon(sections, accent),
         _scene_capital(sections, accent),
-        _scene_strategy(snapshot, accent),
+    ]
+    # 策略选股：总览 + 每个策略一幕（逐策略展示选出的个股）
+    scenes += _build_strategy_scenes(snapshot, accent)
+    scenes += [
         _scene_tomorrow(snapshot, market, accent),
         _scene_cta(accent),
     ]
