@@ -1,0 +1,379 @@
+{
+  "schema": "recap.v1",
+  "date": "20260611",
+  "generated_at": "2026-06-11T23:48:06",
+  "format": {
+    "ratio": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "target_seconds": 80
+  },
+  "cycle": "退潮期",
+  "accent": "amber",
+  "title": "退潮期复盘 | 06-11",
+  "hook": "退潮期，资金在撤——今天谁还在硬扛？",
+  "disclaimer": "本视频为数据复盘，仅供学习交流，不构成任何投资建议。市场有风险，入市需谨慎。",
+  "scenes": [
+    {
+      "key": "hook",
+      "title": "退潮期，资金在撤——今天谁还在硬扛？",
+      "subtitle": "06-11 · A股情绪复盘",
+      "narration": "退潮期，先看一眼今天的市场情绪。",
+      "caption": "退潮期，资金在撤——今天谁还在硬扛？",
+      "stats": [],
+      "list": [],
+      "duration": 4,
+      "accent": "amber",
+      "start": 0.0
+    },
+    {
+      "key": "emotion",
+      "title": "情绪温度计",
+      "subtitle": "退潮期",
+      "narration": "今日69只涨停，32只跌停，最高3板，炸板率44.9%，昨日涨停股今日平均+4.3%、打板胜率37.2%。",
+      "caption": "今日情绪一览",
+      "stats": [
+        {
+          "label": "涨停",
+          "value": 69,
+          "unit": "家",
+          "tone": "up"
+        },
+        {
+          "label": "跌停",
+          "value": 32,
+          "unit": "家",
+          "tone": "down"
+        },
+        {
+          "label": "最高板",
+          "value": 3,
+          "unit": "板",
+          "tone": "up"
+        },
+        {
+          "label": "炸板率",
+          "value": 44.9,
+          "unit": "%",
+          "tone": "down"
+        },
+        {
+          "label": "上证",
+          "value": -0.2,
+          "unit": "%",
+          "tone": "down"
+        }
+      ],
+      "list": [],
+      "duration": 10,
+      "accent": "amber",
+      "start": 4.0
+    },
+    {
+      "key": "mainline",
+      "title": "今日主线",
+      "subtitle": "板块连板梯队",
+      "narration": "今天的主线是芯片概念，26家涨停，龙头和远气体(002971)。其次是专精特新、新能源汽车。",
+      "caption": "今天钱往哪儿走",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "芯片概念",
+          "value": 26,
+          "unit": "家涨停",
+          "sub": "最高3板 · 龙头和远气体(002971)",
+          "tag": 3
+        },
+        {
+          "rank": 2,
+          "name": "专精特新",
+          "value": 19,
+          "unit": "家涨停",
+          "sub": "最高3板 · 龙头和远气体(002971)",
+          "tag": 3
+        },
+        {
+          "rank": 3,
+          "name": "新能源汽车",
+          "value": 17,
+          "unit": "家涨停",
+          "sub": "最高2板 · 龙头东安动力(600178)",
+          "tag": 2
+        },
+        {
+          "rank": 4,
+          "name": "机器人概念",
+          "value": 14,
+          "unit": "家涨停",
+          "sub": "最高3板 · 龙头京基智农(000048)",
+          "tag": 3
+        }
+      ],
+      "duration": 9,
+      "accent": "amber",
+      "start": 14.0
+    },
+    {
+      "key": "dragon",
+      "title": "龙头梯队",
+      "subtitle": "今日连板高度",
+      "narration": "空间高度看京基智农，3连板领涨。和远气体3板紧随其后。",
+      "caption": "谁是今天的龙头",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "京基智农",
+          "code": "000048.SZ",
+          "value": 3,
+          "unit": "板",
+          "sub": "养殖业",
+          "tag": 3
+        },
+        {
+          "rank": 2,
+          "name": "和远气体",
+          "code": "002971.SZ",
+          "value": 3,
+          "unit": "板",
+          "sub": "化学制品",
+          "tag": 3
+        },
+        {
+          "rank": 3,
+          "name": "中化国际",
+          "code": "600500.SH",
+          "value": 3,
+          "unit": "板",
+          "sub": "化学制品",
+          "tag": 3
+        },
+        {
+          "rank": 4,
+          "name": "XD宿迁联",
+          "code": "603065.SH",
+          "value": 3,
+          "unit": "板",
+          "sub": "化学制品",
+          "tag": 3
+        },
+        {
+          "rank": 5,
+          "name": "康强电子",
+          "code": "002119.SZ",
+          "value": 2,
+          "unit": "板",
+          "sub": "半导体",
+          "tag": 2
+        }
+      ],
+      "duration": 9,
+      "accent": "amber",
+      "start": 23.0
+    },
+    {
+      "key": "capital",
+      "title": "资金动向",
+      "subtitle": "龙虎榜·净买入前三",
+      "narration": "龙虎榜今日净买入居前的是宗申动力，约61408万。其次方邦股份。买方信誉标黑的为风险信号，注意甄别。",
+      "caption": "龙虎榜谁被买最多",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "宗申动力",
+          "code": "001696.SZ",
+          "value": 61408,
+          "unit": "万",
+          "sub": "中性",
+          "tag": "中性",
+          "tone": "neutral"
+        },
+        {
+          "rank": 2,
+          "name": "方邦股份",
+          "code": "688020.SH",
+          "value": 53021,
+          "unit": "万",
+          "sub": "黑买入⚠",
+          "tag": "黑买入⚠",
+          "tone": "down"
+        },
+        {
+          "rank": 3,
+          "name": "雅克科技",
+          "code": "002409.SZ",
+          "value": 47281,
+          "unit": "万",
+          "sub": "黑买入⚠",
+          "tag": "黑买入⚠",
+          "tone": "down"
+        }
+      ],
+      "duration": 8,
+      "accent": "amber",
+      "start": 32.0
+    },
+    {
+      "key": "strategy",
+      "title": "策略选股",
+      "subtitle": "今日 2 大策略 · 共 8 只",
+      "narration": "今日策略选股共8只：弱转强5只、二板定龙3只。下面逐个策略来看。",
+      "caption": "今日各策略选股一览",
+      "stats": [
+        {
+          "label": "弱转强",
+          "value": 5,
+          "unit": "只",
+          "tone": "neutral"
+        },
+        {
+          "label": "二板定龙",
+          "value": 3,
+          "unit": "只",
+          "tone": "neutral"
+        }
+      ],
+      "list": [],
+      "duration": 7,
+      "accent": "amber",
+      "start": 40.0
+    },
+    {
+      "key": "strategy_1",
+      "title": "弱转强",
+      "subtitle": "策略选股 · 5只",
+      "narration": "弱转强策略今日选出5只，列出前4只，和远气体居首，置信度约65%。仅为模型信号，盘前竞价再确认。",
+      "caption": "弱势股放量转强，低吸博反包",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "和远气体",
+          "code": "002971.SZ",
+          "value": 65,
+          "unit": "%",
+          "sub": "化学制品",
+          "tag": "弱转强",
+          "tone": "neutral"
+        },
+        {
+          "rank": 2,
+          "name": "宗申动力",
+          "code": "001696.SZ",
+          "value": 65,
+          "unit": "%",
+          "sub": "通用设备",
+          "tag": "弱转强",
+          "tone": "neutral"
+        },
+        {
+          "rank": 3,
+          "name": "雅克科技",
+          "code": "002409.SZ",
+          "value": 65,
+          "unit": "%",
+          "sub": "半导体",
+          "tag": "弱转强",
+          "tone": "neutral"
+        },
+        {
+          "rank": 4,
+          "name": "旭光电子",
+          "code": "600353.SH",
+          "value": 65,
+          "unit": "%",
+          "sub": "其他电子",
+          "tag": "弱转强",
+          "tone": "neutral"
+        }
+      ],
+      "duration": 8,
+      "accent": "amber",
+      "start": 47.0
+    },
+    {
+      "key": "strategy_2",
+      "title": "二板定龙",
+      "subtitle": "策略选股 · 3只",
+      "narration": "二板定龙策略今日选出3只，天地源居首，置信度约80%。仅为模型信号，盘前竞价再确认。",
+      "caption": "首板次日抢二板，锁定梯队龙头",
+      "stats": [],
+      "list": [
+        {
+          "rank": 1,
+          "name": "天地源",
+          "code": "600665.SH",
+          "value": 80,
+          "unit": "%",
+          "sub": "房地产",
+          "tag": "二板定龙",
+          "tone": "up"
+        },
+        {
+          "rank": 2,
+          "name": "康强电子",
+          "code": "002119.SZ",
+          "value": 77,
+          "unit": "%",
+          "sub": "半导体",
+          "tag": "二板定龙",
+          "tone": "neutral"
+        },
+        {
+          "rank": 3,
+          "name": "红 宝 丽",
+          "code": "002165.SZ",
+          "value": 75,
+          "unit": "%",
+          "sub": "化学制品",
+          "tag": "二板定龙",
+          "tone": "neutral"
+        }
+      ],
+      "duration": 8,
+      "accent": "amber",
+      "start": 55.0
+    },
+    {
+      "key": "tomorrow",
+      "title": "明日策略",
+      "subtitle": "退潮期",
+      "narration": "明日策略：空仓或1成试错，禁止接力，建议仓位0-10%。今日精选8个计划，风控通过3、降级1、拒绝4。具体仓位以盘前竞价确认为准。",
+      "caption": "明天怎么办",
+      "stats": [
+        {
+          "label": "建议仓位",
+          "value": "0-10%",
+          "unit": "",
+          "tone": "neutral"
+        },
+        {
+          "label": "精选计划",
+          "value": 8,
+          "unit": "个",
+          "tone": "up"
+        }
+      ],
+      "list": [],
+      "duration": 9,
+      "accent": "amber",
+      "start": 63.0
+    },
+    {
+      "key": "cta",
+      "title": "今日复盘结束",
+      "subtitle": "数据说话 · 不喊单 · 不荐股",
+      "narration": "以上就是今天的A股情绪与策略复盘，所有结论均来自公开数据，请独立判断、控制仓位。",
+      "caption": "本视频为数据复盘，仅供学习交流，不构成任何投资建议。市场有风险，入市需谨慎。",
+      "stats": [],
+      "list": [],
+      "duration": 4,
+      "accent": "amber",
+      "start": 72.0
+    }
+  ],
+  "total_duration": 76.0
+}

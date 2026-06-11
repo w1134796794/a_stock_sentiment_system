@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}图文素材 · {{ date }}{% endblock %}
+{% block page_title %}图文素材 · 情绪温度计{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date }} · 合规市场记录（无个股 · 无收益 · 无操作建议）</div>{% endblock %}
+
+{% block header_extra %}
+  {% if dates %}
+  <label class="text-sm text-slate-400">交易日</label>
+  <select onchange="location.href='/content/'+this.value"
+          class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    {% for d in dates %}
+      <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if not pack %}
+  <div class="card border border-slate-800 rounded-xl p-10 text-center">
+    <div class="text-lg font-semibold mb-1">没有找到 {{ date }} 的快照</div>
+    <div class="text-slate-400 text-sm">先运行一次收盘分析生成快照后再来。</div>
+    <a href="/run" class="inline-block mt-4 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">去运行</a>
+  </div>
+{% else %}
+<div class="mb-4 flex items-center gap-2 text-xs text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
+  <span>🛡️ 合规模式</span>
+  <span class="text-slate-400">仅市场整体聚合数据 · 不点名个股 · 不报收益 · 不给操作建议 · 三处风险提示已内置</span>
+</div>
+
+<div class="grid lg:grid-cols-2 gap-4">
+  <!-- 文案区 -->
+  <div class="space-y-4">
+    <div class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-bold">口播稿 <span class="text-xs font-normal text-slate-500">抖音/视频号 · 约30秒</span></h2>
+        <button class="copy-btn" data-target="copy-oral">复制</button>
+      </div>
+      <pre id="copy-oral" class="copy-src whitespace-pre-wrap text-sm text-slate-200 leading-relaxed">{{ pack.copy.oral }}</pre>
+    </div>
+
+    <div class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-bold">小红书标题</h2>
+        <button class="copy-btn" data-target="copy-title">复制</button>
+      </div>
+      <div id="copy-title" class="copy-src text-sm text-slate-200">{{ pack.copy.xhs_title }}</div>
+    </div>
+
+    <div class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-bold">小红书正文</h2>
+        <button class="copy-btn" data-target="copy-body">复制</button>
+      </div>
+      <pre id="copy-body" class="copy-src whitespace-pre-wrap text-sm text-slate-200 leading-relaxed">{{ pack.copy.xhs_body }}</pre>
+    </div>
+
+    <div class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-bold">话题标签</h2>
+        <button class="copy-btn" data-target="copy-tags">复制</button>
+      </div>
+      <div id="copy-tags" class="copy-src text-sm text-emerald-300">{{ pack.copy.tags | join(' ') }}</div>
+    </div>
+  </div>
+
+  <!-- 卡片预览 + 操作 -->
+  <div class="space-y-4">
+    <div class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-bold">卡片预览 <span class="text-xs font-normal text-slate-500">小红书图 · 9:16</span></h2>
+        <a href="/content/{{ date }}/cards" target="_blank"
+           class="text-xs text-emerald-300 hover:text-emerald-200">新窗口打开 ↗</a>
+      </div>
+      <div class="rounded-lg overflow-hidden border border-slate-800 bg-[#05070d]">
+        <iframe src="/content/{{ date }}/cards" class="w-full" style="height:760px;border:0;"
+                title="情绪温度计卡片"></iframe>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2">在预览里点「下载全部 PNG」即可保存 4 张图，直接发小红书。</p>
+    </div>
+
+    <div class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 class="font-bold mb-1">保存素材到本地</h2>
+          <div class="text-xs text-slate-500">写入 <span class="mono">webdata/content/{{ date }}/</span>：文案.md · 卡片.html · 分镜 story.json</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-slate-400 flex items-center gap-1">
+            <input type="checkbox" id="with-video" class="accent-emerald-500"> 同时出片 <span class="text-slate-600">(需Node≥22)</span>
+          </label>
+          <button id="save-btn" onclick="saveAssets()"
+                  class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">保存素材</button>
+        </div>
+      </div>
+      <div id="save-status" class="hidden mt-3 text-xs leading-relaxed rounded-lg px-3 py-2"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-slate-100 text-sm
+     px-4 py-2 rounded-lg shadow-lg opacity-0 pointer-events-none transition-opacity"></div>
+
+<style>
+  .copy-btn { font-size:.72rem; color:#6ee7b7; background:rgba(16,185,129,.12);
+              border:1px solid rgba(16,185,129,.3); border-radius:.4rem; padding:.2rem .6rem; cursor:pointer; }
+  .copy-btn:hover { background:rgba(16,185,129,.22); }
+</style>
+<script>
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.style.opacity = '1';
+    setTimeout(() => { t.style.opacity = '0'; }, 1600);
+  }
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const el = document.getElementById(btn.dataset.target);
+      const text = el.innerText;
+      navigator.clipboard.writeText(text).then(() => toast('已复制 ✓'))
+        .catch(() => toast('复制失败，请手动选择'));
+    });
+  });
+  async function saveAssets() {
+    const btn = document.getElementById('save-btn');
+    const box = document.getElementById('save-status');
+    const withVideo = document.getElementById('with-video').checked;
+    btn.disabled = true; btn.textContent = '保存中…';
+    box.className = 'mt-3 text-xs leading-relaxed rounded-lg px-3 py-2 bg-slate-800/60 text-slate-300';
+    box.classList.remove('hidden'); box.textContent = '正在生成…' + (withVideo ? '（出片可能较久）' : '');
+    try {
+      const r = await fetch('/api/content/{{ date }}/save', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ with_video: withVideo })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || '保存失败');
+      let html = '✅ 已保存到 <span class="mono">' + d.dir + '</span><br>'
+        + '· 文案：<span class="mono">' + d.files['文案'] + '</span><br>'
+        + '· 卡片：<span class="mono">' + d.files['卡片'] + '</span><br>'
+        + '· 分镜：<span class="mono">' + d.files['分镜'] + '</span>';
+      if (d.video) {
+        html += d.video.rendered
+          ? '<br>· 视频：<span class="mono">' + d.video.mp4 + '</span>'
+          : '<br>· 视频HTML已生成；渲染命令：<span class="mono">' + d.video.render_cmd + '</span>';
+      }
+      box.className = 'mt-3 text-xs leading-relaxed rounded-lg px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-200';
+      box.innerHTML = html;
+      toast('已保存 ✓');
+    } catch (e) {
+      box.className = 'mt-3 text-xs leading-relaxed rounded-lg px-3 py-2 bg-rose-500/10 border border-rose-500/30 text-rose-200';
+      box.textContent = '保存失败：' + e.message;
+    } finally {
+      btn.disabled = false; btn.textContent = '保存素材';
+    }
+  }
+</script>
+{% endif %}
+{% endblock %}

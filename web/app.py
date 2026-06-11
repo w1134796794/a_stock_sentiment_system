@@ -695,6 +695,62 @@ def show_cards(request: Request, date: str) -> Any:
 
 
 # ----------------------------------------------------------------------
+# 图文素材 · 情绪温度计（合规版：仅市场整体数据 + 合规文案，供短视频/小红书运营）
+# ----------------------------------------------------------------------
+@app.get("/content", response_class=HTMLResponse)
+def content_index() -> Any:
+    latest = reader.latest()
+    return RedirectResponse(url=f"/content/{latest}" if latest else "/")
+
+
+@app.get("/content/{date}", response_class=HTMLResponse)
+def content_page(request: Request, date: str) -> Any:
+    """情绪温度计内容页：合规文案（一键复制）+ 卡片预览（一键下载 PNG）。"""
+    from recap.thermometer import build_thermometer
+
+    snapshot = reader.load(date)
+    pack = build_thermometer(snapshot) if snapshot else None
+    return templates.TemplateResponse(
+        request, "content.html",
+        {"date": date, "dates": reader.list_dates(), "pack": pack},
+    )
+
+
+@app.get("/content/{date}/cards", response_class=HTMLResponse)
+def content_cards(date: str) -> Any:
+    """情绪温度计卡片（自包含 HTML，含一键下载 PNG），供内容页 iframe 内嵌。"""
+    from recap.thermometer import build_thermometer, render_cards_html
+
+    snapshot = reader.load(date)
+    if snapshot is None:
+        return HTMLResponse('<div style="color:#94a3b8;padding:24px">无该日快照</div>', status_code=404)
+    return HTMLResponse(render_cards_html(build_thermometer(snapshot)))
+
+
+@app.post("/api/content/{date}/save")
+def api_content_save(date: str, payload: dict = Body(default={})) -> Any:
+    """保存图文/分镜素材到 webdata/content/{date}/；with_video=true 时尝试出片。"""
+    from recap.thermometer import save
+
+    try:
+        res = save(date, with_video=bool((payload or {}).get("with_video")))
+    except FileNotFoundError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
+    out = {
+        "ok": True,
+        "date": res["date"],
+        "dir": str(res["dir"]),
+        "files": {"文案": str(res["文案"]), "卡片": str(res["卡片"]), "分镜": str(res["story"])},
+    }
+    if res.get("video"):
+        v = res["video"]
+        out["video"] = {"html": str(v.get("html")), "rendered": v.get("rendered"),
+                        "mp4": str(v.get("mp4")) if v.get("mp4") else None,
+                        "render_cmd": " ".join(v.get("render_cmd") or [])}
+    return JSONResponse(out)
+
+
+# ----------------------------------------------------------------------
 # P3：AI 每日解读 + 问答
 # ----------------------------------------------------------------------
 @app.get("/report/{date}/brief", response_class=HTMLResponse)

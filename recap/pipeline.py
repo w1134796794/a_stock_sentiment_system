@@ -70,6 +70,7 @@ def _run_render(cmd: List[str], cwd: Path) -> bool:
 
 
 def build_recap_video(date: Optional[str] = None, *,
+                      story: Optional[Dict[str, Any]] = None,
                       with_tts: bool = False,
                       with_captions: bool = True,
                       bgm: Optional[str] = None,
@@ -78,6 +79,7 @@ def build_recap_video(date: Optional[str] = None, *,
     """生成某日复盘短视频的全部出片素材，返回各产物路径与 render 命令。
 
     参数：
+    - story：直接传入分镜（如合规版「情绪温度计」story）；缺省时按 date 加载/生成；
     - with_tts：是否逐幕合成配音（并据此对齐时间轴）；
     - with_captions：是否生成 SRT/VTT 字幕；
     - bgm：背景音乐文件（相对 composition.html 的路径或绝对路径）；
@@ -86,9 +88,10 @@ def build_recap_video(date: Optional[str] = None, *,
     from recap.storyboard import build_and_save, load_recap
 
     target = date
-    story = load_recap(target) if target else None
     if story is None:
-        story = build_and_save(target)
+        story = load_recap(target) if target else None
+        if story is None:
+            story = build_and_save(target)
     date = str(story.get("date") or target or "")
 
     out = _build_dir(date, out_dir)
