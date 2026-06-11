@@ -138,9 +138,17 @@ def tail_log(lines: int = 500) -> str:
 def dragon_pools() -> Dict[str, Any]:
     """返回龙头池/走弱池的精简表格（供龙头池页面渲染）。"""
 
+    # 枚举名 → 中文展示（dragon_pools.json 里存的是 "DragonType.TREND" / "TREND" 形式）
+    _ENUM_ZH = {
+        "CONTINUOUS": "连板龙头", "TREND": "趋势龙头", "SPACE": "空间龙头",
+        "MONITORING": "观察中", "WEAKENING": "已走弱", "RECOVERING": "转强中", "EXPIRED": "已过期",
+    }
+
     def _clean(v: Any) -> Any:
         if isinstance(v, str) and "." in v and v.split(".")[0] in ("DragonType", "DragonStatus"):
-            return v.split(".", 1)[1]
+            v = v.split(".", 1)[1]
+        if isinstance(v, str):
+            return _ENUM_ZH.get(v, v)
         return v
 
     pools = _read_dragon_pools()
@@ -175,4 +183,3 @@ def dragon_pools() -> Dict[str, Any]:
         "exists": DRAGON_POOL_PATH.exists(),
         "path": str(DRAGON_POOL_PATH),
     }
-

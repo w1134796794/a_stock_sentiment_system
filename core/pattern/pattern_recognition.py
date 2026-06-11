@@ -482,18 +482,45 @@ class PatternRecognition:
                     logger.info(f"[弱转强-L4] ✗ {name}({code}) 过滤: 总评分{total_score:.0f}<{min_total_score}(动态阈值)")
                     continue
 
-                # 确定信号级别和置信度
+                # 信号级别（基于总评分的标签，用于描述/校验规则）
                 if total_score >= 80:
                     signal_level = "强烈信号"
-                    confidence = 0.90
                 elif total_score >= 65:
                     signal_level = "确认信号"
-                    confidence = 0.75
                 else:
                     signal_level = "基础信号"
-                    confidence = 0.60
 
-                confidence = min(confidence, 0.95)
+                # 置信度：confidence_mode="deduction" 走统一满分扣分制（ConfidenceScorer +
+                # confidence_rules.yaml 的 weak_to_strong），并附逐项扣分明细；否则沿用旧的
+                # total_score→置信度 映射（行为不变）。
+                wt_mode = self.weak_to_strong.params.get("confidence_mode", "legacy")
+                conf_breakdown = None
+                confidence = None
+                if wt_mode == "deduction":
+                    from core.scoring.confidence_scorer import score_or_none
+                    _wt = weakening.weakening_type or ""
+                    _wt_cat = "断板" if _wt == "断板" else ("放量滞涨" if "放量滞涨" in _wt else "其他")
+                    _res = score_or_none("weak_to_strong", {
+                        "gap_pct": auction_analysis.get('gap', 0),
+                        "auction_vol_ratio": auction_analysis.get('auction_vol_ratio', 0),
+                        "flexible_score": total_score,   # 用综合评分作为弹性/质量代理
+                        "weakening_type": _wt_cat,
+                    })
+                    if _res is not None:
+                        confidence = _res.value
+                        conf_breakdown = _res.to_dict()
+                    else:
+                        logger.warning("[弱转强] 扣分制规则缺失/失败，回退 legacy 置信度")
+
+                if confidence is None:
+                    # legacy：基础分映射
+                    if total_score >= 80:
+                        confidence = 0.90
+                    elif total_score >= 65:
+                        confidence = 0.75
+                    else:
+                        confidence = 0.60
+                    confidence = min(confidence, 0.95)
 
                 # 涨停时间加分
                 if is_limit_up:
@@ -554,6 +581,10 @@ class PatternRecognition:
                     ],
                     l2_industry=sector_name
                 )
+
+                # Phase 3：扣分制下附逐项扣分明细，便于复盘"为什么不是满分"
+                if conf_breakdown:
+                    signal.key_metrics["置信扣分明细"] = conf_breakdown
 
                 signals.append(signal)
                 total_passed += 1

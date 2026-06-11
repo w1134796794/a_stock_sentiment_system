@@ -110,6 +110,23 @@ COLUMN_LABELS: Dict[str, str] = {
     "mf_E2_retail_net_ratio": "E2散户净占比",
     "mf_E3_large_buy_ratio": "E3大单买入占比",
     "mf_E4_moneyflow_trend": "E4资金趋势",
+    # 置信度扣分制因子（confidence_rules.yaml 的 breakdown.factor）
+    "seal_ratio": "封单强度",
+    "gap_ratio": "次日高开",
+    "gap_pct": "竞价高开",
+    "first_board_score": "首板质量分",
+    "is_fast": "快速封板",
+    "auction_vol_ratio": "竞价量比",
+    "flexible_score": "弹性评分",
+    "weakening_type": "走弱类型",
+    "breakout_type": "突破类型",
+    "volume_ratio_excess": "量能超额",
+    "break_count": "开板次数",
+    "early_seal": "早盘秒封",
+    "sector_score": "板块效应",
+    "max_boards": "最高连板",
+    "days_since_peak": "距高点天数",
+    "layer2_clean": "L2干净",
 }
 
 

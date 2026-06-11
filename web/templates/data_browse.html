@@ -22,8 +22,12 @@
     <div class="text-slate-400">请确认该日已运行收盘分析。</div>
   </div>
 {% else %}
-{# 字段过多的分类用主从视图（紧凑列表 + 点击展开全字段卡），避免横向滚动 #}
-{% set detail_view = cat in ['strategy', 'sector'] %}
+{# 各分类的展示视图：
+   strategy/sector → detail 主从卡；limitup → echelon 梯队；
+   capital/review  → smart 智能混搭（卡片/热力表/主从按 section 自动选）；其余 → table。 #}
+{% set view_q = 'echelon' if cat == 'limitup'
+                else ('detail' if cat in ['strategy', 'sector']
+                else ('smart' if cat in ['capital', 'review'] else 'table')) %}
 <div class="space-y-4">
   <nav id="data-tabs" class="card border border-slate-800 rounded-xl p-2 flex flex-wrap gap-1.5">
     {% set ns = namespace(first=true, any=false) %}
@@ -32,7 +36,7 @@
       {% set ns.any = true %}
       <button
         class="dtab {% if ns.first %}active{% endif %}"
-        hx-get="/report/{{ date }}/section/{{ loop.index0 }}{% if detail_view %}?view=detail{% endif %}"
+        hx-get="/report/{{ date }}/section/{{ loop.index0 }}?view={{ view_q }}"
         hx-target="#section-panel" hx-swap="innerHTML"
         onclick="setActiveTab(this)"
         {% if ns.first %}hx-trigger="load, click"{% endif %}>

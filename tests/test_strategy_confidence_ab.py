@@ -77,6 +77,7 @@ def _dyn(params):
 
 def test_wts_default_is_legacy_no_breakdown():
     s = _make_wts()
+    s.params["confidence_mode"] = "legacy"   # 固定 legacy，独立于运行期覆盖
     weak = SimpleNamespace(weakening_type="断板", stock_code="000001")
     val, bd = s._auction_recovery_confidence(
         s.params["ideal_gap"], _dyn(s.params), s.params["ideal_auction_vol_ratio"], 90, weak
@@ -87,6 +88,7 @@ def test_wts_default_is_legacy_no_breakdown():
 
 def test_wts_legacy_value_matches_formula():
     s = _make_wts()
+    s.params["confidence_mode"] = "legacy"   # 固定 legacy，独立于运行期覆盖
     weak = SimpleNamespace(weakening_type="断板", stock_code="x")
     val, _ = s._auction_recovery_confidence(
         s.params["ideal_gap"], _dyn(s.params), s.params["ideal_auction_vol_ratio"], 90, weak
