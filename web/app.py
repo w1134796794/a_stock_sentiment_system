@@ -37,6 +37,90 @@ def _money(value: Any, signed: bool = False) -> str:
 
 templates.env.filters["money"] = _money
 
+
+def _num2(value: Any) -> Any:
+    """数值统一保留两位小数；整数/布尔/非数值（字符串/列表/字典）原样返回。
+
+    用于表格单元格，避免 14.658499999999998 这类浮点尾数直接显示。
+    """
+    if isinstance(value, bool) or isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return value
+
+
+templates.env.filters["num2"] = _num2
+
+
+# ----------------------------------------------------------------------
+# 表头英文列名 → 中文展示名（只翻译显示，底层数据 key 不变，无需重生成快照）。
+# 未收录的列（含已是中文的列）原样返回。
+# ----------------------------------------------------------------------
+COLUMN_LABELS: Dict[str, str] = {
+    # 策略信号 / 交易计划 / 风控闸门
+    "pattern_type": "模式类型",
+    "stock_code": "股票代码",
+    "stock_name": "股票名称",
+    "ts_code": "代码",
+    "name": "名称",
+    "type": "类型",
+    "confidence": "置信度",
+    "description": "信号描述",
+    "key_metrics": "关键指标",
+    "validation_rules": "校验规则",
+    "entry_price": "入场价",
+    "stop_loss": "止损价",
+    "take_profit": "止盈价",
+    "position_size": "建议仓位",
+    "l2_industry": "二级行业",
+    "is_dual_resonance": "双线共振",
+    "action": "风控动作",
+    "reason_text": "决策原因",
+    "original_position_pct": "原始仓位%",
+    "final_position_pct": "风控后仓位%",
+    # 板块题材（热点概念 / 热点行业 / 持续性）
+    "rank": "排名",
+    "pct_change": "涨跌幅",
+    "limit_up_count": "涨停家数",
+    "limit_cons_count": "连板数",
+    "member_count": "成分股数",
+    "amount": "成交额",
+    "avg_amount": "平均成交额",
+    "vol": "成交量",
+    "composite_score": "综合评分",
+    "momentum_score": "动量评分",
+    "price_score": "价格评分",
+    "amount_score": "成交额评分",
+    "limit_score": "涨停评分",
+    "amount_rank": "成交额排名",
+    "limit_cpt_rank": "涨停概念排名",
+    "limit_cpt_score": "涨停概念评分",
+    "is_hot": "是否热点",
+    "is_hot_concept": "是否热点概念",
+    "is_hot_industry": "是否热点行业",
+    "_date_list": "上榜日期",
+    # 因子原始数据（与导出报表命名一致）
+    "tech_D1_n_day_high_low": "D1N日新高低",
+    "tech_D2_vol_price_coord": "D2量价配合",
+    "tech_D3_seal_strength": "D3封板强度",
+    "tech_D4_turnover_health": "D4换手健康",
+    "tech_D5_ma_bull_align": "D5均线多头",
+    "mf_E1_main_net_ratio": "E1主力净占比",
+    "mf_E2_retail_net_ratio": "E2散户净占比",
+    "mf_E3_large_buy_ratio": "E3大单买入占比",
+    "mf_E4_moneyflow_trend": "E4资金趋势",
+}
+
+
+def _col_label(col: Any) -> str:
+    """列名 → 中文展示名；未收录或已是中文的原样返回。"""
+    s = "" if col is None else str(col)
+    return COLUMN_LABELS.get(s, s)
+
+
+templates.env.filters["col_label"] = _col_label
+
 # ----------------------------------------------------------------------
 # 数据浏览分类：把原「明日计划 · 数据浏览」里的 section 按主题拆成独立菜单。
 # signals=True 表示纳入 kind=="signals" 的策略模式 section（弱转强/二板定龙/…）。
@@ -452,8 +536,12 @@ def api_backtest_run_status(since: int = 0) -> Any:
 
 
 @app.get("/report/{date}/section/{idx}", response_class=HTMLResponse)
-def section_fragment(request: Request, date: str, idx: int) -> Any:
-    """HTMX 片段：返回某个 section 的表格 HTML。"""
+def section_fragment(request: Request, date: str, idx: int, view: str = "table") -> Any:
+    """HTMX 片段：返回某个 section 的 HTML。
+
+    view=detail → 折叠主从卡片（紧凑列表 + 点击展开全字段，避免横向滚动），
+    用于字段很多的策略信号 / 板块题材；其余分类默认 view=table 宽表。
+    """
     snapshot = reader.load(date)
     sections: List[Dict] = (snapshot or {}).get("sections", [])
     if not snapshot or idx < 0 or idx >= len(sections):
@@ -462,7 +550,7 @@ def section_fragment(request: Request, date: str, idx: int) -> Any:
     return templates.TemplateResponse(
         request,
         "partials/section.html",
-        {"section": section},
+        {"section": section, "view": view},
     )
 
 
@@ -546,6 +634,15 @@ def show_scene(request: Request, date: str, key: str) -> Any:
     return templates.TemplateResponse(
         request, "show.html",
         {"date": date, "single": key, "autoplay": False, "title": f"A股复盘 {date} · {key}"},
+    )
+
+
+@app.get("/show/{date}/cards", response_class=HTMLResponse)
+def show_cards(request: Request, date: str) -> Any:
+    """图文导出视图：把每一幕铺成独立卡片，可逐张/批量下载 PNG，直接发小红书。"""
+    return templates.TemplateResponse(
+        request, "cards.html",
+        {"date": date, "title": f"A股复盘 {date} · 图文"},
     )
 
 

@@ -105,6 +105,7 @@
     #ctrl button { width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
                    background: rgba(255,255,255,.08); color: #e2e8f0; font-size: 18px; display:flex; align-items:center; justify-content:center; }
     #ctrl button:hover { background: var(--accent); color: #07120c; }
+    #ctrl button.spd { width: auto; min-width: 52px; padding: 0 14px; border-radius: 22px; font-size: 16px; font-weight: 800; }
     #ctrl .dots { display: flex; gap: 7px; padding: 0 8px; }
     #ctrl .dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.25); cursor: pointer; }
     #ctrl .dot.on { background: var(--accent); }
@@ -129,6 +130,8 @@
     <button id="next" title="下一幕 (→)">⏭</button>
     <div class="dots" id="dots"></div>
     <span class="tt mono" id="tt">0 / 0</span>
+    <button id="speed" class="spd mono" title="播放倍速 (S)">1×</button>
+    <button id="cards" title="图文导出（发小红书）">图</button>
     <button id="full" title="全屏 (F)">⛶</button>
   </div>
   <div class="loading" id="loading">正在加载分镜…</div>
@@ -154,6 +157,8 @@
     const fmtNum = (v) => (typeof v === 'number' && isFinite(v)) ? v.toLocaleString('en-US') : esc(v);
 
     let DATA = null, scenes = [], idx = 0, playing = false, elapsed = 0, lastTick = 0, raf = 0, single = false;
+    const SPEEDS = [1, 1.5, 2, 3];
+    let speed = 1;
 
     function applyAccent(name) {
       const a = ACCENTS[name] || ACCENTS.emerald;
@@ -251,7 +256,7 @@
     function tick(now) {
       if (!playing) return;
       const sc = scenes[idx];
-      elapsed += now - lastTick; lastTick = now;
+      elapsed += (now - lastTick) * speed; lastTick = now;
       const dur = (sc.duration || 5) * 1000;
       const bar = document.querySelector(`#segs .seg:nth-child(${idx + 1}) > i`);
       if (bar) { bar.style.transition = 'width .1s linear'; bar.style.width = Math.min(100, elapsed / dur * 100) + '%'; }
@@ -306,14 +311,18 @@
     }
 
     // 控制
+    const cycleSpeed = () => { speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; $('#speed').textContent = speed + '×'; };
     $('#play').onclick = toggle; $('#next').onclick = () => { pause(); next(); };
     $('#prev').onclick = () => { pause(); prev(); };
+    $('#speed').onclick = cycleSpeed;
+    $('#cards').onclick = () => { location.href = (DATE ? `/show/${DATE}/cards` : '/show'); };
     $('#full').onclick = () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); };
     document.addEventListener('keydown', e => {
       if (e.code === 'Space') { e.preventDefault(); toggle(); }
       else if (e.code === 'ArrowRight') { pause(); next(); }
       else if (e.code === 'ArrowLeft') { pause(); prev(); }
       else if (e.key === 'r' || e.key === 'R') { go(0); play(); }
+      else if (e.key === 's' || e.key === 'S') cycleSpeed();
       else if (e.key === 'f' || e.key === 'F') $('#full').click();
     });
 
