@@ -109,6 +109,9 @@ class SharedContext:
     # 因子数据（跨层收集）
     stock_tech_factors: Dict[str, Dict] = field(default_factory=dict)
     moneyflow_factors: Dict[str, Dict] = field(default_factory=dict)
+    # Phase 2：本次生效的因子 profile 与启用因子清单（复盘归因留痕）
+    factor_profile: str = ""
+    enabled_factors: List[str] = field(default_factory=list)
     # 因子收集器输出的 JSON 路径（pipeline.execute 末尾写入）
     factor_results_path: str = ""
 
@@ -139,6 +142,11 @@ class SharedContext:
     # Layer 5 输出
     review_result: Optional[ReviewResult] = None
 
+    # Phase 1 数据解耦：当日只读数据集 + 只读仓库门面
+    # 类型：``core.data.market_dataset.MarketDataset`` / ``core.data.repository.StockRepository``
+    dataset: Optional[Any] = None
+    repo: Optional[Any] = None
+
     # 元数据
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -158,6 +166,9 @@ class ReviewPipeline:
     def __init__(self, data_manager, industry_mapper=None):
         self.dm = data_manager
         self.mapper = industry_mapper
+
+        from core.data.data_prep import DataPrep
+        self.data_prep = DataPrep(self.dm)
 
         self.layer1 = MarketEnvAnalyzer(self.dm)
         self.layer2 = SectorAnalysisLayer(self.dm)
@@ -188,6 +199,10 @@ class ReviewPipeline:
         # 解析日期
         self._resolve_dates(ctx)
 
+        # Phase 1：先给一个透传仓库（Layer1 早于基础数据层；_fetch_base_data 会升级为数据集仓库）
+        from core.data.repository import StockRepository
+        ctx.repo = StockRepository.passthrough(self.dm)
+
         logger.info("=" * 80)
         logger.info(f"[ReviewPipeline] 开始执行五层复盘流水线: {ctx.trade_date}")
         logger.info(f"[ReviewPipeline] 前一交易日: {ctx.prev_trade_date}")
@@ -197,7 +212,7 @@ class ReviewPipeline:
             # P3-8：from_layer 跳过前置层（要求 ctx 已包含前置数据）
             if from_layer <= 1:
                 self._run_layer(ctx, "L1", "看大盘",
-                                lambda: setattr(ctx, "market_env", self.layer1.analyze(ctx.trade_date)),
+                                lambda: setattr(ctx, "market_env", self._execute_layer1(ctx)),
                                 done_msg=lambda: f"综合评分={ctx.market_env.composite_score:.0f}, 建议仓位={ctx.market_env.suggested_position}")
                 self._run_layer(ctx, "L1.5", "基础数据",
                                 lambda: self._fetch_base_data(ctx),
@@ -252,8 +267,7 @@ class ReviewPipeline:
 
             if from_layer <= 5:
                 self._run_layer(ctx, "L5", "盘后总结",
-                                lambda: setattr(ctx, "review_result", self.layer5.analyze(
-                                    ctx.trade_date, ctx.patterns, ctx.emotion_result, ctx.market_env)),
+                                lambda: setattr(ctx, "review_result", self._execute_layer5(ctx)),
                                 done_msg=lambda: ctx.review_result.review_summary if ctx.review_result else "(空)")
                 # Sprint D-2：周期 × 模式胜率矩阵（基于历史 factor_results JSON）
                 self._run_layer(ctx, "L5.5", "周期模式",
@@ -368,9 +382,7 @@ class ReviewPipeline:
         elif layer_num == 4:
             self._execute_layer4(ctx)
         elif layer_num == 5:
-            ctx.review_result = self.layer5.analyze(
-                ctx.trade_date, ctx.patterns, ctx.emotion_result, ctx.market_env
-            )
+            ctx.review_result = self._execute_layer5(ctx)
         else:
             raise ValueError(f"无效的层编号: {layer_num}，有效范围 1-5")
 
@@ -389,12 +401,21 @@ class ReviewPipeline:
             ctx.prev_trade_date = (dt - timedelta(days=1)).strftime("%Y%m%d")
             ctx.day_before_prev = (dt - timedelta(days=2)).strftime("%Y%m%d")
 
+    def _execute_layer1(self, ctx: SharedContext):
+        """执行 Layer 1: 大盘环境（注入只读仓库后分析）"""
+        self.layer1.repo = ctx.repo
+        return self.layer1.analyze(ctx.trade_date)
+
     def _fetch_base_data(self, ctx: SharedContext):
         """获取基础数据"""
+        from core.data.repository import StockRepository
+
         # 涨停池
         ctx.zt_pool = self.dm.get_limit_up_pool(ctx.trade_date)
         if ctx.zt_pool.empty:
             logger.warning(f"未获取到 {ctx.trade_date} 的涨停数据")
+            # 仍提供透传仓库，保证下游业务层有 repo 可用（行为=直连 dm）
+            ctx.repo = StockRepository.passthrough(self.dm)
             return
 
         # 跌停池
@@ -410,8 +431,19 @@ class ReviewPipeline:
             except Exception:
                 ctx.hierarchy_df = pd.DataFrame()
 
+        # Phase 1 数据解耦：预取当日只读数据集 + 装配只读仓库（非严格：未命中回退 dm）
+        try:
+            ctx.dataset = self.data_prep.build(
+                ctx.trade_date, ctx.prev_trade_date, zt_pool=ctx.zt_pool)
+            ctx.repo = StockRepository(ctx.dataset, dm=self.dm, strict=False)
+        except Exception as e:  # 预取/装配失败不致命：回退纯透传
+            logger.warning(f"[Pipeline] 数据集预取失败，回退透传仓库：{e}")
+            ctx.repo = StockRepository.passthrough(self.dm)
+
     def _execute_layer2(self, ctx: SharedContext):
         """执行 Layer 2: 板块分析"""
+        # Phase 1：下发当日只读仓库（经 orchestrator 透传给板块/概念子分析器）
+        self.layer2.repo = ctx.repo
         result = self.layer2.analyze(ctx.trade_date, ctx.zt_pool, ctx.prev_trade_date)
 
         ctx.sector_result = result
@@ -445,6 +477,9 @@ class ReviewPipeline:
             logger.warning(f"[Pipeline] 热点板块列表为空，将触发首板突破策略的兜底计算")
             hot_sectors = None
 
+        # Phase 1：把当日只读仓库下发给 Layer3（供模式识别经 repo 取数）
+        self.layer3.repo = ctx.repo
+
         result = self.layer3.analyze(
             ctx.trade_date, ctx.prev_trade_date, ctx.day_before_prev,
             ctx.zt_pool, ctx.limit_down_df, ctx.hierarchy_df,
@@ -462,6 +497,8 @@ class ReviewPipeline:
         ctx.weakening_pool_data = result.weakening_pool_data
         ctx.stock_tech_factors = result.stock_tech_factors
         ctx.moneyflow_factors = result.moneyflow_factors
+        ctx.factor_profile = result.factor_profile
+        ctx.enabled_factors = result.enabled_factors
 
         if ctx.market_env:
             ctx.market_env.cross_judgment = self.layer1.cross_analyze_with_emotion(
@@ -633,10 +670,18 @@ class ReviewPipeline:
                 mapping[code] = sector
         return mapping
 
+    def _execute_layer5(self, ctx: SharedContext):
+        """执行 Layer 5: 盘后总结（注入只读仓库后分析）"""
+        self.layer5.repo = ctx.repo
+        return self.layer5.analyze(
+            ctx.trade_date, ctx.patterns, ctx.emotion_result, ctx.market_env
+        )
+
     def _execute_layer4(self, ctx: SharedContext):
         """执行 Layer 4: 交易计划生成"""
         emotion_cycle = ctx.emotion_result.get('cycle_name', '震荡期')
 
+        self.layer4.repo = ctx.repo
         result = self.layer4.analyze(
             ctx.trade_date, ctx.ranked_signals, ctx.composite_scores,
             market_env=ctx.market_env, emotion_cycle=emotion_cycle,
@@ -789,6 +834,9 @@ class ReviewPipeline:
             # / `_write_review` 直接读这些键。
             'stock_tech_factors': ctx.stock_tech_factors,
             'moneyflow_factors': ctx.moneyflow_factors,
+            # Phase 2：因子 profile + 启用因子清单（留痕）
+            'factor_profile': ctx.factor_profile,
+            'enabled_factors': ctx.enabled_factors,
             'trade_plans_df': ctx.trade_plans_df,
             'factor_results_path': ctx.factor_results_path,
             # Sprint D-2：周期 × 模式胜率矩阵
@@ -805,4 +853,3 @@ class ReviewPipeline:
             # Sprint R-2/R-3：Layer4.5 风控闸门结果
             'risk_gate_result': ctx.risk_gate_result,
         }
-

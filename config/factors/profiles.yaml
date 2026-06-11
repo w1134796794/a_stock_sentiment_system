@@ -1,0 +1,40 @@
+# ============================================================
+# 情绪周期因子 Profile（Phase 2）
+#
+# 作用：按情绪周期（高潮期/震荡期/退潮期/冰点期）切换“启用的因子集”。
+# 机制：FactorRegistry.apply_profile(cycle) 先把所有因子复位到 factor_registry.yaml
+#       中的基础启用态，再叠加本文件中该周期的 disabled_factors / enabled_factors 覆盖。
+#
+# 重要：当前所有 profile 的 disabled_factors 均为空 —— 即“与改造前完全等价、行为不变”。
+#       这是 Phase 2 的硬性要求（先做到行为不变，再谈调优）。后续调参只需在对应周期
+#       的 disabled_factors 中填入要关闭的因子 ID（如 "D4_turnover_health"）即可。
+#
+# 因子 ID 取值见 config/factors/factor_registry.yaml。
+# ============================================================
+
+profiles:
+  # 默认 profile：未匹配到具体周期时回退到这里
+  default:
+    description: "默认（全因子启用，等价改造前）"
+    disabled_factors: []
+    enabled_factors: []
+
+  高潮期:
+    description: "高潮期：情绪亢奋、连板高度高。暂不禁用任何因子（待调优）"
+    disabled_factors: []
+    enabled_factors: []
+
+  震荡期:
+    description: "震荡期：轮动快、分歧大。暂不禁用任何因子（待调优）"
+    disabled_factors: []
+    enabled_factors: []
+
+  退潮期:
+    description: "退潮期：核按钮多、高标退潮。暂不禁用任何因子（待调优）"
+    disabled_factors: []
+    enabled_factors: []
+
+  冰点期:
+    description: "冰点期：地量、连板高度低。暂不禁用任何因子（待调优）"
+    disabled_factors: []
+    enabled_factors: []

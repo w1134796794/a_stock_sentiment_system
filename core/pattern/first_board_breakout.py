@@ -52,7 +52,7 @@ class TradeSignal:
 
 
 class HotspotFirstBoardStrategy:
-    def __init__(self, data_manager, sector_engine=None, mapper=None):
+    def __init__(self, data_manager, sector_engine=None, mapper=None, repo=None):
         """
         热点首板突破策略 - 基于套牢盘动态调整因子要求
 
@@ -68,6 +68,10 @@ class HotspotFirstBoardStrategy:
         self.dm = data_manager
         self.sector_engine = sector_engine
         self.mapper = mapper
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
 
         # 基础参数（默认值见 config/pattern_params.py，支持网页覆盖）
         self.params = get_params("first_board_breakout")
@@ -772,7 +776,7 @@ class HotspotFirstBoardStrategy:
 
         if hasattr(self.dm, 'get_stock_daily_basic'):
             try:
-                daily_basic_data = self.dm.get_stock_daily_basic(code, date_str)
+                daily_basic_data = self.repo.get_stock_daily_basic(code, date_str)
                 if daily_basic_data:
                     free_share = daily_basic_data.get('free_share', 0)
                     close_price = daily_basic_data.get('close', 0)
@@ -832,30 +836,43 @@ class HotspotFirstBoardStrategy:
         )
         sector_limit_up_count = sector_info.get('stats', {}).get('涨停家数', 0)
 
-        # 计算综合置信度
-        confidence = 0.60  # 基础分（通过Layer 1/2/3已证明质量）
-
-        # 技术结构分（最高+0.10）
-        confidence += 0.05  # 突破平台/前高
-        if breakout_type == '前高突破':
-            confidence += 0.05  # 突破前高额外加成
-
-        # 资金确认分（最高+0.10）
-        confidence += min(seal_ratio * 2, 0.05)  # 封单强度
+        # 计算综合置信度（Phase 3：confidence_mode=deduction 走统一扣分制，默认 legacy 不变）
+        excess_vol = 0.0
         if volume_pass and daily_data:
-            excess_vol = daily_data.get('volume_ratio', 0) - thresholds['min_volume_ratio']
-            confidence += min(max(excess_vol, 0) * 0.03, 0.05)  # 量能超预期加成
+            excess_vol = max(daily_data.get('volume_ratio', 0) - thresholds['min_volume_ratio'], 0)
+        early_seal = 1 if (limit_up_time and limit_up_time <= '09:40') else 0
 
-        # 质量分（最高+0.05）
-        if break_count == 0:
-            confidence += 0.03  # 零开板
-        if limit_up_time and limit_up_time <= '09:40':
-            confidence += 0.02  # 早盘秒封
+        conf_breakdown = None
+        res = None
+        if self.params.get("confidence_mode", "legacy") == "deduction":
+            from core.scoring.confidence_scorer import score_or_none
+            res = score_or_none("first_board_breakout", {
+                "breakout_type": breakout_type,
+                "seal_ratio": seal_ratio,
+                "volume_ratio_excess": excess_vol,
+                "break_count": break_count,
+                "early_seal": early_seal,
+                "sector_score": sector_score,
+            })
 
-        # 板块效应分（最高+0.10）
-        confidence += sector_score
-
-        confidence = min(confidence, 0.95)
+        if res is not None:
+            confidence = res.value
+            conf_breakdown = res.to_dict()
+        else:
+            # legacy：基础分 0.60 + 阶梯/连续加分，封顶 0.95
+            confidence = 0.60  # 基础分（通过Layer 1/2/3已证明质量）
+            confidence += 0.05  # 突破平台/前高
+            if breakout_type == '前高突破':
+                confidence += 0.05  # 突破前高额外加成
+            confidence += min(seal_ratio * 2, 0.05)  # 封单强度
+            if volume_pass and daily_data:
+                confidence += min(excess_vol * 0.03, 0.05)  # 量能超预期加成
+            if break_count == 0:
+                confidence += 0.03  # 零开板
+            if limit_up_time and limit_up_time <= '09:40':
+                confidence += 0.02  # 早盘秒封
+            confidence += sector_score  # 板块效应分
+            confidence = min(confidence, 0.95)
 
         # 确定仓位权重
         if is_dual_resonance:
@@ -925,6 +942,8 @@ class HotspotFirstBoardStrategy:
             "量能说明": thresholds.get('volume_desc', '标准量能'),
             "板块效应": f"{sector_score*100:.0f}分(板块涨停{sector_limit_up_count}家)",
         }
+        if conf_breakdown:
+            key_metrics["置信扣分明细"] = conf_breakdown
         if concept_info_list:
             key_metrics["所属概念"] = ", ".join([c['name'] for c in concept_info_list[:3]])
             key_metrics["概念梯队"] = hierarchy_info or "无"
@@ -1021,7 +1040,7 @@ class HotspotFirstBoardStrategy:
             if hasattr(self.dm, 'get_stock_daily'):
                 # 添加后缀
                 ts_code = self._add_suffix(stock_code)
-                df = self.dm.get_stock_daily(ts_code, start_date, end_date)
+                df = self.repo.get_stock_daily(ts_code, start_date, end_date)
 
                 if not df.empty and len(df) >= 10:  # 至少需要10天数据计算MA10
                     # 按日期排序
@@ -1089,7 +1108,7 @@ class HotspotFirstBoardStrategy:
             
             if hasattr(self.dm, 'get_stock_daily'):
                 ts_code = self._add_suffix(stock_code)
-                df = self.dm.get_stock_daily(ts_code, start_date, date_str)
+                df = self.repo.get_stock_daily(ts_code, start_date, date_str)
                 
                 if df.empty or len(df) < 20:
                     return False, {"reason": "数据不足"}
@@ -1186,7 +1205,7 @@ class HotspotFirstBoardStrategy:
         try:
             # 尝试使用cyq_perf接口获取筹码数据
             if hasattr(self.dm, 'get_chip_data'):
-                chip_data = self.dm.get_chip_data(stock_code, date_str)
+                chip_data = self.repo.get_chip_data(stock_code, date_str)
                 if chip_data:
                     # 获取平均成本和胜率
                     avg_cost = chip_data.get('avg_cost', 0)
@@ -1204,7 +1223,7 @@ class HotspotFirstBoardStrategy:
             
             if hasattr(self.dm, 'get_stock_daily'):
                 ts_code = self._add_suffix(stock_code)
-                df = self.dm.get_stock_daily(ts_code, start_date, date_str)
+                df = self.repo.get_stock_daily(ts_code, start_date, date_str)
                 
                 if not df.empty and len(df) > 20:
                     df = df.sort_values('trade_date')

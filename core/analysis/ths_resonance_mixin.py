@@ -57,7 +57,7 @@ class THSResonanceMixin:
         concept_persistence_df = self.analyze_concept_persistence(trade_date, top_n=15, lookback_days=lookback_days)
         industry_persistence_df = self.analyze_industry_persistence(trade_date, top_n=15, lookback_days=lookback_days)
 
-        limit_up_df = self.dm.get_limit_up_pool(trade_date)
+        limit_up_df = self.repo.get_limit_up_pool(trade_date)
         all_stocks_df = self._get_all_stocks_performance(trade_date)
 
         main_themes = []
@@ -313,7 +313,7 @@ class THSResonanceMixin:
             end_date = datetime.strptime(trade_date, "%Y%m%d")
             start_date = end_date - timedelta(days=days * 2)
 
-            daily_data = self.dm.get_ths_daily(ts_code=ts_code,
+            daily_data = self.repo.get_ths_daily(ts_code=ts_code,
                                                start_date=start_date.strftime("%Y%m%d"),
                                                end_date=trade_date)
 
@@ -352,7 +352,7 @@ class THSResonanceMixin:
     def _get_all_stocks_performance(self, trade_date: str) -> pd.DataFrame:
         """获取全市场股票当日涨幅数据"""
         try:
-            daily_data = self.dm.get_all_rt_k_data(trade_date=trade_date)
+            daily_data = self.repo.get_all_rt_k_data(trade_date=trade_date)
             if daily_data.empty:
                 return pd.DataFrame()
 
@@ -422,7 +422,7 @@ class THSResonanceMixin:
             end_date = datetime.strptime(trade_date, "%Y%m%d")
             start_date = end_date - timedelta(days=days * 2)
 
-            daily_data = self.dm.get_ths_daily(ts_code=ts_code,
+            daily_data = self.repo.get_ths_daily(ts_code=ts_code,
                                                start_date=start_date.strftime("%Y%m%d"),
                                                end_date=trade_date)
 

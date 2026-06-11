@@ -102,8 +102,12 @@ class RetailTraderSupportV2:
     散户交易支持系统 V2 - 修复版
     """
     
-    def __init__(self, data_manager):
+    def __init__(self, data_manager, repo=None):
         self.dm = data_manager
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
         
         # 三阶过滤参数（放宽条件）
         self.filter_params = {
@@ -137,7 +141,7 @@ class RetailTraderSupportV2:
         # 数据验证
         if today_zt_pool is None or today_zt_pool.empty:
             logger.warning("当日涨停池为空，尝试从data_manager获取")
-            today_zt_pool = self.dm.get_limit_up_pool(datetime.now().strftime('%Y%m%d'))
+            today_zt_pool = self.repo.get_limit_up_pool(datetime.now().strftime('%Y%m%d'))
         
         if today_zt_pool is None or today_zt_pool.empty:
             logger.error("无法获取当日涨停池，返回空决策清单")
@@ -723,4 +727,3 @@ if __name__ == "__main__":
     print("• 板块优先级：S/A/B/C/D五级（基于当日涨停+3日趋势）")
     print("• 决策清单：每项包含历史数据+次日条件+执行计划+取消条件")
     print("=" * 70)
-

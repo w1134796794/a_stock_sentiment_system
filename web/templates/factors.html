@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}因子面板{% endblock %}
+{% block page_title %}因子面板{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">因子开关 · 情绪周期 Profile · 各策略置信度模式</div>{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <p class="text-sm text-slate-400">
+    在此统一开关因子、切换情绪周期 Profile、选择各策略的置信度算法。改动即时写入
+    <span class="mono">webdata/config_overrides.json</span>，
+    <span class="text-amber-300">下次跑批自动生效</span>；优先级：网页覆盖 &gt; 文件/代码默认值。
+  </p>
+</div>
+
+<div class="sticky top-0 z-10 -mx-6 px-6 py-3 bg-slate-950/90 backdrop-blur border-b border-slate-800 mb-5">
+  <div class="flex items-center gap-4 flex-wrap text-sm text-slate-400">
+    <span>启用因子 <span class="mono text-emerald-300">{{ state.factor_enabled }}</span> / {{ state.factor_total }}</span>
+    <span>当前覆盖 <span class="mono text-emerald-300">{{ state.override_count }}</span> 项</span>
+    {% if state.active_profile %}
+    <span>最新快照 Profile <span class="mono text-sky-300">{{ state.active_profile }}</span></span>
+    {% endif %}
+    <span id="fp-toast" class="hidden"></span>
+    <div class="flex-1"></div>
+    <button id="fp-reset-all"
+            class="border border-rose-700 text-rose-300 hover:bg-rose-900/30 text-sm rounded-md px-3 py-1.5">全部重置</button>
+  </div>
+</div>
+
+{# ===================== 1. 各策略置信度模式 ===================== #}
+<section class="mb-8">
+  <h2 class="text-lg font-bold text-emerald-300 mb-3">策略置信度模式</h2>
+  <p class="text-xs text-slate-500 mb-3">
+    <span class="mono">legacy</span> = 旧的「基础分 + 加分」（默认，行为不变）；
+    <span class="mono">deduction</span> = 统一「满分起扣」扣分制（见 <span class="mono">config/confidence_rules.yaml</span>）。
+  </p>
+  <div class="card border border-slate-800 rounded-xl overflow-hidden">
+    <table class="w-full text-sm">
+      <tbody>
+        {% for s in state.strategies %}
+        <tr class="border-b border-slate-800/60 hover:bg-slate-800/20">
+          <td class="px-4 py-2.5 align-middle">
+            <span class="text-slate-200">{{ s.label }}</span>
+            {% if s.overridden %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 ml-2">已改</span>
+            {% endif %}
+            <div class="text-xs text-slate-500 mono">{{ s.group }}</div>
+          </td>
+          <td class="px-4 py-2.5 align-middle text-right">
+            <select class="fp-mode mono bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
+                    data-scope="patterns" data-path="{{ s.override_path }}" data-type="str">
+              {% for m in state.confidence_modes %}
+              <option value="{{ m }}" {% if m == s.mode %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{# ===================== 2. 情绪周期 Profile ===================== #}
+<section class="mb-8">
+  <h2 class="text-lg font-bold text-emerald-300 mb-3">情绪周期 Profile</h2>
+  <div class="card border border-slate-800 rounded-xl p-4 mb-4">
+    <div class="flex items-center gap-3 flex-wrap">
+      <span class="text-sm text-slate-300">强制 Profile</span>
+      <select id="fp-forced" class="mono bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
+              data-scope="settings" data-path="FACTOR_PROFILE_OVERRIDE" data-type="str">
+        <option value="" {% if not state.forced_profile %}selected{% endif %}>（自动 · 按当日情绪周期）</option>
+        {% for name in state.profile_names %}
+        <option value="{{ name }}" {% if name == state.forced_profile %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+      <span class="text-xs text-slate-500">留空 = 跑批时按当日情绪周期自动选取（默认）。</span>
+    </div>
+  </div>
+  {% if state.profiles %}
+  <div class="card border border-slate-800 rounded-xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-slate-500 border-b border-slate-800">
+          <th class="px-4 py-2 font-medium">Profile</th>
+          <th class="px-4 py-2 font-medium">禁用因子</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in state.profiles %}
+        <tr class="border-b border-slate-800/60">
+          <td class="px-4 py-2 align-top">
+            <span class="mono text-slate-200">{{ p.name }}</span>
+            {% if p.name == state.active_profile %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-sky-900/50 text-sky-300 ml-1">生效中</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-2 align-top text-xs">
+            {% if p.disabled_factors %}
+              <span class="mono text-amber-300">{{ p.disabled_factors|join(', ') }}</span>
+            {% else %}
+              <span class="text-slate-500">（无 · 全启用）</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-sm text-slate-500">（未配置 profiles.yaml）</div>
+  {% endif %}
+</section>
+
+{# ===================== 3. 因子开关 ===================== #}
+<section class="mb-8">
+  <h2 class="text-lg font-bold text-emerald-300 mb-3">因子开关</h2>
+  <p class="text-xs text-slate-500 mb-3">关闭某因子后，对应 Layer 计算将跳过它（启用集会按权重重归一化）。</p>
+  {% for g in state.factor_groups %}
+  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" open>
+    <summary class="cursor-pointer select-none px-4 py-2.5 font-semibold text-slate-200 hover:bg-slate-800/40 flex items-center gap-2">
+      <span>{{ g.label }}</span>
+      <span class="text-xs text-slate-500 mono">{{ g.factors|length }} 个因子</span>
+    </summary>
+    <div class="border-t border-slate-800">
+      <table class="w-full text-sm">
+        <tbody>
+          {% for f in g.factors %}
+          <tr class="border-b border-slate-800/60 hover:bg-slate-800/20">
+            <td class="px-4 py-2 align-top w-12">
+              <input type="checkbox" class="fp-factor h-4 w-4 accent-emerald-500"
+                     data-scope="yaml" data-path="{{ f.override_path }}" data-type="bool"
+                     {% if f.enabled %}checked{% endif %}>
+            </td>
+            <td class="px-4 py-2 align-top">
+              <div class="flex items-center gap-2">
+                <span class="mono text-slate-200">{{ f.factor_id }}</span>
+                <span class="text-slate-400">{{ f.name }}</span>
+                {% if f.overridden %}
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">已改</span>
+                {% endif %}
+              </div>
+              {% if f.description %}
+              <div class="text-xs text-slate-500 mt-0.5">{{ f.description }}</div>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2 align-top text-xs text-slate-500">{{ f.sub_category }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endfor %}
+</section>
+
+<script>
+(function () {
+  const toast = document.getElementById('fp-toast');
+  function showToast(msg, ok) {
+    toast.textContent = msg;
+    toast.className = 'text-sm ' + (ok ? 'text-emerald-300' : 'text-rose-300');
+  }
+
+  async function applyUpdate(scope, path, value) {
+    try {
+      const r = await fetch('/api/config', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates: [{ scope, path, value }] })
+      });
+      const data = await r.json();
+      if ((data.errors || []).length) { showToast('保存出错：' + JSON.stringify(data.errors), false); return false; }
+      showToast('已应用 · ' + path, true);
+      return true;
+    } catch (err) { showToast('保存失败: ' + err, false); return false; }
+  }
+
+  document.querySelectorAll('.fp-factor').forEach(cb => {
+    cb.addEventListener('change', () => applyUpdate(cb.dataset.scope, cb.dataset.path, cb.checked));
+  });
+  document.querySelectorAll('.fp-mode').forEach(sel => {
+    sel.addEventListener('change', () => applyUpdate(sel.dataset.scope, sel.dataset.path, sel.value));
+  });
+  const forced = document.getElementById('fp-forced');
+  if (forced) forced.addEventListener('change', () => applyUpdate(forced.dataset.scope, forced.dataset.path, forced.value));
+
+  document.getElementById('fp-reset-all').addEventListener('click', async () => {
+    if (!confirm('确定清空全部参数覆盖、恢复到代码/文件默认值？（含其它页面的覆盖）')) return;
+    await fetch('/api/config/reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    showToast('已全部重置，即将刷新…', true);
+    setTimeout(() => location.reload(), 600);
+  });
+})();
+</script>
+{% endblock %}

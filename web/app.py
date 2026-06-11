@@ -444,6 +444,37 @@ def api_config_reset(payload: dict = Body(default={})) -> Any:
     return JSONResponse(reset(scope=scope, path=path))
 
 
+# ----------------------------------------------------------------------
+# Phase 4：因子面板（因子开关 / profile / 各策略置信度模式）
+# 写入复用 /api/config（apply_updates），本页仅提供友好读取 + 编排。
+# ----------------------------------------------------------------------
+def _latest_active_profile() -> str:
+    """从最新快照 meta 读取实际生效的因子 profile（仅展示）。"""
+    try:
+        latest = reader.latest()
+        snap = reader.load(latest) if latest else None
+        meta = (snap or {}).get("meta", {}) or {}
+        return str(meta.get("factor_profile") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+@app.get("/factors", response_class=HTMLResponse)
+def factors_page(request: Request) -> Any:
+    """因子面板：因子启用开关 + 情绪周期 profile + 各策略置信度模式。"""
+    from web.factor_panel import build_factor_state
+
+    state = build_factor_state(active_profile=_latest_active_profile())
+    return templates.TemplateResponse(request, "factors.html", {"state": state})
+
+
+@app.get("/api/factors/state")
+def api_factors_state() -> Any:
+    from web.factor_panel import build_factor_state
+
+    return JSONResponse(build_factor_state(active_profile=_latest_active_profile()))
+
+
 @app.get("/data/{cat}", response_class=HTMLResponse)
 def data_index(cat: str) -> Any:
     """数据浏览分类入口：跳转到最新交易日。"""

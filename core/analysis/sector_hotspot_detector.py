@@ -46,8 +46,12 @@ class HotSpotDetector:
     - 提供热点板块排序
     """
 
-    def __init__(self, data_manager, sector_params: Dict):
+    def __init__(self, data_manager, sector_params: Dict, repo=None):
         self.dm = data_manager
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
         self.sector_params = sector_params
         self._member_cache: Dict[str, pd.DataFrame] = {}
         
@@ -255,7 +259,7 @@ class HotSpotDetector:
     def _get_sector_members(self, ts_code: str) -> pd.DataFrame:
         """获取板块成分股（带缓存）"""
         if ts_code not in self._member_cache:
-            members = self.dm.get_ths_member(ts_code=ts_code)
+            members = self.repo.get_ths_member(ts_code=ts_code)
             self._member_cache[ts_code] = members
         return self._member_cache.get(ts_code, pd.DataFrame())
 
@@ -264,7 +268,7 @@ class HotSpotDetector:
         """计算行业板块涨停统计"""
         limit_up_codes = set()
         try:
-            limit_up_df = self.dm.get_limit_up_pool(date=trade_date)
+            limit_up_df = self.repo.get_limit_up_pool(date=trade_date)
             if not limit_up_df.empty:
                 code_col = None
                 if '代码' in limit_up_df.columns:

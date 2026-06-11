@@ -50,6 +50,10 @@ class StockSelectionResult:
     # 新增资金流向因子 (E1-E4)
     moneyflow_factors: Dict[str, Dict] = field(default_factory=dict)
 
+    # Phase 2：本次生效的因子 profile 与启用因子清单（复盘归因留痕）
+    factor_profile: str = ""
+    enabled_factors: List[str] = field(default_factory=list)
+
 
 class StockSelectionLayer:
     """
@@ -61,6 +65,12 @@ class StockSelectionLayer:
     def __init__(self, data_manager, industry_mapper=None):
         self.dm = data_manager
         self.mapper = industry_mapper
+
+        # Phase 1：当日只读仓库（由流水线在每次 run 前下发；缺省 None → PatternRecognition 自建透传）
+        self.repo = None
+
+        # Phase 2：因子注册中心（单例）——驱动 D/E 逐股因子的启用/权重/profile
+        self._factor_registry = None
 
         self._emotion_engine = None
         self._integrated_emotion_engine = None
@@ -91,6 +101,11 @@ class StockSelectionLayer:
         Returns:
             StockSelectionResult: 个股筛选结果
         """
+        # Phase 1：保证只读仓库可用（通常由流水线注入；独立调用时兜底透传）
+        if self.repo is None:
+            from core.data.repository import StockRepository
+            self.repo = StockRepository.passthrough(self.dm)
+
         result = StockSelectionResult(trade_date=trade_date)
 
         # P2-5: 入口轻量校验，发现脏数据时记日志（非 strict，不阻断 pipeline）
@@ -102,6 +117,9 @@ class StockSelectionLayer:
 
         try:
             self._analyze_emotion_cycle(result, zt_pool, limit_down_df, day_before_prev, market_env)
+
+            # Phase 2：按情绪周期应用因子 profile（默认全启用→行为不变），并留痕
+            self._apply_factor_profile(result)
 
             self._recognize_patterns(result, trade_date, prev_trade_date, hot_sectors)
 
@@ -143,7 +161,7 @@ class StockSelectionLayer:
         prev_limit_up_df = pd.DataFrame()
         if day_before_prev:
             try:
-                prev_limit_up_df = self.dm.get_limit_up_pool(day_before_prev)
+                prev_limit_up_df = self.repo.get_limit_up_pool(day_before_prev)
             except Exception:
                 pass
 
@@ -196,8 +214,11 @@ class StockSelectionLayer:
 
         if self._pattern_recognition is None:
             self._pattern_recognition = PatternRecognition(
-                self.dm, sector_engine=None, mapper=self.mapper
+                self.dm, sector_engine=None, mapper=self.mapper, repo=self.repo
             )
+        elif self.repo is not None:
+            # 缓存复用（如多日回测）：刷新为当日仓库（含各策略）
+            self._pattern_recognition.set_repo(self.repo)
 
         result.patterns = self._pattern_recognition.scan_all_patterns(
             trade_date, prev_trade_date, hot_sectors=hot_sectors or []
@@ -349,24 +370,65 @@ class StockSelectionLayer:
 
         return "\n".join(lines)
 
+    def _get_factor_registry(self):
+        """获取因子注册中心（单例，懒加载）。"""
+        if self._factor_registry is None:
+            from core.factors.factor_registry import get_factor_registry
+            self._factor_registry = get_factor_registry()
+        return self._factor_registry
+
+    def _apply_factor_profile(self, result: StockSelectionResult):
+        """
+        Phase 2：按当前情绪周期应用因子 profile，并把生效 profile + 启用因子清单
+        写入 result（供 snapshot.meta 留痕、复盘归因）。
+
+        默认所有 profile 的禁用集为空 → 全因子启用 → 与改造前行为一致。
+        """
+        try:
+            registry = self._get_factor_registry()
+            # Phase 4：网页可强制指定 profile（FACTOR_PROFILE_OVERRIDE）；
+            # 为空时回退按当日情绪周期自动选取（默认行为不变）。
+            forced = ""
+            try:
+                import config.settings as _s
+                forced = (getattr(_s, "FACTOR_PROFILE_OVERRIDE", "") or "").strip()
+            except Exception:
+                forced = ""
+            cycle_for_profile = forced or (result.emotion_cycle or "")
+            profile = registry.apply_profile(cycle_for_profile)
+            result.factor_profile = profile or ""
+            result.enabled_factors = registry.get_enabled_factor_ids()
+            logger.info(f"[Layer3] 因子 profile={result.factor_profile}"
+                        f"{'(强制)' if forced else ''}, "
+                        f"启用因子 {len(result.enabled_factors)} 个")
+        except Exception as e:
+            logger.warning(f"[Layer3] 应用因子 profile 失败（沿用全启用）: {e}")
+
     def _compute_stock_tech_factors(self, result: StockSelectionResult,
                                      zt_pool: pd.DataFrame, trade_date: str):
         """
-        D1-D5: 个股技术因子计算
+        D1-D5: 个股技术因子（Phase 2：registry 驱动，仅计算启用因子）。
 
-        D1: N日高低位 - 当前价在N日最高最低之间的位置
-        D2: 量价配合度 - 涨幅与量比的匹配程度
-        D3: 封板强度 - 封板时间+封单量综合评分
-        D4: 换手率健康度 - 换手率是否在合理区间
-        D5: 均线多头排列度 - MA5>MA10>MA20>MA60的程度
+        计算逻辑统一到 core/factors/layer3_perstock.py（单一真源）。默认全启用时
+        逐位等价于改造前硬编码；通过 layer3_stock_select.yaml 的 enabled_factors /
+        FactorDefinition.enabled 禁用某因子后，对应键不再写入结果。
+
+        D1: N日高低位 / D2: 量价配合度 / D3: 封板强度 / D4: 换手率健康度 / D5: 均线多头排列度
         """
         try:
+            from core.factors import layer3_perstock as ps
+
             ts_code_col = None
             for col in ['ts_code', '代码', 'code']:
                 if col in zt_pool.columns:
                     ts_code_col = col
                     break
             if ts_code_col is None or zt_pool.empty:
+                return
+
+            active_ids = ps.active_stock_tech_factors(self._get_factor_registry())
+            if not active_ids:
+                logger.info("[Layer3] D因子全部禁用，跳过")
                 return
 
             codes = zt_pool[ts_code_col].astype(str).tolist()[:30]
@@ -374,7 +436,14 @@ class StockSelectionLayer:
             # P2-1: 单次批量拉取所有候选股票的历史日线，避免 N+1
             from datetime import datetime, timedelta
             lookback_start = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
-            hist_map = self.dm.get_stocks_daily_batch(codes, lookback_start, trade_date)
+            hist_map = self.repo.get_stocks_daily_batch(codes, lookback_start, trade_date)
+
+            # 封板时间列解析一次（D3 用），与逐 code 解析等价
+            time_col = None
+            for tc in ['first_time', '首次封板时间', '封板时间']:
+                if tc in zt_pool.columns:
+                    time_col = tc
+                    break
 
             for code in codes:
                 try:
@@ -382,126 +451,44 @@ class StockSelectionLayer:
                     if hist is None or hist.empty:
                         continue
 
-                    # 历史 DataFrame 末行作为当日行情；旧实现额外拉了一次单日数据，去除以减少一半 API 调用
+                    # 历史 DataFrame 末行作为当日行情
                     row = hist.iloc[-1]
-                    close = float(row.get('close', 0))
-                    pre_close = float(row.get('pre_close', 0))
-                    vol = float(row.get('vol', 0))
-                    amount = float(row.get('amount', 0))
-                    pct_chg = float(row.get('pct_chg', 0))
+                    zt_match = zt_pool[zt_pool[ts_code_col].astype(str) == code]
+                    zt_row = zt_match.iloc[0] if not zt_match.empty else None
 
-                    factors = {}
-
-                    # D1: N日高低位 (默认20日)
-                    if hist is not None and not hist.empty and len(hist) >= 5:
-                        n_high = float(hist['high'].max())
-                        n_low = float(hist['low'].min())
-                        if n_high > n_low:
-                            factors['D1_n_day_high_low'] = round(
-                                (close - n_low) / (n_high - n_low) * 100, 1
-                            )
-                        else:
-                            factors['D1_n_day_high_low'] = 50.0
-
-                        # D5: 均线多头排列度
-                        if 'close' in hist.columns:
-                            closes = hist['close'].astype(float)
-                            if len(closes) >= 60:
-                                ma5 = closes.tail(5).mean()
-                                ma10 = closes.tail(10).mean()
-                                ma20 = closes.tail(20).mean()
-                                ma60 = closes.tail(60).mean()
-                                align_score = 0
-                                if ma5 > ma10:
-                                    align_score += 25
-                                if ma10 > ma20:
-                                    align_score += 25
-                                if ma20 > ma60:
-                                    align_score += 25
-                                if close > ma5:
-                                    align_score += 25
-                                factors['D5_ma_bull_align'] = align_score
-                            else:
-                                factors['D5_ma_bull_align'] = 50.0
-                    else:
-                        factors['D1_n_day_high_low'] = 50.0
-                        factors['D5_ma_bull_align'] = 50.0
-
-                    # D2: 量价配合度
-                    if vol > 0 and pre_close > 0:
-                        vol_ratio = vol / max(float(hist['vol'].tail(5).mean()) if hist is not None and not hist.empty else vol, 1)
-                        if pct_chg > 0 and vol_ratio > 1.0:
-                            factors['D2_vol_price_coord'] = min(100, vol_ratio * 50 + 30)
-                        elif pct_chg > 0 and vol_ratio <= 1.0:
-                            factors['D2_vol_price_coord'] = max(0, vol_ratio * 40)
-                        elif pct_chg < 0 and vol_ratio < 1.0:
-                            factors['D2_vol_price_coord'] = 50.0
-                        else:
-                            factors['D2_vol_price_coord'] = max(0, 50 - vol_ratio * 20)
-                    else:
-                        factors['D2_vol_price_coord'] = 50.0
-
-                    # D3: 封板强度 (从涨停池获取封板时间和封单)
-                    zt_row = zt_pool[zt_pool[ts_code_col].astype(str) == code]
-                    seal_score = 50.0
-                    if not zt_row.empty:
-                        zt_r = zt_row.iloc[0]
-                        time_col = None
-                        for tc in ['first_time', '首次封板时间', '封板时间']:
-                            if tc in zt_pool.columns:
-                                time_col = tc
-                                break
-                        if time_col:
-                            ft = str(zt_r.get(time_col, '')).strip()
-                            if ft <= '09:35:00':
-                                seal_score = 90.0
-                            elif ft <= '10:00:00':
-                                seal_score = 75.0
-                            elif ft <= '10:30:00':
-                                seal_score = 60.0
-                            elif ft <= '11:30:00':
-                                seal_score = 45.0
-                            elif ft <= '14:00:00':
-                                seal_score = 30.0
-                            else:
-                                seal_score = 15.0
-                    factors['D3_seal_strength'] = seal_score
-
-                    # D4: 换手率健康度
-                    turnover = float(row.get('turnover_rate', row.get('turnover', 0)))
-                    if turnover <= 0 and amount > 0:
-                        turnover = amount / 1e8
-                    if 3 <= turnover <= 15:
-                        factors['D4_turnover_health'] = 80.0
-                    elif 1 <= turnover < 3:
-                        factors['D4_turnover_health'] = 60.0
-                    elif 15 < turnover <= 25:
-                        factors['D4_turnover_health'] = 50.0
-                    elif turnover > 25:
-                        factors['D4_turnover_health'] = 30.0
-                    else:
-                        factors['D4_turnover_health'] = 40.0
-
-                    result.stock_tech_factors[code] = factors
+                    ctx = {
+                        'hist': hist,
+                        'row': row,
+                        'close': float(row.get('close', 0)),
+                        'pre_close': float(row.get('pre_close', 0)),
+                        'vol': float(row.get('vol', 0)),
+                        'amount': float(row.get('amount', 0)),
+                        'pct_chg': float(row.get('pct_chg', 0)),
+                        'zt_row': zt_row,
+                        'time_col': time_col,
+                    }
+                    result.stock_tech_factors[code] = ps.compute_stock_tech(active_ids, ctx)
 
                 except Exception as e:
                     logger.debug(f"[Layer3] D因子计算失败 {code}: {e}")
 
-            logger.info(f"[Layer3] D1-D5个股技术因子计算完成: {len(result.stock_tech_factors)}只")
+            logger.info(f"[Layer3] D个股技术因子计算完成: {len(result.stock_tech_factors)}只, 启用={active_ids}")
         except Exception as e:
             logger.warning(f"[Layer3] D因子批量计算失败: {e}")
 
     def _compute_moneyflow_factors(self, result: StockSelectionResult,
                                     zt_pool: pd.DataFrame, trade_date: str):
         """
-        E1-E4: 资金流向因子计算
+        E1-E4: 资金流向因子（Phase 2：registry 驱动，仅计算启用因子）。
 
-        E1: 主力净流入占比 - 主力净额/成交额
-        E2: 散户净流入占比 - 散户净额/成交额
-        E3: 大单买入占比 - 大单买入/总成交
-        E4: 资金流向趋势 - 近N日主力净流入方向
+        计算逻辑统一到 core/factors/layer3_perstock.py（单一真源）。默认全启用时
+        逐位等价于改造前硬编码；禁用某因子后对应键不再写入结果。
+
+        E1: 主力净流入占比 / E2: 散户净流入占比 / E3: 大单买入占比 / E4: 资金流向趋势
         """
         try:
+            from core.factors import layer3_perstock as ps
+
             ts_code_col = None
             for col in ['ts_code', '代码', 'code']:
                 if col in zt_pool.columns:
@@ -510,12 +497,17 @@ class StockSelectionLayer:
             if ts_code_col is None or zt_pool.empty:
                 return
 
+            active_ids = ps.active_moneyflow_factors(self._get_factor_registry())
+            if not active_ids:
+                logger.info("[Layer3] E因子全部禁用，跳过")
+                return
+
             codes = zt_pool[ts_code_col].astype(str).tolist()[:30]
 
             # P2-1: 单次 moneyflow_summary 拉全市场当日资金流，并按 ts_code 索引
             summary_df = pd.DataFrame()
             try:
-                summary_df = self.dm.get_moneyflow_summary(trade_date)
+                summary_df = self.repo.get_moneyflow_summary(trade_date)
             except Exception as e:
                 logger.debug(f"[Layer3] 资金流汇总拉取失败: {e}")
             summary_map = {}
@@ -523,83 +515,30 @@ class StockSelectionLayer:
                 summary_map = {row['ts_code']: row for _, row in summary_df.iterrows()}
 
             # P2-1: 近5日趋势用 N 次全市场汇总（5 次），替代 N x 5 次单股调用
-            hist_dates = []
             hist_maps: List[dict] = []
             try:
-                date_list = self.dm.date_utils.get_last_n_trade_dates(5, trade_date)
+                date_list = self.repo.date_utils.get_last_n_trade_dates(5, trade_date)
             except Exception:
                 date_list = []
             for d in date_list:
                 try:
-                    df_d = self.dm.get_moneyflow_summary(d)
+                    df_d = self.repo.get_moneyflow_summary(d)
                     if not df_d.empty and 'ts_code' in df_d.columns:
-                        hist_dates.append(d)
                         hist_maps.append({row['ts_code']: row for _, row in df_d.iterrows()})
                 except Exception:
                     continue
 
             for code in codes:
                 try:
-                    factors = {}
-
-                    row = summary_map.get(code)
-                    if row is not None:
-                        buy_elg = float(row.get('buy_elg_amount', 0) or 0)
-                        sell_elg = float(row.get('sell_elg_amount', 0) or 0)
-                        buy_lg = float(row.get('buy_lg_amount', 0) or 0)
-                        sell_lg = float(row.get('sell_lg_amount', 0) or 0)
-                        buy_md = float(row.get('buy_md_amount', 0) or 0)
-                        sell_md = float(row.get('sell_md_amount', 0) or 0)
-                        buy_sm = float(row.get('buy_sm_amount', 0) or 0)
-                        sell_sm = float(row.get('sell_sm_amount', 0) or 0)
-
-                        total_amount = buy_elg + sell_elg + buy_lg + sell_lg + buy_md + sell_md + buy_sm + sell_sm
-
-                        if total_amount > 0:
-                            main_net = (buy_elg + buy_lg) - (sell_elg + sell_lg)
-                            retail_net = (buy_md + buy_sm) - (sell_md + sell_sm)
-
-                            factors['E1_main_net_ratio'] = round(main_net / total_amount * 100, 2)
-                            factors['E2_retail_net_ratio'] = round(retail_net / total_amount * 100, 2)
-                            factors['E3_large_buy_ratio'] = round(
-                                (buy_elg + buy_lg) / total_amount * 100, 2
-                            )
-
-                            # E4: 近 5 日主力净流入趋势（基于全市场汇总）
-                            net_flows = []
-                            for hist_map in hist_maps:
-                                hr = hist_map.get(code)
-                                if hr is None:
-                                    continue
-                                b_elg = float(hr.get('buy_elg_amount', 0) or 0)
-                                s_elg = float(hr.get('sell_elg_amount', 0) or 0)
-                                b_lg = float(hr.get('buy_lg_amount', 0) or 0)
-                                s_lg = float(hr.get('sell_lg_amount', 0) or 0)
-                                net_flows.append((b_elg + b_lg) - (s_elg + s_lg))
-
-                            if net_flows:
-                                positive_days = sum(1 for nf in net_flows if nf > 0)
-                                factors['E4_moneyflow_trend'] = round(
-                                    positive_days / len(net_flows) * 100, 1
-                                )
-                            else:
-                                factors['E4_moneyflow_trend'] = 50.0
-                        else:
-                            factors['E1_main_net_ratio'] = 0.0
-                            factors['E2_retail_net_ratio'] = 0.0
-                            factors['E3_large_buy_ratio'] = 0.0
-                            factors['E4_moneyflow_trend'] = 50.0
-                    else:
-                        factors['E1_main_net_ratio'] = 0.0
-                        factors['E2_retail_net_ratio'] = 0.0
-                        factors['E3_large_buy_ratio'] = 0.0
-                        factors['E4_moneyflow_trend'] = 50.0
-
-                    result.moneyflow_factors[code] = factors
-
+                    ctx = {
+                        'summary_row': summary_map.get(code),
+                        'code': code,
+                        'hist_maps': hist_maps,
+                    }
+                    result.moneyflow_factors[code] = ps.compute_moneyflow(active_ids, ctx)
                 except Exception as e:
                     logger.debug(f"[Layer3] E因子计算失败 {code}: {e}")
 
-            logger.info(f"[Layer3] E1-E4资金流向因子计算完成: {len(result.moneyflow_factors)}只")
+            logger.info(f"[Layer3] E资金流向因子计算完成: {len(result.moneyflow_factors)}只, 启用={active_ids}")
         except Exception as e:
             logger.warning(f"[Layer3] E因子批量计算失败: {e}")

@@ -52,12 +52,18 @@ class SectorAnalysisLayer:
     def __init__(self, data_manager):
         self.dm = data_manager
         self._orchestrator = None
+        # Phase 1：只读仓库（流水线在 run 前注入）
+        self.repo = None
 
     @property
     def orchestrator(self):
         if self._orchestrator is None:
             from core.analysis.sector_analysis_orchestrator import SectorAnalysisOrchestrator
-            self._orchestrator = SectorAnalysisOrchestrator(self.dm, cache_enabled=True)
+            self._orchestrator = SectorAnalysisOrchestrator(
+                self.dm, cache_enabled=True, repo=getattr(self, "repo", None))
+        elif getattr(self, "repo", None) is not None:
+            # 缓存复用（多日）：刷新为当日仓库
+            self._orchestrator.set_repo(self.repo)
         return self._orchestrator
 
     def analyze(self, trade_date: str, zt_pool: pd.DataFrame,

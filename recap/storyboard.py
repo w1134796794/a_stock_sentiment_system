@@ -436,7 +436,7 @@ def _scene_cta(accent: str) -> Dict[str, Any]:
     return {
         "key": "cta",
         "title": "今日复盘结束",
-        "subtitle": "数据说话 · 非荐股",
+        "subtitle": "数据说话 · 不喊单 · 不荐股",
         "narration": "以上就是今天的A股情绪与策略复盘，所有结论均来自公开数据，请独立判断、控制仓位。",
         "caption": DISCLAIMER,
         "stats": [],

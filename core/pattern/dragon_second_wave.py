@@ -37,9 +37,13 @@ class TradeSignal:
 
 
 class DragonSecondWaveStrategyV2:
-    def __init__(self, data_manager, sentiment_engine):
+    def __init__(self, data_manager, sentiment_engine, repo=None):
         self.dm = data_manager
         self.se = sentiment_engine
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
         
         # 时间参数（近期记忆）- 默认值见 config/pattern_params.py，支持网页覆盖
         self.params = get_params("dragon_second_wave")
@@ -84,7 +88,7 @@ class DragonSecondWaveStrategyV2:
 
             if hasattr(self.dm, 'get_stock_daily'):
                 ts_code = self._add_suffix(stock_code.split('.')[0].zfill(6))
-                df = self.dm.get_stock_daily(ts_code, start_date, end_date)
+                df = self.repo.get_stock_daily(ts_code, start_date, end_date)
 
                 if not df.empty and len(df) >= 10:
                     df = df.sort_values('trade_date')
@@ -419,7 +423,7 @@ class DragonSecondWaveStrategyV2:
         free_float_cap = 0
         if hasattr(self.dm, 'get_stock_daily_basic'):
             try:
-                daily_basic_data = self.dm.get_stock_daily_basic(code_padded, today_str)
+                daily_basic_data = self.repo.get_stock_daily_basic(code_padded, today_str)
                 if daily_basic_data:
                     free_share = daily_basic_data.get('free_share', 0)
                     close_price = daily_basic_data.get('close', 0)
@@ -502,38 +506,51 @@ class DragonSecondWaveStrategyV2:
         sector_limit_up_count = sector_info.get('stats', {}).get('涨停家数', 0) if sector_info else 0
         sector_score = self._calculate_sector_effect_score(sector_hot, sector_limit_up_count)
 
-        # 计算动态置信度
-        confidence = 0.60  # 基础分（通过Layer 1/2/3已证质量）
+        # 计算动态置信度（Phase 3：confidence_mode=deduction 走统一扣分制，默认 legacy 不变）
+        early_seal = 1 if (limit_up_time and limit_up_time <= '09:40') else 0
+        layer2_clean = 1 if (layer2_penalty or 0) <= 0 else 0
 
-        # 前身验证分（最高+0.12）
-        if max_boards >= 5:
-            confidence += 0.06  # 5板以上真龙
-        elif max_boards >= 3:
-            confidence += 0.04  # 3-4板龙
-        if days_since_peak <= 7:
-            confidence += 0.04  # 调整7天以内，记忆新鲜
-        elif days_since_peak <= 10:
-            confidence += 0.02  # 调整7-10天
-        confidence += min(actual_adjust_days * 0.002, 0.02)  # 调整天数恰到好处
+        conf_breakdown = None
+        res = None
+        if self.params.get("confidence_mode", "legacy") == "deduction":
+            from core.scoring.confidence_scorer import score_or_none
+            res = score_or_none("dragon_second_wave", {
+                "max_boards": max_boards,
+                "days_since_peak": days_since_peak,
+                "seal_ratio": seal_ratio,
+                "break_count": break_count,
+                "early_seal": early_seal,
+                "sector_score": sector_score,
+                "layer2_clean": layer2_clean,
+            })
 
-        # 技术确认分（最高+0.07 — 减去L2扣分）
-        tech_bonus = min(seal_ratio * 2, 0.04)  # 封单强度
-        if volume_pass:
-            excess_vol = daily_data.get('volume_ratio', 0) - vol_target
-            tech_bonus += min(max(excess_vol, 0) * 0.02, 0.03)  # 量能超预期
-        confidence += tech_bonus
-        confidence -= layer2_penalty  # 减去L2扣分
-
-        # 质量分（最高+0.03）
-        if break_count == 0:
-            confidence += 0.02
-        if limit_up_time and limit_up_time <= '09:40':
-            confidence += 0.01
-
-        # 板块效应分（最高+0.10）
-        confidence += sector_score
-
-        confidence = min(confidence, 0.95)
+        if res is not None:
+            confidence = res.value
+            conf_breakdown = res.to_dict()
+        else:
+            # legacy：基础分 0.60 + 阶梯/连续加分 − L2扣分，封顶 0.95
+            confidence = 0.60  # 基础分（通过Layer 1/2/3已证质量）
+            if max_boards >= 5:
+                confidence += 0.06  # 5板以上真龙
+            elif max_boards >= 3:
+                confidence += 0.04  # 3-4板龙
+            if days_since_peak <= 7:
+                confidence += 0.04  # 调整7天以内，记忆新鲜
+            elif days_since_peak <= 10:
+                confidence += 0.02  # 调整7-10天
+            confidence += min(actual_adjust_days * 0.002, 0.02)  # 调整天数恰到好处
+            tech_bonus = min(seal_ratio * 2, 0.04)  # 封单强度
+            if volume_pass:
+                excess_vol = daily_data.get('volume_ratio', 0) - vol_target
+                tech_bonus += min(max(excess_vol, 0) * 0.02, 0.03)  # 量能超预期
+            confidence += tech_bonus
+            confidence -= layer2_penalty  # 减去L2扣分
+            if break_count == 0:
+                confidence += 0.02
+            if limit_up_time and limit_up_time <= '09:40':
+                confidence += 0.01
+            confidence += sector_score  # 板块效应分
+            confidence = min(confidence, 0.95)
 
         # 确定仓位
         if sector_hot and sector_limit_up_count >= 5:
@@ -578,6 +595,8 @@ class DragonSecondWaveStrategyV2:
             "涨停时间": limit_up_time,
             "板块效应": f"{sector_score*100:.0f}分(板块涨停{sector_limit_up_count}家)",
         }
+        if conf_breakdown:
+            key_metrics["置信扣分明细"] = conf_breakdown
         if daily_data and 'rise_5d' in daily_data:
             key_metrics["5日涨幅"] = f"{daily_data['rise_5d']*100:.1f}%"
             key_metrics["均线突破"] = "是"
@@ -1000,14 +1019,14 @@ class DragonSecondWaveStrategyV2:
         extended_start = extended_start_dt.strftime("%Y%m%d")
 
         # 从data_manager获取日线数据
-        hist = self.dm.get_stock_daily(stock_code, extended_start, today)
+        hist = self.repo.get_stock_daily(stock_code, extended_start, today)
         
         if hist.empty:
             logger.debug(f"[{stock_code}] 无法获取历史数据({extended_start}-{today})，尝试扩大范围")
             # 尝试扩大范围获取数据
             extended_start_dt = peak_dt - timedelta(days=60)
             extended_start = extended_start_dt.strftime("%Y%m%d")
-            hist = self.dm.get_stock_daily(stock_code, extended_start, today)
+            hist = self.repo.get_stock_daily(stock_code, extended_start, today)
             
             if hist.empty:
                 logger.warning(f"[{stock_code}] 扩大范围后仍无法获取数据")

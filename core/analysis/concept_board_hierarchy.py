@@ -37,8 +37,12 @@ class ConceptBoardHierarchyAnalyzer:
         result = analyzer.analyze_hierarchy(limit_up_df, trade_date)
     """
 
-    def __init__(self, data_manager):
+    def __init__(self, data_manager, repo=None):
         self.dm = data_manager
+        if repo is None:
+            from core.data.repository import StockRepository
+            repo = StockRepository.passthrough(data_manager)
+        self.repo = repo
 
     def analyze_hierarchy(self, limit_up_df: pd.DataFrame, trade_date: str) -> Dict[str, ConceptHierarchy]:
         """
@@ -59,7 +63,7 @@ class ConceptBoardHierarchyAnalyzer:
         logger.info(f"【概念连板梯队分析】涨停股票数: {len(limit_up_df)}")
 
         # 1. 获取最强板块列表（limit_cpt_list）
-        limit_cpt_df = self.dm.get_limit_cpt_list(trade_date=trade_date)
+        limit_cpt_df = self.repo.get_limit_cpt_list(trade_date=trade_date)
         if limit_cpt_df.empty:
             logger.warning("[analyze_hierarchy] 无法获取最强板块数据")
             return {}
@@ -83,7 +87,7 @@ class ConceptBoardHierarchyAnalyzer:
 
             # 获取板块成分股
             logger.debug(f"[{concept_name}] 获取成分股，ts_code={ts_code}")
-            members = self.dm.get_ths_member(ts_code=ts_code)
+            members = self.repo.get_ths_member(ts_code=ts_code)
             if members.empty:
                 logger.debug(f"[{concept_name}] 成分股为空，ts_code={ts_code}")
                 continue

@@ -7,12 +7,11 @@
   - ``PatternStrategy``：策略 Protocol
   - ``StrategyRegistry``、``default_registry``：注册中心
 
-历史策略类（保持向后兼容）：
-  - ``WeakToStrongStrategy``
-  - ``SecondBoardDragonStrategy``
-  - ``HotspotFirstBoardStrategy``
-  - ``DragonSecondWaveStrategyV2``
-  - ``DragonDynamicManager``
+策略实现（由 ``PatternRecognition`` 聚合调度）：
+  - ``WeakToStrongStrategy``（弱转强 / 动态龙头池）
+  - ``HotspotFirstBoardStrategy``（首板突破）
+  - ``DragonSecondWaveStrategyV2``（龙二波）
+  - 二板定龙：逻辑内联于 ``PatternRecognition.detect_second_board_dragon``
 """
 
 from core.pattern.base import (

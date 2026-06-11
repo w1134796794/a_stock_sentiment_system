@@ -130,6 +130,8 @@ class ReviewAnalyzer:
 
     def __init__(self, data_manager):
         self.dm = data_manager
+        # Phase 1：只读仓库（流水线在 run 前注入；缺省 None → analyze 内懒构造透传）
+        self.repo = None
 
         # 信号表现阈值
         self.performance_thresholds = {
@@ -163,6 +165,10 @@ class ReviewAnalyzer:
         logger.info("=" * 60)
         logger.info(f"[Layer5-盘后总结] 开始分析: {trade_date}")
         logger.info("=" * 60)
+
+        if self.repo is None:
+            from core.data.repository import StockRepository
+            self.repo = StockRepository.passthrough(self.dm)
 
         result = ReviewResult(trade_date=trade_date)
 
@@ -218,7 +224,7 @@ class ReviewAnalyzer:
         next_day_map: Dict[str, pd.Series] = {}
         if next_date and next_date != trade_date:
             try:
-                all_daily = self.dm.get_all_stocks_daily(next_date)
+                all_daily = self.repo.get_all_stocks_daily(next_date)
                 if all_daily is not None and not all_daily.empty and 'ts_code' in all_daily.columns:
                     next_day_map = {row['ts_code']: row for _, row in all_daily.iterrows()}
             except Exception as e:
@@ -372,7 +378,7 @@ class ReviewAnalyzer:
         """
         # 1) 取信号日全市场日线（用于 close_0）
         try:
-            base_daily = self.dm.get_all_stocks_daily(signal_date)
+            base_daily = self.repo.get_all_stocks_daily(signal_date)
         except Exception as e:
             logger.debug(f"[Layer5-MW] 取信号日日线失败 {signal_date}: {e}")
             return
@@ -396,7 +402,7 @@ class ReviewAnalyzer:
             if not target_date:
                 continue
             try:
-                df = self.dm.get_all_stocks_daily(target_date)
+                df = self.repo.get_all_stocks_daily(target_date)
             except Exception:
                 continue
             if df is None or df.empty or 'ts_code' not in df.columns:
@@ -527,7 +533,7 @@ class ReviewAnalyzer:
                 continue
 
             try:
-                all_daily = self.dm.get_all_stocks_daily(tplus1)
+                all_daily = self.repo.get_all_stocks_daily(tplus1)
             except Exception:
                 continue
             if all_daily is None or all_daily.empty or 'ts_code' not in all_daily.columns:

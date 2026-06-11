@@ -68,23 +68,50 @@ class FactorRegistry:
         self.factors_dir = self.config_dir / "factors"
         self._factors: Dict[str, FactorDefinition] = {}
         self._layer_configs: Dict[str, Dict] = {}
+        # Phase 2：情绪周期 profile（按周期切换因子启用集）
+        self._profiles: Dict[str, Dict] = {}
+        self._base_enabled: Dict[str, bool] = {}
+        self._active_profile: Optional[str] = None
         self._initialized = True
 
         self._load_registry()
         self._load_layer_configs()
+        self._load_profiles()
+        self._snapshot_base_enabled()
         logger.info(f"[FactorRegistry] 初始化完成，加载 {len(self._factors)} 个因子定义")
 
+    def _load_config_dict(self, config_name: str, fallback_path: Path) -> Dict:
+        """
+        读取某 YAML 配置：优先走 config_loader（已套用 webdata 的网页覆盖），
+        失败/为空时回退直接读原始文件。
+
+        这样网页对 factor_registry.yaml / layerX 配置的"因子开关/权重"覆盖，
+        能即时流入本注册中心（无覆盖时与直接读文件逐字等价，行为不变）。
+        """
+        try:
+            from config.config_loader import get_config_loader
+            cfg = get_config_loader().get_config(config_name)
+            if cfg:
+                return cfg
+        except Exception as e:  # pragma: no cover - 退回原始文件
+            logger.debug(f"[FactorRegistry] 经 config_loader 读取 {config_name} 失败，回退原始文件: {e}")
+        if fallback_path.exists():
+            try:
+                with open(fallback_path, 'r', encoding='utf-8') as f:
+                    return yaml.safe_load(f) or {}
+            except Exception as e:
+                logger.error(f"[FactorRegistry] 读取 {fallback_path} 失败: {e}")
+        return {}
+
     def _load_registry(self):
-        """加载因子注册表"""
+        """加载因子注册表（经 config_loader，含网页覆盖）"""
         registry_path = self.factors_dir / "factor_registry.yaml"
-        if not registry_path.exists():
-            logger.warning(f"[FactorRegistry] 因子注册表不存在: {registry_path}")
+        data = self._load_config_dict('factor_registry', registry_path)
+        if not data:
+            logger.warning(f"[FactorRegistry] 因子注册表为空或不存在: {registry_path}")
             return
 
         try:
-            with open(registry_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-
             for factor_id, cfg in data.get('factors', {}).items():
                 category_str = cfg.get('category', 'market_env')
                 try:
@@ -112,26 +139,23 @@ class FactorRegistry:
             logger.error(f"[FactorRegistry] 加载因子注册表失败: {e}")
 
     def _load_layer_configs(self):
-        """加载各Layer的因子启用+权重配置"""
+        """加载各Layer的因子启用+权重配置（经 config_loader，含网页覆盖）"""
+        # layer 内部名 -> (config_loader 配置名, 原始文件名)
         layer_files = {
-            'layer1': 'layer1_market_env.yaml',
-            'emotion': 'emotion_cycle.yaml',
-            'layer2': 'layer2_sector.yaml',
-            'layer3': 'layer3_stock_select.yaml',
-            'layer4': 'layer4_trade_plan.yaml',
+            'layer1': ('layer1_market_env', 'layer1_market_env.yaml'),
+            'emotion': ('emotion_cycle_factors', 'emotion_cycle.yaml'),
+            'layer2': ('layer2_sector', 'layer2_sector.yaml'),
+            'layer3': ('layer3_stock_select', 'layer3_stock_select.yaml'),
+            'layer4': ('layer4_trade_plan', 'layer4_trade_plan.yaml'),
         }
 
-        for layer_name, filename in layer_files.items():
-            path = self.factors_dir / filename
-            if path.exists():
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        self._layer_configs[layer_name] = yaml.safe_load(f) or {}
-                    logger.info(f"[FactorRegistry] 加载Layer配置: {filename}")
-                except Exception as e:
-                    logger.warning(f"[FactorRegistry] 加载Layer配置失败 {filename}: {e}")
+        for layer_name, (cfg_name, filename) in layer_files.items():
+            cfg = self._load_config_dict(cfg_name, self.factors_dir / filename)
+            if cfg:
+                self._layer_configs[layer_name] = cfg
+                logger.info(f"[FactorRegistry] 加载Layer配置: {filename}")
             else:
-                logger.debug(f"[FactorRegistry] Layer配置文件不存在: {filename}，使用默认值")
+                logger.debug(f"[FactorRegistry] Layer配置为空/不存在: {filename}，使用默认值")
 
     def get_factor(self, factor_id: str) -> Optional[FactorDefinition]:
         """获取单个因子定义"""
@@ -262,9 +286,85 @@ class FactorRegistry:
         """重新加载所有配置"""
         self._factors.clear()
         self._layer_configs.clear()
+        self._profiles.clear()
+        self._active_profile = None
         self._load_registry()
         self._load_layer_configs()
+        self._load_profiles()
+        self._snapshot_base_enabled()
         logger.info("[FactorRegistry] 配置已重新加载")
+
+    # ============================================================
+    # Phase 2：情绪周期 profile
+    # ============================================================
+
+    def _load_profiles(self):
+        """加载情绪周期 profile 配置（config/factors/profiles.yaml）。"""
+        path = self.factors_dir / "profiles.yaml"
+        if not path.exists():
+            logger.debug("[FactorRegistry] profiles.yaml 不存在，profile 机制空载（行为不变）")
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            self._profiles = data.get('profiles', {}) or {}
+            logger.info(f"[FactorRegistry] 加载 {len(self._profiles)} 个情绪周期 profile")
+        except Exception as e:
+            logger.warning(f"[FactorRegistry] 加载 profiles 失败: {e}")
+
+    def _snapshot_base_enabled(self):
+        """快照各因子的基础启用态（来自注册表 YAML），供 profile 复位使用。"""
+        self._base_enabled = {fid: f.enabled for fid, f in self._factors.items()}
+
+    def apply_profile(self, cycle_name: str) -> str:
+        """
+        按情绪周期应用因子 profile。
+
+        关键点（呼应 R5：单例多日回测状态污染）：每次调用**先复位到基础启用态**，
+        再叠加该 profile 的禁用/启用覆盖，保证幂等、与调用历史无关。
+
+        约定：profile 的 disabled_factors 为空（默认）时，等价于全启用 → 行为不变。
+        未找到对应周期的 profile 时回退到 'default'。
+
+        Returns:
+            实际生效的 profile 名称。
+        """
+        # 1) 复位到基础启用态
+        for fid, base in self._base_enabled.items():
+            if fid in self._factors:
+                self._factors[fid].enabled = base
+
+        # 2) 选取 profile（缺失回退 default）
+        profile = self._profiles.get(cycle_name)
+        if profile is None:
+            profile = self._profiles.get('default')
+            self._active_profile = 'default' if profile is not None else cycle_name
+        else:
+            self._active_profile = cycle_name
+
+        # 3) 应用覆盖
+        if profile:
+            for fid in (profile.get('disabled_factors') or []):
+                if fid in self._factors:
+                    self._factors[fid].enabled = False
+            for fid in (profile.get('enabled_factors') or []):
+                if fid in self._factors:
+                    self._factors[fid].enabled = True
+
+        logger.info(f"[FactorRegistry] 应用 profile: {self._active_profile} (周期={cycle_name})")
+        return self._active_profile
+
+    def get_active_profile(self) -> Optional[str]:
+        """当前生效的 profile 名称（未调用 apply_profile 时为 None）。"""
+        return self._active_profile
+
+    def get_enabled_factor_ids(self) -> List[str]:
+        """当前全局启用（FactorDefinition.enabled=True）的因子 ID 列表（稳定顺序）。"""
+        return [fid for fid, f in self._factors.items() if f.enabled]
+
+    def get_profiles(self) -> Dict[str, Dict]:
+        """返回已加载的情绪周期 profile 定义（只读快照）。"""
+        return dict(self._profiles)
 
     def _get_layer_key(self, layer: str) -> str:
         """获取Layer在YAML中的key名"""

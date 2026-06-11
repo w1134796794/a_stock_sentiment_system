@@ -96,7 +96,7 @@ class THSPersistenceMixin:
             return pd.DataFrame()
 
         results = []
-        limit_up_df = self.dm.get_limit_up_pool(trade_date)
+        limit_up_df = self.repo.get_limit_up_pool(trade_date)
 
         for ts_code in all_sectors:
             sector_history = []
