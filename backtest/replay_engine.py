@@ -241,15 +241,20 @@ class ReplayEngine:
             sec = p.sector or "未知"
             sector_val[sec] = sector_val.get(sec, 0.0) + p.market_value()
 
-        total_budget = equity * min(self.cfg.max_total_position, 1 - self.cfg.min_cash_ratio)
-        per_stock_cap = equity * self.cfg.max_position_per_stock
-        sector_cap = equity * self.cfg.max_sector_concentration
+        # 风控总开关关闭：不施加组合层约束（仅受现金限制），用于对比"无风控"模拟
+        risk_on = getattr(self.cfg, "enabled", True)
+        if risk_on:
+            total_budget = equity * min(self.cfg.max_total_position, 1 - self.cfg.min_cash_ratio)
+            per_stock_cap = equity * self.cfg.max_position_per_stock
+            sector_cap = equity * self.cfg.max_sector_concentration
+        else:
+            total_budget = per_stock_cap = sector_cap = float("inf")
 
         for plan in sorted(plans, key=lambda p: -p.position_pct):
             code = plan.code6
             if code in self.account.positions:
                 continue  # 已持仓不加仓
-            if len(self.account.positions) >= self.cfg.max_positions:
+            if risk_on and len(self.account.positions) >= self.cfg.max_positions:
                 break
             ohlc = day_px.get(code)
             if not ohlc:

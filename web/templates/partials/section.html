@@ -70,7 +70,7 @@
     {% if ns.name is none and columns %}{% set ns.name = columns[0] %}{% endif %}
     {% for p in code_prefs %}{% if ns.code is none and p in columns and p != ns.name %}{% set ns.code = p %}{% endif %}{% endfor %}
     {% for p in metric_prefs %}{% if p in columns and p != ns.name and p != ns.code and ns.metrics|length < 3 %}{% set ns.metrics = ns.metrics + [p] %}{% endif %}{% endfor %}
-    <div class="md-wrap max-h-[560px] overflow-y-auto pr-1">
+    <div class="md-wrap">
       {% for row in rows %}
       <details class="md-item">
         <summary class="md-summary">
@@ -108,7 +108,7 @@
   {% if not rows %}
     <div class="text-slate-500 text-sm py-4">无数据</div>
   {% else %}
-  <div class="overflow-x-auto max-h-[520px]">
+  <div class="tbl-scroll overflow-x-auto">
     <table class="w-full text-sm border-collapse">
       <thead class="sticky top-0 bg-slate-900">
         <tr>
@@ -322,7 +322,7 @@
   {% if not rows %}
     <div class="text-slate-500 text-sm py-4">无数据</div>
   {% else %}
-  <div class="overflow-x-auto max-h-[560px]">
+  <div class="overflow-x-auto">
     <table class="heat-tbl">
       <thead class="sticky top-0"><tr>{% for c in columns %}<th>{{ c | col_label }}</th>{% endfor %}</tr></thead>
       <tbody>
@@ -380,30 +380,34 @@
 
 {% if (view | default('table')) in ['detail', 'smart'] %}
 <style>
-  .md-wrap { display:flex; flex-direction:column; gap:.5rem; }
+  .md-wrap { display:flex; flex-direction:column; gap:.55rem; max-width:100%; overflow-x:hidden; }
   .md-item { border:1px solid rgba(51,65,85,.7); border-radius:.6rem; background:rgba(15,23,42,.45); overflow:hidden; }
   .md-item[open] { border-color:rgba(16,185,129,.4); }
-  .md-summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:.75rem; padding:.6rem .85rem; user-select:none; }
+  .md-summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:.75rem; padding:.68rem .85rem; user-select:none; min-width:0; }
   .md-summary::-webkit-details-marker { display:none; }
   .md-summary:hover { background:rgba(51,65,85,.35); }
-  .md-head { display:flex; align-items:baseline; gap:.5rem; min-width:0; flex:0 0 auto; }
-  .md-name { font-weight:600; color:#e2e8f0; white-space:nowrap; }
-  .md-code { font-size:.72rem; color:#64748b; }
+  .md-head { display:flex; align-items:baseline; gap:.5rem; min-width:0; flex:1 1 14rem; }
+  .md-name { font-weight:700; color:#e2e8f0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .md-code { font-size:.72rem; color:#64748b; flex:0 0 auto; }
   .md-metrics { display:flex; flex-wrap:wrap; gap:.4rem; flex:1 1 auto; justify-content:flex-end; }
   .md-chip { display:inline-flex; align-items:center; gap:.3rem; background:rgba(15,23,42,.7); border:1px solid rgba(51,65,85,.6); border-radius:.4rem; padding:.1rem .45rem; font-size:.72rem; }
   .md-chip-k { color:#64748b; }
   .md-chip-v { color:#cbd5e1; font-family:'JetBrains Mono', monospace; }
   .md-caret { color:#64748b; transition:transform .15s; flex:0 0 auto; font-size:1.1rem; line-height:1; }
   .md-item[open] .md-caret { transform:rotate(90deg); color:#34d399; }
-  .md-detail { border-top:1px solid rgba(51,65,85,.5); padding:.75rem .85rem; display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:.6rem .9rem; background:rgba(2,6,23,.35); }
-  .md-field { min-width:0; }
+  .md-detail { border-top:1px solid rgba(51,65,85,.5); padding:.85rem; display:grid;
+               grid-template-columns:repeat(auto-fit, minmax(min(100%, 168px), 1fr));
+               gap:.65rem; background:rgba(2,6,23,.35); max-width:100%; }
+  .md-field { min-width:0; border:1px solid rgba(51,65,85,.45); border-radius:.55rem;
+              background:rgba(15,23,42,.5); padding:.55rem .65rem; }
   .md-field--wide { grid-column:1 / -1; }
-  .md-field-k { font-size:.7rem; color:#64748b; margin-bottom:.15rem; }
-  .md-field-v { font-size:.82rem; color:#e2e8f0; font-family:'JetBrains Mono', monospace; overflow-wrap:anywhere; line-height:1.5; }
+  .md-field-k { font-size:.7rem; color:#64748b; margin-bottom:.2rem; }
+  .md-field-v { font-size:.86rem; color:#e2e8f0; font-family:'JetBrains Mono', monospace;
+                overflow-wrap:anywhere; word-break:break-word; white-space:normal; line-height:1.45; }
   .md-kv { display:flex; flex-direction:column; gap:.2rem; }
-  .md-kv-row { display:flex; gap:.5rem; }
-  .md-kv-k { color:#94a3b8; min-width:5.5rem; flex:0 0 auto; }
-  .md-kv-v { color:#e2e8f0; overflow-wrap:anywhere; }
+  .md-kv-row { display:grid; grid-template-columns:minmax(4.8rem, max-content) minmax(0, 1fr); gap:.5rem; }
+  .md-kv-k { color:#94a3b8; min-width:0; }
+  .md-kv-v { color:#e2e8f0; overflow-wrap:anywhere; min-width:0; }
   .md-tags { display:flex; flex-wrap:wrap; gap:.3rem; }
   .md-tag { background:rgba(15,23,42,.7); border:1px solid rgba(51,65,85,.6); border-radius:.35rem; padding:.05rem .4rem; font-size:.74rem; color:#cbd5e1; }
   /* 置信扣分明细 */
@@ -422,13 +426,22 @@
   .md-conf-val { color:#64748b; font-family:'JetBrains Mono', monospace; }
   .md-conf-item.ok .md-conf-p { color:#34d399; font-family:'JetBrains Mono', monospace; font-weight:700; }
   .md-conf-item.neg .md-conf-p { color:#fbbf24; font-family:'JetBrains Mono', monospace; font-weight:700; }
+  @media (max-width: 720px) {
+    .md-summary { position:relative; flex-direction:column; align-items:stretch; gap:.55rem; padding-right:2.2rem; }
+    .md-head { width:100%; justify-content:space-between; flex:0 1 auto; }
+    .md-metrics { justify-content:flex-start; }
+    .md-caret { position:absolute; right:.85rem; top:.85rem; margin-top:0; }
+    .md-detail { grid-template-columns:repeat(auto-fit, minmax(min(100%, 136px), 1fr)); padding:.7rem; gap:.55rem; }
+    .md-field { padding:.5rem .55rem; }
+    .md-kv-row { grid-template-columns:1fr; gap:.08rem; }
+  }
 </style>
 {% endif %}
 
 {% if (view | default('table')) == 'echelon' %}
 <style>
   /* ===== 涨停梯队 ===== */
-  .ech-wrap { display:flex; flex-direction:column; gap:.7rem; max-height:600px; overflow-y:auto; padding-right:.25rem; }
+  .ech-wrap { display:flex; flex-direction:column; gap:.7rem; padding-right:.25rem; }
   .ech-tier { display:flex; gap:.85rem; align-items:flex-start;
               border-left:2px solid rgba(51,65,85,.5); padding-left:.7rem; }
   .ech-tier-head { flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:.3rem;
@@ -460,8 +473,7 @@
   .ech-b4 { background:rgba(251,146,60,.2); color:#fdba74; border:1px solid rgba(251,146,60,.5); }
   .ech-b5 { background:rgba(244,63,94,.22); color:#fda4af; border:1px solid rgba(244,63,94,.55); }
   /* ===== 概念连板梯队 ===== */
-  .ech-cpt-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:.7rem;
-                  max-height:600px; overflow-y:auto; padding-right:.25rem; }
+  .ech-cpt-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:.7rem; padding-right:.25rem; }
   .ech-cpt { border:1px solid rgba(51,65,85,.6); border-radius:.65rem; background:rgba(15,23,42,.5); padding:.7rem .8rem; }
   .ech-cpt:hover { border-color:rgba(16,185,129,.4); }
   .ech-cpt-head { display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
@@ -478,8 +490,7 @@
 {% if (view | default('table')) == 'smart' %}
 <style>
   /* ===== 资金卡：龙虎榜 / 资金流向 ===== */
-  .cap-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:.7rem;
-              max-height:600px; overflow-y:auto; padding-right:.25rem; }
+  .cap-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:.7rem; padding-right:.25rem; }
   .cap-card { border:1px solid rgba(51,65,85,.6); border-radius:.7rem; background:rgba(15,23,42,.5); padding:.7rem .85rem;
               transition:border-color .15s, transform .15s; }
   .cap-card:hover { border-color:rgba(16,185,129,.4); transform:translateY(-2px); }

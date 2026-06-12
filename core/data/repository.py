@@ -147,6 +147,37 @@ class StockRepository:
         return self._miss("auction", lambda: self.dm.get_auction_data(ts_code, trade_date),
                           f"{ts_code}@{trade_date}")
 
+    def get_auction_vol_ratio(self, ts_code: str, trade_date: str,
+                              prev_trade_date: Optional[str] = None) -> Optional[float]:
+        """竞价量比 = 09:25 集合竞价成交量(手) / 昨日全天成交量(手)。
+
+        盘后涨停池数据不含集合竞价量，本方法用 eltdx 09:25 历史撮合快照回填。
+        任一环节取不到（无 eltdx / 无该日竞价 / 无昨日量）则返回 ``None``，
+        交由上游按"缺失"处理，绝不抛异常打断流水线。
+        """
+        try:
+            auc = self.get_auction_data(ts_code, trade_date) or {}
+            auc_vol = float(auc.get("竞价成交量", 0) or 0)  # 已归一为「手」
+            if auc_vol <= 0:
+                return None
+            prev = prev_trade_date
+            if not prev:
+                du = self.date_utils
+                prev = du.get_prev_trade_date(trade_date) if du else None
+            if not prev:
+                return None
+            df = self.get_daily(ts_code, prev, prev)
+            if df is None or df.empty:
+                return None
+            row = df.iloc[-1]
+            yest_vol = float(row.get("vol", 0) or row.get("volume", 0) or 0)  # 手
+            if yest_vol <= 0:
+                return None
+            return auc_vol / yest_vol
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[Repository] 竞价量比回填失败 {ts_code}@{trade_date}: {e}")
+            return None
+
     # ------------------------------------------------------------------
     # 涨停 / 跌停池
     # ------------------------------------------------------------------

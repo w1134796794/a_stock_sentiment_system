@@ -315,7 +315,7 @@
     $('#play').onclick = toggle; $('#next').onclick = () => { pause(); next(); };
     $('#prev').onclick = () => { pause(); prev(); };
     $('#speed').onclick = cycleSpeed;
-    $('#cards').onclick = () => { location.href = (DATE ? `/show/${DATE}/cards` : '/show'); };
+    $('#cards').onclick = () => { location.href = (DATE ? `/recap/${DATE}/cards?mode=full` : '/recap'); };
     $('#full').onclick = () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); };
     document.addEventListener('keydown', e => {
       if (e.code === 'Space') { e.preventDefault(); toggle(); }

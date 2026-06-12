@@ -256,7 +256,7 @@
       }
       scenes = DATA.scenes;
       $('#ttl').textContent = `${DATA.title || 'A股复盘'} · 图文`;
-      $('#playLink').href = DATE ? `/show/${DATE}` : '/show';
+      $('#playLink').href = DATE ? `/recap/${DATE}` : '/recap';
       try { await document.fonts.ready; } catch (e) {}
       $('#loading').style.display = 'none';
       buildGallery();

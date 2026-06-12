@@ -208,13 +208,24 @@ class BacktestController:
         self._thread: Optional[threading.Thread] = None
 
     def start(self, start_date: Optional[str], end_date: Optional[str],
-              initial_capital: object = None) -> Tuple[bool, str]:
+              initial_capital: object = None,
+              risk_control: object = None) -> Tuple[bool, str]:
         start_date = (str(start_date).strip() if start_date else "") or None
         end_date = (str(end_date).strip() if end_date else "") or None
         try:
             capital = float(initial_capital) if initial_capital not in (None, "") else 100000.0
         except (TypeError, ValueError):
             capital = 100000.0
+
+        # 风控闸门开关：未显式指定时回退到全局 RiskConfig.enabled
+        if risk_control is None:
+            try:
+                from risk.risk_config import RiskConfig
+                risk_on = bool(RiskConfig.load().enabled)
+            except Exception:
+                risk_on = True
+        else:
+            risk_on = bool(risk_control)
 
         # 默认区间：结束=今日，开始=结束前 90 天（交易日历会自动剔除非交易日）
         end = end_date or datetime.now().strftime("%Y%m%d")
@@ -232,14 +243,17 @@ class BacktestController:
             self.buffer.clear()
             self.state = "running"
             self.error = None
-            self.params = {"start_date": start, "end_date": end, "initial_capital": capital}
+            self.params = {"start_date": start, "end_date": end,
+                           "initial_capital": capital, "risk_control": risk_on}
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(start, end, capital), daemon=True, name="backtest-run"
+                target=self._worker, args=(start, end, capital, risk_on),
+                daemon=True, name="backtest-run"
             )
             self._thread.start()
-        return True, f"已启动回测：{start} ~ {end}"
+        mode = "开启风控" if risk_on else "关闭风控"
+        return True, f"已启动回测：{start} ~ {end}（{mode}）"
 
     def status(self, since: int = 0) -> Dict:
         lines, nxt = self.buffer.read_from(since)
@@ -253,7 +267,8 @@ class BacktestController:
             "next": nxt,
         }
 
-    def _worker(self, start: str, end: str, capital: float) -> None:
+    def _worker(self, start: str, end: str, capital: float,
+                risk_control: bool = True) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -265,7 +280,9 @@ class BacktestController:
         sys.stdout = _StreamTee(old_out, self.buffer)
         sys.stderr = _StreamTee(old_err, self.buffer)
         try:
-            self.buffer.append_line(f"=== 开始回测 · {start} ~ {end} · 初始资金 {capital:,.0f} ===")
+            mode_txt = "开启风控闸门" if risk_control else "关闭风控闸门（无风控）"
+            self.buffer.append_line(
+                f"=== 开始回测 · {start} ~ {end} · 初始资金 {capital:,.0f} · {mode_txt} ===")
 
             from config.settings import CACHE_DIR, OUTPUT_DIR, TUSHARE_TOKEN
             from core.data.data_manager_main import DataManager
@@ -284,7 +301,7 @@ class BacktestController:
                 return
 
             dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
-            config = BacktestConfig(initial_capital=capital)
+            config = BacktestConfig(initial_capital=capital, risk_control=risk_control)
             engine = BacktestEngine(dm, config)
             result = engine.run_backtest(
                 start_date=start, end_date=end, trade_plans_dir=str(trade_plans_dir))
@@ -320,4 +337,3 @@ class BacktestController:
 # 进程级单例
 CONTROLLER = RunController()
 BACKTEST_CONTROLLER = BacktestController()
-

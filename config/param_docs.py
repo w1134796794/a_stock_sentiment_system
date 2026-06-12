@@ -43,6 +43,8 @@ PATTERN_DESC: Dict[str, Dict[str, str]] = {
         "max_float_cap": "流通市值上限（亿）",
         "max_5d_rise": "5日涨幅上限（低位启动）",
         "max_break_count": "开板次数上限",
+        "confidence_mode": "置信度算法（legacy=旧加分制，deduction=扣分制）",
+        "min_confidence": "最终信号最低置信度（0=不过滤；0.60或60表示低于60%过滤）",
     },
     "weak_to_strong": {
         "min_board_height": "连板龙头最少连板数",
@@ -55,6 +57,7 @@ PATTERN_DESC: Dict[str, Dict[str, str]] = {
         "weakening_types": "走弱类型清单（命中即视为走弱）",
         "max_drawdown_for_recovery": "最大允许回调幅度（防 A 杀）",
         "max_monitor_days": "最长观察天数",
+        "intraday_recovery_pct": "盘中实时转强阈值（走弱池个股以昨收为基准的涨幅≥此值即判转强；0.07/7/7%均可）",
         "min_gap": "最小高开幅度",
         "ideal_gap": "理想高开幅度",
         "max_gap": "最大高开幅度（避免追高）",
@@ -70,6 +73,8 @@ PATTERN_DESC: Dict[str, Dict[str, str]] = {
         "dynamic_params_enabled": "是否启用动态参数调整",
         "sentiment_bullish_boost": "牛市情绪下阈值下调幅度",
         "sentiment_bearish_penalty": "熊市情绪下阈值上调幅度",
+        "confidence_mode": "置信度算法（legacy=旧加分制，deduction=扣分制）",
+        "min_confidence": "最终信号最低置信度（0=不过滤；0.60或60表示低于60%过滤）",
     },
     "second_board_dragon": {
         "min_seal_ratio": "最小封单额占流通市值比",
@@ -82,6 +87,9 @@ PATTERN_DESC: Dict[str, Dict[str, str]] = {
         "max_time_to_limit": "涨停最迟用时（分钟）",
         "min_seal_growth": "封单最小增长（尾盘相对开盘）",
         "max_sector_second_board": "同板块最多二板数",
+        "candidate_min_confidence": "候选最低置信度（兼容旧参数；优先使用 min_confidence）",
+        "min_confidence": "最终信号最低置信度（默认70%；0.60或60表示低于60%过滤）",
+        "confidence_mode": "置信度算法（legacy=旧加分制，deduction=扣分制）",
     },
     "second_board_dragon_strict": {
         "min_gap": "竞价最小高开",
@@ -107,6 +115,8 @@ PATTERN_DESC: Dict[str, Dict[str, str]] = {
         "platform_days_min": "横盘最少天数",
         "platform_days_max": "横盘最多天数",
         "max_distance_from_high": "距前高最大距离",
+        "confidence_mode": "置信度算法（legacy=旧加分制，deduction=扣分制）",
+        "min_confidence": "最终信号最低置信度（0=不过滤；0.60或60表示低于60%过滤）",
     },
     "multi_factor_weights": {
         "pattern_quality": "模式质量权重",

@@ -1,0 +1,46 @@
+{% extends "mobile/base.html" %}
+{% block title %}情绪系统{% endblock %}
+{% block page_title %}概览{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">核心状态 · 快速操作</div>{% endblock %}
+
+{% block content %}
+{% set st = ov.run.state %}
+<section class="grid grid-cols-2 gap-3 mb-4">
+  <a href="/m/data" class="m-card p-4">
+    <div class="text-xs text-slate-400">最新快照</div>
+    <div class="mono text-xl font-extrabold text-emerald-300 mt-1">{{ ov.latest or '--' }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">共 {{ ov.snapshot_count }} 天</div>
+  </a>
+  <a href="/m/run" class="m-card p-4">
+    <div class="text-xs text-slate-400">运行状态</div>
+    <div class="text-xl font-extrabold mt-1
+      {% if st == 'running' %}text-sky-300{% elif st == 'error' %}text-rose-400{% elif st == 'done' %}text-emerald-300{% else %}text-slate-200{% endif %}">
+      {% if st == 'running' %}运行中{% elif st == 'error' %}失败{% elif st == 'done' %}已完成{% else %}空闲{% endif %}
+    </div>
+    <div class="text-[11px] text-slate-500 mt-1 truncate">{{ ov.run.finished_at or ov.run.started_at or '尚未运行' }}</div>
+  </a>
+  <a href="/m/dragon" class="m-card p-4">
+    <div class="text-xs text-slate-400">龙头池</div>
+    <div class="mono text-2xl font-extrabold mt-1">{{ ov.dragon_count }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">监控中标的</div>
+  </a>
+  <a href="/m/dragon" class="m-card p-4">
+    <div class="text-xs text-slate-400">走弱池</div>
+    <div class="mono text-2xl font-extrabold text-amber-300 mt-1">{{ ov.weak_count }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">待转强观察</div>
+  </a>
+</section>
+
+<section class="m-card p-4 mb-4">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="font-bold">快速入口</h2>
+    <span class="text-[11px] text-slate-500">{{ ov.now }}</span>
+  </div>
+  <div class="grid grid-cols-2 gap-2">
+    <a href="/m/run" class="m-btn m-btn-primary">运行分析</a>
+    <a href="/m/recap" class="m-btn m-btn-ghost">复盘</a>
+    <a href="/m/data/strategy" class="m-btn m-btn-ghost">策略信号</a>
+    <a href="/m/data/limitup" class="m-btn m-btn-ghost">涨停梯队</a>
+  </div>
+</section>
+{% endblock %}

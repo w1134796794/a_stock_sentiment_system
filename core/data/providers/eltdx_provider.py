@@ -109,6 +109,49 @@ class EltdxProvider:
             logger.debug(f"[EltdxProvider] quote snapshot unavailable {ts_code}: {e}")
             return {}
 
+    def get_quote_snapshots(self, ts_codes) -> dict:
+        """**批量**取实时行情快照（一条连接、按 80 只分块）。
+
+        相比逐只 ``get_quote_snapshot``（每只都新建 TCP 连接），批量接口
+        ``client.quotes.get_snapshots`` 在单条连接里一次拉多只，数十只仅需
+        百毫秒级，适合走弱池/候选池盘中轮询。
+
+        Returns:
+            dict: ``{6位代码: {open_price, open_amount, pre_close, last_price,
+                   change_pct, source}}``；eltdx 不可用或异常时返回空字典。
+        """
+        codes = list(ts_codes or [])
+        if not codes:
+            return {}
+        tdx_codes = [self._to_tdx_code(c) for c in codes]
+        out: dict = {}
+        try:
+            with self._client() as client:
+                for i in range(0, len(tdx_codes), 80):
+                    chunk = tdx_codes[i:i + 80]
+                    snaps = client.quotes.get_snapshots(chunk) or []
+                    for s in snaps:
+                        code6 = str(getattr(s, "code", "") or "").split(".")[0].zfill(6)
+                        if not code6 or code6 == "000000":
+                            continue
+                        last = getattr(s, "last_price", None)
+                        pre = getattr(s, "pre_close_price", None)
+                        op = getattr(s, "open_price", None)
+                        oa = getattr(s, "open_amount_yuan", None)
+                        chg = getattr(s, "change_pct", None)
+                        out[code6] = {
+                            "open_price": float(op) if op else 0.0,
+                            "open_amount": float(oa) if oa else 0.0,
+                            "pre_close": float(pre) if pre else 0.0,
+                            "last_price": float(last) if last else 0.0,
+                            "change_pct": float(chg) if chg is not None else None,
+                            "source": "eltdx_quotes_batch",
+                        }
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[EltdxProvider] batch quote snapshots unavailable ({len(codes)} codes): {e}")
+            return {}
+        return out
+
     def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
         """Get K-line bars from eltdx.
 

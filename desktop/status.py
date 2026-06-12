@@ -151,6 +151,25 @@ def dragon_pools() -> Dict[str, Any]:
             return _ENUM_ZH.get(v, v)
         return v
 
+    def _stat_interval(entry_date: Any) -> str:
+        """统计区间：与「10日涨幅/涨停数」同口径——截至入池日的最近 10 个交易日。
+
+        返回 ``MM-DD~MM-DD``；交易日历不可用或日期非法时返回空串。
+        """
+        d = str(entry_date or "")[:8]
+        if len(d) != 8 or not d.isdigit():
+            return ""
+        try:
+            from core.utils.date_utils import get_last_n_trade_dates
+
+            dates = get_last_n_trade_dates(10, d)  # 倒序，最新在前
+            if not dates:
+                return ""
+            end, start = dates[0], dates[-1]
+            return f"{start[4:6]}-{start[6:8]}~{end[4:6]}-{end[6:8]}"
+        except Exception:
+            return ""
+
     pools = _read_dragon_pools()
 
     def _rows(section: str) -> List[Dict[str, Any]]:
@@ -170,6 +189,7 @@ def dragon_pools() -> Dict[str, Any]:
                     ),
                     "状态": _clean(item.get("status", "")),
                     "入池日": item.get("entry_date", ""),
+                    "统计区间": _stat_interval(item.get("entry_date", "")),
                     "走弱类型": item.get("weakening_type", ""),
                     "走弱日": item.get("weakening_date", ""),
                 }

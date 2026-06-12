@@ -1,0 +1,124 @@
+{% extends "mobile/base.html" %}
+{% block title %}运行分析 · 手机端{% endblock %}
+{% block page_title %}运行分析{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">一键跑批 · 实时日志</div>{% endblock %}
+
+{% block content %}
+<section class="m-card p-4 mb-4">
+  <label class="block text-xs text-slate-500 mb-1">分析日期（留空=今日/最近交易日）</label>
+  <input id="run-date" type="text" inputmode="numeric" placeholder="YYYYMMDD"
+         class="mono w-full bg-slate-950/70 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+  <button id="run-btn" class="m-btn m-btn-primary w-full mt-3 disabled:opacity-40">开始运行</button>
+  <div class="flex items-center gap-2 mt-3">
+    <span class="text-xs text-slate-500">状态</span>
+    <span id="run-state" class="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-700 text-slate-200">空闲</span>
+  </div>
+  <div id="run-meta" class="text-[11px] text-slate-500 mt-2 break-all"></div>
+  <div class="text-[11px] text-slate-500 mt-3 leading-relaxed">
+    等价于命令行 python main.py --date ...。生成快照后，可在手机数据页和图文素材页查看。
+  </div>
+</section>
+
+<section class="m-card overflow-hidden">
+  <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/60">
+    <div class="text-sm font-bold text-slate-200">运行日志</div>
+    <div class="flex items-center gap-3 text-xs">
+      <label class="flex items-center gap-1.5 text-slate-400">
+        <input id="run-autoscroll" type="checkbox" class="accent-emerald-500" checked> 滚动
+      </label>
+      <button id="run-clear" class="text-slate-400">清屏</button>
+    </div>
+  </div>
+  <pre id="run-log" class="mono text-[11px] leading-relaxed text-slate-200 p-3 h-[48dvh] overflow-auto whitespace-pre-wrap"></pre>
+</section>
+
+<script>
+(function () {
+  const initial = {{ run|tojson }};
+  let since = initial.next || 0;
+  let polling = false;
+
+  const logEl = document.getElementById('run-log');
+  const stateEl = document.getElementById('run-state');
+  const metaEl = document.getElementById('run-meta');
+  const btn = document.getElementById('run-btn');
+  const dateEl = document.getElementById('run-date');
+  const autoscroll = document.getElementById('run-autoscroll');
+
+  const STATE = {
+    idle:    { t: '空闲',   c: 'bg-slate-700 text-slate-200' },
+    running: { t: '运行中', c: 'bg-sky-600 text-white' },
+    done:    { t: '已完成', c: 'bg-emerald-600 text-white' },
+    error:   { t: '失败',   c: 'bg-rose-600 text-white' },
+  };
+
+  function setState(s, meta) {
+    const m = STATE[s] || STATE.idle;
+    stateEl.textContent = m.t;
+    stateEl.className = 'px-2.5 py-1 rounded-full text-xs font-bold ' + m.c;
+    btn.disabled = (s === 'running');
+    metaEl.textContent = meta || '';
+  }
+
+  function appendLines(lines) {
+    if (!lines || !lines.length) return;
+    logEl.textContent += lines.join('\n') + '\n';
+    if (autoscroll.checked) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    try {
+      const r = await fetch('/api/run/status?since=' + since);
+      const d = await r.json();
+      since = d.next;
+      appendLines(d.lines);
+      const meta = (d.date ? ('日期 ' + d.date + ' · ') : '') +
+                   (d.finished_at ? ('完成于 ' + d.finished_at) : (d.started_at ? ('开始于 ' + d.started_at) : ''));
+      setState(d.state, meta);
+      if (d.state === 'running') {
+        setTimeout(() => { polling = false; poll(); }, 900);
+      } else {
+        polling = false;
+      }
+    } catch (e) {
+      polling = false;
+      setTimeout(poll, 1500);
+    }
+  }
+
+  appendLines(initial.lines);
+  setState(initial.state,
+    (initial.date ? ('日期 ' + initial.date + ' · ') : '') +
+    (initial.finished_at ? ('完成于 ' + initial.finished_at) : (initial.started_at ? ('开始于 ' + initial.started_at) : '')));
+  if (initial.state === 'running') poll();
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    logEl.textContent = '';
+    since = 0;
+    try {
+      const r = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: dateEl.value.trim() })
+      });
+      const d = await r.json();
+      if (!d.started) {
+        appendLines(['[提示] ' + (d.message || '无法启动')]);
+        btn.disabled = false;
+        return;
+      }
+      setState('running', '');
+      poll();
+    } catch (e) {
+      appendLines(['[错误] 启动失败: ' + e]);
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('run-clear').addEventListener('click', () => { logEl.textContent = ''; });
+})();
+</script>
+{% endblock %}

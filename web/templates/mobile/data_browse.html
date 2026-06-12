@@ -1,0 +1,103 @@
+{% extends "mobile/base.html" %}
+{% block title %}{{ category.label }} · 手机数据{% endblock %}
+{% block page_title %}{{ category.label }}{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date }} · 手机数据浏览</div>{% endblock %}
+
+{% block content %}
+<div class="m-card p-3 mb-3">
+  <label class="block text-xs text-slate-500 mb-1">交易日</label>
+  <select onchange="location.href='/m/data/{{ cat }}/'+this.value"
+          class="mono w-full bg-slate-950/70 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+    {% for d in dates %}
+      <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<nav class="m-scroll-x flex gap-2 mb-3 pb-1">
+  {% for c in categories %}
+  <a href="/m/data/{{ c.key }}/{{ date }}"
+     class="shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold border
+       {% if c.key == cat %}bg-emerald-500/15 text-emerald-300 border-emerald-500/40{% else %}bg-slate-900/55 text-slate-400 border-slate-700/70{% endif %}">
+    {{ c.label }}
+  </a>
+  {% endfor %}
+</nav>
+
+{% if snapshot is none %}
+  <div class="m-card p-8 text-center">
+    <div class="text-lg font-bold mb-1">没有找到 {{ date }} 的快照</div>
+    <div class="text-sm text-slate-400">请确认该日已运行收盘分析。</div>
+  </div>
+{% else %}
+  {% set view_q = 'echelon' if cat == 'limitup'
+                  else ('detail' if cat in ['strategy', 'sector']
+                  else ('smart' if cat in ['capital', 'review'] else 'table')) %}
+  {% set ns = namespace(first=true, any=false) %}
+  <div class="m-card p-2 mb-3">
+    <div id="m-section-tabs" class="m-scroll-x flex gap-1.5 pb-1">
+      {% for s in sections %}
+        {% if (s.name in category.names) or (category.signals and s.kind == 'signals') %}
+        {% set ns.any = true %}
+        <button
+          class="m-dtab {% if ns.first %}active{% endif %}"
+          hx-get="/report/{{ date }}/section/{{ loop.index0 }}?view={{ view_q }}"
+          hx-target="#m-section-panel" hx-swap="innerHTML"
+          onclick="setMobileActiveTab(this)"
+          {% if ns.first %}hx-trigger="load, click"{% endif %}>
+          <span>{{ s.name }}</span>
+          <span class="mono">{{ s.rows|length }}</span>
+        </button>
+        {% set ns.first = false %}
+        {% endif %}
+      {% endfor %}
+      {% if not ns.any %}
+        <div class="px-3 py-2 text-sm text-slate-500">该分类当日暂无数据</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div id="m-section-panel" class="m-card mobile-section p-3 min-h-[240px] overflow-visible">
+    <div class="text-sm text-slate-500">{% if ns.any %}加载中...{% else %}选择上方分类查看明细...{% endif %}</div>
+  </div>
+{% endif %}
+
+<style>
+  .m-dtab { display:inline-flex; align-items:center; gap:.4rem; flex:0 0 auto; padding:.55rem .75rem;
+    border-radius:999px; color:#cbd5e1; font-size:.82rem; border:1px solid transparent; background:rgba(15,23,42,.4); }
+  .m-dtab.active { color:#6ee7b7; background:rgba(16,185,129,.12); border-color:rgba(16,185,129,.34); font-weight:700; }
+  .m-dtab .mono { font-size:.68rem; color:#64748b; background:rgba(2,6,23,.6); border-radius:.45rem; padding:.02rem .38rem; }
+  .mobile-section > div > .flex:first-child { align-items:flex-start; gap:.35rem; }
+  .mobile-section .md-summary { position:relative; flex-direction:column; align-items:stretch; gap:.5rem; padding:.75rem 2.2rem .75rem .75rem; }
+  .mobile-section .md-head { justify-content:space-between; width:100%; flex:0 1 auto; min-height:0; }
+  .mobile-section .md-metrics { justify-content:flex-start; }
+  .mobile-section .md-caret { position:absolute; right:.85rem; top:.85rem; margin:0; }
+  .mobile-section .md-detail { grid-template-columns:repeat(auto-fit, minmax(min(100%, 142px), 1fr)); padding:.7rem; }
+  .mobile-section .md-field { min-width:0; }
+  .mobile-section .md-kv-row { flex-direction:column; gap:.1rem; }
+  .mobile-section .md-kv-k { min-width:0; }
+  .mobile-section .ech-wrap,
+  .mobile-section .cap-grid,
+  .mobile-section .ech-cpt-grid { max-height:none; overflow:visible; }
+  .mobile-section .ech-tier { flex-direction:column; gap:.5rem; }
+  .mobile-section .ech-tier-head { position:static; flex-direction:row; align-self:flex-start; }
+  .mobile-section .ech-cards { display:grid; grid-template-columns:1fr 1fr; gap:.5rem; width:100%; }
+  .mobile-section .ech-card { width:auto; min-width:0; }
+  .mobile-section .ech-cpt-grid,
+  .mobile-section .cap-grid,
+  .mobile-section .wr-grid { grid-template-columns:1fr; }
+  .mobile-section .tbl-scroll,
+  .mobile-section .overflow-x-auto { max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .mobile-section table { min-width:620px; }
+  .mobile-section .heat-tbl { min-width:680px; }
+  @media (max-width: 360px) {
+    .mobile-section .md-detail { grid-template-columns:1fr; }
+  }
+</style>
+<script>
+  function setMobileActiveTab(btn) {
+    document.querySelectorAll('#m-section-tabs .m-dtab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+</script>
+{% endblock %}

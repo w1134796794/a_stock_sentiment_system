@@ -46,6 +46,8 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_break_count": 1,
         # Phase 3/4：置信度算法。"legacy"=旧加分制（默认，行为不变）；"deduction"=统一满分扣分制
         "confidence_mode": "legacy",
+        # 最终信号最低置信度。0=不过滤；0.60 或 60 均表示低于60%过滤。
+        "min_confidence": 0.0,
     },
     # 弱转强 WeakToStrong.params
     "weak_to_strong": {
@@ -75,6 +77,11 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "sentiment_bullish_boost": 0.02,
         "sentiment_bearish_penalty": 0.02,
         "confidence_mode": "legacy",
+        # 最终信号最低置信度。0=不过滤；0.60 或 60 均表示低于60%过滤。
+        "min_confidence": 0.0,
+        # 盘中实时观测：走弱池个股「以昨收为基准」的涨幅 ≥ 此值即判定转强。
+        # 支持 0.07 / 7 / "7%" 多种写法（>1 视为百分数）。
+        "intraday_recovery_pct": 0.07,
     },
     # 二板定龙 SecondBoardDragon.params（基础）
     "second_board_dragon": {
@@ -103,6 +110,9 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "rank_w_fast": 10.0,             # 快速封板加分（固定）
         "rank_w_sector_assist": 6.0,     # ×板块首板助攻家数
         "confidence_mode": "legacy",     # Phase 3/4：legacy=旧加分制(默认)；deduction=满分扣分制
+        # 二板定龙原有 0.70 候选准入闸，现统一为可配置最终信号最低置信度。
+        # 0.60 或 60 均表示低于60%过滤。
+        "min_confidence": 0.70,
     },
     # 二板定龙 SecondBoardDragon.strict_params（严格模式）
     "second_board_dragon_strict": {
@@ -131,6 +141,8 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "platform_days_max": 15,
         "max_distance_from_high": 0.25,
         "confidence_mode": "legacy",
+        # 最终信号最低置信度。0=不过滤；0.60 或 60 均表示低于60%过滤。
+        "min_confidence": 0.0,
     },
     # 多因子打分 MultiFactorScorer.weights
     "multi_factor_weights": {

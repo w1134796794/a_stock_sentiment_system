@@ -25,6 +25,14 @@
         <input id="bt-cap" type="text" placeholder="100000"
                class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
       </div>
+      <div>
+        <label class="block text-[11px] text-slate-500 mb-0.5">风控闸门</label>
+        <label class="flex items-center gap-1.5 h-[30px] px-2 rounded-md border border-slate-700 bg-slate-900 cursor-pointer select-none">
+          <input id="bt-risk" type="checkbox"
+                 class="accent-emerald-500 w-3.5 h-3.5">
+          <span class="text-sm text-slate-300">应用风控</span>
+        </label>
+      </div>
       <button id="bt-run-btn" onclick="btRun()"
               class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition">运行回测</button>
       <button id="bt-log-toggle" onclick="btToggleLog()"
@@ -32,7 +40,8 @@
     </div>
   </div>
   <pre id="bt-log" class="hidden mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs mono text-slate-300 max-h-72 overflow-auto whitespace-pre-wrap"></pre>
-  <div class="mt-2 text-[11px] text-slate-500">日期留空则默认回测最近约 90 天；首次使用请先在「运行分析」生成交易计划。</div>
+  <div class="mt-2 text-[11px] text-slate-500">日期留空则默认回测最近约 90 天；首次使用请先在「运行分析」生成交易计划。
+    勾选「应用风控」按组合层闸门（单票/总仓/持仓数/板块集中度）约束建仓；不勾选则仅受现金限制，用于对比"无风控"结果（个股止损止盈始终生效）。</div>
 </section>
 
 <script>
@@ -53,7 +62,9 @@
     busy(true);
     logEl.classList.remove('hidden'); logEl.textContent = ''; since = 0;
     stateEl.textContent = '启动中…';
-    const body = { start_date: val('bt-start'), end_date: val('bt-end'), initial_capital: val('bt-cap') };
+    const riskOn = document.getElementById('bt-risk').checked;
+    const body = { start_date: val('bt-start'), end_date: val('bt-end'),
+                   initial_capital: val('bt-cap'), risk_control: riskOn };
     try {
       const r = await fetch('/api/backtest/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)

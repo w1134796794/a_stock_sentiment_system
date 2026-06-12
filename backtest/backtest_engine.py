@@ -25,6 +25,13 @@ class BacktestConfig:
     initial_capital: float = 100000.0  # 初始资金
     max_position_per_stock: float = 0.2  # 单票最大仓位20%
     max_total_position: float = 0.8  # 总仓位上限80%
+    max_positions: int = 8  # 最多同时持仓只数（仅风控开启时生效）
+    max_sector_concentration: float = 0.4  # 单一板块最大仓位（仅风控开启时生效）
+
+    # 风控闸门总开关：关闭后不施加组合层约束（单票/总仓/持仓数/板块集中度），
+    # 仅保留现金/价格有效性等基础校验，用于对比"无风控"模拟结果。个股止损止盈
+    # 属于交易计划的退出策略，始终生效，不受此开关影响。
+    risk_control: bool = True
 
     # 基础止损止盈
     stop_loss_pct: float = 0.05  # 硬止损线5%
@@ -190,20 +197,41 @@ class BacktestEngine:
             logger.debug(f"{stock_name} 已有持仓，跳过")
             return
 
-        # 检查仓位限制
         position_size = self._calculate_position_size(plan)
-        max_position_value = self.total_capital * self.config.max_position_per_stock
-
-        if position_size > max_position_value:
-            position_size = max_position_value
-
-        # 检查总仓位限制
         current_position_value = sum(pos['market_value'] for pos in self.current_positions.values())
-        max_total = self.total_capital * self.config.max_total_position
 
-        if current_position_value + position_size > max_total:
-            logger.warning(f"总仓位超限，跳过买入 {stock_name}")
-            return
+        # 组合层风控闸门（仅风控开启时施加：持仓数 / 单票 / 总仓 / 板块集中度）
+        if self.config.risk_control:
+            # a) 持仓数上限
+            if len(self.current_positions) >= self.config.max_positions:
+                logger.warning(f"持仓数已达上限{self.config.max_positions}只，跳过买入 {stock_name}")
+                return
+
+            # b) 单票上限
+            max_position_value = self.total_capital * self.config.max_position_per_stock
+            if position_size > max_position_value:
+                position_size = max_position_value
+
+            # c) 总仓位上限
+            max_total = self.total_capital * self.config.max_total_position
+            if current_position_value + position_size > max_total:
+                logger.warning(f"总仓位超限，跳过买入 {stock_name}")
+                return
+
+            # d) 板块集中度
+            sector = str(plan.get('共振板块', '') or '').split(',')[0].strip()
+            if sector:
+                sector_value = sum(
+                    pos['market_value'] for pos in self.current_positions.values()
+                    if str(pos.get('resonance_sectors', '') or '').split(',')[0].strip() == sector
+                )
+                max_sector = self.total_capital * self.config.max_sector_concentration
+                if sector_value + position_size > max_sector:
+                    allowed = max(max_sector - sector_value, 0.0)
+                    if allowed < self.total_capital * 0.005:
+                        logger.warning(f"板块[{sector}]集中度超限，跳过买入 {stock_name}")
+                        return
+                    position_size = allowed
 
         # 检查现金
         if position_size > self.cash:
