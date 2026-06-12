@@ -50,7 +50,7 @@
       <div class="px-3 py-2 text-sm text-slate-500">该分类当日暂无数据</div>
     {% endif %}
   </nav>
-  <div id="section-panel" class="card border border-slate-800 rounded-xl p-4 min-h-[260px] overflow-x-auto">
+  <div id="section-panel" class="card border border-slate-800 rounded-xl p-4 min-h-[260px] overflow-hidden">
     <div class="text-slate-500 text-sm">{% if ns.any %}加载中…{% else %}选择上方分类查看明细…{% endif %}</div>
   </div>
 </div>
@@ -65,6 +65,9 @@
   .dtab-count { font-size:.7rem; color:#64748b; background:rgba(15,23,42,.6);
                 padding:.05rem .42rem; border-radius:.4rem; line-height:1.4; }
   .dtab.active .dtab-count { color:#34d399; background:rgba(16,185,129,.12); }
+  #section-panel { min-width:0; }
+  #section-panel .tbl-scroll,
+  #section-panel .overflow-x-auto { max-width:100%; -webkit-overflow-scrolling:touch; }
 </style>
 <script>
   function setActiveTab(btn) {

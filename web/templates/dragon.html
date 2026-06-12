@@ -30,6 +30,7 @@
         <span class="dpc-code mono">{{ r.get('代码') }}</span>
       </div>
       <span class="dpc-type {{ type_cls(r.get('类型')) }}">{{ r.get('类型') or '龙头' }}</span>
+      {% if not weak and r.get('统计区间') %}<span class="dpc-interval mono">{{ r.get('统计区间') }}</span>{% endif %}
     </div>
     <div class="dpc-stats">
       <div class="dpc-stat">
@@ -100,6 +101,8 @@
   .dt-trend { background:rgba(56,189,248,.16); color:#7dd3fc; border:1px solid rgba(56,189,248,.4); }
   .dt-cont  { background:rgba(251,146,60,.18); color:#fdba74; border:1px solid rgba(251,146,60,.45); }
   .dt-space { background:rgba(167,139,250,.18); color:#c4b5fd; border:1px solid rgba(167,139,250,.45); }
+  .dpc-interval { flex:0 0 auto; align-self:flex-start; font-size:.64rem; color:#94a3b8; white-space:nowrap;
+                  background:rgba(2,6,23,.55); border:1px solid rgba(51,65,85,.6); border-radius:.35rem; padding:.12rem .45rem; }
   .dpc-stats { display:flex; align-items:flex-end; gap:1.1rem; margin-top:.7rem; flex-wrap:wrap; }
   .dpc-stat { display:flex; flex-direction:column; }
   .dpc-stat-v { font-size:1.35rem; font-weight:800; color:#e2e8f0; line-height:1; }

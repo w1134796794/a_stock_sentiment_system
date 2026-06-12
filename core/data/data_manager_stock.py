@@ -412,6 +412,54 @@ class StockDataManager(DataManagerBase):
             'source': data.get('数据源'),
         }
 
+    def get_quote_snapshot(self, ts_code: str) -> Dict:
+        """获取个股最新实时行情快照（eltdx）。
+
+        仅含 ``last_price`` / ``open_price`` / ``pre_close`` / ``open_amount`` 等盘中
+        实时字段，**不落盘**（快照随行情变化）。eltdx 不可用时返回空字典。
+
+        主要服务盘中实时观测（如弱转强走弱池的盘中转强监控）。
+        """
+        provider = self._get_eltdx_provider()
+        if provider is None:
+            return {}
+        try:
+            return provider.get_quote_snapshot(ts_code) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[get_quote_snapshot] eltdx 实时快照失败 {ts_code}: {e}")
+            return {}
+
+    def get_quote_snapshots(self, ts_codes) -> Dict[str, Dict]:
+        """**批量**获取多只实时行情快照（eltdx，一条连接）。
+
+        返回 ``{6位代码: 快照dict}``。相比逐只 ``get_quote_snapshot`` 快一两个
+        数量级，适合走弱池/候选池盘中轮询。eltdx 不可用时返回空字典。
+        """
+        provider = self._get_eltdx_provider()
+        if provider is None:
+            return {}
+        try:
+            return provider.get_quote_snapshots(ts_codes) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[get_quote_snapshots] eltdx 批量快照失败: {e}")
+            return {}
+
+    def get_minute_bars_live(self, ts_code: str, trade_date: str) -> pd.DataFrame:
+        """获取个股**实时分时**（eltdx，不落盘）。
+
+        与 ``get_stock_tick`` 不同：本方法**不读写 CSV 缓存**，每次都取最新分时，
+        避免盘中把「半截分时序列」缓存后读到过期数据。专供盘中实时形态判定。
+        """
+        provider = self._get_eltdx_provider()
+        if provider is None:
+            return pd.DataFrame()
+        try:
+            df = provider.get_minute_bars(ts_code, trade_date)
+            return df if df is not None else pd.DataFrame()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[get_minute_bars_live] eltdx 实时分时失败 {ts_code} {trade_date}: {e}")
+            return pd.DataFrame()
+
     def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
         """获取个股 K 线：唯一数据源为 eltdx，无数据则返回空。
 

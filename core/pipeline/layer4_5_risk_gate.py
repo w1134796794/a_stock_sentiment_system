@@ -99,6 +99,28 @@ class RiskGateLayer:
             equity=equity,
         )
 
+        # 0) 总开关关闭：闸门放行所有计划，不改仓位、不熔断（用于对比"无风控"模拟） ----
+        if not getattr(self.cfg, "enabled", True):
+            result.cb_status = CircuitBreakerStatus()  # NORMAL / 不熔断 / 上限 1.0
+            result.effective_total_cap = 1.0
+            for plan in plans:
+                orig_pct = float(getattr(plan, "position_pct", 0.0) or 0.0)
+                result.decisions.append(GateDecision(
+                    stock_code=getattr(plan, "stock_code", ""),
+                    stock_name=getattr(plan, "stock_name", ""),
+                    pattern_type=getattr(plan, "pattern_type", ""),
+                    original_position_pct=orig_pct,
+                    final_position_pct=orig_pct,
+                    action="PASS",
+                    reasons=["风控闸门已关闭：原样放行"],
+                ))
+            result.summary = (
+                f"=== 风控闸门 ({result.trade_date}) ===\n"
+                "风控闸门已关闭（enabled=False）：所有计划原样放行，不施加组合层约束与熔断。"
+            )
+            logger.info(f"[L4.5] 风控闸门已关闭，放行全部 {len(plans)} 条计划（无风控模式）")
+            return result
+
         # 1) 账户级熔断 -----------------------------------------------------
         cb = self.breaker.evaluate(portfolio_state, emotion_cycle, price_map, trade_date)
         result.cb_status = cb

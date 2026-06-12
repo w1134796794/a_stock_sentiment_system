@@ -188,6 +188,37 @@ def dragon_page(request: Request) -> Any:
     return templates.TemplateResponse(request, "dragon.html", {"dp": dragon_pools()})
 
 
+@app.get("/intraday", response_class=HTMLResponse)
+def intraday_page(request: Request) -> Any:
+    """盘中转强：实时观测走弱池个股是否盘中涨幅转强（手动跑一轮）。"""
+    from core.execution.intraday_recovery import IntradayRecoveryMonitor
+
+    view = IntradayRecoveryMonitor().view()
+    return templates.TemplateResponse(request, "intraday.html", {"rt": view})
+
+
+@app.post("/api/intraday/run")
+def api_intraday_run(payload: dict = Body(default={})) -> Any:
+    """手动跑一轮盘中转强观测，合并落盘后返回最新结果。"""
+    from core.execution.intraday_recovery import IntradayRecoveryMonitor
+
+    date = (payload or {}).get("date") or None
+    threshold = (payload or {}).get("threshold")
+    monitor = IntradayRecoveryMonitor()
+    try:
+        monitor.run_once(date_str=date, threshold=threshold)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "message": f"{e}"}, status_code=500)
+    return JSONResponse({"ok": True, "view": monitor.view(date)})
+
+
+@app.get("/api/intraday/status")
+def api_intraday_status(date: Optional[str] = None) -> Any:
+    from core.execution.intraday_recovery import IntradayRecoveryMonitor
+
+    return JSONResponse(IntradayRecoveryMonitor().view(date))
+
+
 @app.get("/run", response_class=HTMLResponse)
 def run_page(request: Request) -> Any:
     """运行分析页：一键执行收盘分析并实时查看日志。"""
@@ -522,6 +553,109 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
     )
 
 
+# ----------------------------------------------------------------------
+# 手机竖屏 UI（独立 /m 入口）：复用桌面数据源与 API，不影响现有横屏控制台。
+# ----------------------------------------------------------------------
+@app.get("/m", response_class=HTMLResponse)
+def mobile_index(request: Request) -> Any:
+    """手机概览页：核心状态 + 快捷入口。"""
+    from desktop.status import overview
+
+    return templates.TemplateResponse(request, "mobile/overview.html", {"ov": overview()})
+
+
+@app.get("/m/data", response_class=HTMLResponse)
+def mobile_data_home() -> Any:
+    latest = reader.latest()
+    return RedirectResponse(url=f"/m/data/strategy/{latest}" if latest else "/m")
+
+
+@app.get("/m/data/{cat}", response_class=HTMLResponse)
+def mobile_data_index(cat: str) -> Any:
+    if cat not in _CATEGORY_BY_KEY:
+        return RedirectResponse(url="/m")
+    latest = reader.latest()
+    return RedirectResponse(url=f"/m/data/{cat}/{latest}" if latest else "/m")
+
+
+@app.get("/m/data/{cat}/{date}", response_class=HTMLResponse)
+def mobile_data_browse(request: Request, cat: str, date: str) -> Any:
+    """手机数据浏览：分类 Tab + 单列 section 卡片。"""
+    category = _CATEGORY_BY_KEY.get(cat)
+    if category is None:
+        return HTMLResponse('<div class="p-6 text-slate-400">无此分类</div>', status_code=404)
+    snapshot = reader.load(date)
+    return templates.TemplateResponse(
+        request,
+        "mobile/data_browse.html",
+        {
+            "category": category,
+            "cat": cat,
+            "categories": DATA_CATEGORIES,
+            "date": date,
+            "dates": reader.list_dates(),
+            "sections": (snapshot or {}).get("sections", []),
+            "snapshot": snapshot,
+        },
+    )
+
+
+@app.get("/m/dragon", response_class=HTMLResponse)
+def mobile_dragon_page(request: Request) -> Any:
+    """手机龙头池：单列卡片浏览。"""
+    from desktop.status import dragon_pools
+
+    return templates.TemplateResponse(request, "mobile/dragon.html", {"dp": dragon_pools()})
+
+
+@app.get("/m/intraday", response_class=HTMLResponse)
+def mobile_intraday_page(request: Request) -> Any:
+    """手机盘中转强：单列展示走弱池实时转强信号。"""
+    from core.execution.intraday_recovery import IntradayRecoveryMonitor
+
+    return templates.TemplateResponse(
+        request, "mobile/intraday.html", {"rt": IntradayRecoveryMonitor().view()}
+    )
+
+
+@app.get("/m/recap", response_class=HTMLResponse)
+def mobile_recap_index() -> Any:
+    latest = reader.latest()
+    return RedirectResponse(url=f"/m/recap/{latest}" if latest else "/m")
+
+
+@app.get("/m/recap/{date}", response_class=HTMLResponse)
+def mobile_recap_page(request: Request, date: str, tab: str = "show") -> Any:
+    """手机复盘统一页：演出播放器 + 图文素材（合规文案/卡片/保存）。"""
+    from recap.thermometer import build_thermometer
+
+    snapshot = reader.load(date)
+    pack = build_thermometer(snapshot) if snapshot else None
+    return templates.TemplateResponse(
+        request, "mobile/recap.html",
+        {"date": date, "dates": reader.list_dates(), "pack": pack,
+         "tab": "material" if tab == "material" else "show"},
+    )
+
+
+@app.get("/m/content", response_class=HTMLResponse)
+def mobile_content_index() -> Any:
+    return RedirectResponse(url="/m/recap")
+
+
+@app.get("/m/content/{date}", response_class=HTMLResponse)
+def mobile_content_page(date: str) -> Any:
+    return RedirectResponse(url=f"/m/recap/{date}?tab=material")
+
+
+@app.get("/m/run", response_class=HTMLResponse)
+def mobile_run_page(request: Request) -> Any:
+    """手机运行分析：复用运行控制器与状态 API。"""
+    from desktop.runner import CONTROLLER
+
+    return templates.TemplateResponse(request, "mobile/run.html", {"run": CONTROLLER.status()})
+
+
 @app.get("/ask", response_class=HTMLResponse)
 def ask_index(request: Request) -> Any:
     """问 AI 入口：默认以最新交易日为上下文。"""
@@ -567,12 +701,17 @@ def api_backtest_runs() -> Any:
 
 @app.post("/api/backtest/run")
 def api_backtest_run(payload: dict = Body(default={})) -> Any:
-    """启动一次回测（重新生成净值/交易/回撤）。body: {start_date?, end_date?, initial_capital?}"""
+    """启动一次回测（重新生成净值/交易/回撤）。
+
+    body: {start_date?, end_date?, initial_capital?, risk_control?}
+    risk_control 缺省时回退到全局 RiskConfig.enabled。
+    """
     from desktop.runner import BACKTEST_CONTROLLER
 
     p = payload or {}
     ok, msg = BACKTEST_CONTROLLER.start(
-        p.get("start_date"), p.get("end_date"), p.get("initial_capital"))
+        p.get("start_date"), p.get("end_date"), p.get("initial_capital"),
+        risk_control=p.get("risk_control"))
     return JSONResponse({"started": ok, "message": msg})
 
 
@@ -659,12 +798,56 @@ def api_recap(date: str, refresh: bool = False) -> Any:
 
 
 # ----------------------------------------------------------------------
-# 复盘「演出视图」（P1）：全屏 9:16 自动播放，供大屏放映 / 被逐帧抓取
+# 复盘（统一功能）：演出视图 + 图文素材整合到 /recap，单一入口、同源驱动。
+#   /recap/{date}            统一页（演出 / 图文素材 两个选项卡）
+#   /recap/{date}/cards      统一图文导出（mode=full 全量分镜 / mode=compliant 合规4卡）
+# 旧 /show、/content 路由保留为重定向，确保历史链接不失效。
+# ----------------------------------------------------------------------
+@app.get("/recap", response_class=HTMLResponse)
+def recap_index() -> Any:
+    latest = reader.latest()
+    return RedirectResponse(url=f"/recap/{latest}" if latest else "/")
+
+
+@app.get("/recap/{date}", response_class=HTMLResponse)
+def recap_page(request: Request, date: str, tab: str = "show") -> Any:
+    """复盘统一页：演出播放器 + 合规图文素材，共享日期 / 同一快照。"""
+    from recap.thermometer import build_thermometer
+
+    snapshot = reader.load(date)
+    pack = build_thermometer(snapshot) if snapshot else None
+    return templates.TemplateResponse(
+        request, "recap.html",
+        {"date": date, "dates": reader.list_dates(), "pack": pack,
+         "tab": "material" if tab == "material" else "show"},
+    )
+
+
+@app.get("/recap/{date}/cards", response_class=HTMLResponse)
+def recap_cards(request: Request, date: str, mode: str = "full") -> Any:
+    """统一图文导出。
+
+    - ``mode=full``（默认）：全量复盘分镜逐幕成图（含个股/策略，自用复盘）。
+    - ``mode=compliant``：情绪温度计 4 张合规卡（无个股/收益/操作建议，可对外发布）。
+    """
+    snapshot = reader.load(date)
+    if snapshot is None:
+        return HTMLResponse('<div style="color:#94a3b8;padding:24px">无该日快照</div>', status_code=404)
+    if mode == "compliant":
+        from recap.thermometer import build_thermometer, render_cards_html
+        return HTMLResponse(render_cards_html(build_thermometer(snapshot)))
+    return templates.TemplateResponse(
+        request, "cards.html",
+        {"date": date, "title": f"A股复盘 {date} · 图文"},
+    )
+
+
+# ----------------------------------------------------------------------
+# 演出播放器（被 /recap 页内嵌 iframe 复用；也可独立全屏放映 / 逐帧抓取）
 # ----------------------------------------------------------------------
 @app.get("/show", response_class=HTMLResponse)
 def show_index() -> Any:
-    latest = reader.latest()
-    return RedirectResponse(url=f"/show/{latest}" if latest else "/")
+    return RedirectResponse(url="/recap")
 
 
 @app.get("/show/{date}", response_class=HTMLResponse)
@@ -686,45 +869,27 @@ def show_scene(request: Request, date: str, key: str) -> Any:
 
 
 @app.get("/show/{date}/cards", response_class=HTMLResponse)
-def show_cards(request: Request, date: str) -> Any:
-    """图文导出视图：把每一幕铺成独立卡片，可逐张/批量下载 PNG，直接发小红书。"""
-    return templates.TemplateResponse(
-        request, "cards.html",
-        {"date": date, "title": f"A股复盘 {date} · 图文"},
-    )
+def show_cards(date: str) -> Any:
+    """兼容旧链接：跳到统一图文导出（全量分镜）。"""
+    return RedirectResponse(url=f"/recap/{date}/cards?mode=full")
 
 
 # ----------------------------------------------------------------------
-# 图文素材 · 情绪温度计（合规版：仅市场整体数据 + 合规文案，供短视频/小红书运营）
+# 图文素材 · 情绪温度计：已并入 /recap 的「图文素材」选项卡，旧链接重定向。
 # ----------------------------------------------------------------------
 @app.get("/content", response_class=HTMLResponse)
 def content_index() -> Any:
-    latest = reader.latest()
-    return RedirectResponse(url=f"/content/{latest}" if latest else "/")
+    return RedirectResponse(url="/recap")
 
 
 @app.get("/content/{date}", response_class=HTMLResponse)
-def content_page(request: Request, date: str) -> Any:
-    """情绪温度计内容页：合规文案（一键复制）+ 卡片预览（一键下载 PNG）。"""
-    from recap.thermometer import build_thermometer
-
-    snapshot = reader.load(date)
-    pack = build_thermometer(snapshot) if snapshot else None
-    return templates.TemplateResponse(
-        request, "content.html",
-        {"date": date, "dates": reader.list_dates(), "pack": pack},
-    )
+def content_page(date: str) -> Any:
+    return RedirectResponse(url=f"/recap/{date}?tab=material")
 
 
 @app.get("/content/{date}/cards", response_class=HTMLResponse)
 def content_cards(date: str) -> Any:
-    """情绪温度计卡片（自包含 HTML，含一键下载 PNG），供内容页 iframe 内嵌。"""
-    from recap.thermometer import build_thermometer, render_cards_html
-
-    snapshot = reader.load(date)
-    if snapshot is None:
-        return HTMLResponse('<div style="color:#94a3b8;padding:24px">无该日快照</div>', status_code=404)
-    return HTMLResponse(render_cards_html(build_thermometer(snapshot)))
+    return RedirectResponse(url=f"/recap/{date}/cards?mode=compliant")
 
 
 @app.post("/api/content/{date}/save")

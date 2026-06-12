@@ -314,6 +314,235 @@ class WeakToStrongStrategy:
         except Exception as e:
             logger.error(f"[弱转强] 保存池子失败: {e}")
     
+    # ==================== 盘中实时观测（只读走弱池，不回写池子）====================
+
+    @staticmethod
+    def _normalize_pct_threshold(value, default: float = 0.07) -> float:
+        """归一化涨幅阈值：支持 0.07 / 7 / "7%" 等写法，>1 视为百分数。"""
+        try:
+            if isinstance(value, str):
+                value = value.strip().replace('%', '')
+            v = float(value)
+        except (TypeError, ValueError):
+            return default
+        if v <= 0:
+            return default
+        return v / 100.0 if v > 1 else v
+
+    @staticmethod
+    def _classify_recovery_time(now: datetime) -> str:
+        """按当前时间给转强信号打标签：竞价转强 / 开盘转强 / 盘中转强。"""
+        t = now.time()
+        if t <= time(9, 25):
+            return "竞价转强"
+        if t <= time(9, 35):
+            return "开盘转强"
+        return "盘中转强"
+
+    def scan_weakening_intraday(self, date_str: str = None, threshold=None,
+                                with_trend: bool = True, trend_limit: int = 50) -> Dict:
+        """盘中实时观测走弱池：批量取 eltdx 实时快照，判断是否转强。
+
+        判据（v1，仅涨幅）：以**昨收**为基准，盘中涨幅 ≥ ``threshold`` 即视为转强。
+        本方法**只读走弱池**，不修改 ``dragon_pools.json``，也不写盘后快照。
+
+        Args:
+            date_str: 交易日 YYYYMMDD（默认今天，仅用于结果标注）。
+            threshold: 涨幅阈值，缺省取 ``weak_to_strong.intraday_recovery_pct``；
+                       支持 0.07 / 7 / "7%" 写法。
+
+        Returns:
+            Dict: {
+                'date', 'time', 'threshold', 'pool_size',
+                'quotes_ok', 'errors',
+                'hits':     List[Dict]  # 命中转强（涨幅≥阈值），按涨幅降序
+                'observed': List[Dict]  # 全部成功取价的观测，按涨幅降序
+            }
+        """
+        now = datetime.now()
+        date_str = date_str or now.strftime("%Y%m%d")
+        thr = self._normalize_pct_threshold(
+            threshold if threshold is not None else self.params.get("intraday_recovery_pct", 0.07),
+            default=0.07,
+        )
+        time_str = now.strftime("%H:%M:%S")
+
+        result = {
+            "date": date_str,
+            "time": time_str,
+            "threshold": thr,
+            "pool_size": len(self.weakening_pool),
+            "quotes_ok": 0,
+            "errors": [],
+            "hits": [],
+            "observed": [],
+        }
+
+        if not self.weakening_pool:
+            logger.info("[弱转强-盘中] 走弱池为空，无可观测标的")
+            return result
+
+        logger.info(f"[弱转强-盘中] 开始观测走弱池 {len(self.weakening_pool)} 只，转强阈值={thr*100:.1f}%")
+
+        # 批量取价（一条连接，数十只仅百毫秒级）；批量缺某只时再逐只兜底
+        batch_quotes = {}
+        codes = list(self.weakening_pool.keys())
+        if self.dm is not None and hasattr(self.dm, "get_quote_snapshots"):
+            try:
+                batch_quotes = self.dm.get_quote_snapshots(codes) or {}
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[弱转强-盘中] 批量取快照失败: {e}")
+                batch_quotes = {}
+        logger.info(f"[弱转强-盘中] 批量取价命中 {len(batch_quotes)}/{len(codes)} 只")
+
+        for code, wd in list(self.weakening_pool.items()):
+            code6 = str(code).split(".")[0].zfill(6)
+            quote = batch_quotes.get(code6, {})
+            if not quote and self.dm is not None and hasattr(self.dm, "get_quote_snapshot"):
+                try:
+                    quote = self.dm.get_quote_snapshot(code) or {}
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"[弱转强-盘中] 取快照失败 {code}: {e}")
+                    quote = {}
+
+            last_price = float(quote.get("last_price") or 0)
+            pre_close = float(quote.get("pre_close") or 0)
+            open_price = float(quote.get("open_price") or 0)
+            if last_price <= 0 or pre_close <= 0:
+                result["errors"].append(code)
+                logger.debug(f"[弱转强-盘中] {wd.stock_name}({code}) 无有效实时行情，跳过")
+                continue
+
+            result["quotes_ok"] += 1
+            pct_chg = (last_price - pre_close) / pre_close
+            open_change_pct = (open_price - pre_close) / pre_close if open_price > 0 else 0.0
+            monitor_days = self._safe_monitor_days(wd.weakening_date, date_str)
+
+            obs = {
+                "code": code,
+                "name": wd.stock_name,
+                "weakening_type": wd.weakening_type,
+                "weakening_date": wd.weakening_date,
+                "monitor_days": monitor_days,
+                "last_price": round(last_price, 2),
+                "pre_close": round(pre_close, 2),
+                "open_price": round(open_price, 2),
+                "pct_chg": round(pct_chg, 4),
+                "open_change_pct": round(open_change_pct, 4),
+                "is_recovery": pct_chg >= thr,
+                "time": time_str,
+            }
+            result["observed"].append(obs)
+
+            if pct_chg >= thr:
+                signal_type = self._classify_recovery_time(now)
+                signal = RecoverySignal(
+                    stock_code=code,
+                    stock_name=wd.stock_name,
+                    signal_time=time_str,
+                    signal_type=signal_type,
+                    gap_pct=0.0,
+                    auction_vol_ratio=0.0,
+                    auction_amount=0.0,
+                    open_price=open_price,
+                    open_change_pct=open_change_pct,
+                    confirmed=True,
+                    confirmation_time=time_str,
+                    confirmation_price=last_price,
+                    suggested_entry=last_price,
+                    confidence=0.0,
+                )
+                hit = dict(obs)
+                hit["signal_type"] = signal_type
+                hit["signal"] = signal.to_dict()
+                result["hits"].append(hit)
+                logger.info(
+                    f"[弱转强-盘中] ✓ 转强 {wd.stock_name}({code}) "
+                    f"涨幅{pct_chg*100:.1f}% ≥ {thr*100:.1f}% [{signal_type}]"
+                )
+
+        result["hits"].sort(key=lambda x: x["pct_chg"], reverse=True)
+        result["observed"].sort(key=lambda x: x["pct_chg"], reverse=True)
+
+        # 对命中的转强票补充「分时走强」判定（仅命中集合，控制额外耗时）
+        if with_trend and result["hits"]:
+            for hit in result["hits"][:max(0, int(trend_limit))]:
+                hit["trend"] = self._intraday_trend(hit["code"], date_str)
+            for hit in result["hits"][max(0, int(trend_limit)):]:
+                hit["trend"] = {"label": "未计算", "above_avg": None, "near_high": None, "slope_up": None}
+
+        logger.info(
+            f"[弱转强-盘中] 观测完成：取价{result['quotes_ok']}/{result['pool_size']}，"
+            f"转强命中{len(result['hits'])}只"
+        )
+        return result
+
+    def _intraday_trend(self, code: str, date_str: str) -> Dict:
+        """基于实时分时判定「分时走强/震荡/走弱」。
+
+        判据：站上分时均价线 + 处于日内价格高位(>=60%分位) + 近段(末30点)上行。
+        三者同时满足→走强；明显失守→走弱；其余→震荡。数据不足返回「数据不足」。
+        """
+        empty = {"label": "数据不足", "above_avg": None, "near_high": None,
+                 "slope_up": None, "last": None, "avg": None}
+        df = None
+        if self.dm is not None and hasattr(self.dm, "get_minute_bars_live"):
+            try:
+                df = self.dm.get_minute_bars_live(code, date_str)
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[弱转强-盘中] 取分时失败 {code}: {e}")
+                df = None
+        if df is None or df.empty or "close" not in df.columns:
+            return empty
+        try:
+            closes = pd.to_numeric(df["close"], errors="coerce").dropna()
+            if len(closes) < 5:
+                return empty
+            last = float(closes.iloc[-1])
+            day_high = float(closes.max())
+            day_low = float(closes.min())
+            rng = day_high - day_low
+            pos = (last - day_low) / rng if rng > 0 else 1.0  # 日内价格分位
+            near_high = ((day_high - last) / day_high) if day_high > 0 else None  # 距日内高点
+
+            avg_last = None
+            if "avg_price" in df.columns:
+                avg = pd.to_numeric(df["avg_price"], errors="coerce").dropna()
+                if len(avg):
+                    avg_last = float(avg.iloc[-1])
+            above_avg = (last >= avg_last) if avg_last else None
+
+            tail = closes.tail(min(30, len(closes)))
+            slope_up = bool(tail.iloc[-1] >= tail.iloc[0])
+
+            if (above_avg is not False) and pos >= 0.6 and slope_up:
+                label = "分时走强"
+            elif (above_avg is False) and pos <= 0.4:
+                label = "分时走弱"
+            else:
+                label = "分时震荡"
+            return {
+                "label": label,
+                "above_avg": above_avg,
+                "near_high": round(near_high, 4) if near_high is not None else None,
+                "slope_up": slope_up,
+                "pos": round(pos, 3),
+                "last": round(last, 2),
+                "avg": round(avg_last, 2) if avg_last else None,
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[弱转强-盘中] 分时形态计算失败 {code}: {e}")
+            return empty
+
+    @staticmethod
+    def _safe_monitor_days(weakening_date: str, date_str: str) -> int:
+        """走弱至今的观察天数（自然日），解析失败返回 0。"""
+        try:
+            return (datetime.strptime(date_str, "%Y%m%d") -
+                    datetime.strptime(weakening_date, "%Y%m%d")).days
+        except Exception:  # noqa: BLE001
+            return 0
+
     # ==================== 阶段1：龙头识别与入池 ====================
     
     def update_dragon_pools(self, 

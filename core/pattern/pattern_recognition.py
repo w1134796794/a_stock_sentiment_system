@@ -25,6 +25,14 @@ logger = loguru.logger
 class PatternRecognition:
     """模式识别引擎 - 统一调度各策略模块"""
 
+    STRATEGY_PARAM_GROUPS = {
+        "弱转强": "weak_to_strong",
+        "二板定龙": "second_board_dragon",
+        "首板突破": "first_board_breakout",
+        "龙二波": "dragon_second_wave",
+        "龙头二波": "dragon_second_wave",
+    }
+
     def __init__(self, data_manager, sector_engine=None, mapper=None, repo=None):
         self.dm = data_manager
         self.se = sector_engine
@@ -86,6 +94,49 @@ class PatternRecognition:
         except Exception as e:
             logger.warning(f"✗ 龙二波策略加载失败: {e}")
             self.dragon_second_wave = None
+
+    @staticmethod
+    def _normalize_confidence_threshold(value, default: float = 0.0) -> float:
+        """置信度阈值统一成 0~1；兼容 0.6、60、"60%"。"""
+        try:
+            if value is None or value == "":
+                v = float(default)
+            elif isinstance(value, str):
+                v = float(value.strip().replace("%", ""))
+            else:
+                v = float(value)
+        except Exception:
+            v = float(default)
+        if v > 1:
+            v = v / 100.0
+        return max(0.0, min(1.0, v))
+
+    def _strategy_min_confidence(self, pattern_type: str) -> float:
+        """读取单策略最终信号最低置信度；0 表示不过滤。"""
+        group = self.STRATEGY_PARAM_GROUPS.get(pattern_type)
+        if not group:
+            return 0.0
+        params = get_params(group)
+        # 二板定龙保留旧 candidate_min_confidence 作为兼容回退；新参数优先。
+        fallback = params.get("candidate_min_confidence", 0.0) if group == "second_board_dragon" else 0.0
+        return self._normalize_confidence_threshold(params.get("min_confidence", fallback), fallback)
+
+    def _apply_min_confidence_filters(self, results: Dict[str, List[PatternSignal]]) -> Dict[str, List[PatternSignal]]:
+        """按每个策略的 min_confidence 过滤最终信号。"""
+        filtered: Dict[str, List[PatternSignal]] = {}
+        for pattern_type, signals in (results or {}).items():
+            threshold = self._strategy_min_confidence(pattern_type)
+            if threshold <= 0:
+                filtered[pattern_type] = signals
+                continue
+            kept = [s for s in (signals or []) if (s.confidence or 0) >= threshold]
+            dropped = len(signals or []) - len(kept)
+            if dropped:
+                logger.info(
+                    f"[置信度过滤] {pattern_type}: 阈值{threshold:.0%}，过滤{dropped}个，保留{len(kept)}个"
+                )
+            filtered[pattern_type] = kept
+        return filtered
     
     # ==================== 模式识别接口 ====================
     
@@ -605,27 +656,101 @@ class PatternRecognition:
                 if code in today_zt_codes:
                     same_day_flicker += 1
                     zt_row = today_zt_dict[code]
-                    current_price = zt_row.get('最新价', 0)
+                    def _num(v, default=None):
+                        try:
+                            if v is None or v == "":
+                                return default
+                            return float(str(v).replace("%", "").replace(",", ""))
+                        except Exception:
+                            return default
+
+                    current_price = (_num(zt_row.get('最新价'), 0) or _num(zt_row.get('close'), 0)
+                                     or _num(zt_row.get('涨停价'), 0))
                     board_height = zt_row.get('连板数', 0)
                     sector_name = weakening.sector_name or ""
 
+                    # P4 是“今日入池走弱→今日涨停收复”的日内反转，历史路径里的竞价分析
+                    # 未必可得；扣分制下宁可记录缺失扣分，也不继续用固定 0.65。
+                    today_daily_row = None
+                    try:
+                        if today_daily is not None and not today_daily.empty:
+                            sd = today_daily[today_daily['ts_code'].astype(str).str.contains(code)]
+                            if not sd.empty:
+                                today_daily_row = sd.iloc[-1]
+                    except Exception:
+                        today_daily_row = None
+
+                    open_px = (_num(zt_row.get('open')) or _num(zt_row.get('开盘价')) or
+                               (_num(today_daily_row.get('open')) if today_daily_row is not None else None))
+                    pre_close = (_num(zt_row.get('pre_close')) or _num(zt_row.get('昨收价')) or
+                                 _num(zt_row.get('昨日收盘价')) or
+                                 (_num(today_daily_row.get('pre_close')) if today_daily_row is not None else None))
+                    gap_pct = (open_px - pre_close) / pre_close if open_px and pre_close and pre_close > 0 else None
+                    auction_vol_ratio = (_num(zt_row.get('auction_vol_ratio')) or
+                                         _num(zt_row.get('竞价量比')) or
+                                         _num(zt_row.get('竞价量占比')))
+                    if auction_vol_ratio is not None and auction_vol_ratio > 1:
+                        auction_vol_ratio = auction_vol_ratio / 100.0
+                    # 方案1：涨停池无竞价量比 → 用 eltdx 09:25 集合竞价量回填（量比=竞价量/昨日量）
+                    if auction_vol_ratio is None and self.repo and today_date:
+                        backfilled = self.repo.get_auction_vol_ratio(code, today_date, yest_date)
+                        if backfilled is not None:
+                            auction_vol_ratio = backfilled
+                            logger.info(f"[弱转强-P4] {weakening.stock_name}({code}) "
+                                        f"竞价量比经 eltdx 回填: {auction_vol_ratio*100:.1f}%")
+                    first_limit_time = str(zt_row.get('首次封板时间') or zt_row.get('首次涨停时间') or "")
+                    time_bonus = 10 if first_limit_time and first_limit_time <= "09:40:00" else 0
+                    type_bonus = 8 if weakening.dragon_type.value == "连板龙头" else 4
+                    try:
+                        bh = float(board_height or 0)
+                    except Exception:
+                        bh = 0
+                    flexible_score = min(100, 50 + min(bh, 4) * 7 + time_bonus + type_bonus)
+
+                    wt_mode = self.weak_to_strong.params.get("confidence_mode", "legacy")
+                    confidence = 0.65
+                    conf_breakdown = None
+                    if wt_mode == "deduction":
+                        from core.scoring.confidence_scorer import score_or_none
+                        _wt = weakening.weakening_type or ""
+                        _wt_cat = "断板" if _wt == "断板" else ("放量滞涨" if "放量滞涨" in _wt else "其他")
+                        _res = score_or_none("weak_to_strong", {
+                            "gap_pct": gap_pct,
+                            "auction_vol_ratio": auction_vol_ratio,
+                            "flexible_score": flexible_score,
+                            "weakening_type": _wt_cat,
+                        })
+                        if _res is not None:
+                            confidence = _res.value
+                            conf_breakdown = _res.to_dict()
+                        else:
+                            logger.warning("[弱转强-P4] 扣分制规则缺失/失败，回退固定日内反转置信度")
+
                     logger.info(f"[弱转强-P4] ⚡ {weakening.stock_name}({code}) 当日走弱({weakening.weakening_type})→当日转强(涨停!)")
+
+                    key_metrics = {
+                        "走弱类型": weakening.weakening_type,
+                        "涨停收复": f"余{board_height}板",
+                        "龙头类型": weakening.dragon_type.value,
+                        "弹性评分": round(flexible_score, 1),
+                        "高开幅度": f"{gap_pct*100:.1f}%" if gap_pct is not None else "缺失",
+                        "竞价量比": f"{auction_vol_ratio*100:.1f}%" if auction_vol_ratio is not None else "缺失",
+                        "首次涨停时间": first_limit_time or "--",
+                    }
+                    if conf_breakdown:
+                        key_metrics["置信扣分明细"] = conf_breakdown
 
                     signal = PatternSignal(
                         pattern_type="弱转强",
                         stock_code=code,
                         stock_name=weakening.stock_name,
-                        confidence=0.65,
+                        confidence=round(confidence, 2),
                         description=f"日内反转: 今日入池走弱({weakening.weakening_type})→今日涨停收复(余{board_height}板)",
                         entry_price=current_price,
                         stop_loss=current_price * 0.95,
                         take_profit=current_price * 1.10,
                         position_size="light",
-                        key_metrics={
-                            "走弱类型": weakening.weakening_type,
-                            "涨停收复": f"余{board_height}板",
-                            "龙头类型": weakening.dragon_type.value,
-                        },
+                        key_metrics=key_metrics,
                         validation_rules=[
                             f"今日入池走弱: {weakening.weakening_type}",
                             f"今日涨停收复(余{board_height}板)",
@@ -698,7 +823,7 @@ class PatternRecognition:
             sbd_params = get_params("second_board_dragon")
             min_fb_score = sbd_params.get("min_first_board_score", 60)
             cand_min_gap = sbd_params.get("candidate_min_gap", 0.02)
-            cand_min_conf = sbd_params.get("candidate_min_confidence", 0.70)
+            cand_min_conf = self._strategy_min_confidence("二板定龙")
             max_dragons = int(sbd_params.get("max_dragons_per_day", 3))
             max_per_sector = int(sbd_params.get("max_per_sector", 1))
             min_sector_fb = int(sbd_params.get("min_sector_first_board", 0))
@@ -1773,6 +1898,10 @@ class PatternRecognition:
         except Exception as e:
             logger.error(f"首板突破检测失败: {e}")
             results["首板突破"] = []
+
+        # 统一最终信号置信度过滤。各策略可在 config/pattern_params.py 或网页参数配置中
+        # 设置 min_confidence；支持 0.60 / 60 / "60%"，0 表示不过滤。
+        results = self._apply_min_confidence_filters(results)
         
         # 汇总统计
         logger.info("=" * 60)

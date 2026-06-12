@@ -35,6 +35,9 @@ _DEFAULT_YAML = Path(__file__).resolve().parent.parent / "config" / "risk_contro
 class RiskConfig:
     """风控统一配置（单一事实来源）。"""
 
+    # ---- 总开关 ----
+    enabled: bool = True                      # 风控闸门总开关：关闭后 L4.5 放行所有计划、回测不施加组合层约束（用于对比"无风控"模拟结果）
+
     # ---- 账户 ----
     initial_capital: float = 100_000.0
 

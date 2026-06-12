@@ -34,37 +34,6 @@
   </a>
 </section>
 
-{# ===== 健康检查 ===== #}
-<section class="mb-6">
-  <div class="flex items-center justify-between mb-3">
-    <h2 class="text-base font-bold">健康检查</h2>
-    <span class="text-xs text-slate-500">{{ ov.now }}</span>
-  </div>
-  <div class="space-y-2">
-    {% for it in ov.checks %}
-    <div class="card border border-slate-800 rounded-xl px-4 py-3 flex items-start gap-3">
-      <span class="mt-0.5 inline-flex items-center justify-center w-6 h-6 rounded-full
-        {% if it.status == 'ok' %}bg-emerald-500/15 text-emerald-300{% else %}bg-amber-500/15 text-amber-300{% endif %}">
-        {% if it.status == 'ok' %}
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
-        {% else %}
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 9v4m0 4h.01"/><path d="M10.3 3.9l-8 14A2 2 0 004 21h16a2 2 0 001.7-3.1l-8-14a2 2 0 00-3.4 0z"/></svg>
-        {% endif %}
-      </span>
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2">
-          <span class="font-semibold text-slate-200">{{ it.title }}</span>
-          <span class="text-[11px] px-2 py-0.5 rounded-full
-            {% if it.status == 'ok' %}bg-emerald-900/40 text-emerald-300{% else %}bg-amber-900/40 text-amber-300{% endif %}">{{ it.badge }}</span>
-        </div>
-        <div class="text-sm text-slate-300 mt-0.5">{{ it.value }}</div>
-        {% if it.detail %}<div class="text-xs text-slate-500 mt-0.5 break-all">{{ it.detail }}</div>{% endif %}
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-</section>
-
 {# ===== 快速操作 ===== #}
 <section>
   <h2 class="text-base font-bold mb-3">快速操作</h2>
