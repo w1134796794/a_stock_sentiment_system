@@ -182,6 +182,12 @@ class SentimentSystem:
     def _generate_retail_support_report_v2(self, ctx: SharedContext):
         """生成散户决策支持报告"""
         logger.info("[散户支持] 生成散户决策支持报告...")
+        # Phase 1：把当日只读仓库下发给散户支持模块（命中预取数据集，避免 limit_up/daily 回退透传）
+        repo = getattr(ctx, "repo", None)
+        if self.retail_support is None:
+            self.retail_support = RetailTraderSupportV2(self.dm, repo=repo)
+        elif repo is not None:
+            self.retail_support.repo = repo
         self._generate_retail_support_report(
             ctx.trade_date, ctx.zt_pool, ctx.hierarchy_df,
             ctx.patterns, ctx.emotion_result
