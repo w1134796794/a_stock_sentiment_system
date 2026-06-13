@@ -60,7 +60,10 @@ class DataPrep:
               limit_up_history_days: int = 16,
               prefetch_all_daily: bool = True,
               prefetch_auction: bool = False,
-              prefetch_sectors: bool = True) -> MarketDataset:
+              prefetch_sectors: bool = True,
+              sector_history_days: int = 10,
+              index_codes: Optional[Iterable[str]] = None,
+              index_lookbacks: tuple = (120, 30)) -> MarketDataset:
         """构建当日只读数据集。
 
         预取域：
@@ -92,7 +95,9 @@ class DataPrep:
             if prefetch_limit_up:
                 self._prefetch_limit_up(ds, trade_date, limit_up_history_days)
             if prefetch_sectors:
-                self._prefetch_sectors(ds, trade_date, prev_trade_date)
+                self._prefetch_sectors(ds, trade_date, prev_trade_date, sector_history_days)
+            if index_codes:
+                self._prefetch_index_daily(ds, index_codes, trade_date, index_lookbacks)
 
             if not universe:
                 logger.info("[DataPrep] universe 为空，跳过 daily/auction 预取")
@@ -162,6 +167,41 @@ class DataPrep:
         except Exception as e:
             logger.warning(f"[DataPrep] all_daily 预取失败（将回退 dm）：{e}")
 
+    def _prefetch_index_daily(self, ds: MarketDataset, index_codes: Iterable[str],
+                              trade_date: str, lookbacks: tuple = (120, 30)) -> None:
+        """预取大盘指数日线（Layer1 指数趋势/量能用）。
+
+        Layer1 对每个指数按两个回看窗口各发一次 ``get_index_daily``（趋势 120 个交易日、
+        量能 30 个交易日），且 Repository 端 ``index_daily`` 走 ``_cached``——键里含
+        ``start_date/end_date``，**不做窗口切片**，故必须按 Layer1 完全一致的
+        ``(ts_code, start, end)`` 预取才会命中。这里用同一套交易日历
+        (``DateUtils.get_n_trade_dates_before``) 算出与 Layer1 相同的 start。
+        """
+        if not hasattr(self.dm, "get_index_daily"):
+            return
+        try:
+            from core.utils.date_utils import DateUtils
+            du = DateUtils()
+        except Exception:
+            logger.debug("[DataPrep] 无法加载 DateUtils，跳过 index_daily 预取")
+            return
+        end = str(trade_date)
+        codes = [str(c) for c in index_codes if c]
+        n_ok = 0
+        for code in codes:
+            for lb in lookbacks:
+                try:
+                    start = du.get_n_trade_dates_before(int(lb), end)
+                except Exception:
+                    continue
+                key = call_key("index_daily", ts_code=code, start_date=start, end_date=end)
+                try:
+                    ds.put_call(key, self.dm.get_index_daily(code, start, end), "index_daily")
+                    n_ok += 1
+                except Exception as e:  # noqa: BLE001 —— 预取永不致命
+                    logger.debug(f"[DataPrep] index_daily {code} {start}~{end} 预取失败（将回退 dm）：{e}")
+        logger.info(f"[DataPrep] index_daily 预取：{len(codes)} 指数 × {len(lookbacks)} 窗口，成功 {n_ok} 次")
+
     def _prefetch_limit_up(self, ds: MarketDataset, trade_date: str, history_days: int) -> None:
         """预取近 N 交易日涨停池（与分析期同一套交易日历，最大化命中）。"""
         if not hasattr(self.dm, "get_limit_up_pool"):
@@ -187,18 +227,24 @@ class DataPrep:
             ds.prefetched.add("limit_up")
         logger.info(f"[DataPrep] limit_up 预取：{len(ds.limit_up)} 个交易日，非空 {n_ok} 个")
 
-    def _prefetch_sectors(self, ds: MarketDataset, trade_date: str, prev_trade_date: str) -> None:
+    def _prefetch_sectors(self, ds: MarketDataset, trade_date: str, prev_trade_date: str,
+                          history_days: int = 10) -> None:
         """预取 Layer2 板块域中「签名稳定、与个股无关」的批量调用，消除分析期回退告警。
 
         覆盖：
         - ths_index：概念(N)/行业(I)/全部 三类板块列表（业务层多处复用，各只调一次）
-        - ths_daily：当日(及昨日)全板块指数行情（trade_date 维度的批量查询）
-        - limit_cpt_list：当日最强板块统计
+        - ths_daily：最近 history_days 个交易日的全板块指数行情（按日批量查询）
+        - limit_cpt_list：最近 history_days 个交易日的最强板块统计
         - moneyflow_summary：当日(及昨日)全市场资金流汇总
 
-        不预取逐板块的 ths_member / 单板块 ths_daily —— 其入参由运行时命中的热点板块决定，
-        无法在预取阶段枚举，留给 Repository 的 _cached 记忆化（按需取一次、后续命中）。
-        键由 ``call_key`` 生成，与 Repository 读取端共用，保证命中。
+        为何按 history_days 回看：板块持续性分析（analyze_*_persistence，默认 lookback_days=10）
+        会逐日调用 ``analyze_concept/industry_sectors(date)`` → 进而按日取 ths_daily /
+        limit_cpt_list。只预取当日/昨日会导致历史那几天逐日回退 dm 并刷告警，故这里用
+        **与分析期同一套交易日历**把整窗一次性预取（同 call_key，保证命中）。
+
+        不预取逐板块的 ths_member / 单板块 ths_daily(ts_code=...) —— 其入参由运行时命中的
+        热点板块决定，无法在预取阶段枚举，留给 Repository 的 _cached 记忆化（按需取一次、
+        后续命中）。键由 ``call_key`` 生成，与 Repository 读取端共用，保证命中。
         """
         dm = self.dm
 
@@ -214,15 +260,29 @@ class DataPrep:
                      lambda it=index_type: dm.get_ths_index(index_type=it))
 
         dates = [d for d in (str(trade_date), str(prev_trade_date)) if d and d != "None"]
+
+        # 持续性窗口：最近 history_days 个交易日（与 analyze_*_persistence 的 date_list 一致）
+        try:
+            from core.utils.date_utils import get_last_n_trade_dates
+            hist_dates = get_last_n_trade_dates(int(history_days), str(trade_date)) or []
+        except Exception:
+            hist_dates = []
+        # 合并去重保序：当日/昨日 + 历史窗口
+        sector_dates: List[str] = list(dates)
+        for d in hist_dates:
+            if d and d != "None" and d not in sector_dates:
+                sector_dates.append(d)
+
         if hasattr(dm, "get_ths_daily"):
-            for d in dates:
+            for d in sector_dates:
                 _try("ths_daily",
                      call_key("ths_daily", ts_code=None, trade_date=d, start_date=None, end_date=None),
                      lambda dd=d: dm.get_ths_daily(trade_date=dd))
 
         if hasattr(dm, "get_limit_cpt_list"):
-            _try("limit_cpt_list", call_key("limit_cpt_list", trade_date=str(trade_date)),
-                 lambda: dm.get_limit_cpt_list(str(trade_date)))
+            for d in sector_dates:
+                _try("limit_cpt_list", call_key("limit_cpt_list", trade_date=d),
+                     lambda dd=d: dm.get_limit_cpt_list(dd))
 
         if hasattr(dm, "get_moneyflow_summary"):
             for d in dates:
@@ -231,7 +291,8 @@ class DataPrep:
 
         prefetched = [k for k in ("ths_index", "ths_daily", "limit_cpt_list", "moneyflow_summary")
                       if k in ds.prefetched]
-        logger.info(f"[DataPrep] 板块/资金流预取：{prefetched}（调用缓存 {len(ds.calls)} 条）")
+        logger.info(f"[DataPrep] 板块/资金流预取：{prefetched}"
+                    f"（板块按日窗口 {len(sector_dates)} 天，调用缓存 {len(ds.calls)} 条）")
 
     def _prefetch_auction(self, ds: MarketDataset, universe: List[str], trade_date: str) -> None:
         """预取 universe 当日集合竞价（逐股；默认关闭，开启会增加运行耗时）。"""
@@ -248,3 +309,43 @@ class DataPrep:
             except Exception as e:
                 logger.debug(f"[DataPrep] auction {code} 预取失败（将回退 dm）：{e}")
         logger.info(f"[DataPrep] auction 预取：{len(universe)} 只 universe，非空 {n_ok} 只 @ {trade_date}")
+
+    # ------------------------------------------------------------------
+    def prefetch_universe_daily(self, ds: MarketDataset,
+                                zt_pool: Optional[pd.DataFrame] = None,
+                                trade_date: str = "",
+                                *,
+                                prev_zt_pool: Optional[pd.DataFrame] = None,
+                                extra_pools: Optional[Iterable[pd.DataFrame]] = None,
+                                extra_codes: Optional[Iterable[str]] = None,
+                                daily_lookback_calendar_days: int = 120,
+                                prefetch_auction: bool = False) -> None:
+        """对已建好的数据集**补预取** universe 个股日线（universe 相关域）。
+
+        用于「分阶段预取」：先在 ``build`` 里把 universe 无关域（all_daily/limit_up/板块）
+        预取好供早期层（如 Layer1）命中，待拿到当日涨停池后，再用本方法把 daily 补进
+        **同一个** ``MarketDataset``——因 Repository 持有该数据集引用，补预取后即可命中，
+        无需重建仓库。等价性与 ``_prefetch_daily`` 完全一致。
+
+        ``extra_pools``：额外纳入 daily universe 的涨停池（如昨日/前日涨停池），覆盖
+        Layer3 情绪引擎对「前日涨停股次日表现」等的逐股 daily 查询。
+        """
+        td = str(trade_date or ds.trade_date)
+        universe: List[str] = []
+        universe += _extract_codes(zt_pool)
+        if prev_zt_pool is not None:
+            universe += _extract_codes(prev_zt_pool)
+        if extra_pools:
+            for pool in extra_pools:
+                universe += _extract_codes(pool)
+        if extra_codes:
+            universe += [_norm_code(c) for c in extra_codes]
+        seen = set()
+        universe = [c for c in universe if not (c in seen or seen.add(c))]
+        ds.meta["universe_size"] = len(universe)
+        if not universe:
+            logger.info("[DataPrep] universe 为空，跳过 daily 补预取")
+            return
+        self._prefetch_daily(ds, universe, td, daily_lookback_calendar_days)
+        if prefetch_auction:
+            self._prefetch_auction(ds, universe, td)

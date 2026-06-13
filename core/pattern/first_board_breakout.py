@@ -582,6 +582,7 @@ class HotspotFirstBoardStrategy:
         1. 非涨停 / 非首板 — 连板数 != 1 或 涨跌幅 < 9.5%
         2. 一字板 — 无换手，次日大概率高开低走
         3. 尾盘板 — 14:30后涨停，偷袭板确定性低
+        4. 流通市值过大 — 大票拉升乏力（涨停池自带字段，零成本）
 
         Returns:
             str: 排除原因，None表示通过Layer 0
@@ -615,6 +616,13 @@ class HotspotFirstBoardStrategy:
             if hour > 14 or (hour == 14 and minute >= 30):
                 return f"尾盘板({limit_up_time})"
 
+        # 5. 流通市值过大排除（仅用涨停池自带字段，零成本）
+        float_cap = float(stock.get('流通市值', 0)) / 100000000  # 亿
+        if isinstance(stock.get('流通市值', 0), str):
+            float_cap = float(str(stock.get('流通市值', '')).replace('亿', ''))
+        if float_cap > self.params['max_float_cap']:
+            return f"市值过大({float_cap:.1f}亿>{self.params['max_float_cap']}亿)"
+
         return None
 
     def _should_skip_stock(self, stock: pd.Series, sector_info: Dict, date_str: str) -> Optional[str]:
@@ -646,7 +654,8 @@ class HotspotFirstBoardStrategy:
         │ Layer 0: 硬性排除（零成本，仅用涨停池自带字段）          │
         │   ├── 非首板/非涨停                                     │
         │   ├── 一字板（无换手）                                  │
-        │   └── 尾盘板（14:30后）                                 │
+        │   ├── 尾盘板（14:30后）                                 │
+        │   └── 流通市值 ≤ 100亿                                   │
         ├─────────────────────────────────────────────────────────┤
         │ Layer 1: 技术结构突破（策略核心，需拉取日线数据）        │
         │   ├── 平台/前高/历史新高突破                             │
@@ -661,7 +670,6 @@ class HotspotFirstBoardStrategy:
         │ Layer 3: 质量指标（硬性过滤）                            │
         │   ├── 涨停时间（动态阈值）                               │
         │   ├── 开板次数 ≤ 1                                      │
-        │   ├── 流通市值 ≤ 100亿                                   │
         │   └── 5日涨幅 ≤ 15%（低位要求）                          │
         ├─────────────────────────────────────────────────────────┤
         │ Layer 4: 板块效应评分 + 信号生成（加分项，非硬排除）     │
@@ -809,11 +817,7 @@ class HotspotFirstBoardStrategy:
         if break_count > self.params['max_break_count']:
             layer3_fail.append(f"开板过多({break_count}次)")
 
-        # 3c. 流通市值 ≤ 100亿
-        if float_cap > self.params['max_float_cap']:
-            layer3_fail.append(f"市值过大({float_cap:.1f}亿)")
-
-        # 3d. 5日涨幅 ≤ 15%（低位启动）
+        # 3c. 5日涨幅 ≤ 15%（低位启动）
         if daily_data and 'rise_5d' in daily_data:
             if daily_data['rise_5d'] >= self.params['max_5d_rise']:
                 layer3_fail.append(f"5日涨幅过高({daily_data['rise_5d']*100:.1f}%)")
@@ -824,7 +828,7 @@ class HotspotFirstBoardStrategy:
 
         logger.info(f"[首板-L3] ✓ {name}({code}) 通过质量指标 "
                     f"(时间{limit_up_time}<{thresholds['max_limit_up_time']}, "
-                    f"开板{break_count}次, 市值{float_cap:.1f}亿, "
+                    f"开板{break_count}次, "
                     f"5日涨幅{daily_data.get('rise_5d', 0)*100:.1f}%)")
 
         # ══════════════════════════════════════════════════════════

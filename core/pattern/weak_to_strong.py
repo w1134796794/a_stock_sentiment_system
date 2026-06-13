@@ -646,7 +646,6 @@ class WeakToStrongStrategy:
                         current_price = stock_daily.iloc[0].get('close', 0)
                         if current_price == 0:
                             current_price = stock_daily.iloc[-1].get('close', 0)
-                        logger.debug(f"[弱转强] 通过data_manager获取{weakening.stock_name}({code})价格: {current_price}")
                 except Exception as e:
                     logger.debug(f"[弱转强] 通过data_manager获取价格失败 {code}: {e}")
             

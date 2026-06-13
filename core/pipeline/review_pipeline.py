@@ -199,9 +199,20 @@ class ReviewPipeline:
         # 解析日期
         self._resolve_dates(ctx)
 
-        # Phase 1：先给一个透传仓库（Layer1 早于基础数据层；_fetch_base_data 会升级为数据集仓库）
+        # Phase 1：Layer1 早于基础数据层。先把 universe 无关域（all_daily/limit_up/板块）预取成
+        # 数据集仓库，供 Layer1 直接命中（消除其 all_daily/limit_up 回退告警）；daily 等 universe
+        # 相关域待 _fetch_base_data 拿到涨停池后补进同一数据集。预取失败则降级纯透传，绝不致命。
         from core.data.repository import StockRepository
         ctx.repo = StockRepository.passthrough(self.dm)
+        # 仅整流程（from_layer<=1，会真正跑 Layer1+基础数据层）才提前预取；按层 resume 保持原透传行为。
+        if from_layer <= 1:
+            try:
+                ctx.dataset = self.data_prep.build(
+                    ctx.trade_date, ctx.prev_trade_date,
+                    index_codes=list(self.layer1.index_codes.values()))
+                ctx.repo = StockRepository(ctx.dataset, dm=self.dm, strict=False)
+            except Exception as e:  # noqa: BLE001 —— 预取永不致命
+                logger.debug(f"[Pipeline] Layer1 前市场域预取失败，将回退 dm：{e}")
 
         logger.info("=" * 80)
         logger.info(f"[ReviewPipeline] 开始执行五层复盘流水线: {ctx.trade_date}")
@@ -431,10 +442,25 @@ class ReviewPipeline:
             except Exception:
                 ctx.hierarchy_df = pd.DataFrame()
 
-        # Phase 1 数据解耦：预取当日只读数据集 + 装配只读仓库（非严格：未命中回退 dm）
+        # Phase 1 数据解耦：装配只读仓库（非严格：未命中回退 dm）。
+        # universe 无关域（all_daily/limit_up/板块）已在 Layer1 前预取进 ctx.dataset；这里只需把
+        # universe 相关的 daily 补进**同一数据集**（复用，避免重复预取），再重建仓库即可。
         try:
-            ctx.dataset = self.data_prep.build(
-                ctx.trade_date, ctx.prev_trade_date, zt_pool=ctx.zt_pool)
+            if getattr(ctx, "dataset", None) is not None:
+                # daily universe 扩展：除今日涨停外，纳入昨日/前日涨停股（其涨停池已在数据集里），
+                # 覆盖 Layer3 情绪引擎对「前日涨停股次日表现」的逐股 daily 查询。
+                extra_pools = []
+                for d in (ctx.prev_trade_date, ctx.day_before_prev):
+                    pool = ctx.dataset.get_limit_up(d) if d else None
+                    if pool is not None and not pool.empty:
+                        extra_pools.append(pool)
+                self.data_prep.prefetch_universe_daily(
+                    ctx.dataset, zt_pool=ctx.zt_pool, trade_date=ctx.trade_date,
+                    extra_pools=extra_pools)
+            else:
+                ctx.dataset = self.data_prep.build(
+                    ctx.trade_date, ctx.prev_trade_date, zt_pool=ctx.zt_pool,
+                    index_codes=list(self.layer1.index_codes.values()))
             ctx.repo = StockRepository(ctx.dataset, dm=self.dm, strict=False)
         except Exception as e:  # 预取/装配失败不致命：回退纯透传
             logger.warning(f"[Pipeline] 数据集预取失败，回退透传仓库：{e}")

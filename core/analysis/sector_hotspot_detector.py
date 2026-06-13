@@ -268,7 +268,7 @@ class HotSpotDetector:
         """计算行业板块涨停统计"""
         limit_up_codes = set()
         try:
-            limit_up_df = self.repo.get_limit_up_pool(date=trade_date)
+            limit_up_df = self.repo.get_limit_up_pool(trade_date)
             if not limit_up_df.empty:
                 code_col = None
                 if '代码' in limit_up_df.columns:
