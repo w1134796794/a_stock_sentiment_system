@@ -68,6 +68,10 @@ class MarketEnvResult:
     bj_index_close: float = 0.0
     bj_index_change_pct: float = 0.0
 
+    # 指数数据实际对应的交易日（用于检测指数 EOD 滞后/缺失）
+    index_trade_date: str = ''
+    index_stale: bool = False
+
     # 趋势判断
     index_trend: MarketTrend = MarketTrend.SIDEWAYS
     trend_score: float = 0.0          # 趋势评分 0-100
@@ -220,6 +224,18 @@ class MarketEnvAnalyzer:
                     df = df.sort_values('trade_date')
                     close = df['close'].values
                     latest_close = float(close[-1]) if len(close) > 0 else 0.0
+
+                    # 指数 EOD 滞后检测：若最新一行不是请求的 trade_date，
+                    # 说明当日指数日线尚未入库，下面取到的是上一交易日的数据。
+                    latest_row_date = str(df['trade_date'].values[-1]) if len(df) > 0 else ''
+                    if latest_row_date and latest_row_date != str(trade_date):
+                        result.index_stale = True
+                        logger.warning(
+                            f"[Layer1] {idx_name}指数日线最新为 {latest_row_date}，"
+                            f"请求日 {trade_date} 数据尚未入库，使用上一交易日数据（请稍后重跑收盘分析刷新）"
+                        )
+                    if idx_name == 'sh':
+                        result.index_trade_date = latest_row_date
 
                     if 'pct_chg' in df.columns and len(df) > 0:
                         change_pct = float(df['pct_chg'].values[-1])
@@ -612,6 +628,8 @@ class MarketEnvAnalyzer:
         """将分析结果转换为字典"""
         return {
             'trade_date': result.trade_date,
+            'index_trade_date': result.index_trade_date or result.trade_date,
+            'index_stale': result.index_stale,
             'sh_index': {'close': result.sh_index_close, 'change_pct': result.sh_index_change_pct},
             'sz_index': {'close': result.sz_index_close, 'change_pct': result.sz_index_change_pct},
             'cyb_index': {'close': result.cyb_index_close, 'change_pct': result.cyb_index_change_pct},

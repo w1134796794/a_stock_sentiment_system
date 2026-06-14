@@ -221,31 +221,70 @@
     {%- endif -%}
   {% endmacro %}
 
-  {# ---------- 资金卡：龙虎榜 / 资金流向 ---------- #}
-  {% macro render_capital_cards(columns, rows) %}
+  {# ---------- 资金卡：龙虎榜 / 资金流向（去金额，主看结构/信誉/相对占比） ---------- #}
+  {% macro render_capital_cards(columns, rows, name) %}
   {% if not rows %}
     <div class="text-slate-500 text-sm py-4">无数据</div>
   {% else %}
+    {% set is_lhb = (name == '龙虎榜') %}
     <div class="cap-grid">
       {% for r in rows %}
-      {% set net = r.get('净买入(万)') if '净买入(万)' in columns else r.get('主力净流入(万)') %}
-      {% set net_n = net | float(0) %}
       <div class="cap-card">
         <div class="cap-top">
           <span class="cap-name">{{ r.get('股票名称') or r.get('股票代码') }}</span>
           <span class="cap-code mono">{{ r.get('股票代码') }}</span>
         </div>
-        <div class="cap-net mono {% if net_n > 0 %}up{% elif net_n < 0 %}down{% endif %}">
-          {{ '+' if net_n > 0 else '' }}{{ net | num2 }}<small>万</small>
-        </div>
-        <div class="cap-sub">
-          {% if '信誉加权净(万)' in columns %}<span>信誉净 <b class="mono">{{ r.get('信誉加权净(万)') | num2 }}</b></span>{% endif %}
-          {% if '买方信誉' in columns and r.get('买方信誉') %}<span class="cap-badge">{{ r.get('买方信誉') }}</span>{% endif %}
-          {% if '席位数' in columns %}<span class="mono">{{ r.get('席位数') }} 席</span>{% endif %}
-          {% if '散户净流入(万)' in columns %}<span>散户 <b class="mono">{{ r.get('散户净流入(万)') | num2 }}</b></span>{% endif %}
-          {% if '方向' in columns and r.get('方向') %}<span class="cap-badge {% if r.get('方向') == '流入' %}cap-in{% else %}cap-out{% endif %}">{{ r.get('方向') }}</span>{% endif %}
-        </div>
-        {% if r.get('主要席位') %}<div class="cap-seats">{{ r.get('主要席位') }}</div>{% endif %}
+
+        {% if is_lhb %}
+          {# ===== 龙虎榜：买方信誉 + 净买卖方向 + 席位结构 ===== #}
+          {% set flag = r.get('买方信誉') %}
+          {% set netdir = r.get('净向') %}
+          {% if not netdir and r.get('信誉加权净(万)') is not none %}
+            {% set rn = r.get('信誉加权净(万)') | float(0) %}
+            {% set netdir = '净买' if rn > 0 else ('净卖' if rn < 0 else '') %}
+          {% endif %}
+          <div class="cap-tags">
+            {% if flag %}<span class="cap-flag {% if '黑' in flag %}bad{% elif '白' in flag %}good{% else %}neu{% endif %}">{{ flag }}</span>{% endif %}
+            {% if netdir %}<span class="cap-dir {% if netdir == '净买' %}up{% elif netdir == '净卖' %}down{% endif %}">{{ netdir }}</span>{% endif %}
+            {% if r.get('机构') %}<span class="cap-inst {% if r.get('机构') == '机构买' %}up{% else %}down{% endif %}">{{ r.get('机构') }}</span>{% endif %}
+          </div>
+          <div class="cap-sub">
+            {% if r.get('买席') is not none %}<span>买<b class="up">{{ r.get('买席') }}</b> / 卖<b class="down">{{ r.get('卖席') }}</b> 席</span>
+            {% elif r.get('席位数') is not none %}<span class="mono">{{ r.get('席位数') }} 席</span>{% endif %}
+            {% if r.get('信誉构成') %}<span class="cap-rep mono">{{ r.get('信誉构成') }}</span>{% endif %}
+          </div>
+          {% set br = r.get('买盘占比') %}
+          {% if br is not none and br != '' %}
+          <div class="cap-bar"><span class="cap-bar-k">买盘占比</span><span class="cap-bar-t"><i style="width:{{ br | float(0) }}%"></i></span><span class="cap-bar-v mono">{{ br }}%</span></div>
+          {% endif %}
+          {% if r.get('主要席位') %}<div class="cap-seats">{{ r.get('主要席位') }}</div>{% endif %}
+
+        {% else %}
+          {# ===== 资金流向：主力方向 + 净占比% + 主力/散户结构 ===== #}
+          {% set dir = r.get('方向') %}
+          {% set mr = r.get('主力净占比') %}
+          <div class="cap-tags">
+            {% if dir %}<span class="cap-dir-badge {% if dir == '流入' %}up{% else %}down{% endif %}">主力{{ dir }}</span>{% endif %}
+            {% if mr is not none and mr != '' %}<span class="cap-pct mono {% if mr | float(0) >= 0 %}up{% else %}down{% endif %}">净占比 {{ mr }}%</span>{% endif %}
+          </div>
+          {% set struct = r.get('结构') %}
+          {% if not struct or struct == '—' %}
+            {% set mn = r.get('主力净流入(万)') %}{% set rnn = r.get('散户净流入(万)') %}
+            {% if mn is not none and rnn is not none %}
+              {% set mnf = mn | float(0) %}{% set rnf = rnn | float(0) %}
+              {% if mnf > 0 and rnf <= 0 %}{% set struct = '主力吸筹·散户离场' %}
+              {% elif mnf > 0 and rnf > 0 %}{% set struct = '主力散户齐买' %}
+              {% elif mnf < 0 and rnf > 0 %}{% set struct = '主力派发·散户接盘' %}
+              {% elif mnf < 0 and rnf < 0 %}{% set struct = '主力散户齐卖' %}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+          {% if struct and struct != '—' %}<div class="cap-struct">{{ struct }}</div>{% endif %}
+          {% set br = r.get('买盘占比') %}
+          {% if br is not none and br != '' %}
+          <div class="cap-bar"><span class="cap-bar-k">买盘占比</span><span class="cap-bar-t"><i style="width:{{ br | float(0) }}%"></i></span><span class="cap-bar-v mono">{{ br }}%</span></div>
+          {% endif %}
+        {% endif %}
       </div>
       {% endfor %}
     </div>
@@ -347,7 +386,7 @@
 
   {# ---------- 智能混搭分发 ---------- #}
   {% macro render_smart(columns, rows, name) %}
-    {%- if name in ['龙虎榜', '资金流向'] -%}{{ render_capital_cards(columns, rows) }}
+    {%- if name in ['龙虎榜', '资金流向'] -%}{{ render_capital_cards(columns, rows, name) }}
     {%- elif name == '复盘总结' -%}{{ render_winrate_cards(rows) }}
     {%- elif name == '周期模式胜率' -%}{{ render_winrate_matrix(columns, rows) }}
     {%- elif name == '因子原始数据' -%}{{ render_factor_heat(columns, rows) }}
@@ -497,14 +536,37 @@
   .cap-top { display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; }
   .cap-name { font-weight:700; color:#f1f5f9; font-size:.92rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cap-code { font-size:.68rem; color:#64748b; flex:0 0 auto; }
-  .cap-net { font-size:1.55rem; font-weight:800; color:#e2e8f0; line-height:1; margin-top:.5rem; }
-  .cap-net small { font-size:.7rem; font-weight:600; opacity:.7; margin-left:2px; }
-  .cap-net.up { color:#ff5d5d; } .cap-net.down { color:#3ddc97; }
+  /* 标签行：信誉 / 净买卖方向 / 机构 / 主力方向 */
+  .cap-tags { display:flex; flex-wrap:wrap; align-items:center; gap:.4rem; margin-top:.55rem; }
+  .cap-flag { font-size:.74rem; font-weight:700; padding:.12rem .5rem; border-radius:.4rem;
+              background:rgba(100,116,139,.2); color:#cbd5e1; }
+  .cap-flag.good { background:rgba(56,189,248,.16); color:#7dd3fc; border:1px solid rgba(56,189,248,.4); }
+  .cap-flag.bad { background:rgba(244,63,94,.18); color:#fda4af; border:1px solid rgba(244,63,94,.5); }
+  .cap-flag.neu { background:rgba(100,116,139,.18); color:#cbd5e1; }
+  .cap-dir, .cap-inst { font-size:.7rem; font-weight:700; padding:.1rem .45rem; border-radius:.4rem;
+                        background:rgba(100,116,139,.18); color:#cbd5e1; }
+  .cap-dir.up, .cap-inst.up { background:rgba(255,93,93,.16); color:#fca5a5; }
+  .cap-dir.down, .cap-inst.down { background:rgba(61,220,151,.16); color:#6ee7b7; }
+  .cap-dir-badge { font-size:.78rem; font-weight:800; padding:.12rem .55rem; border-radius:.45rem; }
+  .cap-dir-badge.up { background:rgba(255,93,93,.18); color:#fca5a5; }
+  .cap-dir-badge.down { background:rgba(61,220,151,.18); color:#6ee7b7; }
+  .cap-pct { font-size:.82rem; font-weight:800; }
+  .cap-pct.up { color:#ff5d5d; } .cap-pct.down { color:#3ddc97; }
   .cap-sub { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem .7rem; margin-top:.5rem; font-size:.72rem; color:#94a3b8; }
-  .cap-sub b { color:#cbd5e1; }
-  .cap-badge { font-size:.66rem; padding:.08rem .42rem; border-radius:.35rem; background:rgba(100,116,139,.2); color:#cbd5e1; }
-  .cap-badge.cap-in { background:rgba(255,93,93,.16); color:#fca5a5; }
-  .cap-badge.cap-out { background:rgba(61,220,151,.16); color:#6ee7b7; }
+  .cap-sub b { font-family:'JetBrains Mono', monospace; }
+  .cap-sub b.up { color:#ff8c8c; } .cap-sub b.down { color:#6ee7b7; }
+  .cap-rep { background:rgba(2,6,23,.55); border:1px solid rgba(51,65,85,.6); border-radius:.35rem;
+             padding:.05rem .4rem; color:#cbd5e1; }
+  .cap-struct { margin-top:.55rem; font-size:.76rem; font-weight:600; color:#cbd5e1;
+                background:rgba(2,6,23,.5); border:1px solid rgba(51,65,85,.5);
+                border-radius:.4rem; padding:.22rem .5rem; display:inline-block; }
+  /* 买盘占比横条 */
+  .cap-bar { display:flex; align-items:center; gap:.45rem; margin-top:.6rem; font-size:.68rem; color:#94a3b8; }
+  .cap-bar-k { flex:0 0 auto; }
+  .cap-bar-t { flex:1 1 auto; height:6px; border-radius:3px; background:rgba(51,65,85,.5); overflow:hidden; }
+  .cap-bar-t i { display:block; height:100%; border-radius:3px;
+                 background:linear-gradient(90deg,#38bdf8,#34d399); }
+  .cap-bar-v { flex:0 0 auto; color:#cbd5e1; }
   .cap-seats { margin-top:.55rem; padding-top:.5rem; border-top:1px solid rgba(51,65,85,.4);
                font-size:.66rem; color:#64748b; line-height:1.5; max-height:4.4em; overflow:hidden; }
   /* ===== 模式胜率卡：复盘总结 ===== */

@@ -70,8 +70,14 @@ class MarketDataManager(DataManagerBase):
         if cache_file.exists():
             try:
                 df = pd.read_csv(cache_file)
-                if not df.empty:
+                if not df.empty and not self._index_cache_is_stale(df, end_date):
                     return df
+                if not df.empty:
+                    # 缓存命中但数据未覆盖到应有的最新交易日（首次抓取时当日指数 EOD 尚未发布），
+                    # 视为不完整缓存，丢弃后重新抓取，避免长期返回上一交易日的过期数据。
+                    logger.warning(
+                        f"[get_index_daily] {ts_code} 缓存数据未覆盖到 {end_date} 应有的最新交易日，重新抓取"
+                    )
             except Exception:
                 pass
 
@@ -92,6 +98,22 @@ class MarketDataManager(DataManagerBase):
         except Exception as e:
             logger.error(f"[get_index_daily] {ts_code} 获取失败: {e}")
             return pd.DataFrame()
+
+    def _index_cache_is_stale(self, df: pd.DataFrame, end_date: str) -> bool:
+        """判断指数日线缓存是否过期（未覆盖到 end_date 对应的最新交易日）。
+
+        end_date 对应的「应有最新交易日」= ≤ end_date 的最近交易日。
+        - 历史完整区间 / 节假日结尾：缓存已覆盖该日 → 不过期，命中缓存。
+        - 拉边场景（end_date 当日 EOD 尚未发布）：缓存最大日 < 应有日 → 过期，重抓。
+        """
+        try:
+            if 'trade_date' not in df.columns or df.empty:
+                return False
+            expected_last = self.date_utils.get_nearest_trade_date(str(end_date))
+            cached_max = str(df['trade_date'].astype(str).max())
+            return cached_max < str(expected_last)
+        except Exception:
+            return False
 
     def get_limit_up_pool(self, date: str) -> pd.DataFrame:
         """获取涨停池数据（使用Tushare limit_list_d接口）"""

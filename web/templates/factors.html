@@ -111,6 +111,59 @@
   {% endif %}
 </section>
 
+{# ===================== 2.5 生命周期 / 仲裁参数 ===================== #}
+{% if state.param_groups %}
+<section class="mb-8">
+  <h2 class="text-lg font-bold text-emerald-300 mb-3">生命周期 / 仲裁参数</h2>
+  <p class="text-xs text-slate-500 mb-3">
+    龙头生命周期阶段窗口、龙二波候选来源、跨策略仲裁与情绪路由。改动写入
+    <span class="mono">patterns</span> 覆盖，下次跑批生效。
+  </p>
+  {% for g in state.param_groups %}
+  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" open>
+    <summary class="cursor-pointer select-none px-4 py-2.5 font-semibold text-slate-200 hover:bg-slate-800/40 flex items-center gap-2">
+      <span>{{ g.label }}</span>
+      <span class="text-xs text-slate-500 mono">{{ g.params|length }} 项</span>
+    </summary>
+    <div class="border-t border-slate-800">
+      <table class="w-full text-sm">
+        <tbody>
+          {% for pr in g.params %}
+          <tr class="border-b border-slate-800/60 hover:bg-slate-800/20">
+            <td class="px-4 py-2 align-top">
+              <span class="mono text-slate-200">{{ pr.key }}</span>
+              {% if pr.overridden %}
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 ml-1">已改</span>
+              {% endif %}
+              {% if pr.desc %}
+              <div class="text-xs text-slate-500 mt-0.5">{{ pr.desc }}</div>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2 align-middle text-right w-48">
+              {% if pr.type == 'bool' %}
+              <select class="fp-param mono bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
+                      data-scope="patterns" data-path="{{ pr.override_path }}" data-type="bool">
+                <option value="true" {% if pr.value %}selected{% endif %}>true</option>
+                <option value="false" {% if not pr.value %}selected{% endif %}>false</option>
+              </select>
+              {% else %}
+              <input type="{{ 'number' if pr.type == 'num' else 'text' }}"
+                     {% if pr.type == 'num' %}step="any"{% endif %}
+                     value="{{ pr.value }}"
+                     class="fp-param mono bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm w-40 text-right focus:outline-none focus:border-emerald-500"
+                     data-scope="patterns" data-path="{{ pr.override_path }}" data-type="{{ pr.type }}">
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+
 {# ===================== 3. 因子开关 ===================== #}
 <section class="mb-8">
   <h2 class="text-lg font-bold text-emerald-300 mb-3">因子开关</h2>
@@ -179,6 +232,15 @@
   });
   document.querySelectorAll('.fp-mode').forEach(sel => {
     sel.addEventListener('change', () => applyUpdate(sel.dataset.scope, sel.dataset.path, sel.value));
+  });
+  document.querySelectorAll('.fp-param').forEach(el => {
+    el.addEventListener('change', () => {
+      const t = el.dataset.type;
+      let v = el.value;
+      if (t === 'num') { v = Number(v); if (Number.isNaN(v)) { showToast('请输入数字 · ' + el.dataset.path, false); return; } }
+      else if (t === 'bool') { v = (el.value === 'true'); }
+      applyUpdate(el.dataset.scope, el.dataset.path, v);
+    });
   });
   const forced = document.getElementById('fp-forced');
   if (forced) forced.addEventListener('change', () => applyUpdate(forced.dataset.scope, forced.dataset.path, forced.value));
