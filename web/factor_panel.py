@@ -111,6 +111,9 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
     profiles.sort(key=lambda p: p["name"])
     forced_profile = str(settings_store.get("FACTOR_PROFILE_OVERRIDE", "") or "")
 
+    # ---- 生命周期 / 仲裁等可调参数组（Phase 6：暴露标量参数，经 patterns 覆盖即时生效）----
+    param_groups = _build_tunable_param_groups(pat_store)
+
     return {
         "factor_groups": factor_groups,
         "factor_total": total,
@@ -121,8 +124,52 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
         "profile_names": [p["name"] for p in profiles],
         "forced_profile": forced_profile,
         "active_profile": active_profile or "",
+        "param_groups": param_groups,
         "override_count": _count(yaml_store) + _count(pat_store) + _count(settings_store),
     }
+
+
+# 面板暴露的可调参数组（仅标量参数；嵌套 dict/list 如 emotion_routing 不在此编辑）
+TUNABLE_PARAM_GROUPS = ("dragon_lifecycle", "arbitration")
+_PARAM_GROUP_LABELS = {
+    "dragon_lifecycle": "龙头生命周期 · 阶段窗口/切源",
+    "arbitration": "跨策略仲裁 · 择主/共振/情绪路由",
+}
+
+
+def _build_tunable_param_groups(pat_store: Dict[str, Any]) -> List[Dict[str, Any]]:
+    from config import pattern_params as pp
+    from config.param_docs import PATTERN_DESC
+
+    out: List[Dict[str, Any]] = []
+    for grp in TUNABLE_PARAM_GROUPS:
+        eff = pp.get_params(grp) or {}
+        ov_keys = (pat_store.get(grp, {}) or {})
+        params: List[Dict[str, Any]] = []
+        for key, val in eff.items():
+            if isinstance(val, bool):
+                ptype = "bool"
+            elif isinstance(val, (int, float)):
+                ptype = "num"
+            elif isinstance(val, str):
+                ptype = "str"
+            else:
+                continue  # 跳过嵌套 dict/list（如 emotion_routing/emotion_gate）
+            params.append({
+                "key": key,
+                "value": val,
+                "type": ptype,
+                "desc": PATTERN_DESC.get(grp, {}).get(key, ""),
+                "override_path": f"{grp}.{key}",
+                "overridden": key in ov_keys,
+            })
+        if params:
+            out.append({
+                "group": grp,
+                "label": _PARAM_GROUP_LABELS.get(grp, grp),
+                "params": params,
+            })
+    return out
 
 
 def _count(d: Any) -> int:

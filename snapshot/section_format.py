@@ -228,12 +228,31 @@ def format_lhb(data: Dict[str, Any]) -> Dict[str, Any]:
         has_bad = any(_f(s.get("net_amount")) > 0 and s.get("label") == "黑" for s in seats)
         has_good = any(_f(s.get("net_amount")) > 0 and s.get("label") == "白" for s in seats)
         flag = "黑买入⚠" if has_bad else ("白买入" if has_good else "中性")
+        # —— 席位结构（去金额、看构成）——
+        buy_seats = sum(1 for s in seats if _f(s.get("net_amount")) > 0)
+        sell_seats = sum(1 for s in seats if _f(s.get("net_amount")) < 0)
+        w = sum(1 for s in seats if s.get("label") == "白")
+        g = sum(1 for s in seats if s.get("label") == "灰")
+        k = sum(1 for s in seats if s.get("label") == "黑")
+        buy_amt = sum(_f(s.get("buy_amount")) for s in seats)
+        sell_amt = sum(_f(s.get("sell_amount")) for s in seats)
+        tot_amt = buy_amt + sell_amt
+        # —— 机构专用席位方向 ——
+        inst_seats = [s for s in seats if "机构专用" in str(s.get("hm_name", ""))]
+        inst_net = sum(_f(s.get("net_amount")) for s in inst_seats)
+        inst = "" if not inst_seats else ("机构买" if inst_net > 0 else "机构卖")
         stock_rows.append({
             "股票代码": prof.get("ts_code", ""),
             "股票名称": prof.get("ts_name", ""),
             "净买入(万)": _wan(total_net),
             "信誉加权净(万)": _wan(rep_net),
             "买方信誉": flag,
+            "净向": "净买" if rep_net > 0 else ("净卖" if rep_net < 0 else "持平"),
+            "买席": buy_seats,
+            "卖席": sell_seats,
+            "信誉构成": f"白{w}/灰{g}/黑{k}",
+            "买盘占比": round(buy_amt / tot_amt * 100, 1) if tot_amt > 0 else 0,
+            "机构": inst,
             "席位数": len(seats),
             "主要席位": _seats_summary(seats, top=4),
             "_rep": rep_net,
@@ -243,8 +262,9 @@ def format_lhb(data: Dict[str, Any]) -> Dict[str, Any]:
     for r in stock_rows:
         r.pop("_rep", None)
 
-    stock_cols = ["股票代码", "股票名称", "净买入(万)", "信誉加权净(万)",
-                  "买方信誉", "席位数", "主要席位"]
+    stock_cols = ["股票代码", "股票名称", "净向", "买方信誉", "买席", "卖席",
+                  "信誉构成", "买盘占比", "机构", "席位数", "主要席位",
+                  "净买入(万)", "信誉加权净(万)"]
     blocks = [{
         "title": f"上榜个股（按信誉加权净买入排序 · {trade_date}）",
         "columns": stock_cols, "rows": stock_rows,
@@ -286,27 +306,46 @@ def format_lhb(data: Dict[str, Any]) -> Dict[str, Any]:
 # ----------------------------------------------------------------------
 # 4. 资金流向
 # ----------------------------------------------------------------------
+def _flow_structure(main_net: float, retail_net: float) -> str:
+    """主力/散户资金的相对结构信号（不依赖金额绝对值）。"""
+    if main_net > 0 and retail_net <= 0:
+        return "主力吸筹·散户离场"
+    if main_net > 0 and retail_net > 0:
+        return "主力散户齐买"
+    if main_net < 0 and retail_net > 0:
+        return "主力派发·散户接盘"
+    if main_net < 0 and retail_net < 0:
+        return "主力散户齐卖"
+    return "—"
+
+
 def format_moneyflow(data: Dict[str, Any]) -> Dict[str, Any]:
     data = data or {}
     rows: List[Dict[str, Any]] = []
     for code, info in data.items():
         info = info or {}
+        main_net = _f(info.get("main_net"))
+        retail_net = _f(info.get("retail_net"))
         rows.append({
             "股票代码": code,
             "股票名称": info.get("name", ""),
+            "方向": info.get("direction", ""),
+            "主力净占比": info.get("main_net_ratio"),   # %（采集层新增；旧快照为空）
+            "买盘占比": info.get("buy_ratio"),            # %（采集层新增；旧快照为空）
+            "结构": _flow_structure(main_net, retail_net),
             "主力净流入(万)": _round(info.get("main_net"), 0),
             "散户净流入(万)": _round(info.get("retail_net"), 0),
-            "方向": info.get("direction", ""),
-            "_m": _f(info.get("main_net")),
+            "_m": main_net,
         })
     rows.sort(key=lambda x: x.get("_m", 0.0), reverse=True)
     for r in rows:
         r.pop("_m", None)
 
-    columns = ["股票代码", "股票名称", "主力净流入(万)", "散户净流入(万)", "方向"]
+    columns = ["股票代码", "股票名称", "方向", "主力净占比", "买盘占比", "结构",
+               "主力净流入(万)", "散户净流入(万)"]
     return {
         "name": "资金流向", "kind": "table", "columns": columns, "rows": rows,
-        "note": "主力 = 大单+特大单；散户 = 小单。金额单位：万元。",
+        "note": "主力净占比 = 主力净流入 / 当日总成交额；买盘占比 = 总买额 / 总成交额；结构看主力与散户资金的相对方向。",
     }
 
 

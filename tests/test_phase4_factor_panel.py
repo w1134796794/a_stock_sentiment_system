@@ -79,6 +79,29 @@ def test_build_factor_state_structure():
     assert st["confidence_modes"] == ["legacy", "deduction"]
 
 
+def test_param_groups_exposed_and_tunable(overrides_sandbox):
+    """Phase 6：生命周期/仲裁参数组在面板暴露，且经 patterns 覆盖即时生效。"""
+    from config.config_loader import get_config_loader
+    from web.factor_panel import build_factor_state
+
+    st = build_factor_state()
+    groups = {g["group"] for g in st["param_groups"]}
+    assert {"dragon_lifecycle", "arbitration"} <= groups
+    # 标量参数被暴露、嵌套 dict（emotion_routing）被跳过
+    arb = next(g for g in st["param_groups"] if g["group"] == "arbitration")
+    keys = {p["key"] for p in arb["params"]}
+    assert "mode" in keys and "resonance_bonus" in keys
+    assert "emotion_routing" not in keys  # 嵌套 dict 不在标量编辑面板
+
+    # 覆盖 dragon_lifecycle.wts_max_watch_days → get_params 生效
+    ov.set_override("patterns", "dragon_lifecycle.wts_max_watch_days", 8)
+    get_config_loader().reload_config()
+    assert pp.get_params("dragon_lifecycle")["wts_max_watch_days"] == 8
+    ov.clear_override("patterns", "dragon_lifecycle.wts_max_watch_days")
+    get_config_loader().reload_config()
+    assert pp.get_params("dragon_lifecycle")["wts_max_watch_days"] == 5
+
+
 def test_forced_profile_overrides_cycle(monkeypatch):
     """FACTOR_PROFILE_OVERRIDE 非空时压过当日情绪周期。"""
     import config.settings as settings

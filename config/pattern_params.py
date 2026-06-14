@@ -83,6 +83,86 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
         # 支持 0.07 / 7 / "7%" 多种写法（>1 视为百分数）。
         "intraday_recovery_pct": 0.07,
     },
+    # 龙头生命周期注册中心（Phase 1：弱转强×龙二波统一身份/阶段划分）
+    # 用于把"前龙身份+所处阶段"收敛为单一事实来源；阶段窗口可经覆盖调参。
+    "dragon_lifecycle": {
+        # —— 弱转强信号域（早段/浅调反包）——
+        "wts_max_watch_days": 5,       # 走弱后纳入「弱转强」观察的最长天数（按距走弱日）
+        "wts_max_drawdown": 0.20,      # 弱转强允许的最大回调（超过疑似A杀，淘汰）
+        # —— 龙二波信号域（中段/充分调整二波）——
+        "dsw_min_adjust_days": 2,      # 龙二波最小调整天数（按距高点）
+        "dsw_max_adjust_days": 15,     # 龙二波最大调整天数
+        "dsw_min_adjust_depth": 0.05,  # 龙二波最小调整深度
+        "dsw_max_adjust_depth": 0.30,  # 龙二波最大调整深度
+        # —— 交接带：落在 [wts_max_watch_days, dsw_min_adjust_days] 视为两策略都可命中，交仲裁层 ——
+        "handoff_overlap_enabled": True,
+        # —— 全局淘汰 ——
+        "expire_max_days_since_peak": 20,  # 距高点超过此天数从生命周期淘汰
+        # —— 龙二波候选来源（Phase 3 切源）——
+        # "registry": 候选身份改读注册中心——先用"触发前前龙枚举器"把今日涨停票里的前龙
+        #             (调整窗内)并入注册中心龙二波域，再取"今日触发 ∩ 注册中心龙二波域"为候选。
+        #             枚举器是龙二波 L1 身份门的超集 → 对最终信号零 diff，且身份来源唯一化。
+        # "legacy":  旧逻辑（遍历今日全市场，detect_second_wave 内部各自重建前龙）。可回滚。
+        "dsw_candidate_source": "registry",
+    },
+    # 跨策略信号仲裁（Phase 4）：同票多策略命中时择主/去重/协同
+    "arbitration": {
+        "enabled": True,           # 是否运行仲裁（关闭则完全不介入）
+        # 作用模式：annotate=仅标注(零diff)；reweight=共振主信号加权；dedup=剔除被抑制信号
+        "mode": "annotate",
+        "resonance_bonus": 0.05,   # 多策略共振时主信号置信度加权上限
+        "resonance_max_confidence": 0.98,  # 共振加权后的置信度封顶
+        # —— Phase 5 情绪周期路由/闸门（默认空→不介入，零 diff）——
+        # 择主优先级偏移：{情绪: {策略: 偏移}}，如 {"退潮期": {"弱转强": -2, "龙二波": 1}}
+        "emotion_routing": {},
+        # 情绪闸门：{情绪: [本日整体抑制的策略]}，如 {"退潮期": ["首板突破"]}
+        "emotion_gate": {},
+    },
+    # 弱转强 Layer4 多维评分阈值（detect_weak_to_strong 的竞价/技术/资金/情绪维度）
+    # 历史上这些阈值与分值硬编码在 pattern_recognition 里，现统一收敛，支持网页/覆盖调参。
+    "weak_to_strong_scoring": {
+        # —— 竞价量价维度（满分 = auction_cap）——
+        "auction_cap": 25,
+        "auction_gap_high": 0.05, "auction_gap_high_pts": 15,   # 高开≥5% 加分
+        "auction_gap_mid": 0.03, "auction_gap_mid_pts": 10,     # 高开≥3% 加分
+        "auction_gap_low": 0.02, "auction_gap_low_pts": 5,      # 高开≥2% 加分
+        "auction_vol_high": 0.15, "auction_vol_high_pts": 10,   # 竞价量比≥15% 加分
+        "auction_vol_mid": 0.10, "auction_vol_mid_pts": 5,      # 竞价量比≥10% 加分
+        "auction_amount_threshold": 10000000, "auction_amount_pts": 5,  # 竞价金额≥阈值 加分
+        # —— 技术形态维度（满分 20）——
+        "tech_above_ma5_pts": 8,                                # 收盘站上5日均线
+        "tech_ma5_turnup_pts": 5,                               # 5日均线拐头向上
+        "tech_vol_breakout_ratio": 1.5, "tech_vol_breakout_pts": 5,  # 量能突破5日均量倍数
+        "tech_yang_pts": 2,                                     # 收盘>开盘（阳线）
+        # —— 资金流入维度（满分 25）——
+        "capital_lookback_days": 3,                             # 资金流向回溯交易日数
+        "capital_net_inflow_pts": 10,                           # 主力净流入为正
+        "capital_big_ratio_high": 0.20, "capital_big_ratio_high_pts": 10,  # 大单净占比≥20%
+        "capital_big_ratio_mid": 0.10, "capital_big_ratio_mid_pts": 5,     # 大单净占比≥10%
+        "capital_persist_days": 2, "capital_persist_pts": 5,    # 近N日主力净流入为正≥M天
+        # —— 市场情绪维度（满分 20）——
+        "sector_limit_up_high": 3, "sector_limit_up_high_pts": 10,  # 板块涨停≥3家
+        "sector_limit_up_low": 1, "sector_limit_up_low_pts": 5,     # 板块涨停≥1家
+        "sector_change_high": 2.0, "sector_change_high_pts": 10,    # 板块涨幅≥2%
+        "sector_change_low": 1.0, "sector_change_low_pts": 5,       # 板块涨幅≥1%
+        # —— 总分门槛（按龙头类型动态）——
+        "min_total_strong_dragon": 45,   # 连板龙头 且 最高板≥5
+        "min_total_dragon": 50,          # 连板龙头
+        "min_total_trend": 55,           # 趋势龙头
+        # —— 信号级别标签门槛 ——
+        "signal_level_strong": 80,       # ≥此分为「强烈信号」
+        "signal_level_confirm": 65,      # ≥此分为「确认信号」
+        # —— P4 日内反转（当日入池走弱→当日涨停收复）兜底置信度 ——
+        # confidence_mode=deduction 时该路径改走统一扣分制；legacy 时用此固定值。
+        "intraday_reversal_confidence": 0.65,
+        # —— 高开低走/冲高回落排除（仅作用于"非涨停大涨/竞价转强"候选）——
+        # "转强"不应把开得高却收盘走弱的接力失败票算进来。涨停票收在板上不受此约束。
+        "intraday_fade_guard_enabled": True,
+        # 收盘较开盘回落 > 此比例 且为阴线(收<开) → 判冲高回落，淘汰。0.03=回落3%。
+        "intraday_fade_max_from_open": 0.03,
+        # 收盘较当日最高回落 > 此比例 → 判冲高回落，淘汰（不论阴阳线）。0.06=距高点6%。
+        "intraday_fade_max_from_high": 0.06,
+    },
     # 二板定龙 SecondBoardDragon.params（基础）
     "second_board_dragon": {
         "min_seal_ratio": 0.08,
@@ -199,6 +279,8 @@ PATTERN_DEFAULTS: Dict[str, Dict[str, Any]] = {
 PATTERN_GROUP_LABELS: Dict[str, str] = {
     "dragon_second_wave": "龙二波 · 识别参数",
     "weak_to_strong": "弱转强 · 识别参数",
+    "weak_to_strong_scoring": "弱转强 · Layer4 多维评分阈值",
+    "dragon_lifecycle": "龙头生命周期 · 阶段窗口",
     "second_board_dragon": "二板定龙 · 基础参数",
     "second_board_dragon_strict": "二板定龙 · 严格模式参数",
     "first_board_breakout": "首板突破 · 识别参数",

@@ -16,7 +16,7 @@ from pathlib import Path
 # 允许以 `python desktop/manager.py` 直接运行（把项目根加入 sys.path）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-WINDOW_TITLE = "A股情绪系统 · 管理控制台"
+WINDOW_TITLE = "A股短线情绪 · 管理控制台"
 
 
 class _NullStream(io.TextIOBase):
@@ -100,5 +100,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

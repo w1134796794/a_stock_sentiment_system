@@ -221,7 +221,8 @@ class StockSelectionLayer:
             self._pattern_recognition.set_repo(self.repo)
 
         result.patterns = self._pattern_recognition.scan_all_patterns(
-            trade_date, prev_trade_date, hot_sectors=hot_sectors or []
+            trade_date, prev_trade_date, hot_sectors=hot_sectors or [],
+            market_emotion=getattr(result, "emotion_cycle", "") or ""
         )
 
         total_signals = sum(len(v) for v in result.patterns.values())
@@ -324,6 +325,8 @@ class StockSelectionLayer:
                             'main_net': mf_result.main_net_amount,
                             'retail_net': mf_result.retail_net_amount,
                             'direction': '流入' if mf_result.main_net_amount > 0 else '流出',
+                            'buy_ratio': round(mf_result.buy_ratio, 1),
+                            'main_net_ratio': round(mf_result.main_net_ratio, 1),
                         }
 
                     chip_result = self._chip_analyzer.analyze_chip_structure(

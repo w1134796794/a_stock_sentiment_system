@@ -10,13 +10,14 @@
 """
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import loguru
 
 # PatternSignal 统一契约位于 core.pattern.base
 from core.pattern.base import PatternSignal  # noqa: F401  re-export for backward compat
+from core.pattern.dragon_lifecycle import DragonLifecycleRegistry, DragonPhase
 from config.pattern_params import get_params
 
 logger = loguru.logger
@@ -24,14 +25,6 @@ logger = loguru.logger
 
 class PatternRecognition:
     """模式识别引擎 - 统一调度各策略模块"""
-
-    STRATEGY_PARAM_GROUPS = {
-        "弱转强": "weak_to_strong",
-        "二板定龙": "second_board_dragon",
-        "首板突破": "first_board_breakout",
-        "龙二波": "dragon_second_wave",
-        "龙头二波": "dragon_second_wave",
-    }
 
     def __init__(self, data_manager, sector_engine=None, mapper=None, repo=None):
         self.dm = data_manager
@@ -45,6 +38,12 @@ class PatternRecognition:
             from core.data.repository import StockRepository
             repo = StockRepository.passthrough(data_manager)
         self.repo = repo
+
+        # 弱转强 Layer4 多维评分阈值（可经 webdata/config_overrides.json 覆盖）
+        self.wts_scoring = get_params("weak_to_strong_scoring")
+
+        # 龙头生命周期视图（每次 detect_weak_to_strong 重建；见 dragon_lifecycle.py）
+        self._lifecycle: Optional[DragonLifecycleRegistry] = None
 
         # 初始化各策略模块
         self._init_strategies()
@@ -94,49 +93,6 @@ class PatternRecognition:
         except Exception as e:
             logger.warning(f"✗ 龙二波策略加载失败: {e}")
             self.dragon_second_wave = None
-
-    @staticmethod
-    def _normalize_confidence_threshold(value, default: float = 0.0) -> float:
-        """置信度阈值统一成 0~1；兼容 0.6、60、"60%"。"""
-        try:
-            if value is None or value == "":
-                v = float(default)
-            elif isinstance(value, str):
-                v = float(value.strip().replace("%", ""))
-            else:
-                v = float(value)
-        except Exception:
-            v = float(default)
-        if v > 1:
-            v = v / 100.0
-        return max(0.0, min(1.0, v))
-
-    def _strategy_min_confidence(self, pattern_type: str) -> float:
-        """读取单策略最终信号最低置信度；0 表示不过滤。"""
-        group = self.STRATEGY_PARAM_GROUPS.get(pattern_type)
-        if not group:
-            return 0.0
-        params = get_params(group)
-        # 二板定龙保留旧 candidate_min_confidence 作为兼容回退；新参数优先。
-        fallback = params.get("candidate_min_confidence", 0.0) if group == "second_board_dragon" else 0.0
-        return self._normalize_confidence_threshold(params.get("min_confidence", fallback), fallback)
-
-    def _apply_min_confidence_filters(self, results: Dict[str, List[PatternSignal]]) -> Dict[str, List[PatternSignal]]:
-        """按每个策略的 min_confidence 过滤最终信号。"""
-        filtered: Dict[str, List[PatternSignal]] = {}
-        for pattern_type, signals in (results or {}).items():
-            threshold = self._strategy_min_confidence(pattern_type)
-            if threshold <= 0:
-                filtered[pattern_type] = signals
-                continue
-            kept = [s for s in (signals or []) if (s.confidence or 0) >= threshold]
-            dropped = len(signals or []) - len(kept)
-            if dropped:
-                logger.info(
-                    f"[置信度过滤] {pattern_type}: 阈值{threshold:.0%}，过滤{dropped}个，保留{len(kept)}个"
-                )
-            filtered[pattern_type] = kept
-        return filtered
     
     # ==================== 模式识别接口 ====================
     
@@ -232,6 +188,13 @@ class PatternRecognition:
             for weakening in pool_summary.get('weakening_pool', []):
                 logger.info(f"[弱转强]     • {weakening['名称']}({weakening['代码']}) - {weakening['走弱类型']} - 回调{weakening['回调幅度']}")
             
+            # 构建龙头生命周期视图（单一事实来源；Phase 1 地基接入实时路径）
+            # 当前仅驱动 FLASH_RECOVERY（日内反转）路径，主路径仍走既有筛选，行为不变。
+            self._lifecycle = DragonLifecycleRegistry().from_weak_to_strong(
+                self.weak_to_strong, today_date or datetime.now().strftime("%Y%m%d")
+            )
+            logger.debug(f"[弱转强] 生命周期阶段分布: {self._lifecycle.summary()}")
+
             # ========== 阶段2：转强信号检测（四层优先级管线：L0→L1→L2→L3→L4）==========
             logger.info("[弱转强] ========== 阶段2：转强信号检测 ==========")
 
@@ -305,6 +268,25 @@ class PatternRecognition:
                     l0_not_strong += 1
                     logger.debug(f"[弱转强-L0] ✗ {name}({code}) 过滤: 今日未转强(涨幅{price_change:.1f}%)")
                     continue
+
+                # L0b-guard: 高开低走/冲高回落排除（仅非涨停的"大涨/竞价转强"候选）。
+                # 开得高却收盘走弱属接力失败，不算转强；涨停票收在板上不受此约束。
+                if not is_limit_up and self.wts_scoring.get("intraday_fade_guard_enabled", True):
+                    try:
+                        _o = float(today_row.get('open', 0) or 0)
+                        _c = float(today_row.get('close', 0) or 0)
+                        _h = float(today_row.get('high', 0) or 0)
+                        fade_open = (_o - _c) / _o if _o > 0 else 0.0   # >0 收盘低于开盘（低走）
+                        fade_high = (_h - _c) / _h if _h > 0 else 0.0   # 收盘距当日最高的回落
+                        max_from_open = float(self.wts_scoring.get("intraday_fade_max_from_open", 0.03))
+                        max_from_high = float(self.wts_scoring.get("intraday_fade_max_from_high", 0.06))
+                        if (_c < _o and fade_open > max_from_open) or (_h > 0 and fade_high > max_from_high):
+                            l0_not_strong += 1
+                            logger.info(f"[弱转强-L0] ✗ {name}({code}) 过滤: 高开低走/冲高回落"
+                                        f"(较开盘回落{fade_open*100:.1f}%, 较最高回落{fade_high*100:.1f}%)")
+                            continue
+                    except Exception:
+                        pass
 
                 # L0c: 一字板排除
                 if is_limit_up:
@@ -476,30 +458,33 @@ class PatternRecognition:
                             f"(时间{limit_up_time}, 市值{float_cap:.1f}亿, 扣分{l3_penalty:.2f})")
 
                 # ═══════════ Layer 4: 多维评分 + 信号生成 ═══════════
-                # 1. 竞价量价维度评分（25分）
+                wts = self.wts_scoring
+                auction_cap = int(wts.get('auction_cap', 25))
+                # 1. 竞价量价维度评分（满分 auction_cap）
                 auction_score = 0
-                if gap >= 0.05:
-                    auction_score += 15
-                elif gap >= 0.03:
-                    auction_score += 10
-                elif gap >= 0.02:
-                    auction_score += 5
+                if gap >= wts.get('auction_gap_high', 0.05):
+                    auction_score += wts.get('auction_gap_high_pts', 15)
+                elif gap >= wts.get('auction_gap_mid', 0.03):
+                    auction_score += wts.get('auction_gap_mid_pts', 10)
+                elif gap >= wts.get('auction_gap_low', 0.02):
+                    auction_score += wts.get('auction_gap_low_pts', 5)
 
-                if auction_vol_ratio >= 0.15:
-                    auction_score += 10
-                elif auction_vol_ratio >= 0.10:
-                    auction_score += 5
+                if auction_vol_ratio >= wts.get('auction_vol_high', 0.15):
+                    auction_score += wts.get('auction_vol_high_pts', 10)
+                elif auction_vol_ratio >= wts.get('auction_vol_mid', 0.10):
+                    auction_score += wts.get('auction_vol_mid_pts', 5)
 
-                if auction_analysis.get('auction_amount', 0) >= 10_000_000:
-                    auction_score += 5
+                if auction_analysis.get('auction_amount', 0) >= wts.get('auction_amount_threshold', 10_000_000):
+                    auction_score += wts.get('auction_amount_pts', 5)
+                auction_score = min(auction_score, auction_cap)  # 三项最高>封顶时按 auction_cap 截断
 
-                logger.debug(f"[弱转强-L4] {name} 竞价维度: 高开{gap*100:.1f}%,量比{auction_vol_ratio*100:.1f}%,得分{auction_score}/25")
+                logger.debug(f"[弱转强-L4] {name} 竞价维度: 高开{gap*100:.1f}%,量比{auction_vol_ratio*100:.1f}%,得分{auction_score}/{auction_cap}")
 
-                # 2. 技术形态维度评分（25分）
+                # 2. 技术形态维度评分（满分 20）
                 technical_score = self._calculate_technical_score(code, today_date, today_daily)
-                logger.debug(f"[弱转强-L4] {name} 技术维度得分{technical_score}/25")
+                logger.debug(f"[弱转强-L4] {name} 技术维度得分{technical_score}/20")
 
-                # 3. 资金流入维度评分（25分）
+                # 3. 资金流入维度评分（满分 25）
                 capital_score = self._calculate_capital_score(code, today_date)
                 logger.debug(f"[弱转强-L4] {name} 资金维度得分{capital_score}/25")
 
@@ -522,11 +507,11 @@ class PatternRecognition:
 
                 # 动态阈值：连板龙头/趋势龙头不同标准
                 if weakening.dragon_type.value == "连板龙头" and peak_height >= 5:
-                    min_total_score = 45  # 强龙头降低门槛
+                    min_total_score = wts.get('min_total_strong_dragon', 45)  # 强龙头降低门槛
                 elif weakening.dragon_type.value == "连板龙头":
-                    min_total_score = 50
+                    min_total_score = wts.get('min_total_dragon', 50)
                 else:
-                    min_total_score = 55  # 趋势龙头要求更高
+                    min_total_score = wts.get('min_total_trend', 55)  # 趋势龙头要求更高
 
                 if total_score < min_total_score:
                     l4_skipped += 1
@@ -534,9 +519,9 @@ class PatternRecognition:
                     continue
 
                 # 信号级别（基于总评分的标签，用于描述/校验规则）
-                if total_score >= 80:
+                if total_score >= wts.get('signal_level_strong', 80):
                     signal_level = "强烈信号"
-                elif total_score >= 65:
+                elif total_score >= wts.get('signal_level_confirm', 65):
                     signal_level = "确认信号"
                 else:
                     signal_level = "基础信号"
@@ -646,111 +631,61 @@ class PatternRecognition:
                         f"(候选{len(candidates)}→L1过滤{l1_skipped}→L2过滤{l2_skipped}→"
                         f"L3过滤{l3_skipped}→L4过滤{l4_skipped}→通过{total_passed})")
 
-            # ========== P4: 当日走弱+当日转强轻量检测 ==========
-            # 场景：烂板回封 / 断板后强力收复（当天入池，当天就转强）
+            # ========== P4: 当日走弱+当日转强（生命周期 FLASH_RECOVERY 阶段）==========
+            # 场景：烂板回封 / 断板后强力收复（当天入池，当天就转强）。
+            # 候选改由生命周期注册中心的 FLASH_RECOVERY 阶段驱动（取代原"遍历走弱池+
+            # 再判当日入池"的临时逻辑），把"当日反转"确立为一个合法阶段而非补丁。
             same_day_flicker = 0
-            for code, weakening in self.weak_to_strong.weakening_pool.items():
-                if weakening.weakening_date != today_date:
+            for _st in self._lifecycle.query((DragonPhase.FLASH_RECOVERY,), include_handoff=False):
+                code = _st.stock_code
+                weakening = self.weak_to_strong.weakening_pool.get(code)
+                if weakening is None:
                     continue
                 # 今日入池但今日涨停 = 烂板回封/断板后收复
                 if code in today_zt_codes:
                     same_day_flicker += 1
                     zt_row = today_zt_dict[code]
-                    def _num(v, default=None):
-                        try:
-                            if v is None or v == "":
-                                return default
-                            return float(str(v).replace("%", "").replace(",", ""))
-                        except Exception:
-                            return default
-
-                    current_price = (_num(zt_row.get('最新价'), 0) or _num(zt_row.get('close'), 0)
-                                     or _num(zt_row.get('涨停价'), 0))
+                    current_price = zt_row.get('最新价', 0)
                     board_height = zt_row.get('连板数', 0)
                     sector_name = weakening.sector_name or ""
 
-                    # P4 是“今日入池走弱→今日涨停收复”的日内反转，历史路径里的竞价分析
-                    # 未必可得；扣分制下宁可记录缺失扣分，也不继续用固定 0.65。
-                    today_daily_row = None
-                    try:
-                        if today_daily is not None and not today_daily.empty:
-                            sd = today_daily[today_daily['ts_code'].astype(str).str.contains(code)]
-                            if not sd.empty:
-                                today_daily_row = sd.iloc[-1]
-                    except Exception:
-                        today_daily_row = None
+                    logger.info(f"[弱转强-P4] ⚡ {weakening.stock_name}({code}) 当日走弱({weakening.weakening_type})→当日转强(涨停!)")
 
-                    open_px = (_num(zt_row.get('open')) or _num(zt_row.get('开盘价')) or
-                               (_num(today_daily_row.get('open')) if today_daily_row is not None else None))
-                    pre_close = (_num(zt_row.get('pre_close')) or _num(zt_row.get('昨收价')) or
-                                 _num(zt_row.get('昨日收盘价')) or
-                                 (_num(today_daily_row.get('pre_close')) if today_daily_row is not None else None))
-                    gap_pct = (open_px - pre_close) / pre_close if open_px and pre_close and pre_close > 0 else None
-                    auction_vol_ratio = (_num(zt_row.get('auction_vol_ratio')) or
-                                         _num(zt_row.get('竞价量比')) or
-                                         _num(zt_row.get('竞价量占比')))
-                    if auction_vol_ratio is not None and auction_vol_ratio > 1:
-                        auction_vol_ratio = auction_vol_ratio / 100.0
-                    # 方案1：涨停池无竞价量比 → 用 eltdx 09:25 集合竞价量回填（量比=竞价量/昨日量）
-                    if auction_vol_ratio is None and self.repo and today_date:
-                        backfilled = self.repo.get_auction_vol_ratio(code, today_date, yest_date)
-                        if backfilled is not None:
-                            auction_vol_ratio = backfilled
-                            logger.info(f"[弱转强-P4] {weakening.stock_name}({code}) "
-                                        f"竞价量比经 eltdx 回填: {auction_vol_ratio*100:.1f}%")
-                    first_limit_time = str(zt_row.get('首次封板时间') or zt_row.get('首次涨停时间') or "")
-                    time_bonus = 10 if first_limit_time and first_limit_time <= "09:40:00" else 0
-                    type_bonus = 8 if weakening.dragon_type.value == "连板龙头" else 4
-                    try:
-                        bh = float(board_height or 0)
-                    except Exception:
-                        bh = 0
-                    flexible_score = min(100, 50 + min(bh, 4) * 7 + time_bonus + type_bonus)
-
-                    wt_mode = self.weak_to_strong.params.get("confidence_mode", "legacy")
-                    confidence = 0.65
-                    conf_breakdown = None
-                    if wt_mode == "deduction":
+                    # 置信度：与主路径一致——confidence_mode="deduction" 走统一扣分制；
+                    # 否则用可配置兜底值（intraday_reversal_confidence，默认 0.65）。
+                    p4_conf = self.wts_scoring.get('intraday_reversal_confidence', 0.65)
+                    p4_breakdown = None
+                    if (self.weak_to_strong and
+                            self.weak_to_strong.params.get("confidence_mode", "legacy") == "deduction"):
                         from core.scoring.confidence_scorer import score_or_none
                         _wt = weakening.weakening_type or ""
                         _wt_cat = "断板" if _wt == "断板" else ("放量滞涨" if "放量滞涨" in _wt else "其他")
                         _res = score_or_none("weak_to_strong", {
-                            "gap_pct": gap_pct,
-                            "auction_vol_ratio": auction_vol_ratio,
-                            "flexible_score": flexible_score,
+                            # 日内反转无次日竞价数据，gap/量比缺失（按扣分制最差扣分计）
+                            "flexible_score": 60,  # 当日即涨停收复，给中性弹性分
                             "weakening_type": _wt_cat,
                         })
                         if _res is not None:
-                            confidence = _res.value
-                            conf_breakdown = _res.to_dict()
+                            p4_conf = _res.value
+                            p4_breakdown = _res.to_dict()
                         else:
-                            logger.warning("[弱转强-P4] 扣分制规则缺失/失败，回退固定日内反转置信度")
-
-                    logger.info(f"[弱转强-P4] ⚡ {weakening.stock_name}({code}) 当日走弱({weakening.weakening_type})→当日转强(涨停!)")
-
-                    key_metrics = {
-                        "走弱类型": weakening.weakening_type,
-                        "涨停收复": f"余{board_height}板",
-                        "龙头类型": weakening.dragon_type.value,
-                        "弹性评分": round(flexible_score, 1),
-                        "高开幅度": f"{gap_pct*100:.1f}%" if gap_pct is not None else "缺失",
-                        "竞价量比": f"{auction_vol_ratio*100:.1f}%" if auction_vol_ratio is not None else "缺失",
-                        "首次涨停时间": first_limit_time or "--",
-                    }
-                    if conf_breakdown:
-                        key_metrics["置信扣分明细"] = conf_breakdown
+                            logger.warning("[弱转强-P4] 扣分制规则缺失/失败，回退兜底置信度")
 
                     signal = PatternSignal(
                         pattern_type="弱转强",
                         stock_code=code,
                         stock_name=weakening.stock_name,
-                        confidence=round(confidence, 2),
+                        confidence=round(p4_conf, 2),
                         description=f"日内反转: 今日入池走弱({weakening.weakening_type})→今日涨停收复(余{board_height}板)",
                         entry_price=current_price,
                         stop_loss=current_price * 0.95,
                         take_profit=current_price * 1.10,
                         position_size="light",
-                        key_metrics=key_metrics,
+                        key_metrics={
+                            "走弱类型": weakening.weakening_type,
+                            "涨停收复": f"余{board_height}板",
+                            "龙头类型": weakening.dragon_type.value,
+                        },
                         validation_rules=[
                             f"今日入池走弱: {weakening.weakening_type}",
                             f"今日涨停收复(余{board_height}板)",
@@ -759,6 +694,8 @@ class PatternRecognition:
                         ],
                         l2_industry=sector_name
                     )
+                    if p4_breakdown:
+                        signal.key_metrics["置信扣分明细"] = p4_breakdown
                     signals.append(signal)
 
             if same_day_flicker > 0:
@@ -823,7 +760,7 @@ class PatternRecognition:
             sbd_params = get_params("second_board_dragon")
             min_fb_score = sbd_params.get("min_first_board_score", 60)
             cand_min_gap = sbd_params.get("candidate_min_gap", 0.02)
-            cand_min_conf = self._strategy_min_confidence("二板定龙")
+            cand_min_conf = sbd_params.get("candidate_min_confidence", 0.70)
             max_dragons = int(sbd_params.get("max_dragons_per_day", 3))
             max_per_sector = int(sbd_params.get("max_per_sector", 1))
             min_sector_fb = int(sbd_params.get("min_sector_first_board", 0))
@@ -1112,14 +1049,35 @@ class PatternRecognition:
             gap = 0
             logger.debug(f"[_analyze_auction_data] {name}({code}) 数据不足无法计算高开: open={open_price}, yest_close={yest_close}")
 
-        # 计算竞价量比
-        auction_vol = auction.get('竞价成交量', 0) if auction else 0
-        yest_vol = yesterday.get('成交量', 1) if yesterday is not None else 1
-        auction_vol_ratio = auction_vol / yest_vol if yest_vol > 0 else 0
+        # 计算竞价量比 = 竞价成交量 / 昨日全天成交量（两者均为「手」，同口径）。
+        # 注意：竞价成交量已在 get_auction_data 内统一换算为「手」(与日线 vol 同口径)。
+        auction_vol = float(auction.get('竞价成交量', 0) or 0) if auction else 0.0
+
+        # 昨日全天成交量优先取日线 vol(手)，与竞价成交量口径一致；
+        # 不能用「昨日涨停池行不存在就默认 1」的旧逻辑——那会把比值退化成「竞价成交量原值」。
+        yest_vol = 0.0
+        if self.repo and yest_date and code:
+            try:
+                ydf = self.repo.get_daily(code, yest_date, yest_date)
+                if ydf is not None and not ydf.empty:
+                    vcol = 'vol' if 'vol' in ydf.columns else ('volume' if 'volume' in ydf.columns else None)
+                    if vcol:
+                        yest_vol = float(ydf.iloc[-1].get(vcol, 0) or 0)
+            except Exception as e:
+                logger.debug(f"[_analyze_auction_data] {name}({code}) 取昨日成交量失败: {e}")
+        # 兜底：昨日涨停池行成交量（口径可能不同，仅在无日线时使用）
+        if yest_vol <= 0 and yesterday is not None:
+            try:
+                yest_vol = float(yesterday.get('成交量', 0) or 0)
+            except Exception:
+                yest_vol = 0.0
+
+        auction_vol_ratio = (auction_vol / yest_vol) if (yest_vol > 0 and auction_vol > 0) else 0.0
 
         return {
             'gap': gap,
             'auction_vol_ratio': auction_vol_ratio,
+            'auction_amount': float(auction.get('竞价成交额', 0) or 0) if auction else 0.0,
             'open_price': open_price
         }
 
@@ -1540,6 +1498,30 @@ class PatternRecognition:
             total_checked = 0
             total_passed = 0
 
+            # Phase 3 切源：龙二波"前龙身份/调整期"改读生命周期注册中心。
+            # registry 模式下：① 先用"触发前前龙枚举器"把今日涨停票里的前龙(调整窗内)
+            # upsert 进注册中心龙二波域；② 候选 = 今日触发 ∩ 注册中心龙二波域(含交接带)。
+            # 枚举器是龙二波 L1 身份门的超集（仅 rebuild + 距高点窗，不含调整质量），
+            # 确认信号必在候选集内 → 切源对最终信号零 diff。
+            from core.pattern.dragon_lifecycle import DRAGON_SECOND_WAVE_PHASES
+            dsw_source = str(get_params("dragon_lifecycle").get("dsw_candidate_source", "registry"))
+            registry_dsw_codes: Optional[set] = None
+            hist_cache: Dict[str, Any] = {}
+            if dsw_source == "registry":
+                if self._lifecycle is not None:
+                    hist_cache = self._enumerate_former_dragons_to_lifecycle(
+                        today_df, recent_15d_pools, today_date
+                    )
+                    registry_dsw_codes = {
+                        self._norm_code6(st.stock_code)
+                        for st in self._lifecycle.query(DRAGON_SECOND_WAVE_PHASES, include_handoff=True)
+                    }
+                    logger.info(
+                        f"[龙二波] 候选来源=注册中心：龙二波域(含交接带){len(registry_dsw_codes)}只前龙待今日确认"
+                    )
+                else:
+                    logger.warning("[龙二波] 候选来源=注册中心，但生命周期未构建 → 回退遍历今日全市场")
+
             for _, today_row in today_df.iterrows():
                 code_raw = str(today_row.get('代码', '')).strip().upper()
                 if '.' in code_raw:
@@ -1549,6 +1531,10 @@ class PatternRecognition:
                     code = code_raw.zfill(6)
                     code += '.SH' if (code.startswith('688') or code.startswith('6')) else '.SZ'
                 name = today_row.get('名称', '')
+
+                # registry 切源：不在注册中心龙二波域的今日票直接跳过（身份不符）
+                if registry_dsw_codes is not None and self._norm_code6(code) not in registry_dsw_codes:
+                    continue
                 total_checked += 1
 
                 sector_hot = False
@@ -1569,18 +1555,19 @@ class PatternRecognition:
                     logger.debug(f"[龙二波]   {name}({code}) 板块热度=False, 所属行业={stock_sector}")
 
                 # 日期已经是YYYYMMDD格式，直接使用
-                # 获取历史数据以启用双轨制判断（连板 或 涨幅）
-                hist_data = None
-                try:
-                    if hasattr(self.dm, 'get_stock_daily') and hasattr(self.dm, 'date_utils'):
-                        # 获取近20日历史数据用于涨幅统计
-                        # 使用 get_last_n_trade_dates 获取最近25个交易日
-                        last_n_dates = self.repo.date_utils.get_last_n_trade_dates(25, today_date)
-                        if last_n_dates:
-                            start_date = last_n_dates[-1]  # 最早的一个
-                            hist_data = self.repo.get_daily(code, start_date, today_date)
-                except Exception as e:
-                    logger.debug(f"[龙二波] 获取{code}历史数据失败: {e}")
+                # 获取历史数据以启用双轨制判断（连板 或 涨幅）；优先复用枚举器缓存避免重复取数
+                hist_data = hist_cache.get(code)
+                if hist_data is None and code not in hist_cache:
+                    try:
+                        if hasattr(self.dm, 'get_stock_daily') and hasattr(self.dm, 'date_utils'):
+                            # 获取近20日历史数据用于涨幅统计
+                            # 使用 get_last_n_trade_dates 获取最近25个交易日
+                            last_n_dates = self.repo.date_utils.get_last_n_trade_dates(25, today_date)
+                            if last_n_dates:
+                                start_date = last_n_dates[-1]  # 最早的一个
+                                hist_data = self.repo.get_daily(code, start_date, today_date)
+                    except Exception as e:
+                        logger.debug(f"[龙二波] 获取{code}历史数据失败: {e}")
                 
                 trade_signal = self.dragon_second_wave.detect_second_wave(
                     stock_code=code,
@@ -1610,6 +1597,9 @@ class PatternRecognition:
                         l2_industry=stock_sector
                     )
                     signals.append(pattern_signal)
+                    # Phase 3 union：把龙二波确认的前龙并入生命周期注册中心（SECOND_WAVE_READY），
+                    # 让注册中心成为"前龙身份"的并集（弱转强池 ∪ 龙二波确认），供仲裁层/后续切源消费。
+                    self._upsert_second_wave_to_lifecycle(trade_signal, stock_sector, today_date)
                 else:
                     logger.debug(f"[龙二波]   {name} 未通过检测")
 
@@ -1654,7 +1644,8 @@ class PatternRecognition:
             return trade_dates[days]
         return trade_dates[-1] if trade_dates else date_str
 
-    def scan_all_patterns(self, today_date: str, yesterday_date: str = None, hot_sectors: List[Dict] = None) -> Dict[str, List[PatternSignal]]:
+    def scan_all_patterns(self, today_date: str, yesterday_date: str = None, hot_sectors: List[Dict] = None,
+                          market_emotion: str = "") -> Dict[str, List[PatternSignal]]:
         """
         扫描所有模式 - 主入口方法
         
@@ -1662,10 +1653,12 @@ class PatternRecognition:
             today_date: 今日日期 (YYYY-MM-DD 或 YYYYMMDD)
             yesterday_date: 昨日日期 (YYYY-MM-DD 或 YYYYMMDD)，如为None则自动计算
             hot_sectors: 预计算的热点板块列表（避免重复计算）
+            market_emotion: 当前市场情绪周期（Phase 5：仲裁择主路由/情绪闸门）；空=不路由
             
         Returns:
             Dict[str, List[PatternSignal]]: 各模式识别结果
         """
+        self._market_emotion = str(market_emotion or "")
         # 标准化日期格式为YYYYMMDD（data_manager需要）
         today_date_ymd = self._normalize_date_to_ymd(today_date)
         yesterday_date_ymd = self._normalize_date_to_ymd(yesterday_date) if yesterday_date else None
@@ -1898,10 +1891,6 @@ class PatternRecognition:
         except Exception as e:
             logger.error(f"首板突破检测失败: {e}")
             results["首板突破"] = []
-
-        # 统一最终信号置信度过滤。各策略可在 config/pattern_params.py 或网页参数配置中
-        # 设置 min_confidence；支持 0.60 / 60 / "60%"，0 表示不过滤。
-        results = self._apply_min_confidence_filters(results)
         
         # 汇总统计
         logger.info("=" * 60)
@@ -1913,8 +1902,208 @@ class PatternRecognition:
             logger.info(f"  {pattern_type}: {count}个信号")
         logger.info(f"  总计: {total_signals}个信号")
         logger.info("=" * 60)
-        
+
+        # Phase 4：跨策略信号仲裁（同票多策略择主/去重/协同）。默认 annotate 仅标注，零 diff。
+        results = self._apply_arbitration(results)
+
         return results
+
+    def _apply_arbitration(self, results: Dict[str, List[PatternSignal]]) -> Dict[str, List[PatternSignal]]:
+        """运行跨策略仲裁并把结论作用到信号集合（受 config ``arbitration`` 控制）。"""
+        cfg = get_params("arbitration") or {}
+        if not cfg.get("enabled", True):
+            self._log_cross_strategy_overlap(results)
+            return results
+        try:
+            from core.pattern import signal_arbitrator as arb_mod
+            emotion = getattr(self, "_market_emotion", "") or ""
+            # Phase 5：情绪闸门（默认空表→零 diff），在仲裁前整体抑制指定策略
+            results = arb_mod.gate_by_emotion(results, emotion, cfg)
+            arb = arb_mod.arbitrate(results, cfg=cfg, emotion=emotion)
+            overlaps = arb.overlaps
+            if overlaps:
+                logger.info(f"[仲裁] {len(overlaps)} 只标的多策略命中，择主/标注：")
+                for c6, d in overlaps.items():
+                    tag = "共振" if d.is_resonance else ""
+                    logger.info(f"  {d.name}({c6}): {d.all_patterns} → 主[{d.primary_pattern}]"
+                                f"{('，抑制' + str(d.suppressed_patterns)) if d.suppressed_patterns else ''} {tag}")
+                wts_dsw = [d.name or c6 for c6, d in overlaps.items()
+                           if "弱转强" in d.all_patterns and "龙二波" in d.all_patterns]
+                if wts_dsw:
+                    logger.warning(f"[仲裁] 弱转强∩龙二波 边界争议 {len(wts_dsw)} 只：{wts_dsw}（已择主裁决）")
+            mode = str(cfg.get("mode", "annotate"))
+            results = arb_mod.apply(results, arb, mode=mode)
+            if mode != "annotate":
+                logger.info(f"[仲裁] 作用模式={mode}（共振加权/去重已生效）")
+        except Exception as e:
+            logger.error(f"[仲裁] 执行失败，回退原始信号: {e}")
+        return results
+
+    @staticmethod
+    def _norm_code6(code: str) -> str:
+        """归一为 6 位代码前缀，便于跨策略（带/不带后缀）匹配。"""
+        s = str(code).strip().upper()
+        return s.split('.')[0].zfill(6) if s else s
+
+    def _enumerate_former_dragons_to_lifecycle(self, today_df: Any, recent_pools: Dict[str, Any],
+                                               today_date: str) -> Dict[str, Any]:
+        """触发前前龙枚举器（Phase 3 切源核心）。
+
+        对**今日涨停票**复用龙二波自身的"第一波身份重建"（`_rebuild_consecutive_from_pools`，
+        双轨制：连板/涨幅/涨停次数）+ 距高点调整窗，把识别为"前龙且处于调整窗"的票
+        upsert 进生命周期注册中心龙二波域（SECOND_WAVE_READY）。
+
+        - **单一事实来源**：龙二波候选身份自此由注册中心统一提供，不再各自重建。
+        - **零 diff 保证**：本枚举只用 L1 身份门的**超集**（rebuild + 距高点窗，不含调整质量
+          `_get_adjust_period`），确认信号必落在候选集内；其余由下游 `detect_second_wave` 过滤。
+        - 与弱转强域重叠时不覆盖其阶段，仅标记 `both_eligible`（交接带，供仲裁层裁决）。
+
+        Returns:
+            hist_cache：{带后缀代码: 日线DataFrame}，供主循环复用，避免重复取数。
+        """
+        hist_cache: Dict[str, Any] = {}
+        if self._lifecycle is None or self.dragon_second_wave is None or today_df is None or today_df.empty:
+            return hist_cache
+        from core.pattern.dragon_lifecycle import DragonState, DragonPhase, DRAGON_SECOND_WAVE_PHASES
+        p = getattr(self.dragon_second_wave, "params", {}) or {}
+        min_adj = int(p.get("min_adjust_days", 2))
+        max_adj = int(p.get("max_adjust_days", 15))
+
+        enum_count = 0
+        for _, row in today_df.iterrows():
+            code_raw = str(row.get('代码', '')).strip().upper()
+            if '.' in code_raw:
+                parts = code_raw.split('.')
+                code = parts[0].zfill(6) + '.' + parts[1]
+            else:
+                code = code_raw.zfill(6)
+                code += '.SH' if (code.startswith('688') or code.startswith('6')) else '.SZ'
+            code6 = self._norm_code6(code)
+
+            # 取历史日线（双轨制需要；缓存供主循环复用）
+            hist_data = None
+            try:
+                if hasattr(self.dm, 'get_stock_daily') and hasattr(self.dm, 'date_utils'):
+                    last_n = self.repo.date_utils.get_last_n_trade_dates(25, today_date)
+                    if last_n:
+                        hist_data = self.repo.get_daily(code, last_n[-1], today_date)
+            except Exception:
+                hist_data = None
+            hist_cache[code] = hist_data
+
+            try:
+                rec = self.dragon_second_wave._rebuild_consecutive_from_pools(code6, recent_pools, hist_data)
+            except Exception:
+                continue
+            if not rec.get('is_valid'):
+                continue
+            fw = rec.get('first_wave', {}) or {}
+            peak_date = fw.get('peak_date', '')
+            try:
+                dsp = self.dragon_second_wave._calculate_days_since_peak(peak_date, today_date)
+            except Exception:
+                continue
+            # 距高点调整窗（与 detect_second_wave L1a 一致的上下界，留 +5 余量保持超集）
+            if not (min_adj <= dsp <= max_adj + 5):
+                continue
+
+            existing = self._lifecycle.get(code)
+            if existing is not None and existing.phase not in DRAGON_SECOND_WAVE_PHASES:
+                # 已属弱转强/龙头域：不覆盖，仅标记交接带（既是走弱观察、又是前龙反包）
+                existing.both_eligible = True
+                enum_count += 1
+                continue
+            st = DragonState(
+                stock_code=code,
+                stock_name=str(row.get('名称', '')),
+                dragon_type=str(fw.get('wave_type', '')),
+                peak_height=int(fw.get('max_boards', 0) or 0),
+                peak_date=peak_date,
+                days_since_peak=dsp,
+                phase=DragonPhase.SECOND_WAVE_READY,
+                source="dragon_second_wave_enum",
+            )
+            self._lifecycle.upsert(st)
+            enum_count += 1
+
+        logger.info(f"[龙二波] 触发前前龙枚举：{enum_count} 只今日票识别为前龙(调整窗内)并入注册中心")
+        return hist_cache
+
+    def _upsert_second_wave_to_lifecycle(self, trade_signal: Any, sector: str, today_date: str) -> None:
+        """把龙二波确认的前龙并入生命周期注册中心（SECOND_WAVE_READY）。
+
+        这是 Phase 3「身份并集」的落地：注册中心此前仅由弱转强走弱池构建，龙二波域为空；
+        本方法让其纳入龙二波自有的前龙身份重建结果，成为前龙身份的并集来源。
+        仅写注册中心，不改任何信号输出（零 diff）。
+        """
+        if self._lifecycle is None:
+            return
+        try:
+            from core.pattern.dragon_lifecycle import DragonState, DragonPhase
+            km = getattr(trade_signal, "key_metrics", {}) or {}
+            # 解析见顶日（"第一波日期" 形如 "起涨日至见顶日"）
+            peak_date = ""
+            fw = str(km.get("第一波日期", ""))
+            if "至" in fw:
+                peak_date = fw.split("至")[-1].strip()
+            # 解析调整深度（"23.5%" → 0.235）
+            depth = 0.0
+            try:
+                depth = float(str(km.get("调整深度", "0")).replace("%", "")) / 100.0
+            except Exception:
+                depth = 0.0
+            adjust_days = int(km.get("调整天数", 0) or 0)
+            code = str(getattr(trade_signal, "stock_code", ""))
+            st = DragonState(
+                stock_code=code,
+                stock_name=getattr(trade_signal, "stock_name", ""),
+                dragon_type=str(km.get("第一波类型", "")),
+                sector_name=sector,
+                peak_date=peak_date,
+                max_drawdown=depth,
+                days_since_peak=adjust_days,
+                phase=DragonPhase.SECOND_WAVE_READY,
+                source="dragon_second_wave",
+                extra={"key_metrics": km},
+            )
+            self._lifecycle.upsert(st)
+        except Exception as e:
+            logger.debug(f"[龙二波] 并入生命周期注册中心失败: {e}")
+
+    def _log_cross_strategy_overlap(self, results: Dict[str, List[PatternSignal]]) -> Dict[str, List[str]]:
+        """统计同一标的被多个策略同时命中的情况（跨策略重叠）。
+
+        这是"系统互补性"的客观度量，也是 Phase 4 信号仲裁层去重/协同的输入：
+        - 同股多策略 → 潜在冲突（需仲裁取舍）或共振（可加权）；
+        - 弱转强 ∩ 龙二波 重叠尤其关键：二者本应按生命周期窗错位互补，重叠即边界争议。
+
+        仅记录日志、返回映射，**不修改任何信号**。
+        """
+        code_to_patterns: Dict[str, List[str]] = {}
+        code_to_name: Dict[str, str] = {}
+        for ptype, signals in results.items():
+            for s in (signals or []):
+                c6 = self._norm_code6(getattr(s, "stock_code", ""))
+                if not c6:
+                    continue
+                code_to_patterns.setdefault(c6, [])
+                if ptype not in code_to_patterns[c6]:
+                    code_to_patterns[c6].append(ptype)
+                code_to_name.setdefault(c6, getattr(s, "stock_name", ""))
+
+        overlaps = {c: ps for c, ps in code_to_patterns.items() if len(ps) > 1}
+        if overlaps:
+            logger.info(f"[跨策略重叠] {len(overlaps)} 只标的被多策略同时命中：")
+            for c, ps in overlaps.items():
+                logger.info(f"  {code_to_name.get(c, '')}({c}): {' + '.join(ps)}")
+        # 弱转强 ∩ 龙二波 专项（生命周期窗本应错位，重叠=边界争议，重点观测）
+        wts_dsw = [c for c, ps in overlaps.items() if "弱转强" in ps and "龙二波" in ps]
+        if wts_dsw:
+            logger.warning(
+                f"[跨策略重叠] 弱转强∩龙二波 边界争议 {len(wts_dsw)} 只："
+                f"{[code_to_name.get(c, c) for c in wts_dsw]}（待 Phase 4 仲裁/生命周期窗收敛）"
+            )
+        return overlaps
     
     def get_top_signals(self, results: Dict[str, List[PatternSignal]], 
                         min_confidence: float = 0.70,
@@ -2000,52 +2189,43 @@ class PatternRecognition:
         
         核心逻辑：
         - 入池日期早于当天的股票（历史走弱）才纳入转强观察池
-        - 入池日期为当天的股票（当天刚走弱）不检测转强
-        
-        排除条件：
-        1. 当天入池的股票（刚走弱，需观察）
-        2. 观察期已过期（超过5天）
-        3. 回调幅度过大（>25%，A杀风险）或过小（<5%，刚走弱）
-        4. 成交量连续萎缩（<5日均量50%）
-        
+        - 入池日期为当天的股票（当天刚走弱）不检测转强（→ 生命周期 FLASH_RECOVERY 单独处理）
+
+        Phase 2b：候选来源改为**龙头生命周期注册中心**的弱转强信号域阶段
+        （``WEAKENING`` / ``WATCHING``）——它已统一处理"排除当天入池、观察期≤N日、
+        回调≤上限"三项。本函数仅在其上再叠加注册中心未覆盖的口径：
+
+        - 回调上限 0.25 兜底闸（注册中心按 0.20 预筛，主路径 L1a 同样按 0.20 收紧，
+          最终信号集合不变）；
+        - 成交量连续萎缩（<5日均量50%）过滤（依赖 today_daily，注册中心不持有日线）。
+
         Returns:
             符合条件的股票代码列表
         """
         valid_codes = []
-        current_date = datetime.strptime(date_str, "%Y%m%d")
-        
-        for code, weakening in self.weak_to_strong.weakening_pool.items():
-            # 1. 检查入池日期 - 当天入池的不检测
-            try:
-                entry_date_str = weakening.weakening_date
-                entry_date = datetime.strptime(entry_date_str, "%Y%m%d")
-                
-                # 当天入池的股票跳过（刚走弱，不检测转强）
-                if entry_date_str == date_str:
-                    logger.debug(f"[走弱池筛选] {weakening.stock_name} 当天入池({entry_date_str})，不检测转强")
-                    continue
-                
-                # 计算观察天数（从入池日到当前日）
-                observation_days = (current_date - entry_date).days
-                
-                # 观察期超过5天的排除
-                if observation_days > 5:
-                    logger.debug(f"[走弱池筛选] {weakening.stock_name} 观察期过期({observation_days}天 > 5天)")
-                    continue
-                    
-                logger.debug(f"[走弱池筛选] {weakening.stock_name} 入池{observation_days}天，纳入观察")
-            except Exception as e:
-                logger.debug(f"[走弱池筛选] {weakening.stock_name} 日期解析失败: {e}")
+
+        # 候选来源：生命周期注册中心的弱转强信号域（不含 FLASH_RECOVERY，后者单独走 P4）
+        if self._lifecycle is None:
+            logger.warning("[走弱池筛选] 生命周期未构建，本日不纳入历史走弱观察")
+            return valid_codes
+        states = self._lifecycle.query(
+            (DragonPhase.WEAKENING, DragonPhase.WATCHING), include_handoff=False
+        )
+
+        for st in states:
+            code = st.stock_code
+            weakening = self.weak_to_strong.weakening_pool.get(code)
+            if weakening is None:
                 continue
-            
-            # 2. 检查回调幅度
+            observation_days = st.days_since_weakening
+
+            # 回调上限兜底（注册中心已按 0.20 预筛，此处保留 0.25 闸口语义）
             drawdown = weakening.max_drawdown
             if drawdown > 0.25:
                 logger.debug(f"[走弱池筛选] {weakening.stock_name} 回调过大({drawdown*100:.1f}% > 25%)")
                 continue
-            # 移除回调下限：即使小幅回调也纳入观察（走弱信号本身已足够）
-            
-            # 3. 检查成交量（如果提供了日线数据，vol/volume列兼容保护）
+
+            # 成交量连续萎缩过滤（注册中心未覆盖；vol/volume列兼容保护）
             if today_daily is not None and not today_daily.empty:
                 stock_daily = today_daily[today_daily['ts_code'].str.contains(code)]
                 if not stock_daily.empty:
@@ -2057,59 +2237,69 @@ class PatternRecognition:
                         if today_volume < avg_volume_5d * 0.5 and avg_volume_5d > 0:
                             logger.debug(f"[走弱池筛选] {weakening.stock_name} 成交量萎缩(<50%)")
                             continue
-            
+
             valid_codes.append(code)
             logger.info(f"[走弱池筛选] ✓ {weakening.stock_name}({code}) 符合条件，入池{observation_days}天，回调{drawdown*100:.1f}%")
-        
+
         logger.info(f"[走弱池筛选] 共{len(self.weak_to_strong.weakening_pool)}只，历史走弱{len(valid_codes)}只纳入观察")
         return valid_codes
     
     def _calculate_technical_score(self, stock_code: str, date_str: str, today_daily: pd.DataFrame = None) -> int:
         """
-        计算技术形态维度评分（满分20分）
+        计算技术形态维度评分（满分20分；L4 总分里按 0–20 计入）
 
         评分标准：
         - 收盘价站上5日均线: +8分
         - 5日均线拐头向上: +5分
         - 成交量突破5日均量1.5倍: +5分
         - 收盘价高于开盘价（阳线）: +2分
+
+        依赖个股近 25 自然日日线（经 repo 取数）。若该股不在预取 universe 且盘后日线
+        暂未取到，daily 窗口会为空 → 本维度返回 0（属数据缺失，非「技术形态差」）。
         """
         score = 0
 
+        if not self.repo:
+            return 0
+
         try:
-            if self.dm and hasattr(self.dm, 'get_stock_daily'):
-                start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=25)).strftime("%Y%m%d")
-                daily_df = self.repo.get_daily(stock_code, start_date, date_str)
-                if daily_df is not None and not daily_df.empty and len(daily_df) >= 5:
-                    df = daily_df.sort_values('trade_date')
-                    df['close'] = df['close'].astype(float)
-                    df['ma5'] = df['close'].rolling(window=5).mean()
+            start_date = (datetime.strptime(date_str, "%Y%m%d") - timedelta(days=25)).strftime("%Y%m%d")
+            daily_df = self.repo.get_daily(stock_code, start_date, date_str)
+            if daily_df is None or daily_df.empty or len(daily_df) < 5:
+                logger.debug(f"[技术评分] {stock_code} 日线不足({0 if daily_df is None else len(daily_df)}根<5)，"
+                             f"该维度计 0（数据缺失，非形态差）")
+                return 0
 
-                    latest = df.iloc[-1]
-                    prev = df.iloc[-2] if len(df) >= 2 else latest
+            df = daily_df.sort_values('trade_date')
+            df['close'] = df['close'].astype(float)
+            df['ma5'] = df['close'].rolling(window=5).mean()
 
-                    # 收盘价站上5日均线
-                    if pd.notna(latest['ma5']) and latest['close'] > latest['ma5']:
-                        score += 8
+            wts = self.wts_scoring
+            latest = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) >= 2 else latest
 
-                    # 5日均线拐头向上
-                    if pd.notna(latest['ma5']) and pd.notna(prev['ma5']) and latest['ma5'] > prev['ma5']:
-                        score += 5
+            # 收盘价站上5日均线
+            if pd.notna(latest['ma5']) and latest['close'] > latest['ma5']:
+                score += wts.get('tech_above_ma5_pts', 8)
 
-                    # 成交量突破（volume列可能名为vol或volume）
-                    vol_col = 'vol' if 'vol' in df.columns else ('volume' if 'volume' in df.columns else None)
-                    if vol_col:
-                        df[vol_col] = df[vol_col].astype(float)
-                        avg_volume_5d = df[vol_col].tail(5).mean()
-                        if latest[vol_col] > avg_volume_5d * 1.5:
-                            score += 5
+            # 5日均线拐头向上
+            if pd.notna(latest['ma5']) and pd.notna(prev['ma5']) and latest['ma5'] > prev['ma5']:
+                score += wts.get('tech_ma5_turnup_pts', 5)
 
-                    # 收盘价高于开盘价（阳线）
-                    if 'open' in df.columns:
-                        today_close = float(latest['close'])
-                        today_open = float(latest['open'])
-                        if today_close > today_open:
-                            score += 2
+            # 成交量突破（volume列可能名为vol或volume）
+            vol_col = 'vol' if 'vol' in df.columns else ('volume' if 'volume' in df.columns else None)
+            if vol_col:
+                df[vol_col] = df[vol_col].astype(float)
+                avg_volume_5d = df[vol_col].tail(5).mean()
+                if latest[vol_col] > avg_volume_5d * wts.get('tech_vol_breakout_ratio', 1.5):
+                    score += wts.get('tech_vol_breakout_pts', 5)
+
+            # 收盘价高于开盘价（阳线）
+            if 'open' in df.columns:
+                today_close = float(latest['close'])
+                today_open = float(latest['open'])
+                if today_close > today_open:
+                    score += wts.get('tech_yang_pts', 2)
         except Exception as e:
             logger.debug(f"[技术评分] {stock_code} 计算失败: {e}")
 
@@ -2118,34 +2308,63 @@ class PatternRecognition:
     def _calculate_capital_score(self, stock_code: str, date_str: str) -> int:
         """
         计算资金流入维度评分（满分25分）
-        
+
+        数据源：``dm.get_moneyflow`` → Tushare ``moneyflow``（DataFrame，金额单位「万元」）。
+        关键列：net_mf_amount(主力净流入)、buy/sell_lg_amount(大单)、buy/sell_elg_amount(特大单)。
+
         评分标准：
-        - 主力净流入为正: +10分
-        - 大单净流入占比>=20%: +10分
-        - 资金连续流入: +5分
+        - 主力净流入为正(net_mf_amount>0): +10分
+        - 大单+特大单净流入占当日总成交额比 ≥20%: +10分（≥10%: +5分）
+        - 最近 3 个交易日主力净流入为正 ≥2 天（持续流入）: +5分
         """
         score = 0
-        
+
+        # 历史口径：曾错误调用不存在的 dm.get_moneyflow_data 且按 dict 解析，导致本维度恒为 0。
+        if not (self.dm and hasattr(self.dm, 'get_moneyflow')):
+            return 0
+
         try:
-            # 获取资金流向数据
-            if self.dm and hasattr(self.dm, 'get_moneyflow_data'):
-                moneyflow = self.repo.get_moneyflow_data(stock_code, date_str)
-                if moneyflow:
-                    # 主力净流入为正
-                    if moneyflow.get('main_inflow', 0) > 0:
-                        score += 10
-                    
-                    # 大单占比
-                    big_order_ratio = moneyflow.get('big_order_ratio', 0)
-                    if big_order_ratio >= 0.20:
-                        score += 10
-                    
-                    # 持续流入
-                    if moneyflow.get('inflow_days', 0) >= 2:
-                        score += 5
+            wts = self.wts_scoring
+            lookback = int(wts.get('capital_lookback_days', 3))
+            # 一次取最近 N 个交易日（含当日），既算当日强度，又判断持续性
+            df = self.dm.get_moneyflow(stock_code, trade_date=date_str, lookback_days=lookback)
+            if df is None or df.empty:
+                return 0
+            if 'trade_date' in df.columns:
+                df = df.sort_values('trade_date')
+            row = df.iloc[-1]  # 当日
+
+            def _f(container, key: str) -> float:
+                try:
+                    return float(container.get(key, 0) or 0)
+                except Exception:
+                    return 0.0
+
+            # 1) 主力净流入为正
+            net_mf = _f(row, 'net_mf_amount')
+            if net_mf > 0:
+                score += wts.get('capital_net_inflow_pts', 10)
+
+            # 2) 大单(含特大单)净流入占当日总成交额比
+            big_net = (_f(row, 'buy_lg_amount') + _f(row, 'buy_elg_amount')) \
+                      - (_f(row, 'sell_lg_amount') + _f(row, 'sell_elg_amount'))
+            total_amt = sum(_f(row, c) for c in (
+                'buy_sm_amount', 'sell_sm_amount', 'buy_md_amount', 'sell_md_amount',
+                'buy_lg_amount', 'sell_lg_amount', 'buy_elg_amount', 'sell_elg_amount'))
+            big_ratio = (big_net / total_amt) if total_amt > 0 else 0.0
+            if big_ratio >= wts.get('capital_big_ratio_high', 0.20):
+                score += wts.get('capital_big_ratio_high_pts', 10)
+            elif big_ratio >= wts.get('capital_big_ratio_mid', 0.10):
+                score += wts.get('capital_big_ratio_mid_pts', 5)
+
+            # 3) 持续流入：近 N 日主力净流入为正 ≥ capital_persist_days 天
+            if 'net_mf_amount' in df.columns:
+                pos_days = int((pd.to_numeric(df['net_mf_amount'], errors='coerce') > 0).sum())
+                if pos_days >= int(wts.get('capital_persist_days', 2)):
+                    score += wts.get('capital_persist_pts', 5)
         except Exception as e:
             logger.debug(f"[资金评分] {stock_code} 计算失败: {e}")
-        
+
         return score
     
     def _calculate_sector_score(self, sector_name: str, date_str: str, today_zt: pd.DataFrame = None,
@@ -2159,7 +2378,8 @@ class PatternRecognition:
         - 板块内涨停家数>=3家: +10分
         """
         score = 0
-        
+        wts = self.wts_scoring
+
         try:
             # 从涨停池统计板块涨停家数（优先用THS映射，回退东财行业列）
             if today_zt is not None and not today_zt.empty and sector_name:
@@ -2179,20 +2399,20 @@ class PatternRecognition:
                     sector_zt = today_zt[today_zt['所属行业'] == sector_name]
                     sector_limit_up_count = len(sector_zt)
                 
-                if sector_limit_up_count >= 3:
-                    score += 10
-                elif sector_limit_up_count >= 1:
-                    score += 5
+                if sector_limit_up_count >= wts.get('sector_limit_up_high', 3):
+                    score += wts.get('sector_limit_up_high_pts', 10)
+                elif sector_limit_up_count >= wts.get('sector_limit_up_low', 1):
+                    score += wts.get('sector_limit_up_low_pts', 5)
             
             # 获取板块涨幅（如果有板块数据）
             if self.dm and hasattr(self.dm, 'get_sector_daily'):
                 sector_data = self.repo.get_sector_daily(sector_name, date_str)
                 if sector_data:
                     sector_change = sector_data.get('change_pct', 0)
-                    if sector_change >= 2.0:
-                        score += 10
-                    elif sector_change >= 1.0:
-                        score += 5
+                    if sector_change >= wts.get('sector_change_high', 2.0):
+                        score += wts.get('sector_change_high_pts', 10)
+                    elif sector_change >= wts.get('sector_change_low', 1.0):
+                        score += wts.get('sector_change_low_pts', 5)
         except Exception as e:
             logger.debug(f"[情绪评分] {sector_name} 计算失败: {e}")
         

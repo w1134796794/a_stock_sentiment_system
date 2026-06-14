@@ -43,8 +43,9 @@ class StockMoneyFlow:
     retail_net_amount: float = 0  # 散户净流入（小单）
     
     # 买卖比例
-    buy_ratio: float = 0          # 买入占比
+    buy_ratio: float = 0          # 买入占比（总买额 / 总成交额 ×100）
     sell_ratio: float = 0         # 卖出占比
+    main_net_ratio: float = 0     # 主力净流入占成交比（主力净 / 总成交额 ×100，带符号）
 
 
 @dataclass
@@ -132,7 +133,8 @@ class MoneyFlowAnalyzer:
         # 总买入卖出
         total_buy = main_buy + row.get('buy_md_amount', 0) + retail_buy
         total_sell = main_sell + row.get('sell_md_amount', 0) + retail_sell
-        
+        total_amt = total_buy + total_sell
+
         return StockMoneyFlow(
             ts_code=ts_code,
             name=row.get('name', ''),
@@ -141,8 +143,9 @@ class MoneyFlowAnalyzer:
             net_mf_vol=row.get('net_mf_vol', 0),
             main_net_amount=main_net,
             retail_net_amount=retail_net,
-            buy_ratio=total_buy / (total_buy + total_sell) * 100 if (total_buy + total_sell) > 0 else 0,
-            sell_ratio=total_sell / (total_buy + total_sell) * 100 if (total_buy + total_sell) > 0 else 0,
+            buy_ratio=total_buy / total_amt * 100 if total_amt > 0 else 0,
+            sell_ratio=total_sell / total_amt * 100 if total_amt > 0 else 0,
+            main_net_ratio=main_net / total_amt * 100 if total_amt > 0 else 0,
         )
 
     def analyze_main_force_direction(self, ts_code: str, trade_date: str,
