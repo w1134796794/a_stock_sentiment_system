@@ -73,7 +73,6 @@ class StockSelectionLayer:
         self._factor_registry = None
 
         self._emotion_engine = None
-        self._integrated_emotion_engine = None
         self._pattern_recognition = None
         self._signal_priority = None
         self._sector_position_analyzer = None
@@ -116,7 +115,7 @@ class StockSelectionLayer:
             logger.debug(f"[Layer3] zt_pool 契约校验异常: {e}")
 
         try:
-            self._analyze_emotion_cycle(result, zt_pool, limit_down_df, day_before_prev, market_env)
+            self._analyze_emotion_cycle(result, zt_pool, limit_down_df, day_before_prev, market_env, prev_trade_date)
 
             # Phase 2：按情绪周期应用因子 profile（默认全启用→行为不变），并留痕
             self._apply_factor_profile(result)
@@ -151,7 +150,7 @@ class StockSelectionLayer:
 
     def _analyze_emotion_cycle(self, result: StockSelectionResult,
                                 zt_pool: pd.DataFrame, limit_down_df: pd.DataFrame,
-                                day_before_prev: str, market_env):
+                                day_before_prev: str, market_env, prev_trade_date: str = None):
         """情绪周期分析"""
         from core.analysis.emotion_cycle_engine import EmotionCycleEngine
 
@@ -165,46 +164,34 @@ class StockSelectionLayer:
             except Exception:
                 pass
 
+        # P1：昨日(T-1)涨停池，用于真·晋级率（仅展示，不参与评分）
+        prev_day_limit_up_df = pd.DataFrame()
+        if prev_trade_date:
+            try:
+                prev_day_limit_up_df = self.repo.get_limit_up_pool(prev_trade_date)
+            except Exception:
+                pass
+
+        # P3：昨日快照的情绪 metrics，用于循环相位模型的真·环比动量（旁路，可选）
+        prev_metrics = None
+        if prev_trade_date:
+            try:
+                from snapshot.reader import SnapshotReader
+                from config.settings import SNAPSHOT_DIR
+                prev_snap = SnapshotReader(SNAPSHOT_DIR).load(prev_trade_date)
+                if prev_snap:
+                    prev_metrics = (prev_snap.get("market") or {}).get("metrics")
+            except Exception:
+                pass
+
         result.emotion_result = self._emotion_engine.analyze_market_data(
             limit_up_df=zt_pool,
             limit_down_df=limit_down_df,
             prev_limit_up_df=prev_limit_up_df,
+            prev_day_limit_up_df=prev_day_limit_up_df,
+            prev_metrics=prev_metrics,
         )
         result.emotion_cycle = result.emotion_result.get('cycle_name', '震荡期')
-
-        try:
-            if self._integrated_emotion_engine is None:
-                from core.analysis.emotion_cycle_integrated import create_integrated_engine
-                self._integrated_emotion_engine = create_integrated_engine(self._emotion_engine)
-
-            metrics = result.emotion_result.get('metrics', {})
-            ml_indicators = {
-                'limit_up_count': metrics.get('limit_up_count', 0),
-                'max_board_height': metrics.get('max_board_height', 0),
-                'broken_rate': metrics.get('broken_rate', 0),
-                'continuous_rate': metrics.get('continuous_rate', 0),
-            }
-
-            integrated_result = self._integrated_emotion_engine.detect_cycle_integrated(
-                market_data={'limit_up_df': zt_pool, 'limit_down_df': limit_down_df},
-                indicators=ml_indicators,
-                use_ml=True,
-            )
-
-            result.emotion_result['integrated_analysis'] = {
-                'rule_state': integrated_result.rule_based_state,
-                'ml_state': integrated_result.ml_predicted_state,
-                'final_state': integrated_result.final_state,
-                'confidence': integrated_result.final_confidence,
-                'agreement': integrated_result.agreement,
-                'analysis': integrated_result.analysis,
-                'risk_level': integrated_result.risk_level,
-            }
-
-            logger.info(f"[Layer3] 情绪周期综合判断: 规则={integrated_result.rule_based_state}, "
-                       f"ML={integrated_result.ml_predicted_state}, 最终={integrated_result.final_state}")
-        except Exception as e:
-            logger.warning(f"[Layer3] ML情绪分析失败: {e}")
 
     def _recognize_patterns(self, result: StockSelectionResult,
                              trade_date: str, prev_trade_date: str,
@@ -351,9 +338,6 @@ class StockSelectionLayer:
         lines.append(f"=== 个股筛选摘要 ({result.trade_date}) ===")
 
         lines.append(f"\n📈 情绪周期: {result.emotion_cycle}")
-        if 'integrated_analysis' in result.emotion_result:
-            ia = result.emotion_result['integrated_analysis']
-            lines.append(f"   综合判断: {ia.get('final_state', 'N/A')} (置信度: {ia.get('confidence', 0):.0%})")
 
         total_signals = sum(len(v) for v in result.patterns.values())
         lines.append(f"\n🎯 模式信号: {total_signals}个")

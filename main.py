@@ -287,22 +287,11 @@ class SentimentSystem:
         print("【今日交易决策辅助】")
         print("="*60)
         
-        # 情绪周期判断（新增：显示综合判断结果）
+        # 情绪周期判断（来源：循环相位模型）
         cycle_name = emotion_result.get('cycle_name', '未知')
         strategy = emotion_result.get('strategy', None)
-        integrated = emotion_result.get('integrated_analysis')
-        
-        # 优先显示综合判断结果
-        if integrated:
-            print(f"\n[情绪周期 - 综合判断]")
-            print(f"  规则引擎: {integrated['rule_state']}")
-            print(f"  ML模型: {integrated['ml_state']}")
-            print(f"  最终判断: {integrated['final_state']} (置信度{integrated['confidence']:.1%})")
-            if not integrated['agreement']:
-                print(f"  [警告] 规则与ML判断不一致，{integrated['analysis']}")
-            print(f"  风险等级: {integrated['risk_level']}")
-        else:
-            print(f"\n[情绪周期] {cycle_name}")
+
+        print(f"\n[情绪周期] {cycle_name}")
         
         if cycle_name == '高潮期':
             print("[!] 市场情绪高潮，建议减仓观望，避免高位接盘")

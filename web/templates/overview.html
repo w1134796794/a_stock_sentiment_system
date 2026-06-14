@@ -22,6 +22,14 @@
     </div>
     {% if mk.strategy %}<div class="text-sm text-slate-300 mt-2">{{ mk.strategy }}{% if mk.position %} <span class="text-slate-500">· 建议仓位 {{ mk.position }}</span>{% endif %}</div>{% endif %}
     {% if mk.transition_warning %}<div class="text-[12px] text-amber-400/90 mt-2">{{ mk.transition_warning }}</div>{% endif %}
+    {% if mk.new_phase %}
+    <div class="mt-3 pt-2 border-t border-slate-800/80 text-[12px] text-slate-400 flex items-center gap-2 flex-wrap">
+      <span class="text-slate-500">循环相位</span>
+      <b class="text-sky-300">{{ mk.new_phase }}</b>
+      {% if mk.new_momentum and mk.new_momentum != '—' %}<span class="text-slate-300">· {{ mk.new_momentum }}</span>{% endif %}
+      {% if mk.trunk_clarity is not none %}<span class="text-slate-500">· 主线明确度 {{ mk.trunk_clarity|int }}%</span>{% endif %}
+    </div>
+    {% endif %}
   </div>
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-2">综合趋势</div>
@@ -78,6 +86,53 @@
     <div class="text-[11px] text-slate-500 mt-1">监控中 / 待转强</div>
   </a>
 </section>
+
+{# ===== 分群情绪：大票 / 中军 / 小票（P1 仅展示） ===== #}
+{% if mk.cohorts and (mk.cohorts.small or mk.cohorts.mid or mk.cohorts.large) %}
+<section class="mb-5">
+  <div class="text-xs text-slate-400 mb-2">分群情绪 <span class="text-slate-600">（按流通市值：小 &lt;100亿 · 中军 100-500亿 · 大 &gt;500亿）</span></div>
+  <div class="grid grid-cols-3 gap-3">
+    {% for key, label in [('small','小票'),('mid','中军'),('large','大票')] %}
+    {% set c = mk.cohorts.get(key) or {} %}
+    <div class="card border border-slate-800 rounded-xl p-3">
+      <div class="flex items-baseline justify-between mb-1">
+        <span class="text-sm font-semibold text-slate-200">{{ label }}</span>
+        <span class="text-lg font-bold mono text-rose-400">{{ c.limit_up_count if c.limit_up_count is not none else '--' }}</span>
+      </div>
+      <div class="text-[11px] text-slate-500 leading-relaxed">
+        最高 {{ c.max_board_height if c.max_board_height is not none else '--' }} 板 · 连板 {{ c.continuous_count if c.continuous_count is not none else '--' }}<br>
+        炸板 {{ c.broken_rate if c.broken_rate is not none else '--' }}% · 跌停 <span class="text-emerald-400">{{ c.limit_down_count if c.limit_down_count is not none else '--' }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ===== 真·晋级率（昨日 N 板今日晋级 N+1） ===== #}
+{% if mk.promotion and mk.promotion.overall is not none %}
+<section class="mb-6">
+  <div class="text-xs text-slate-400 mb-2">连板晋级率 <span class="text-slate-600">（昨日涨停今日接力，领先指标）</span></div>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="card border border-slate-800 rounded-xl p-3">
+      <div class="text-[11px] text-slate-400 mb-1">总晋级率</div>
+      <div class="text-lg font-bold mono text-slate-200">{{ mk.promotion.overall }}%</div>
+    </div>
+    <div class="card border border-slate-800 rounded-xl p-3">
+      <div class="text-[11px] text-slate-400 mb-1">1 进 2</div>
+      <div class="text-lg font-bold mono text-slate-200">{{ mk.promotion.rate_1to2 if mk.promotion.rate_1to2 is not none else '--' }}{% if mk.promotion.rate_1to2 is not none %}%{% endif %}</div>
+    </div>
+    <div class="card border border-slate-800 rounded-xl p-3">
+      <div class="text-[11px] text-slate-400 mb-1">2 进 3</div>
+      <div class="text-lg font-bold mono text-slate-200">{{ mk.promotion.rate_2to3 if mk.promotion.rate_2to3 is not none else '--' }}{% if mk.promotion.rate_2to3 is not none %}%{% endif %}</div>
+    </div>
+    <div class="card border border-slate-800 rounded-xl p-3">
+      <div class="text-[11px] text-slate-400 mb-1">高位晋级（3 板+）</div>
+      <div class="text-lg font-bold mono text-slate-200">{{ mk.promotion.rate_high if mk.promotion.rate_high is not none else '--' }}{% if mk.promotion.rate_high is not none %}%{% endif %}</div>
+    </div>
+  </div>
+</section>
+{% endif %}
 
 {% if mk.analysis_summary %}
 <section class="mb-6">

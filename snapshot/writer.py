@@ -51,6 +51,7 @@ def _extract_market(data_dict: Dict) -> Dict[str, Any]:
         "strategy": to_jsonable(_from_strategy("strategy")),
         "scores": to_jsonable(emotion.get("scores") if isinstance(emotion, dict) else None),
         "metrics": to_jsonable(emotion.get("metrics") if isinstance(emotion, dict) else None),
+        "phase_model": to_jsonable(emotion.get("phase_model") if isinstance(emotion, dict) else None),
         "env": to_jsonable(data_dict.get("market_env", {})),
         "phase": to_jsonable(data_dict.get("emotion_phase")),
         "similar_days": to_jsonable(data_dict.get("similar_days")),

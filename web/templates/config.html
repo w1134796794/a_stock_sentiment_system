@@ -46,6 +46,13 @@
   <div class="flex items-center gap-3 flex-wrap">
     <input id="cfg-search" type="text" placeholder="搜索参数名 / 路径…"
            class="flex-1 min-w-[200px] bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500">
+    <label class="text-sm text-slate-400 flex items-center gap-1.5 cursor-pointer select-none">
+      <input id="cfg-only-changed" type="checkbox" class="h-4 w-4 accent-amber-500"> 只看已改
+    </label>
+    <button id="cfg-expand"
+            class="border border-slate-700 text-slate-300 hover:bg-slate-800/40 text-sm rounded-md px-3 py-1.5">展开全部</button>
+    <button id="cfg-collapse"
+            class="border border-slate-700 text-slate-300 hover:bg-slate-800/40 text-sm rounded-md px-3 py-1.5">收起全部</button>
     <span class="text-sm text-slate-400">当前覆盖
       <span class="mono text-emerald-300">{{ registry.override_count }}</span> 项</span>
     <span class="text-sm text-slate-400">待保存
@@ -56,11 +63,23 @@
     <button id="cfg-reset-all"
             class="border border-rose-700 text-rose-300 hover:bg-rose-900/30 text-sm rounded-md px-3 py-1.5">全部重置</button>
   </div>
+  {# 分区快速跳转：默认全部折叠，点击直达对应分区 #}
+  <div class="flex items-center gap-2 flex-wrap mt-2.5 text-xs">
+    <span class="text-slate-500">快速跳转</span>
+    {% for section in registry.sections %}
+    {% set ns = namespace(n=0) %}
+    {% for g in section.groups %}{% set ns.n = ns.n + (g.fields|length) %}{% endfor %}
+    <a href="#sec-{{ section.scope }}"
+       class="px-2.5 py-1 rounded-full bg-slate-800/60 border border-slate-700 text-slate-300 hover:border-emerald-500 hover:text-emerald-300 transition-colors">
+      {{ section.label }} <span class="text-slate-500 mono">{{ ns.n }}</span>
+    </a>
+    {% endfor %}
+  </div>
   <div id="cfg-toast" class="hidden mt-2 text-sm"></div>
 </div>
 
 {% for section in registry.sections %}
-<section class="mb-8" data-section>
+<section id="sec-{{ section.scope }}" class="mb-8 scroll-mt-32" data-section data-scope="{{ section.scope }}">
   <h2 class="text-lg font-bold text-emerald-300 mb-3">{{ section.label }}</h2>
   {% if not section.groups %}
     <div class="text-sm text-slate-500">（无可编辑项）</div>
@@ -71,17 +90,20 @@
     因子启用开关已迁至 <a href="/factors" class="text-emerald-300 hover:underline">因子面板</a>（含 profile、各策略置信度模式）。
   </div>
   {% else %}
-  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" data-group
-           {% if section.scope == 'patterns' %}open{% endif %}>
+  {% set ns_ov = namespace(n=0) %}
+  {% for f in group.fields %}{% if f.overridden %}{% set ns_ov.n = ns_ov.n + 1 %}{% endif %}{% endfor %}
+  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" data-group>
     <summary class="cursor-pointer select-none px-4 py-2.5 font-semibold text-slate-200 hover:bg-slate-800/40 flex items-center gap-2">
       <span>{{ group.label }}</span>
       <span class="text-xs text-slate-500 mono">{{ section.scope }} · {{ group.fields|length }} 项</span>
+      {% if ns_ov.n %}<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">已改 {{ ns_ov.n }}</span>{% endif %}
     </summary>
     <div class="border-t border-slate-800">
       <table class="w-full text-sm">
         <tbody>
           {% for f in group.fields %}
           <tr class="border-b border-slate-800/60 hover:bg-slate-800/20" data-row
+              data-overridden="{{ 'true' if f.overridden else 'false' }}"
               data-name="{{ f.key|lower }} {{ f.path|lower }} {{ f.desc }}">
             <td class="px-4 py-2 align-top w-1/3">
               <div class="flex items-center gap-2">
@@ -201,21 +223,43 @@
     });
   });
 
-  // 搜索过滤
-  const search = document.getElementById('cfg-search');
-  search.addEventListener('input', () => {
-    const q = search.value.trim().toLowerCase();
-    document.querySelectorAll('[data-group]').forEach(group => {
-      let visible = 0;
-      group.querySelectorAll('[data-row]').forEach(row => {
-        const hit = !q || (row.dataset.name || '').includes(q);
-        row.style.display = hit ? '' : 'none';
-        if (hit) visible++;
-      });
-      group.style.display = visible ? '' : 'none';
-      if (q) group.open = true;
-    });
+  // 展开 / 收起全部
+  document.getElementById('cfg-expand').addEventListener('click', () => {
+    document.querySelectorAll('[data-group]').forEach(g => { g.open = true; });
   });
+  document.getElementById('cfg-collapse').addEventListener('click', () => {
+    document.querySelectorAll('[data-group]').forEach(g => { g.open = false; });
+  });
+
+  // 搜索 + 「只看已改」联合过滤
+  const search = document.getElementById('cfg-search');
+  const onlyChanged = document.getElementById('cfg-only-changed');
+
+  function applyFilters() {
+    const q = search.value.trim().toLowerCase();
+    const only = onlyChanged.checked;
+    const active = !!q || only;
+    document.querySelectorAll('[data-section]').forEach(section => {
+      let secVisible = 0;
+      section.querySelectorAll('[data-group]').forEach(group => {
+        let visible = 0;
+        group.querySelectorAll('[data-row]').forEach(row => {
+          const hitQ = !q || (row.dataset.name || '').includes(q);
+          const hitC = !only || row.dataset.overridden === 'true';
+          const hit = hitQ && hitC;
+          row.style.display = hit ? '' : 'none';
+          if (hit) visible++;
+        });
+        group.style.display = visible ? '' : 'none';
+        if (active && visible) group.open = true;
+        secVisible += visible;
+      });
+      section.style.display = secVisible ? '' : 'none';
+    });
+  }
+
+  search.addEventListener('input', applyFilters);
+  onlyChanged.addEventListener('change', applyFilters);
 
   refreshChanged();
 })();

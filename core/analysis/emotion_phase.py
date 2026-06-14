@@ -1,69 +1,52 @@
-"""Sprint E-1：情绪周期相位 / 转换预警分析器
+"""情绪循环相位子态分析（消费 ``emotion_phase_model`` 的输出）。
 
-现有 ``EmotionCycleEngine`` 给出"今日处于哪个周期"（高潮/上升/震荡/退潮/冰点），
-但实战中操盘手最关心的是两个**前瞻性**问题：
+情绪周期的**权威判定**来自 :func:`core.analysis.emotion_phase_model.compute_phase_model`
+（小票 / 中军 / 大票分群 + 方向性相位：冰点 → 修复 → 发酵 → 高潮 → 退潮）。
+本模块在其之上，提炼操盘手最关心的两个**前瞻性**问题：
 
-1. **相位进度（phase_progress）** —— 当前周期是早期 / 中期 / 晚期？
-   - 上升期早期：可以重仓加仓
-   - 上升期晚期：开始减仓换强势龙头
-   - 同样是"上升期"，早期和晚期的操作策略截然不同。
+1. **相位进度（phase_progress / phase_label）** —— 当前相位处于早期 / 中期 / 晚期？
+   - 由动量方向（升温 / 见顶 / 降温）估计：升温=早期、走平=中期、见顶/降温=晚期。
+2. **转换预警（transition_warning / next_likely_cycle）** —— 最可能转入哪个相位？
+   - 由相位得分的次高项与领先差（score_gap）判断；高潮 / 见顶额外给出「退潮」预警。
 
-2. **转换预警（transition_warning）** —— 下一周期最可能是什么？
-   - 上升期 + 高潮期分数次高且接近 → "警惕高潮期"，准备撤退
-   - 上升期 + 退潮期分数次高 → "警惕退潮风险"，谨慎打板
-   - 没有显著差异 → "暂稳"
-
-实现策略
-========
-
-* **phase_progress**：取 emotion_result 中**当前周期 score** 在 (0~100) 区间内的归一化值，
-  并结合关键指标（涨停数 / 连板高度 / 炸板率）的极端度做一个 0-1 的相位估计。
-* **transition_warning**：检查 scores 字典里**次高分**和**主分**的差距：
-  - 差距 < 8 分 → 「警惕向 {次高周期} 转换」
-  - 差距 < 15 分 → 「关注 {次高周期} 信号」
-  - 否则 → 「周期稳定」
-
+输出 ``EmotionPhaseResult`` 的字段保持稳定（下游报告 / 状态 / 概览模板直接消费）。
 简洁、可解释、可单测。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import loguru
 
 logger = loguru.logger
 
 
-# 周期顺序：从最强到最弱
-_CYCLE_ORDER_DESC = ["高潮期", "上升期", "震荡期", "回暖期", "退潮期", "冰点期"]
-
-# 周期英文 key 到中文名的映射（emotion_result 里 scores 用英文 key）
-_SCORE_KEY_TO_NAME = {
-    "boom": "高潮期",
-    "rise": "上升期",
-    "shake": "震荡期",
-    "decline": "退潮期",
-    "freeze": "冰点期",
+# 新相位 → 旧周期名（与 emotion_phase_model.LEGACY_MAP 对齐，去掉 None 兜底项）
+_LEGACY_MAP = {
+    "冰点": "冰点期",
+    "修复": "上升期",
+    "发酵": "上升期",
+    "高潮": "高潮期",
+    "退潮": "退潮期",
 }
+
+# 动量方向 → 相位进度（0-1）。升温偏早期、走平居中、见顶/降温偏晚期。
+_MOMENTUM_PROGRESS = {"升温": 0.2, "—": 0.5, "见顶": 0.9, "降温": 0.75}
 
 
 @dataclass
 class EmotionPhaseResult:
     """情绪周期相位分析结果。"""
     cycle_name: str
-    phase_progress: float           # 0-1，当前周期内的进度位置
+    phase_progress: float           # 0-1，当前相位内的进度位置
     phase_label: str                # "早期" / "中期" / "晚期"
     transition_warning: str         # 转换预警文字
-    next_likely_cycle: str          # 次高分对应的周期名（=最可能转入的周期）
-    main_score: float               # 主周期得分
-    next_score: float               # 次高周期得分
+    next_likely_cycle: str          # 最可能转入的相位（旧周期名）
+    main_score: float               # 主相位得分
+    next_score: float               # 次高相位得分
     score_gap: float                # 主分 - 次分
 
-
-# ---------------------------------------------------------------------------
-# 主分析函数
-# ---------------------------------------------------------------------------
 
 def _classify_phase_progress(progress: float) -> str:
     """把 0-1 进度归到"早期 / 中期 / 晚期"标签。"""
@@ -74,137 +57,77 @@ def _classify_phase_progress(progress: float) -> str:
     return "晚期"
 
 
-def _compute_phase_progress(
-    cycle_name: str,
-    main_score: float,
-    metrics: Dict[str, Any],
-) -> float:
-    """估算当前周期的相位进度。
-
-    实现思路：
-    - 主周期得分越接近 100 → 该周期表现越"典型/强烈"
-    - 同时考虑关键 metrics 的极端度（涨停数 / 连板高度 / 炸板率）
-    - 输出 0-1 的归一化进度
-
-    特殊处理（每个周期的"进度"含义不同）：
-    - 高潮期：得分越高 → 越晚期（高潮顶点 = 最危险点）
-    - 上升期：得分越高 → 越偏中期（健康状态）；下降趋势 → 晚期
-    - 退潮期：得分越高 → 越晚期（最差的退潮 = 最深的冰点边缘）
-    - 冰点期：得分越高 → 越晚期（最冷点 = 反弹前夜）
-    """
-    # 主周期得分占 70% 权重
-    score_progress = min(1.0, max(0.0, main_score / 100.0))
-
-    # 关键指标加成 30% 权重
-    limit_up = float(metrics.get("limit_up_count", 0) or 0)
-    max_height = float(metrics.get("max_board_height", 0) or 0)
-    broken_rate = float(metrics.get("broken_rate", 0) or 0)
-    nuclear = float(metrics.get("nuclear_button_count", 0) or 0)
-
-    metric_progress = 0.5
-    if cycle_name == "高潮期":
-        # 涨停越多、连板越高、炸板率越低 → 越晚期
-        metric_progress = min(1.0, (limit_up / 120.0) * 0.5 + (max_height / 10.0) * 0.5)
-    elif cycle_name == "上升期":
-        # 上升期：涨停 50-100 家区间，越接近 100 越晚期
-        if limit_up <= 50:
-            metric_progress = 0.0
-        elif limit_up >= 100:
-            metric_progress = 1.0
-        else:
-            metric_progress = (limit_up - 50) / 50.0
-    elif cycle_name == "震荡期":
-        # 震荡期看炸板率：炸板率越高 → 越向退潮转
-        metric_progress = min(1.0, broken_rate / 60.0)
-    elif cycle_name == "退潮期":
-        # 退潮越深 → 越晚期；用核按钮数量
-        metric_progress = min(1.0, nuclear / 30.0)
-    elif cycle_name == "冰点期":
-        # 涨停越少、连板越低 → 越晚期（接近反弹）
-        metric_progress = 1.0 - min(1.0, limit_up / 20.0)
-
-    return round(0.7 * score_progress + 0.3 * metric_progress, 3)
-
-
 def _compute_transition_warning(
-    cycle_name: str,
-    next_cycle_name: str,
+    phase: Optional[str],
+    momentum: str,
+    next_phase: str,
     score_gap: float,
 ) -> str:
-    """生成转换预警文本。
-
-    阈值经验值：
-    - gap < 8：很可能即将转换 → "警惕"
-    - gap < 15：有转换风险 → "关注"
-    - 否则：稳定
-    """
-    if score_gap < 8:
-        return f"⚠ 警惕向「{next_cycle_name}」转换（次分 vs 主分 gap={score_gap:.1f}）"
-    if score_gap < 15:
-        return f"关注「{next_cycle_name}」信号（gap={score_gap:.1f}）"
-    return "周期稳定"
+    """生成转换预警文本（基于相位 / 动量 / 相位得分领先度）。"""
+    if phase == "高潮" or momentum == "见顶":
+        return "⚠ 高位见顶风险，警惕转入「退潮」"
+    if momentum == "降温":
+        nxt = next_phase or "退潮"
+        return f"⚠ 动量降温，警惕走弱（下一相位「{nxt}」）"
+    if next_phase and score_gap < 1.0:
+        return f"⚠ 相位胶着，警惕转入「{next_phase}」（领先 {score_gap:.1f} 分）"
+    if next_phase and score_gap < 2.0:
+        return f"关注「{next_phase}」信号（领先 {score_gap:.1f} 分）"
+    return "相位稳定"
 
 
 def analyze_emotion_phase(emotion_result: Dict[str, Any]) -> Optional[EmotionPhaseResult]:
-    """对 emotion_result 做相位分析。
+    """对 emotion_result 做相位子态分析。
 
     Args:
-        emotion_result: ``EmotionCycleEngine.analyze`` 的返回值，
-                        需含 ``cycle_name`` / ``scores`` / ``metrics`` 三键
+        emotion_result: ``EmotionCycleEngine.analyze_market_data`` 的返回值，
+                        需含 ``phase_model``（来自 compute_phase_model）。
 
     Returns:
-        ``EmotionPhaseResult``，输入异常时返回 None
+        ``EmotionPhaseResult``，输入异常或缺相位模型时返回 None。
     """
     if not emotion_result or not isinstance(emotion_result, dict):
         return None
 
-    cycle_name = emotion_result.get("cycle_name", "")
-    scores = emotion_result.get("scores", {}) or {}
-    metrics = emotion_result.get("metrics", {}) or {}
-
-    if not cycle_name or not scores:
+    pm = emotion_result.get("phase_model") or {}
+    scores = pm.get("scores") or {}
+    if not scores:
         return None
 
-    # scores 的 key 可能是英文（"boom"/"rise"/...）也可能直接是中文，做兼容
-    name_score_map: Dict[str, float] = {}
-    for k, v in scores.items():
-        if v is None:
-            continue
-        try:
-            v = float(v)
-        except (ValueError, TypeError):
-            continue
-        if k in _SCORE_KEY_TO_NAME:
-            name_score_map[_SCORE_KEY_TO_NAME[k]] = v
-        else:
-            name_score_map[k] = v
-
-    if not name_score_map:
-        return None
-
-    main_score = name_score_map.get(cycle_name, 0.0)
-
-    # 次高分对应的周期（排除主周期本身）
-    sorted_others = sorted(
-        [(name, sc) for name, sc in name_score_map.items() if name != cycle_name],
-        key=lambda x: -x[1],
+    phase = pm.get("phase")                                   # 新相位名 或 "无主线"
+    momentum = pm.get("momentum") or "—"
+    legacy_cycle = (
+        emotion_result.get("cycle_name")
+        or pm.get("legacy_cycle_name")
+        or "震荡期"
     )
-    if sorted_others:
-        next_cycle_name, next_score = sorted_others[0]
-    else:
-        next_cycle_name, next_score = "", 0.0
 
-    score_gap = main_score - next_score
-    phase_progress = _compute_phase_progress(cycle_name, main_score, metrics)
-    phase_label = _classify_phase_progress(phase_progress)
-    warning = _compute_transition_warning(cycle_name, next_cycle_name, score_gap)
+    # 主相位 / 次相位（按相位得分排序）
+    try:
+        ordered = sorted(scores.items(), key=lambda kv: -float(kv[1]))
+    except (TypeError, ValueError):
+        return None
+    main_phase, main_score = ordered[0]
+    next_phase, next_score = (ordered[1] if len(ordered) > 1 else ("", 0.0))
+    main_score = float(main_score)
+    next_score = float(next_score)
+    score_gap = round(main_score - next_score, 1)
+
+    progress = _MOMENTUM_PROGRESS.get(momentum, 0.5)
+    phase_label = _classify_phase_progress(progress)
+
+    # 下一相位：高潮 / 见顶强制提示「退潮」，否则取次高相位
+    nxt_phase = "退潮" if (phase == "高潮" or momentum == "见顶") else next_phase
+    next_legacy = _LEGACY_MAP.get(nxt_phase, nxt_phase or "")
+
+    warning = _compute_transition_warning(phase, momentum, nxt_phase, score_gap)
 
     return EmotionPhaseResult(
-        cycle_name=cycle_name,
-        phase_progress=phase_progress,
+        cycle_name=legacy_cycle,
+        phase_progress=progress,
         phase_label=phase_label,
         transition_warning=warning,
-        next_likely_cycle=next_cycle_name,
+        next_likely_cycle=next_legacy,
         main_score=main_score,
         next_score=next_score,
         score_gap=score_gap,

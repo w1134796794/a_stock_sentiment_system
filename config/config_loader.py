@@ -106,8 +106,8 @@ class ConfigLoader:
     # 必备配置键 schema：(配置名, 必备路径列表)
     REQUIRED_KEYS: Dict[str, list] = {
         'emotion_cycle': [
-            'cycle_thresholds',
-            'scoring_weights',
+            'phase_model.cohort',
+            'phase_model.thresholds',
         ],
         'sector_tracker': [
             'analyze_sectors.top_n',
@@ -279,30 +279,6 @@ def get_emotion_cycle_config() -> Dict[str, Any]:
     return config_loader.get_emotion_cycle_config()
 
 
-def get_emotion_thresholds() -> Dict[str, Any]:
-    """获取情绪周期阈值配置"""
-    config = config_loader.get_emotion_cycle_config()
-    return config.get('cycle_thresholds', {})
-
-
-def get_emotion_scoring_weights() -> Dict[str, float]:
-    """获取情绪周期评分权重"""
-    config = config_loader.get_emotion_cycle_config()
-    return config.get('scoring_weights', {})
-
-
-def get_emotion_cycle_rules() -> Dict[str, Any]:
-    """获取情绪周期判定规则"""
-    config = config_loader.get_emotion_cycle_config()
-    return config.get('cycle_rules', {})
-
-
-def get_emotion_strategies() -> Dict[str, Any]:
-    """获取情绪周期策略配置"""
-    config = config_loader.get_emotion_cycle_config()
-    return config.get('cycle_strategies', {})
-
-
 def get_sector_tracker_config() -> Dict[str, Any]:
     """获取板块追踪器完整配置"""
     return config_loader.get_sector_tracker_config()
@@ -342,112 +318,6 @@ def get_sector_relation_config() -> Dict[str, Any]:
     """获取板块关联配置"""
     config = config_loader.get_sector_tracker_config()
     return config.get('sector_relation', {})
-
-
-# 用于兼容旧代码的配置访问
-class EmotionCycleConfig:
-    """情绪周期配置兼容类"""
-
-    def __init__(self):
-        self._config = get_emotion_thresholds()
-
-    @property
-    def limit_up_high(self) -> int:
-        return self._config.get('limit_up', {}).get('high', 100)
-
-    @property
-    def limit_up_mid_high(self) -> int:
-        return self._config.get('limit_up', {}).get('mid_high', 80)
-
-    @property
-    def limit_up_mid_low(self) -> int:
-        return self._config.get('limit_up', {}).get('mid_low', 50)
-
-    @property
-    def limit_up_low(self) -> int:
-        return self._config.get('limit_up', {}).get('low', 30)
-
-    @property
-    def limit_up_freeze(self) -> int:
-        return self._config.get('limit_up', {}).get('freeze', 20)
-
-    @property
-    def board_height_boom(self) -> int:
-        return self._config.get('board_height', {}).get('boom', 7)
-
-    @property
-    def board_height_high(self) -> int:
-        return self._config.get('board_height', {}).get('high', 6)
-
-    @property
-    def board_height_mid(self) -> int:
-        return self._config.get('board_height', {}).get('mid', 4)
-
-    @property
-    def board_height_low(self) -> int:
-        return self._config.get('board_height', {}).get('low', 3)
-
-    @property
-    def broken_rate_low(self) -> float:
-        return self._config.get('broken_rate', {}).get('low', 15.0)
-
-    @property
-    def broken_rate_mid(self) -> float:
-        return self._config.get('broken_rate', {}).get('mid', 25.0)
-
-    @property
-    def broken_rate_high(self) -> float:
-        return self._config.get('broken_rate', {}).get('high', 40.0)
-
-    @property
-    def nuclear_button_low(self) -> int:
-        return self._config.get('nuclear_button', {}).get('low', 3)
-
-    @property
-    def nuclear_button_high(self) -> int:
-        return self._config.get('nuclear_button', {}).get('high', 10)
-
-    @property
-    def premium_high(self) -> float:
-        return self._config.get('premium', {}).get('high', 3.0)
-
-    @property
-    def premium_mid(self) -> float:
-        return self._config.get('premium', {}).get('mid', 1.0)
-
-    @property
-    def premium_low(self) -> float:
-        return self._config.get('premium', {}).get('low', -1.0)
-
-    @property
-    def continuous_rate_high(self) -> float:
-        return self._config.get('continuous_rate', {}).get('high', 30.0)
-
-    @property
-    def continuous_rate_mid(self) -> float:
-        return self._config.get('continuous_rate', {}).get('mid', 20.0)
-
-    @property
-    def continuous_rate_low(self) -> float:
-        return self._config.get('continuous_rate', {}).get('low', 10.0)
-
-    @property
-    def limit_down_ratio_low(self) -> float:
-        return self._config.get('limit_down_ratio', {}).get('low', 0.1)
-
-    @property
-    def limit_down_ratio_mid(self) -> float:
-        return self._config.get('limit_down_ratio', {}).get('mid', 0.3)
-
-    @property
-    def limit_down_ratio_high(self) -> float:
-        return self._config.get('limit_down_ratio', {}).get('high', 0.5)
-
-
-# 兼容旧的导入方式
-def load_emotion_cycle_config() -> EmotionCycleConfig:
-    """加载情绪周期配置（兼容旧代码）"""
-    return EmotionCycleConfig()
 
 
 # ============================================
