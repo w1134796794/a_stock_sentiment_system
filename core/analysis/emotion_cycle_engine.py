@@ -16,17 +16,30 @@
   - 随意补仓（亏损加仓摊低成本）
 """
 import pandas as pd
-import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 from enum import Enum
 from dataclasses import dataclass
-from datetime import datetime
 import loguru
 
 logger = loguru.logger
 
-# 导入外置配置
-from config.config_loader import EmotionCycleConfig
+# —— 分群口径（流通市值，单位：元）。默认 小<100亿 / 中军100-500亿 / 大>500亿。
+# 仅用于 metrics 展示，不参与情绪周期评分。运行时优先读 emotion_cycle_config.yaml
+# 的 phase_model.cohort（单位：亿元），失败回退下列默认值。
+COHORT_CAP_SMALL_MAX = 100 * 1e8     # 小票流通市值上限
+COHORT_CAP_LARGE_MIN = 500 * 1e8     # 大票流通市值下限
+
+
+def _load_cohort_cutoffs():
+    """从 YAML 单一真源读取分群市值阈值（亿元→元），失败回退默认。"""
+    try:
+        from config.config_loader import get_emotion_cycle_config
+        coh = ((get_emotion_cycle_config() or {}).get("phase_model") or {}).get("cohort") or {}
+        small = float(coh.get("small_max_yi", 100)) * 1e8
+        large = float(coh.get("large_min_yi", 500)) * 1e8
+        return small, large
+    except Exception:
+        return COHORT_CAP_SMALL_MAX, COHORT_CAP_LARGE_MIN
 
 
 class EmotionCycle(Enum):
@@ -36,57 +49,6 @@ class EmotionCycle(Enum):
     SHAKE = "震荡期"     # 震荡期: 涨停30-60家，连板高度3-5板，轮动快
     DECLINE = "退潮期"   # 退潮期: 涨停<30家，核按钮多，高标A杀
     FREEZE = "冰点期"    # 冰点期: 涨停<20家，连板高度<3板，地量
-
-
-@dataclass
-class CycleThresholds:
-    """
-    情绪周期阈值配置
-    
-    注意: 现在阈值从YAML配置文件加载，此类保留用于兼容性
-    建议使用 EmotionCycleConfig() 获取最新配置
-    """
-    
-    def __init__(self):
-        # 从外置配置加载
-        config = EmotionCycleConfig()
-        
-        # 涨停家数阈值
-        self.limit_up_high = config.limit_up_high
-        self.limit_up_mid_high = config.limit_up_mid_high
-        self.limit_up_mid_low = config.limit_up_mid_low
-        self.limit_up_low = config.limit_up_low
-        self.limit_up_freeze = config.limit_up_freeze
-        
-        # 连板高度阈值
-        self.board_height_boom = config.board_height_boom
-        self.board_height_high = config.board_height_high
-        self.board_height_mid = config.board_height_mid
-        self.board_height_low = config.board_height_low
-        
-        # 炸板率阈值
-        self.broken_rate_low = config.broken_rate_low
-        self.broken_rate_mid = config.broken_rate_mid
-        self.broken_rate_high = config.broken_rate_high
-        
-        # 核按钮阈值
-        self.nuclear_button_low = config.nuclear_button_low
-        self.nuclear_button_high = config.nuclear_button_high
-        
-        # 昨日涨停溢价阈值
-        self.premium_high = config.premium_high
-        self.premium_mid = config.premium_mid
-        self.premium_low = config.premium_low
-        
-        # 连板率阈值
-        self.continuous_rate_high = config.continuous_rate_high
-        self.continuous_rate_mid = config.continuous_rate_mid
-        self.continuous_rate_low = config.continuous_rate_low
-        
-        # 跌停惩罚阈值
-        self.limit_down_ratio_low = config.limit_down_ratio_low
-        self.limit_down_ratio_mid = config.limit_down_ratio_mid
-        self.limit_down_ratio_high = config.limit_down_ratio_high
 
 
 @dataclass
@@ -166,352 +128,14 @@ class EmotionCycleEngine:
     8. 连板梯队完整性 - 生态健康度
     """
     
-    def __init__(self, thresholds: CycleThresholds = None, dm=None, factor_registry=None, repo=None):
-        self.thresholds = thresholds or CycleThresholds()
-        self.history_cycles: List[Dict] = []  # 历史周期记录
-        self.dm = dm  # DataManager实例，用于获取价格数据
-        # Phase 1：只读仓库（仅在有 dm 时构造透传）
+    def __init__(self, dm=None, repo=None):
+        self.dm = dm  # DataManager 实例，用于获取价格数据
+        # 只读仓库（仅在有 dm 时构造透传）
         if repo is None and dm is not None:
             from core.data.repository import StockRepository
             repo = StockRepository.passthrough(dm)
         self.repo = repo
-        self.factor_registry = factor_registry  # 因子注册中心
 
-        # 从因子配置加载评分权重
-        self._load_scoring_weights()
-
-    def _load_scoring_weights(self):
-        """从FactorRegistry加载评分权重，失败则使用默认值"""
-        self.scoring_weights = {
-            'limit_up_count': 1.0,
-            'board_height': 0.8,
-            'broken_rate': 0.6,
-            'nuclear_button': 0.5,
-            'premium': 0.5,
-            'echelon': 0.4,
-            'continuous_rate': 0.6,
-            'limit_down_ratio': 0.7,
-            'win_rate': 0.5,
-            'avg_profit': 0.4,
-            'first_board_ratio': 0.08,
-            'one_word_ratio': 0.05,
-            'tail_board_ratio': 0.05,
-            'extreme_reversal': 0.05,
-            'avg_seal_ratio': 0.05,
-        }
-
-        if self.factor_registry is None:
-            try:
-                from core.factors.factor_registry import get_factor_registry
-                self.factor_registry = get_factor_registry()
-            except Exception:
-                pass
-
-        if self.factor_registry is not None:
-            try:
-                factor_weights = self.factor_registry.get_composite_weights('emotion')
-                if not factor_weights:
-                    factor_weights = {}
-
-                for sub_cat in ['core', 'structure', 'extreme', 'quality']:
-                    factor_ids = self.factor_registry.get_enabled_factors('emotion', sub_cat)
-                    for fid in factor_ids:
-                        w = self.factor_registry.get_factor_weight('emotion', sub_cat, fid)
-                        key_map = {
-                            'limit_up_count': 'limit_up_count',
-                            'max_board_height': 'board_height',
-                            'broken_rate': 'broken_rate',
-                            'nuclear_button_count': 'nuclear_button',
-                            'prev_limit_up_premium': 'premium',
-                            'echelon_integrity': 'echelon',
-                            'continuous_rate': 'continuous_rate',
-                            'limit_down_ratio': 'limit_down_ratio',
-                            'win_rate': 'win_rate',
-                            'avg_profit': 'avg_profit',
-                            'B1_first_board_ratio': 'first_board_ratio',
-                            'B2_one_word_board_ratio': 'one_word_ratio',
-                            'B3_tail_board_ratio': 'tail_board_ratio',
-                            'B4_extreme_reversal_count': 'extreme_reversal',
-                            'B5_avg_seal_ratio': 'avg_seal_ratio',
-                        }
-                        if fid in key_map:
-                            self.scoring_weights[key_map[fid]] = w
-
-                logger.info("[EmotionCycleEngine] 从FactorRegistry加载评分权重成功")
-            except Exception as e:
-                logger.warning(f"[EmotionCycleEngine] 从FactorRegistry加载权重失败: {e}，使用默认值")
-        
-    def detect_cycle(self,
-                     limit_up_count: int,
-                     max_board_height: int,
-                     broken_rate: float,
-                     nuclear_button_count: int = 0,
-                     prev_limit_up_premium: float = None,
-                     board_distribution: Dict[int, int] = None,
-                     continuous_rate: float = None,
-                     limit_down_count: int = 0,
-                     win_rate: float = None,
-                     avg_profit: float = None) -> Tuple[EmotionCycle, Dict[str, float]]:
-        """
-        识别当前情绪周期 - 优化版本
-
-        Args:
-            limit_up_count: 涨停家数
-            max_board_height: 最高连板高度
-            broken_rate: 炸板率 (%)
-            nuclear_button_count: 核按钮数量（跌停家数）
-            prev_limit_up_premium: 涨停溢价率（T+1路径：前天涨停→昨日开盘买→今日开盘卖，%）
-            board_distribution: 连板分布 {1: 20, 2: 10, 3: 5, ...}
-            continuous_rate: 连板率 (连板股数/涨停股总数 %)
-            limit_down_count: 跌停家数
-            win_rate: T+1开盘卖出胜率 (%)
-            avg_profit: 平均赢面 (%)
-
-        Returns:
-            Tuple[EmotionCycle, Dict]: (情绪周期枚举, 各周期得分)
-        """
-        # 计算综合得分 - 传入新增参数
-        scores = self._calculate_cycle_scores(
-            limit_up_count, max_board_height, broken_rate,
-            nuclear_button_count, prev_limit_up_premium, board_distribution,
-            continuous_rate, limit_down_count,
-            win_rate, avg_profit
-        )
-
-        # 根据得分判断周期
-        cycle = self._determine_cycle(scores)
-
-        # 记录历史
-        self._record_cycle(cycle, scores)
-
-        return cycle, scores
-    
-    def _calculate_cycle_scores(self,
-                               limit_up_count: int,
-                               max_board_height: int,
-                               broken_rate: float,
-                               nuclear_button_count: int,
-                               prev_limit_up_premium: Optional[float],
-                               board_distribution: Optional[Dict[int, int]],
-                               continuous_rate: Optional[float] = None,
-                               limit_down_count: int = 0,
-                               win_rate: Optional[float] = None,
-                               avg_profit: Optional[float] = None) -> Dict[str, float]:
-        """计算各周期维度的匹配得分 - 优化版本
-        
-        改进点：
-        1. 增加胜率和平均赢面作为新特征
-        2. 优化评分权重，使各周期区分度更明显
-        3. 增加趋势动量因子
-        """
-        scores = {
-            'boom': 0,      # 高潮期得分
-            'rise': 0,      # 上升期得分
-            'shake': 0,     # 震荡期得分
-            'decline': 0,   # 退潮期得分
-            'freeze': 0     # 冰点期得分
-        }
-
-        th = self.thresholds
-
-        # 1. 涨停家数评分 - 优化权重
-        if limit_up_count >= th.limit_up_high:
-            scores['boom'] += 4  # 从3增加到4
-            scores['rise'] += 1
-        elif limit_up_count >= th.limit_up_mid_high:
-            scores['boom'] += 2  # 从1增加到2
-            scores['rise'] += 3
-        elif limit_up_count >= th.limit_up_mid_low:
-            scores['rise'] += 3  # 从2增加到3
-            scores['shake'] += 2
-        elif limit_up_count >= th.limit_up_low:
-            scores['shake'] += 3  # 从2增加到3
-            scores['decline'] += 1
-        elif limit_up_count >= th.limit_up_freeze:
-            scores['decline'] += 3
-            scores['freeze'] += 2  # 从1增加到2
-        else:
-            scores['freeze'] += 4  # 从3增加到4
-            scores['decline'] += 1
-
-        # 2. 连板高度评分 - 优化权重
-        if max_board_height >= th.board_height_boom:
-            scores['boom'] += 4  # 从3增加到4
-        elif max_board_height >= th.board_height_high:
-            scores['boom'] += 2  # 从1增加到2
-            scores['rise'] += 3
-        elif max_board_height >= th.board_height_mid:
-            scores['rise'] += 3  # 从2增加到3
-            scores['shake'] += 1
-        elif max_board_height >= th.board_height_low:
-            scores['shake'] += 3  # 从2增加到3
-            scores['decline'] += 1
-        else:
-            scores['freeze'] += 3  # 从2增加到3
-            scores['decline'] += 1
-
-        # 3. 炸板率评分
-        if broken_rate <= th.broken_rate_low:
-            scores['boom'] += 2  # 从1增加到2
-            scores['rise'] += 2
-        elif broken_rate <= th.broken_rate_mid:
-            scores['rise'] += 1
-            scores['shake'] += 2
-        elif broken_rate <= th.broken_rate_high:
-            scores['shake'] += 2
-            scores['decline'] += 2
-        else:
-            scores['decline'] += 3
-            scores['freeze'] += 2  # 从1增加到2
-
-        # 4. 核按钮评分
-        if nuclear_button_count <= th.nuclear_button_low:
-            scores['boom'] += 2  # 从1增加到2
-            scores['rise'] += 1
-        elif nuclear_button_count <= th.nuclear_button_high:
-            scores['shake'] += 2
-        else:
-            scores['decline'] += 3
-            scores['freeze'] += 2  # 从1增加到2
-
-        # 5. 昨日涨停溢价评分
-        if prev_limit_up_premium is not None:
-            if prev_limit_up_premium >= th.premium_high:
-                scores['boom'] += 2  # 从1增加到2
-                scores['rise'] += 2
-            elif prev_limit_up_premium >= th.premium_mid:
-                scores['rise'] += 2  # 从1增加到2
-                scores['shake'] += 1
-            elif prev_limit_up_premium >= th.premium_low:
-                scores['shake'] += 2  # 从1增加到2
-                scores['decline'] += 1
-            else:
-                scores['decline'] += 3  # 从2增加到3
-                scores['freeze'] += 1
-
-        # 6. 连板梯队完整性评分
-        if board_distribution:
-            echelon_score = self._calculate_echelon_score(board_distribution)
-            if echelon_score >= 0.8:
-                scores['boom'] += 2  # 从1增加到2
-                scores['rise'] += 2
-            elif echelon_score >= 0.5:
-                scores['rise'] += 2  # 从1增加到2
-                scores['shake'] += 1
-            else:
-                scores['decline'] += 2  # 从1增加到2
-                scores['freeze'] += 1
-
-        # 7. 连板率奖赏因子 (连板股数/涨停股总数)
-        if continuous_rate is not None and limit_up_count > 0:
-            if continuous_rate >= th.continuous_rate_high:
-                scores['boom'] += 3  # 从2增加到3
-                scores['rise'] += 2
-            elif continuous_rate >= th.continuous_rate_mid:
-                scores['rise'] += 3  # 从2增加到3
-                scores['shake'] += 1
-            elif continuous_rate >= th.continuous_rate_low:
-                scores['shake'] += 2  # 从1增加到2
-                scores['decline'] += 2
-            else:
-                scores['decline'] += 2
-                scores['freeze'] += 3  # 从2增加到3
-
-        # 8. 跌停惩罚因子 (跌停家数/涨停家数比例)
-        if limit_up_count > 0:
-            limit_down_ratio = limit_down_count / limit_up_count
-            if limit_down_ratio <= th.limit_down_ratio_low:
-                scores['boom'] += 2  # 从1增加到2
-                scores['rise'] += 1
-            elif limit_down_ratio <= th.limit_down_ratio_mid:
-                scores['shake'] += 2
-            elif limit_down_ratio <= th.limit_down_ratio_high:
-                scores['decline'] += 3
-                scores['shake'] += 2  # 从1增加到2
-            else:
-                scores['decline'] += 3
-                scores['freeze'] += 4  # 从3增加到4
-
-        # 9. 新增：胜率评分（T+1模式：前天涨停→昨日开盘买→今日开盘卖的胜率）
-        if win_rate is not None:
-            if win_rate >= 70:
-                scores['boom'] += 1
-                scores['rise'] += 2
-            elif win_rate >= 50:
-                scores['rise'] += 2
-                scores['shake'] += 1
-            elif win_rate >= 30:
-                scores['shake'] += 2
-                scores['decline'] += 1
-            else:
-                scores['decline'] += 2
-                scores['freeze'] += 1
-
-        # 10. 新增：平均赢面评分
-        if avg_profit is not None:
-            if avg_profit >= 5:
-                scores['boom'] += 1
-                scores['rise'] += 2
-            elif avg_profit >= 2:
-                scores['rise'] += 1
-                scores['shake'] += 1
-            elif avg_profit >= 0:
-                scores['shake'] += 1
-            else:
-                scores['decline'] += 2
-                scores['freeze'] += 1
-
-        return scores
-    
-    def _calculate_echelon_score(self, board_distribution: Dict[int, int]) -> float:
-        """
-        计算连板梯队完整性得分
-        
-        使用公共组件库计算，保持向后兼容
-        """
-        from core.analysis.market_indicators import calculate_echelon_score
-        from config.config_loader import get_emotion_cycle_config
-        
-        # 从配置获取理想比例和阈值
-        config = get_emotion_cycle_config()
-        echelon_config = config.get('echelon_scoring', {})
-        ideal_ratios = echelon_config.get('ideal_ratios', [0.6, 0.4, 0.25, 0.15, 0.1])
-        min_ratio_threshold = echelon_config.get('min_ratio_threshold', 0.5)
-        
-        return calculate_echelon_score(
-            board_distribution,
-            ideal_ratios=ideal_ratios,
-            min_ratio_threshold=min_ratio_threshold
-        )
-    
-    def _determine_cycle(self, scores: Dict[str, float]) -> EmotionCycle:
-        """根据得分确定情绪周期"""
-        max_score = max(scores.values())
-        
-        # 找到得分最高的周期
-        if scores['boom'] == max_score and max_score >= 5:
-            return EmotionCycle.BOOM
-        elif scores['freeze'] == max_score and max_score >= 5:
-            return EmotionCycle.FREEZE
-        elif scores['decline'] == max_score and max_score >= 5:
-            return EmotionCycle.DECLINE
-        elif scores['rise'] == max_score:
-            return EmotionCycle.RISE
-        else:
-            return EmotionCycle.SHAKE
-    
-    def _record_cycle(self, cycle: EmotionCycle, scores: Dict[str, float]):
-        """记录周期判断历史"""
-        self.history_cycles.append({
-            'timestamp': datetime.now(),
-            'cycle': cycle.value,
-            'scores': scores
-        })
-        
-        # 只保留最近30条记录
-        if len(self.history_cycles) > 30:
-            self.history_cycles = self.history_cycles[-30:]
-    
     def get_strategy(self, cycle: EmotionCycle) -> CycleStrategy:
         """获取对应周期的策略建议"""
         return CYCLE_STRATEGIES.get(cycle, CYCLE_STRATEGIES[EmotionCycle.SHAKE])
@@ -519,14 +143,18 @@ class EmotionCycleEngine:
     def analyze_market_data(self, 
                            limit_up_df: pd.DataFrame,
                            limit_down_df: pd.DataFrame = None,
-                           prev_limit_up_df: pd.DataFrame = None) -> Dict:
+                           prev_limit_up_df: pd.DataFrame = None,
+                           prev_day_limit_up_df: pd.DataFrame = None,
+                           prev_metrics: Dict = None) -> Dict:
         """
         分析市场数据，识别情绪周期
         
         Args:
             limit_up_df: 当日涨停数据
             limit_down_df: 当日跌停数据（可选）
-            prev_limit_up_df: 前天涨停数据（用于T+1溢价计算：前天涨停→昨日开盘买→今日开盘卖）
+            prev_limit_up_df: 前天(T-2)涨停数据（用于T+1溢价计算：前天涨停→昨日开盘买→今日开盘卖）
+            prev_day_limit_up_df: 昨日(T-1)涨停数据（P1：用于真·晋级率，仅展示不参与评分）
+            prev_metrics: 昨日快照的情绪 metrics（P3：用于真·环比动量，可选）
             
         Returns:
             包含情绪周期分析结果的字典
@@ -639,49 +267,172 @@ class EmotionCycleEngine:
                 seconds = valid_times.apply(_time_to_seconds)
                 avg_seal_time = float(seconds.mean())
 
-        # 识别情绪周期 - 传入新增参数
-        cycle, scores = self.detect_cycle(
-            limit_up_count=limit_up_count,
-            max_board_height=max_board_height,
-            broken_rate=broken_rate,
-            nuclear_button_count=nuclear_button_count,
-            prev_limit_up_premium=prev_limit_up_premium,
-            board_distribution=board_distribution,
-            continuous_rate=continuous_rate,
-            limit_down_count=limit_down_count,
-            win_rate=win_rate,
-            avg_profit=avg_profit
-        )
+        metrics = {
+            'limit_up_count': limit_up_count,
+            'max_board_height': max_board_height,
+            'broken_rate': round(broken_rate, 2),
+            'nuclear_button_count': nuclear_button_count,
+            'prev_limit_up_premium': prev_limit_up_premium,
+            'win_rate': win_rate,
+            'avg_profit': avg_profit,
+            'board_distribution': board_distribution,
+            'continuous_rate': round(continuous_rate, 2),
+            'limit_down_count': limit_down_count,
+            'limit_down_ratio': round(limit_down_count / limit_up_count, 2) if limit_up_count > 0 else 0,
+            'first_board_ratio': first_board_ratio,
+            'one_word_ratio': one_word_ratio,
+            'tail_board_ratio': tail_board_ratio,
+            'extreme_reversal_count': extreme_reversal_count,
+            'avg_seal_ratio': avg_seal_ratio,
+            'avg_seal_time': avg_seal_time,
+            # P1 新增（仅展示，不参与评分）：大/中军/小票分群子指标 + 真·晋级率
+            'cohorts': self._calculate_cohort_metrics(limit_up_df, limit_down_df),
+            'promotion': self._calculate_promotion_rate(limit_up_df, prev_day_limit_up_df),
+        }
 
-        # 获取策略
+        # 循环相位模型：情绪周期的唯一判定来源（小票 / 中军 / 大票分群 + 方向性相位）
+        phase_model = None
+        try:
+            from core.analysis.emotion_phase_model import compute_phase_model
+            phase_model = compute_phase_model(metrics, prev_metrics=prev_metrics)
+        except Exception as e:
+            logger.warning(f"[phase_model] 相位模型计算失败: {e}")
+
+        cycle_name = (phase_model or {}).get('legacy_cycle_name') or EmotionCycle.SHAKE.value
+        cycle = next((c for c in EmotionCycle if c.value == cycle_name), EmotionCycle.SHAKE)
         strategy = self.get_strategy(cycle)
 
         return {
             'cycle': cycle,
-            'cycle_name': cycle.value,
+            'cycle_name': cycle_name,
             'strategy': strategy,
-            'metrics': {
-                'limit_up_count': limit_up_count,
-                'max_board_height': max_board_height,
-                'broken_rate': round(broken_rate, 2),
-                'nuclear_button_count': nuclear_button_count,
-                'prev_limit_up_premium': prev_limit_up_premium,
-                'win_rate': win_rate,
-                'avg_profit': avg_profit,
-                'board_distribution': board_distribution,
-                'continuous_rate': round(continuous_rate, 2),
-                'limit_down_count': limit_down_count,
-                'limit_down_ratio': round(limit_down_count / limit_up_count, 2) if limit_up_count > 0 else 0,
-                'first_board_ratio': first_board_ratio,
-                'one_word_ratio': one_word_ratio,
-                'tail_board_ratio': tail_board_ratio,
-                'extreme_reversal_count': extreme_reversal_count,
-                'avg_seal_ratio': avg_seal_ratio,
-                'avg_seal_time': avg_seal_time,
-            },
-            'scores': scores
+            'metrics': metrics,
+            'scores': (phase_model or {}).get('scores', {}),
+            'phase_model': phase_model,
         }
     
+    @staticmethod
+    def _first_col(df: pd.DataFrame, names) -> Optional[str]:
+        """返回 df 中第一个存在的列名（兼容中英文列）。"""
+        for n in names:
+            if n in df.columns:
+                return n
+        return None
+
+    def _calculate_cohort_metrics(self, limit_up_df: pd.DataFrame,
+                                  limit_down_df: pd.DataFrame = None) -> Optional[Dict]:
+        """P1：按流通市值把涨停/跌停拆为 小票/中军/大票，各算子情绪指标。
+
+        仅写入 metrics 供展示与后续建模观察，**不参与情绪周期评分**。
+        失败返回 None，绝不影响主流程。
+        """
+        try:
+            if limit_up_df is None or limit_up_df.empty:
+                return None
+            cap_col = self._first_col(limit_up_df, ['float_mv', '流通市值'])
+            if cap_col is None:
+                return None
+            board_col = self._first_col(limit_up_df, ['limit_times', '连板数'])
+            open_col = self._first_col(limit_up_df, ['open_times', '炸板次数'])
+
+            caps = pd.to_numeric(limit_up_df[cap_col], errors='coerce')
+
+            down_caps = None
+            if limit_down_df is not None and not limit_down_df.empty:
+                dcol = self._first_col(limit_down_df, ['float_mv', '流通市值'])
+                if dcol is not None:
+                    down_caps = pd.to_numeric(limit_down_df[dcol], errors='coerce')
+
+            small_cut, large_cut = _load_cohort_cutoffs()
+
+            def _masks(series):
+                small = series < small_cut
+                large = series >= large_cut
+                mid = (~small) & (~large)
+                return {'small': small, 'mid': mid, 'large': large}
+
+            up_masks = _masks(caps)
+            down_masks = _masks(down_caps) if down_caps is not None else None
+
+            result = {}
+            for name in ('small', 'mid', 'large'):
+                mask = up_masks[name].fillna(False)
+                sub = limit_up_df[mask.values]
+                cnt = int(len(sub))
+                if board_col and cnt > 0:
+                    boards = pd.to_numeric(sub[board_col], errors='coerce').fillna(1).astype(int)
+                    max_board = int(boards.max())
+                    cont = int((boards >= 2).sum())
+                else:
+                    max_board, cont = 0, 0
+                cont_rate = round(cont / cnt * 100, 2) if cnt > 0 else 0.0
+                if open_col and cnt > 0:
+                    broken = int((pd.to_numeric(sub[open_col], errors='coerce').fillna(0) > 0).sum())
+                    broken_rate = round(broken / cnt * 100, 2)
+                else:
+                    broken_rate = 0.0
+                down_cnt = int(down_masks[name].fillna(False).sum()) if down_masks is not None else 0
+                result[name] = {
+                    'limit_up_count': cnt,
+                    'max_board_height': max_board,
+                    'continuous_count': cont,
+                    'continuous_rate': cont_rate,
+                    'broken_rate': broken_rate,
+                    'limit_down_count': down_cnt,
+                }
+            return result
+        except Exception as e:
+            logger.warning(f"[cohort] 分群指标计算失败: {e}")
+            return None
+
+    def _calculate_promotion_rate(self, limit_up_df: pd.DataFrame,
+                                  prev_day_limit_up_df: pd.DataFrame = None) -> Optional[Dict]:
+        """P1：真·晋级率。昨日(T-1) k 板今日(T) 仍涨停（晋级 k+1）的比例。
+
+        与 continuous_rate（存量连板占比）不同，这是跨日的**领先**指标。
+        仅写入 metrics 供展示，**不参与评分**。失败返回 None。
+        """
+        try:
+            if (prev_day_limit_up_df is None or prev_day_limit_up_df.empty
+                    or limit_up_df is None or limit_up_df.empty):
+                return None
+            up_code = self._first_col(limit_up_df, ['ts_code', '代码', 'code'])
+            pv_code = self._first_col(prev_day_limit_up_df, ['ts_code', '代码', 'code'])
+            pv_board = self._first_col(prev_day_limit_up_df, ['limit_times', '连板数'])
+            if not all([up_code, pv_code, pv_board]):
+                return None
+
+            today_codes = set(limit_up_df[up_code].astype(str))
+            prev = prev_day_limit_up_df[[pv_code, pv_board]].copy()
+            prev[pv_board] = pd.to_numeric(prev[pv_board], errors='coerce').fillna(1).astype(int)
+
+            def _rate(level_mask):
+                codes = prev[level_mask][pv_code].astype(str)
+                denom = int(len(codes))
+                if denom == 0:
+                    return None, denom
+                promoted = int(sum(1 for c in codes if c in today_codes))
+                return round(promoted / denom * 100, 2), denom
+
+            r_1to2, d12 = _rate(prev[pv_board] == 1)
+            r_2to3, d23 = _rate(prev[pv_board] == 2)
+            r_high, dh = _rate(prev[pv_board] >= 3)
+
+            overall_denom = int(len(prev))
+            overall_prom = int(sum(1 for c in prev[pv_code].astype(str) if c in today_codes))
+            overall = round(overall_prom / overall_denom * 100, 2) if overall_denom else None
+
+            return {
+                'overall': overall,
+                'rate_1to2': r_1to2,
+                'rate_2to3': r_2to3,
+                'rate_high': r_high,
+                'sample': {'prev_total': overall_denom, 'b1': d12, 'b2': d23, 'b3plus': dh},
+            }
+        except Exception as e:
+            logger.warning(f"[promotion] 晋级率计算失败: {e}")
+            return None
+
     def _calculate_prev_limit_up_performance(self, prev_limit_up_df: pd.DataFrame) -> Dict:
         """
         计算前天涨停股票在T+1交易模式下的真实表现
@@ -798,29 +549,3 @@ class EmotionCycleEngine:
             logger.error(f"[_calculate_prev_limit_up_performance] 计算失败: {e}")
 
         return result
-
-
-if __name__ == "__main__":
-    # 测试
-    engine = EmotionCycleEngine()
-    
-    # 模拟上升期数据
-    cycle, scores = engine.detect_cycle(
-        limit_up_count=65,
-        max_board_height=5,
-        broken_rate=18,
-        nuclear_button_count=2,
-        prev_limit_up_premium=2.5,
-        board_distribution={1: 35, 2: 18, 3: 8, 4: 3, 5: 1}
-    )
-
-    print(f"识别到的情绪周期: {cycle.value}")
-    print(f"各周期得分: {scores}")
-
-    strategy = engine.get_strategy(cycle)
-    print(f"\n策略建议:")
-    print(f"  描述: {strategy.description}")
-    print(f"  策略: {strategy.strategy}")
-    print(f"  仓位: {strategy.position}")
-    print(f"  允许操作: {', '.join(strategy.allowed_actions)}")
-    print(f"  禁止操作: {', '.join(strategy.forbidden_actions)}")

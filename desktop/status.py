@@ -109,6 +109,7 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
     env = m.get("env") or {}
     metrics = m.get("metrics") or {}
     phase = m.get("phase") or {}
+    phase_model = m.get("phase_model") or {}
     width = env.get("width") or {}
     volume = env.get("volume") or {}
     trend = env.get("trend") or {}
@@ -175,6 +176,13 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
         "next_cycle": phase.get("next_likely_cycle"),
         "position": m.get("position"),
         "strategy": m.get("strategy"),
+        # P1 分群子指标（大/中军/小票）+ 真·晋级率（仅展示）
+        "cohorts": metrics.get("cohorts") or {},
+        "promotion": metrics.get("promotion") or {},
+        # 循环相位模型（情绪周期权威来源）
+        "new_phase": phase_model.get("phase"),
+        "new_momentum": phase_model.get("momentum"),
+        "trunk_clarity": round(_f(phase_model.get("trunk_clarity")) * 100, 0) if phase_model.get("trunk_clarity") is not None else None,
         # 综合趋势
         "trend_state": trend.get("state"),
         "trend_score": round(_f(trend.get("score")), 0) if trend.get("score") is not None else None,
