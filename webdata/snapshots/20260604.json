@@ -1,19 +1,76 @@
 {
   "meta": {
     "date": "20260604",
-    "generated_at": "2026-06-05T21:37:37",
-    "schema_version": 1
+    "generated_at": "2026-06-14T20:53:30",
+    "schema_version": 1,
+    "factor_profile": "default",
+    "enabled_factors": [
+      "multi_index_trend",
+      "A1_index_intraday_volatility",
+      "A2_index_consecutive_direction",
+      "A3_style_deviation",
+      "total_amount",
+      "volume_ratio",
+      "A4_amount_change_ratio",
+      "up_down_ratio",
+      "A5_limit_down_count",
+      "up_count",
+      "prev_limit_up_gap_up",
+      "prev_limit_up_positive",
+      "prev_first_board_gap_up",
+      "prev_first_board_positive",
+      "A6_blasted_next_day_performance",
+      "limit_up_count",
+      "max_board_height",
+      "broken_rate",
+      "nuclear_button_count",
+      "prev_limit_up_premium",
+      "echelon_integrity",
+      "continuous_rate",
+      "limit_down_ratio",
+      "win_rate",
+      "avg_profit",
+      "B1_first_board_ratio",
+      "B2_one_word_board_ratio",
+      "B3_tail_board_ratio",
+      "B4_extreme_reversal_count",
+      "B5_avg_seal_ratio",
+      "sector_pct_change",
+      "sector_amount",
+      "sector_limit_up_count",
+      "sector_limit_up_ratio",
+      "sector_momentum",
+      "C1_avg_seal_time",
+      "C2_leader_follower_seal_ratio",
+      "C3_sector_next_day_premium",
+      "C4_sector_net_capital_flow",
+      "C5_sector_rotation_speed",
+      "D1_n_day_high_low",
+      "D2_vol_price_coord",
+      "D3_seal_strength",
+      "D4_turnover_health",
+      "D5_ma_bull_align",
+      "E1_main_net_ratio",
+      "E2_retail_net_ratio",
+      "E3_large_buy_ratio",
+      "E4_moneyflow_trend",
+      "E3_north_flow",
+      "E4_margin_change_ratio",
+      "F1_cycle_duration",
+      "F2_market_emotion_divergence",
+      "F3_signal_win_rate"
+    ]
   },
   "market": {
     "cycle_name": "上升期",
     "position": "50-80%",
     "strategy": "重仓龙头，做最强，积极参与",
     "scores": {
-      "boom": 4,
-      "rise": 10,
-      "shake": 9,
-      "decline": 8,
-      "freeze": 3
+      "冰点": 0.0,
+      "修复": 6.0,
+      "发酵": 3.0,
+      "高潮": 0.0,
+      "退潮": 1.0
     },
     "metrics": {
       "limit_up_count": 80,
@@ -37,10 +94,64 @@
       "tail_board_ratio": 0.425,
       "extreme_reversal_count": 0,
       "avg_seal_ratio": 101413609.375,
-      "avg_seal_time": null
+      "avg_seal_time": null,
+      "cohorts": {
+        "small": {
+          "limit_up_count": 40,
+          "max_board_height": 4,
+          "continuous_count": 6,
+          "continuous_rate": 15.0,
+          "broken_rate": 50.0,
+          "limit_down_count": 6
+        },
+        "mid": {
+          "limit_up_count": 33,
+          "max_board_height": 4,
+          "continuous_count": 4,
+          "continuous_rate": 12.12,
+          "broken_rate": 66.67,
+          "limit_down_count": 1
+        },
+        "large": {
+          "limit_up_count": 7,
+          "max_board_height": 1,
+          "continuous_count": 0,
+          "continuous_rate": 0.0,
+          "broken_rate": 57.14,
+          "limit_down_count": 0
+        }
+      },
+      "promotion": {
+        "overall": 15.15,
+        "rate_1to2": 10.91,
+        "rate_2to3": 16.67,
+        "rate_high": 60.0,
+        "sample": {
+          "prev_total": 66,
+          "b1": 55,
+          "b2": 6,
+          "b3plus": 5
+        }
+      }
+    },
+    "phase_model": {
+      "phase": "修复",
+      "momentum": "升温",
+      "trunk_clarity": 0.6,
+      "legacy_cycle_name": "上升期",
+      "scores": {
+        "冰点": 0.0,
+        "修复": 6.0,
+        "发酵": 3.0,
+        "高潮": 0.0,
+        "退潮": 1.0
+      },
+      "score_gap": 3.0
     },
     "env": {
       "trade_date": "20260604",
+      "index_trade_date": "20260604",
+      "index_stale": false,
       "sh_index": {
         "close": 4057.7811,
         "change_pct": -0.6414
@@ -100,13 +211,13 @@
     },
     "phase": {
       "cycle_name": "上升期",
-      "phase_progress": 0.25,
+      "phase_progress": 0.2,
       "phase_label": "早期",
-      "transition_warning": "⚠ 警惕向「震荡期」转换（次分 vs 主分 gap=1.0）",
-      "next_likely_cycle": "震荡期",
-      "main_score": 10.0,
-      "next_score": 9.0,
-      "score_gap": 1.0
+      "transition_warning": "相位稳定",
+      "next_likely_cycle": "上升期",
+      "main_score": 6.0,
+      "next_score": 3.0,
+      "score_gap": 3.0
     },
     "similar_days": {
       "today_snapshot": {
@@ -124,7 +235,7 @@
         {
           "trade_date": "20260525",
           "cycle_name": "上升期",
-          "distance": 2.044,
+          "distance": 1.841,
           "description": "上升期 / 涨停103只 / 最高4板 / 炸板率56% / 综合51分 / 风险中等偏高 / 建议20-40%",
           "raw_metrics": {
             "limit_up_count": 103.0,
@@ -135,10 +246,23 @@
           }
         },
         {
+          "trade_date": "20260528",
+          "cycle_name": "震荡期",
+          "distance": 1.978,
+          "description": "震荡期 / 涨停102只 / 最高4板 / 炸板率51% / 综合56分 / 风险中等偏高 / 建议20-40%",
+          "raw_metrics": {
+            "limit_up_count": 102.0,
+            "limit_down_count": 8.0,
+            "max_board_height": 4.0,
+            "broken_rate": 50.98,
+            "composite_score": 55.96669060050658
+          }
+        },
+        {
           "trade_date": "20260526",
-          "cycle_name": "退潮期",
-          "distance": 2.089,
-          "description": "退潮期 / 涨停46只 / 最高3板 / 炸板率57% / 综合46分 / 风险中等偏高 / 建议20-40%",
+          "cycle_name": "上升期",
+          "distance": 2.118,
+          "description": "上升期 / 涨停46只 / 最高3板 / 炸板率57% / 综合46分 / 风险中等偏高 / 建议20-40%",
           "raw_metrics": {
             "limit_up_count": 46.0,
             "limit_down_count": 16.0,
@@ -146,22 +270,9 @@
             "broken_rate": 56.52,
             "composite_score": 45.832390438240616
           }
-        },
-        {
-          "trade_date": "20260515",
-          "cycle_name": "退潮期",
-          "distance": 2.286,
-          "description": "退潮期 / 涨停54只 / 最高6板 / 炸板率52% / 综合46分 / 风险中等偏高 / 建议20-40%",
-          "raw_metrics": {
-            "limit_up_count": 54.0,
-            "limit_down_count": 15.0,
-            "max_board_height": 6.0,
-            "broken_rate": 51.85,
-            "composite_score": 45.86557887173949
-          }
         }
       ],
-      "sample_pool_size": 11
+      "sample_pool_size": 18
     }
   },
   "trade_plans": {
@@ -191,7 +302,7 @@
         "股票名称": "奕东电子",
         "模式类型": "弱转强",
         "优先级": 100,
-        "综合评分": 63.7,
+        "综合评分": 60.2,
         "仓位等级": "轻仓",
         "建议仓位": "10%",
         "仓位依据": "启发式",
@@ -211,7 +322,7 @@
         "股票名称": "铜峰电子",
         "模式类型": "弱转强",
         "优先级": 100,
-        "综合评分": 63.3,
+        "综合评分": 59.8,
         "仓位等级": "轻仓",
         "建议仓位": "10%",
         "仓位依据": "启发式",
@@ -220,7 +331,7 @@
         "入场区间": "竞价确定",
         "止损": "-4.0%",
         "止盈": "+10.0%",
-        "次日预期": "震荡走高预期，关注开盘方向",
+        "次日预期": "需竞价确认，谨慎参与",
         "风险提示": "无特别风险提示",
         "风控动作": "拒绝",
         "风控后仓位": "0%",
@@ -231,7 +342,7 @@
         "股票名称": "龙辰科技",
         "模式类型": "弱转强",
         "优先级": 100,
-        "综合评分": 56.9,
+        "综合评分": 53.4,
         "仓位等级": "轻仓",
         "建议仓位": "10%",
         "仓位依据": "启发式",
@@ -248,10 +359,10 @@
       },
       {
         "股票代码": "600367.SH",
-        "股票名称": "XD红星发",
+        "股票名称": "红星发展",
         "模式类型": "弱转强",
         "优先级": 100,
-        "综合评分": 46.1,
+        "综合评分": 42.6,
         "仓位等级": "观察",
         "建议仓位": "5%",
         "仓位依据": "启发式",
@@ -271,7 +382,7 @@
         "股票名称": "天洋新材",
         "模式类型": "弱转强",
         "优先级": 100,
-        "综合评分": 44.5,
+        "综合评分": 41.0,
         "仓位等级": "观察",
         "建议仓位": "5%",
         "仓位依据": "启发式",
@@ -291,7 +402,7 @@
         "股票名称": "豫能控股",
         "模式类型": "二板定龙",
         "优先级": 85,
-        "综合评分": 69.4,
+        "综合评分": 64.2,
         "仓位等级": "轻仓",
         "建议仓位": "10%",
         "仓位依据": "启发式",
@@ -311,7 +422,7 @@
         "股票名称": "上海石化",
         "模式类型": "二板定龙",
         "优先级": 85,
-        "综合评分": 68.0,
+        "综合评分": 62.8,
         "仓位等级": "轻仓",
         "建议仓位": "10%",
         "仓位依据": "启发式",
@@ -331,9 +442,9 @@
         "股票名称": "瑞贝卡",
         "模式类型": "二板定龙",
         "优先级": 85,
-        "综合评分": 53.0,
-        "仓位等级": "轻仓",
-        "建议仓位": "10%",
+        "综合评分": 46.3,
+        "仓位等级": "观察",
+        "建议仓位": "5%",
         "仓位依据": "启发式",
         "竞价条件": "不限",
         "竞价区间": "-3.0%~+9.0%",
@@ -351,7 +462,7 @@
         "股票名称": "力诺药包",
         "模式类型": "龙二波",
         "优先级": 70,
-        "综合评分": 60.6,
+        "综合评分": 58.0,
         "仓位等级": "轻仓",
         "建议仓位": "10%",
         "仓位依据": "启发式",
@@ -360,18 +471,18 @@
         "入场区间": "竞价确定",
         "止损": "-4.0%",
         "止盈": "+10.0%",
-        "次日预期": "震荡走高预期，关注开盘方向",
+        "次日预期": "需竞价确认，谨慎参与",
         "风险提示": "无特别风险提示",
         "风控动作": "通过",
         "风控后仓位": "10%",
         "风控提示": "通过"
       },
       {
-        "股票代码": "002590.SZ",
-        "股票名称": "万安科技",
+        "股票代码": "000718.SZ",
+        "股票名称": "苏宁环球",
         "模式类型": "首板突破",
         "优先级": 50,
-        "综合评分": 66.2,
+        "综合评分": 65.9,
         "仓位等级": "轻仓",
         "建议仓位": "10%",
         "仓位依据": "启发式",
@@ -392,8 +503,8 @@
     "trade_date": "20260604",
     "decisions": [
       {
-        "stock_code": "002590.SZ",
-        "stock_name": "万安科技",
+        "stock_code": "000718.SZ",
+        "stock_name": "苏宁环球",
         "pattern_type": "首板突破",
         "original_position_pct": 0.1,
         "final_position_pct": 0.1,
@@ -437,7 +548,7 @@
         "stock_code": "600439.SH",
         "stock_name": "瑞贝卡",
         "pattern_type": "二板定龙",
-        "original_position_pct": 0.1,
+        "original_position_pct": 0.05,
         "final_position_pct": 0.0,
         "action": "REJECT",
         "reasons": [
@@ -483,7 +594,7 @@
       },
       {
         "stock_code": "600367.SH",
-        "stock_name": "XD红星发",
+        "stock_name": "红星发展",
         "pattern_type": "弱转强",
         "original_position_pct": 0.05,
         "final_position_pct": 0.0,
@@ -517,7 +628,7 @@
     "total_position_before": 0.0,
     "sector_exposure_before": {},
     "equity": 100000.0,
-    "summary": "=== 风控闸门 (20260604) ===\n熔断状态: NORMAL（无触发）\n有效总仓位上限: 30% | 开闸前持仓: 0%\n决策: 通过 3 / 降级 0 / 拒绝 7\n  [REJECT] 上海石化(600688.SH) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 瑞贝卡(600439.SH) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 奕东电子(301123.SZ) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 铜峰电子(600237.SH) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 龙辰科技(920161.BJ) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] XD红星发(600367.SH) 5%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 天洋新材(603330.SH) 5%→0% | 总仓位超限→剩余额度0%",
+    "summary": "=== 风控闸门 (20260604) ===\n熔断状态: NORMAL（无触发）\n有效总仓位上限: 30% | 开闸前持仓: 0%\n决策: 通过 3 / 降级 0 / 拒绝 7\n  [REJECT] 上海石化(600688.SH) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 瑞贝卡(600439.SH) 5%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 奕东电子(301123.SZ) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 铜峰电子(600237.SH) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 龙辰科技(920161.BJ) 10%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 红星发展(600367.SH) 5%→0% | 总仓位超限→剩余额度0%\n  [REJECT] 天洋新材(603330.SH) 5%→0% | 总仓位超限→剩余额度0%",
     "passed": 3,
     "downgraded": 0,
     "rejected": 7
@@ -544,12 +655,45 @@
           "pattern_type": "弱转强",
           "stock_code": "301123.SZ",
           "stock_name": "奕东电子",
-          "confidence": 0.65,
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(尾盘板)→今日涨停收复(余1.0板)",
           "key_metrics": {
             "走弱类型": "尾盘板",
             "涨停收复": "余1.0板",
-            "龙头类型": "趋势龙头"
+            "龙头类型": "趋势龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 106.79,
           "stop_loss": 101.4505,
@@ -567,13 +711,46 @@
         {
           "pattern_type": "弱转强",
           "stock_code": "600367.SH",
-          "stock_name": "XD红星发",
-          "confidence": 0.65,
+          "stock_name": "红星发展",
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(尾盘板)→今日涨停收复(余4.0板)",
           "key_metrics": {
             "走弱类型": "尾盘板",
             "涨停收复": "余4.0板",
-            "龙头类型": "连板龙头"
+            "龙头类型": "趋势龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 46.98,
           "stop_loss": 44.63099999999999,
@@ -582,7 +759,7 @@
           "validation_rules": [
             "今日入池走弱: 尾盘板",
             "今日涨停收复(余4.0板)",
-            "龙头类型: 连板龙头",
+            "龙头类型: 趋势龙头",
             "日内反转信号（需次日确认）"
           ],
           "l2_industry": "化学原料",
@@ -592,12 +769,45 @@
           "pattern_type": "弱转强",
           "stock_code": "603330.SH",
           "stock_name": "天洋新材",
-          "confidence": 0.65,
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(烂板(3次))→今日涨停收复(余4.0板)",
           "key_metrics": {
             "走弱类型": "烂板(3次)",
             "涨停收复": "余4.0板",
-            "龙头类型": "连板龙头"
+            "龙头类型": "连板龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 9.41,
           "stop_loss": 8.939499999999999,
@@ -616,12 +826,45 @@
           "pattern_type": "弱转强",
           "stock_code": "600237.SH",
           "stock_name": "铜峰电子",
-          "confidence": 0.65,
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(尾盘板)→今日涨停收复(余1.0板)",
           "key_metrics": {
             "走弱类型": "尾盘板",
             "涨停收复": "余1.0板",
-            "龙头类型": "趋势龙头"
+            "龙头类型": "趋势龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 12.22,
           "stop_loss": 11.609,
@@ -640,12 +883,45 @@
           "pattern_type": "弱转强",
           "stock_code": "920161.BJ",
           "stock_name": "龙辰科技",
-          "confidence": 0.65,
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(烂板(2次))→今日涨停收复(余1.0板)",
           "key_metrics": {
             "走弱类型": "烂板(2次)",
             "涨停收复": "余1.0板",
-            "龙头类型": "趋势龙头"
+            "龙头类型": "趋势龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 57.21,
           "stop_loss": 54.3495,
@@ -659,33 +935,9 @@
           ],
           "l2_industry": "电子化学品",
           "is_dual_resonance": false
-        },
-        {
-          "pattern_type": "弱转强",
-          "stock_code": "000520.SZ",
-          "stock_name": "凤凰航运",
-          "confidence": 0.65,
-          "description": "日内反转: 今日入池走弱(趋势回调(9.1%))→今日涨停收复(余1.0板)",
-          "key_metrics": {
-            "走弱类型": "趋势回调(9.1%)",
-            "涨停收复": "余1.0板",
-            "龙头类型": "趋势龙头"
-          },
-          "entry_price": 4.18,
-          "stop_loss": 3.9709999999999996,
-          "take_profit": 4.598,
-          "position_size": "light",
-          "validation_rules": [
-            "今日入池走弱: 趋势回调(9.1%)",
-            "今日涨停收复(余1.0板)",
-            "龙头类型: 趋势龙头",
-            "日内反转信号（需次日确认）"
-          ],
-          "l2_industry": "港口航运",
-          "is_dual_resonance": false
         }
       ],
-      "count": 6
+      "count": 5
     },
     "二板定龙": {
       "columns": [
@@ -708,81 +960,192 @@
           "pattern_type": "二板定龙",
           "stock_code": "001896.SZ",
           "stock_name": "豫能控股",
-          "confidence": 0.95,
-          "description": "首板早盘板后，次日高开7.8%，93124涨停，二板定龙",
+          "confidence": 0.8,
+          "description": "板块[电力]最强二板（全场第1），首板早盘板后，次日高开7.8%，93124涨停，二板定龙",
           "key_metrics": {
             "首板类型": "早盘板",
             "首板质量分": 85,
             "次日高开": "7.8%",
             "涨停时间": "93124",
             "封单强度": "0.74%",
-            "买点时机": "竞价"
+            "板块助攻": "3家首板",
+            "全场龙头排名": 1,
+            "强度分": 78.9,
+            "买点时机": "竞价",
+            "置信扣分明细": {
+              "value": 0.8,
+              "raw": 80.0,
+              "ceiling": 95.0,
+              "floor": 40.0,
+              "total_penalty": 15.0,
+              "breakdown": [
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.007356514160625474,
+                  "penalty": 15.0,
+                  "missing": false
+                },
+                {
+                  "factor": "gap_ratio",
+                  "value": 0.07818725099601596,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "first_board_score",
+                  "value": 85.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "is_fast",
+                  "value": 1.0,
+                  "penalty": 0.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 22.09,
           "stop_loss": 20.99,
           "take_profit": 24.74,
-          "position_size": "heavy",
+          "position_size": "medium",
           "validation_rules": [
-            "首板早盘板（硬逻辑）",
+            "板块[电力]最强二板（去同质化后唯一）",
             "次日高开7.8%（资金表态）",
             "93124涨停（速度）",
-            "封单强度0.74%（质量）"
+            "板块助攻3家首板（梯队厚度）",
+            "全场强度排名第1"
           ],
           "l2_industry": "电力",
           "is_dual_resonance": false
         },
         {
           "pattern_type": "二板定龙",
-          "stock_code": "600439.SH",
-          "stock_name": "瑞贝卡",
-          "confidence": 0.95,
-          "description": "首板盘中板后，次日高开3.1%，93055涨停，二板定龙",
-          "key_metrics": {
-            "首板类型": "盘中板",
-            "首板质量分": 85,
-            "次日高开": "3.1%",
-            "涨停时间": "93055",
-            "封单强度": "1.00%",
-            "买点时机": "开盘"
-          },
-          "entry_price": 2.88,
-          "stop_loss": 2.74,
-          "take_profit": 3.23,
-          "position_size": "heavy",
-          "validation_rules": [
-            "首板盘中板（硬逻辑）",
-            "次日高开3.1%（资金表态）",
-            "93055涨停（速度）",
-            "封单强度1.00%（质量）"
-          ],
-          "l2_industry": "服装家纺",
-          "is_dual_resonance": false
-        },
-        {
-          "pattern_type": "二板定龙",
           "stock_code": "600688.SH",
           "stock_name": "上海石化",
-          "confidence": 0.95,
-          "description": "首板一字板后，次日高开10.1%，92504涨停，二板定龙",
+          "confidence": 0.8,
+          "description": "板块[石油加工贸易]最强二板（全场第2），首板一字板后，次日高开10.1%，92504涨停，二板定龙",
           "key_metrics": {
             "首板类型": "一字板",
             "首板质量分": 100,
             "次日高开": "10.1%",
             "涨停时间": "92504",
             "封单强度": "0.66%",
-            "买点时机": "竞价"
+            "板块助攻": "0家首板",
+            "全场龙头排名": 2,
+            "强度分": 70.6,
+            "买点时机": "竞价",
+            "置信扣分明细": {
+              "value": 0.8,
+              "raw": 80.0,
+              "ceiling": 95.0,
+              "floor": 40.0,
+              "total_penalty": 15.0,
+              "breakdown": [
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.006624276330516061,
+                  "penalty": 15.0,
+                  "missing": false
+                },
+                {
+                  "factor": "gap_ratio",
+                  "value": 0.10097719869706842,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "first_board_score",
+                  "value": 100.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "is_fast",
+                  "value": 1.0,
+                  "penalty": 0.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 3.38,
           "stop_loss": 3.21,
           "take_profit": 3.79,
-          "position_size": "heavy",
+          "position_size": "medium",
           "validation_rules": [
-            "首板一字板（硬逻辑）",
+            "板块[石油加工贸易]最强二板（去同质化后唯一）",
             "次日高开10.1%（资金表态）",
             "92504涨停（速度）",
-            "封单强度0.66%（质量）"
+            "板块助攻0家首板（梯队厚度）",
+            "全场强度排名第2"
           ],
           "l2_industry": "石油加工贸易",
+          "is_dual_resonance": false
+        },
+        {
+          "pattern_type": "二板定龙",
+          "stock_code": "600439.SH",
+          "stock_name": "瑞贝卡",
+          "confidence": 0.76,
+          "description": "板块[服装家纺]最强二板（全场第3），首板盘中板后，次日高开3.1%，93055涨停，二板定龙",
+          "key_metrics": {
+            "首板类型": "盘中板",
+            "首板质量分": 85,
+            "次日高开": "3.1%",
+            "涨停时间": "93055",
+            "封单强度": "1.00%",
+            "板块助攻": "0家首板",
+            "全场龙头排名": 3,
+            "强度分": 56.4,
+            "买点时机": "开盘",
+            "置信扣分明细": {
+              "value": 0.76,
+              "raw": 76.0,
+              "ceiling": 95.0,
+              "floor": 40.0,
+              "total_penalty": 19.0,
+              "breakdown": [
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.009964749843523704,
+                  "penalty": 15.0,
+                  "missing": false
+                },
+                {
+                  "factor": "gap_ratio",
+                  "value": 0.030534351145038195,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "first_board_score",
+                  "value": 85.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "is_fast",
+                  "value": 1.0,
+                  "penalty": 0.0,
+                  "missing": false
+                }
+              ]
+            }
+          },
+          "entry_price": 2.88,
+          "stop_loss": 2.74,
+          "take_profit": 3.23,
+          "position_size": "medium",
+          "validation_rules": [
+            "板块[服装家纺]最强二板（去同质化后唯一）",
+            "次日高开3.1%（资金表态）",
+            "93055涨停（速度）",
+            "板块助攻0家首板（梯队厚度）",
+            "全场强度排名第3"
+          ],
+          "l2_industry": "服装家纺",
           "is_dual_resonance": false
         }
       ],
@@ -809,7 +1172,7 @@
           "pattern_type": "龙二波",
           "stock_code": "301188.SZ",
           "stock_name": "力诺药包",
-          "confidence": 0.6517858563777414,
+          "confidence": 0.58,
           "description": "龙二波+2次涨停趋势龙+调整9天(下跌5+震荡4)+深度16.7%+量比1.5+封单0.1%+突破均线",
           "key_metrics": {
             "第一波强度": "3板",
@@ -824,6 +1187,57 @@
             "封单强度": "0.1%",
             "涨停时间": "134554",
             "板块效应": "0分(板块涨停0家)",
+            "置信扣分明细": {
+              "value": 0.58,
+              "raw": 58.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 37.0,
+              "breakdown": [
+                {
+                  "factor": "max_boards",
+                  "value": 3.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "days_since_peak",
+                  "value": 10.0,
+                  "penalty": 3.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.0006500044863018095,
+                  "penalty": 8.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 3.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.0,
+                  "penalty": 10.0,
+                  "missing": false
+                },
+                {
+                  "factor": "layer2_clean",
+                  "value": 0.0,
+                  "penalty": 8.0,
+                  "missing": false
+                }
+              ]
+            },
             "5日涨幅": "23.4%",
             "均线突破": "是"
           },
@@ -865,83 +1279,9 @@
       "rows": [
         {
           "pattern_type": "首板突破",
-          "stock_code": "002590.SZ",
-          "stock_name": "万安科技",
-          "confidence": 0.819225417942844,
-          "description": "首板突破+新能源汽车热点+5日涨幅2.1%+量比1.5+封单6.0%+突破均线",
-          "key_metrics": {
-            "涨停时间": "93800",
-            "封单额": "19536万",
-            "封单强度": "6.0%",
-            "所属行业": "新能源汽车",
-            "行业趋势": "加速期",
-            "距前高": "11.9%",
-            "量能说明": "距前高11.9%<15%，套牢盘少",
-            "板块效应": "8分(板块涨停25家)",
-            "5日涨幅": "2.1%",
-            "量比": "1.46",
-            "均线突破": "是"
-          },
-          "entry_price": 12.44,
-          "stop_loss": 11.5692,
-          "take_profit": 13.684000000000001,
-          "position_size": "medium",
-          "validation_rules": [
-            "今日涨停(首板)",
-            "突破形态: 突破5日均线",
-            "筹码: 距前高11.9%",
-            "均线: MA5/MA10突破",
-            "涨停时间<10:45",
-            "封单>2.5%",
-            "量比>1.15",
-            "热点概念: 新能源汽车",
-            "5日涨幅<15%（低位）"
-          ],
-          "l2_industry": "新能源汽车",
-          "is_dual_resonance": false
-        },
-        {
-          "pattern_type": "首板突破",
-          "stock_code": "603610.SH",
-          "stock_name": "麒盛科技",
-          "confidence": 0.8114481082497489,
-          "description": "首板突破+智能家居+5日涨幅5.7%+量比2.2+封单2.0%+突破均线",
-          "key_metrics": {
-            "涨停时间": "95034",
-            "封单额": "5877万",
-            "封单强度": "2.0%",
-            "所属行业": "智能家居",
-            "行业趋势": "非热点",
-            "距前高": "7.6%",
-            "量能说明": "突破前高，无套牢盘",
-            "板块效应": "0分(板块涨停2家)",
-            "5日涨幅": "5.7%",
-            "量比": "2.19",
-            "均线突破": "是"
-          },
-          "entry_price": 19.32,
-          "stop_loss": 17.9676,
-          "take_profit": 21.252000000000002,
-          "position_size": "light",
-          "validation_rules": [
-            "今日涨停(首板)",
-            "突破形态: 前高突破",
-            "筹码: 距前高7.6%",
-            "均线: MA5/MA10突破",
-            "涨停时间<11:00",
-            "封单>1.5%",
-            "量比>0.8",
-            "行业: 智能家居（非热点，板块效应0分）",
-            "5日涨幅<15%（低位）"
-          ],
-          "l2_industry": "智能家居",
-          "is_dual_resonance": false
-        },
-        {
-          "pattern_type": "首板突破",
           "stock_code": "000718.SZ",
           "stock_name": "苏宁环球",
-          "confidence": 0.8024305512374045,
+          "confidence": 0.81,
           "description": "首板突破+文化传媒概念+5日涨幅12.6%+量比1.5+封单3.0%+突破均线",
           "key_metrics": {
             "涨停时间": "94209",
@@ -952,6 +1292,51 @@
             "距前高": "5.1%",
             "量能说明": "突破前高，无套牢盘",
             "板块效应": "0分(板块涨停2家)",
+            "置信扣分明细": {
+              "value": 0.81,
+              "raw": 81.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 14.0,
+              "breakdown": [
+                {
+                  "factor": "breakout_type",
+                  "value": "前高突破",
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.030188723115866994,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "volume_ratio_excess",
+                  "value": 0.7476850412468119,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.0,
+                  "penalty": 10.0,
+                  "missing": false
+                }
+              ]
+            },
             "5日涨幅": "12.6%",
             "量比": "1.55",
             "均线突破": "是"
@@ -976,9 +1361,91 @@
         },
         {
           "pattern_type": "首板突破",
+          "stock_code": "002590.SZ",
+          "stock_name": "万安科技",
+          "confidence": 0.8,
+          "description": "首板突破+新能源汽车热点+5日涨幅2.1%+量比1.5+封单6.0%+突破均线",
+          "key_metrics": {
+            "涨停时间": "93800",
+            "封单额": "19536万",
+            "封单强度": "6.0%",
+            "所属行业": "新能源汽车",
+            "行业趋势": "加速期",
+            "距前高": "11.9%",
+            "量能说明": "距前高11.9%<15%，套牢盘少",
+            "板块效应": "8分(板块涨停25家)",
+            "置信扣分明细": {
+              "value": 0.8,
+              "raw": 80.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 15.0,
+              "breakdown": [
+                {
+                  "factor": "breakout_type",
+                  "value": "突破5日均线",
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.06046258730333457,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "volume_ratio_excess",
+                  "value": 0.3075139314281303,
+                  "penalty": 6.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.08,
+                  "penalty": 0.0,
+                  "missing": false
+                }
+              ]
+            },
+            "5日涨幅": "2.1%",
+            "量比": "1.46",
+            "均线突破": "是"
+          },
+          "entry_price": 12.44,
+          "stop_loss": 11.5692,
+          "take_profit": 13.684000000000001,
+          "position_size": "medium",
+          "validation_rules": [
+            "今日涨停(首板)",
+            "突破形态: 突破5日均线",
+            "筹码: 距前高11.9%",
+            "均线: MA5/MA10突破",
+            "涨停时间<10:45",
+            "封单>2.5%",
+            "量比>1.15",
+            "热点概念: 新能源汽车",
+            "5日涨幅<15%（低位）"
+          ],
+          "l2_industry": "新能源汽车",
+          "is_dual_resonance": false
+        },
+        {
+          "pattern_type": "首板突破",
           "stock_code": "002072.SZ",
           "stock_name": "凯瑞德",
-          "confidence": 0.7767314005781251,
+          "confidence": 0.77,
           "description": "首板突破+煤炭概念+5日涨幅7.4%+量比1.3+封单1.5%+突破均线",
           "key_metrics": {
             "涨停时间": "103315",
@@ -989,6 +1456,51 @@
             "距前高": "0.0%",
             "量能说明": "突破前高，无套牢盘",
             "板块效应": "0分(板块涨停1家)",
+            "置信扣分明细": {
+              "value": 0.77,
+              "raw": 77.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 18.0,
+              "breakdown": [
+                {
+                  "factor": "breakout_type",
+                  "value": "前高突破",
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.01546077717265166,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "volume_ratio_excess",
+                  "value": 0.5269948744273878,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.0,
+                  "penalty": 10.0,
+                  "missing": false
+                }
+              ]
+            },
             "5日涨幅": "7.4%",
             "量比": "1.33",
             "均线突破": "是"
@@ -1009,6 +1521,88 @@
             "5日涨幅<15%（低位）"
           ],
           "l2_industry": "煤炭概念",
+          "is_dual_resonance": false
+        },
+        {
+          "pattern_type": "首板突破",
+          "stock_code": "603610.SH",
+          "stock_name": "麒盛科技",
+          "confidence": 0.77,
+          "description": "首板突破+智能家居+5日涨幅5.7%+量比2.2+封单2.0%+突破均线",
+          "key_metrics": {
+            "涨停时间": "95034",
+            "封单额": "5877万",
+            "封单强度": "2.0%",
+            "所属行业": "智能家居",
+            "行业趋势": "非热点",
+            "距前高": "7.6%",
+            "量能说明": "突破前高，无套牢盘",
+            "板块效应": "0分(板块涨停2家)",
+            "置信扣分明细": {
+              "value": 0.77,
+              "raw": 77.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 18.0,
+              "breakdown": [
+                {
+                  "factor": "breakout_type",
+                  "value": "前高突破",
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.01986326731891208,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "volume_ratio_excess",
+                  "value": 1.3907191203974885,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.0,
+                  "penalty": 10.0,
+                  "missing": false
+                }
+              ]
+            },
+            "5日涨幅": "5.7%",
+            "量比": "2.19",
+            "均线突破": "是"
+          },
+          "entry_price": 19.32,
+          "stop_loss": 17.9676,
+          "take_profit": 21.252000000000002,
+          "position_size": "light",
+          "validation_rules": [
+            "今日涨停(首板)",
+            "突破形态: 前高突破",
+            "筹码: 距前高7.6%",
+            "均线: MA5/MA10突破",
+            "涨停时间<11:00",
+            "封单>1.5%",
+            "量比>0.8",
+            "行业: 智能家居（非热点，板块效应0分）",
+            "5日涨幅<15%（低位）"
+          ],
+          "l2_industry": "智能家居",
           "is_dual_resonance": false
         }
       ],
@@ -1039,12 +1633,45 @@
           "pattern_type": "弱转强",
           "stock_code": "301123.SZ",
           "stock_name": "奕东电子",
-          "confidence": 0.65,
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(尾盘板)→今日涨停收复(余1.0板)",
           "key_metrics": {
             "走弱类型": "尾盘板",
             "涨停收复": "余1.0板",
-            "龙头类型": "趋势龙头"
+            "龙头类型": "趋势龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 106.79,
           "stop_loss": 101.4505,
@@ -1062,13 +1689,46 @@
         {
           "pattern_type": "弱转强",
           "stock_code": "600367.SH",
-          "stock_name": "XD红星发",
-          "confidence": 0.65,
+          "stock_name": "红星发展",
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(尾盘板)→今日涨停收复(余4.0板)",
           "key_metrics": {
             "走弱类型": "尾盘板",
             "涨停收复": "余4.0板",
-            "龙头类型": "连板龙头"
+            "龙头类型": "趋势龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 46.98,
           "stop_loss": 44.63099999999999,
@@ -1077,7 +1737,7 @@
           "validation_rules": [
             "今日入池走弱: 尾盘板",
             "今日涨停收复(余4.0板)",
-            "龙头类型: 连板龙头",
+            "龙头类型: 趋势龙头",
             "日内反转信号（需次日确认）"
           ],
           "l2_industry": "化学原料",
@@ -1087,12 +1747,45 @@
           "pattern_type": "弱转强",
           "stock_code": "603330.SH",
           "stock_name": "天洋新材",
-          "confidence": 0.65,
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(烂板(3次))→今日涨停收复(余4.0板)",
           "key_metrics": {
             "走弱类型": "烂板(3次)",
             "涨停收复": "余4.0板",
-            "龙头类型": "连板龙头"
+            "龙头类型": "连板龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 9.41,
           "stop_loss": 8.939499999999999,
@@ -1111,12 +1804,45 @@
           "pattern_type": "弱转强",
           "stock_code": "600237.SH",
           "stock_name": "铜峰电子",
-          "confidence": 0.65,
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(尾盘板)→今日涨停收复(余1.0板)",
           "key_metrics": {
             "走弱类型": "尾盘板",
             "涨停收复": "余1.0板",
-            "龙头类型": "趋势龙头"
+            "龙头类型": "趋势龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 12.22,
           "stop_loss": 11.609,
@@ -1135,12 +1861,45 @@
           "pattern_type": "弱转强",
           "stock_code": "920161.BJ",
           "stock_name": "龙辰科技",
-          "confidence": 0.65,
+          "confidence": 0.55,
           "description": "日内反转: 今日入池走弱(烂板(2次))→今日涨停收复(余1.0板)",
           "key_metrics": {
             "走弱类型": "烂板(2次)",
             "涨停收复": "余1.0板",
-            "龙头类型": "趋势龙头"
+            "龙头类型": "趋势龙头",
+            "置信扣分明细": {
+              "value": 0.55,
+              "raw": 55.0,
+              "ceiling": 95.0,
+              "floor": 50.0,
+              "total_penalty": 40.0,
+              "breakdown": [
+                {
+                  "factor": "gap_pct",
+                  "value": null,
+                  "penalty": 18,
+                  "missing": true
+                },
+                {
+                  "factor": "auction_vol_ratio",
+                  "value": null,
+                  "penalty": 12,
+                  "missing": true
+                },
+                {
+                  "factor": "flexible_score",
+                  "value": 60.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "weakening_type",
+                  "value": "其他",
+                  "penalty": 5.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 57.21,
           "stop_loss": 54.3495,
@@ -1153,30 +1912,6 @@
             "日内反转信号（需次日确认）"
           ],
           "l2_industry": "电子化学品",
-          "is_dual_resonance": false
-        },
-        {
-          "pattern_type": "弱转强",
-          "stock_code": "000520.SZ",
-          "stock_name": "凤凰航运",
-          "confidence": 0.65,
-          "description": "日内反转: 今日入池走弱(趋势回调(9.1%))→今日涨停收复(余1.0板)",
-          "key_metrics": {
-            "走弱类型": "趋势回调(9.1%)",
-            "涨停收复": "余1.0板",
-            "龙头类型": "趋势龙头"
-          },
-          "entry_price": 4.18,
-          "stop_loss": 3.9709999999999996,
-          "take_profit": 4.598,
-          "position_size": "light",
-          "validation_rules": [
-            "今日入池走弱: 趋势回调(9.1%)",
-            "今日涨停收复(余1.0板)",
-            "龙头类型: 趋势龙头",
-            "日内反转信号（需次日确认）"
-          ],
-          "l2_industry": "港口航运",
           "is_dual_resonance": false
         }
       ]
@@ -1204,81 +1939,192 @@
           "pattern_type": "二板定龙",
           "stock_code": "001896.SZ",
           "stock_name": "豫能控股",
-          "confidence": 0.95,
-          "description": "首板早盘板后，次日高开7.8%，93124涨停，二板定龙",
+          "confidence": 0.8,
+          "description": "板块[电力]最强二板（全场第1），首板早盘板后，次日高开7.8%，93124涨停，二板定龙",
           "key_metrics": {
             "首板类型": "早盘板",
             "首板质量分": 85,
             "次日高开": "7.8%",
             "涨停时间": "93124",
             "封单强度": "0.74%",
-            "买点时机": "竞价"
+            "板块助攻": "3家首板",
+            "全场龙头排名": 1,
+            "强度分": 78.9,
+            "买点时机": "竞价",
+            "置信扣分明细": {
+              "value": 0.8,
+              "raw": 80.0,
+              "ceiling": 95.0,
+              "floor": 40.0,
+              "total_penalty": 15.0,
+              "breakdown": [
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.007356514160625474,
+                  "penalty": 15.0,
+                  "missing": false
+                },
+                {
+                  "factor": "gap_ratio",
+                  "value": 0.07818725099601596,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "first_board_score",
+                  "value": 85.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "is_fast",
+                  "value": 1.0,
+                  "penalty": 0.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 22.09,
           "stop_loss": 20.99,
           "take_profit": 24.74,
-          "position_size": "heavy",
+          "position_size": "medium",
           "validation_rules": [
-            "首板早盘板（硬逻辑）",
+            "板块[电力]最强二板（去同质化后唯一）",
             "次日高开7.8%（资金表态）",
             "93124涨停（速度）",
-            "封单强度0.74%（质量）"
+            "板块助攻3家首板（梯队厚度）",
+            "全场强度排名第1"
           ],
           "l2_industry": "电力",
           "is_dual_resonance": false
         },
         {
           "pattern_type": "二板定龙",
-          "stock_code": "600439.SH",
-          "stock_name": "瑞贝卡",
-          "confidence": 0.95,
-          "description": "首板盘中板后，次日高开3.1%，93055涨停，二板定龙",
-          "key_metrics": {
-            "首板类型": "盘中板",
-            "首板质量分": 85,
-            "次日高开": "3.1%",
-            "涨停时间": "93055",
-            "封单强度": "1.00%",
-            "买点时机": "开盘"
-          },
-          "entry_price": 2.88,
-          "stop_loss": 2.74,
-          "take_profit": 3.23,
-          "position_size": "heavy",
-          "validation_rules": [
-            "首板盘中板（硬逻辑）",
-            "次日高开3.1%（资金表态）",
-            "93055涨停（速度）",
-            "封单强度1.00%（质量）"
-          ],
-          "l2_industry": "服装家纺",
-          "is_dual_resonance": false
-        },
-        {
-          "pattern_type": "二板定龙",
           "stock_code": "600688.SH",
           "stock_name": "上海石化",
-          "confidence": 0.95,
-          "description": "首板一字板后，次日高开10.1%，92504涨停，二板定龙",
+          "confidence": 0.8,
+          "description": "板块[石油加工贸易]最强二板（全场第2），首板一字板后，次日高开10.1%，92504涨停，二板定龙",
           "key_metrics": {
             "首板类型": "一字板",
             "首板质量分": 100,
             "次日高开": "10.1%",
             "涨停时间": "92504",
             "封单强度": "0.66%",
-            "买点时机": "竞价"
+            "板块助攻": "0家首板",
+            "全场龙头排名": 2,
+            "强度分": 70.6,
+            "买点时机": "竞价",
+            "置信扣分明细": {
+              "value": 0.8,
+              "raw": 80.0,
+              "ceiling": 95.0,
+              "floor": 40.0,
+              "total_penalty": 15.0,
+              "breakdown": [
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.006624276330516061,
+                  "penalty": 15.0,
+                  "missing": false
+                },
+                {
+                  "factor": "gap_ratio",
+                  "value": 0.10097719869706842,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "first_board_score",
+                  "value": 100.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "is_fast",
+                  "value": 1.0,
+                  "penalty": 0.0,
+                  "missing": false
+                }
+              ]
+            }
           },
           "entry_price": 3.38,
           "stop_loss": 3.21,
           "take_profit": 3.79,
-          "position_size": "heavy",
+          "position_size": "medium",
           "validation_rules": [
-            "首板一字板（硬逻辑）",
+            "板块[石油加工贸易]最强二板（去同质化后唯一）",
             "次日高开10.1%（资金表态）",
             "92504涨停（速度）",
-            "封单强度0.66%（质量）"
+            "板块助攻0家首板（梯队厚度）",
+            "全场强度排名第2"
           ],
           "l2_industry": "石油加工贸易",
+          "is_dual_resonance": false
+        },
+        {
+          "pattern_type": "二板定龙",
+          "stock_code": "600439.SH",
+          "stock_name": "瑞贝卡",
+          "confidence": 0.76,
+          "description": "板块[服装家纺]最强二板（全场第3），首板盘中板后，次日高开3.1%，93055涨停，二板定龙",
+          "key_metrics": {
+            "首板类型": "盘中板",
+            "首板质量分": 85,
+            "次日高开": "3.1%",
+            "涨停时间": "93055",
+            "封单强度": "1.00%",
+            "板块助攻": "0家首板",
+            "全场龙头排名": 3,
+            "强度分": 56.4,
+            "买点时机": "开盘",
+            "置信扣分明细": {
+              "value": 0.76,
+              "raw": 76.0,
+              "ceiling": 95.0,
+              "floor": 40.0,
+              "total_penalty": 19.0,
+              "breakdown": [
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.009964749843523704,
+                  "penalty": 15.0,
+                  "missing": false
+                },
+                {
+                  "factor": "gap_ratio",
+                  "value": 0.030534351145038195,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "first_board_score",
+                  "value": 85.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "is_fast",
+                  "value": 1.0,
+                  "penalty": 0.0,
+                  "missing": false
+                }
+              ]
+            }
+          },
+          "entry_price": 2.88,
+          "stop_loss": 2.74,
+          "take_profit": 3.23,
+          "position_size": "medium",
+          "validation_rules": [
+            "板块[服装家纺]最强二板（去同质化后唯一）",
+            "次日高开3.1%（资金表态）",
+            "93055涨停（速度）",
+            "板块助攻0家首板（梯队厚度）",
+            "全场强度排名第3"
+          ],
+          "l2_industry": "服装家纺",
           "is_dual_resonance": false
         }
       ]
@@ -1306,7 +2152,7 @@
           "pattern_type": "龙二波",
           "stock_code": "301188.SZ",
           "stock_name": "力诺药包",
-          "confidence": 0.6517858563777414,
+          "confidence": 0.58,
           "description": "龙二波+2次涨停趋势龙+调整9天(下跌5+震荡4)+深度16.7%+量比1.5+封单0.1%+突破均线",
           "key_metrics": {
             "第一波强度": "3板",
@@ -1321,6 +2167,57 @@
             "封单强度": "0.1%",
             "涨停时间": "134554",
             "板块效应": "0分(板块涨停0家)",
+            "置信扣分明细": {
+              "value": 0.58,
+              "raw": 58.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 37.0,
+              "breakdown": [
+                {
+                  "factor": "max_boards",
+                  "value": 3.0,
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "days_since_peak",
+                  "value": 10.0,
+                  "penalty": 3.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.0006500044863018095,
+                  "penalty": 8.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 3.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.0,
+                  "penalty": 10.0,
+                  "missing": false
+                },
+                {
+                  "factor": "layer2_clean",
+                  "value": 0.0,
+                  "penalty": 8.0,
+                  "missing": false
+                }
+              ]
+            },
             "5日涨幅": "23.4%",
             "均线突破": "是"
           },
@@ -1363,83 +2260,9 @@
       "rows": [
         {
           "pattern_type": "首板突破",
-          "stock_code": "002590.SZ",
-          "stock_name": "万安科技",
-          "confidence": 0.819225417942844,
-          "description": "首板突破+新能源汽车热点+5日涨幅2.1%+量比1.5+封单6.0%+突破均线",
-          "key_metrics": {
-            "涨停时间": "93800",
-            "封单额": "19536万",
-            "封单强度": "6.0%",
-            "所属行业": "新能源汽车",
-            "行业趋势": "加速期",
-            "距前高": "11.9%",
-            "量能说明": "距前高11.9%<15%，套牢盘少",
-            "板块效应": "8分(板块涨停25家)",
-            "5日涨幅": "2.1%",
-            "量比": "1.46",
-            "均线突破": "是"
-          },
-          "entry_price": 12.44,
-          "stop_loss": 11.5692,
-          "take_profit": 13.684000000000001,
-          "position_size": "medium",
-          "validation_rules": [
-            "今日涨停(首板)",
-            "突破形态: 突破5日均线",
-            "筹码: 距前高11.9%",
-            "均线: MA5/MA10突破",
-            "涨停时间<10:45",
-            "封单>2.5%",
-            "量比>1.15",
-            "热点概念: 新能源汽车",
-            "5日涨幅<15%（低位）"
-          ],
-          "l2_industry": "新能源汽车",
-          "is_dual_resonance": false
-        },
-        {
-          "pattern_type": "首板突破",
-          "stock_code": "603610.SH",
-          "stock_name": "麒盛科技",
-          "confidence": 0.8114481082497489,
-          "description": "首板突破+智能家居+5日涨幅5.7%+量比2.2+封单2.0%+突破均线",
-          "key_metrics": {
-            "涨停时间": "95034",
-            "封单额": "5877万",
-            "封单强度": "2.0%",
-            "所属行业": "智能家居",
-            "行业趋势": "非热点",
-            "距前高": "7.6%",
-            "量能说明": "突破前高，无套牢盘",
-            "板块效应": "0分(板块涨停2家)",
-            "5日涨幅": "5.7%",
-            "量比": "2.19",
-            "均线突破": "是"
-          },
-          "entry_price": 19.32,
-          "stop_loss": 17.9676,
-          "take_profit": 21.252000000000002,
-          "position_size": "light",
-          "validation_rules": [
-            "今日涨停(首板)",
-            "突破形态: 前高突破",
-            "筹码: 距前高7.6%",
-            "均线: MA5/MA10突破",
-            "涨停时间<11:00",
-            "封单>1.5%",
-            "量比>0.8",
-            "行业: 智能家居（非热点，板块效应0分）",
-            "5日涨幅<15%（低位）"
-          ],
-          "l2_industry": "智能家居",
-          "is_dual_resonance": false
-        },
-        {
-          "pattern_type": "首板突破",
           "stock_code": "000718.SZ",
           "stock_name": "苏宁环球",
-          "confidence": 0.8024305512374045,
+          "confidence": 0.81,
           "description": "首板突破+文化传媒概念+5日涨幅12.6%+量比1.5+封单3.0%+突破均线",
           "key_metrics": {
             "涨停时间": "94209",
@@ -1450,6 +2273,51 @@
             "距前高": "5.1%",
             "量能说明": "突破前高，无套牢盘",
             "板块效应": "0分(板块涨停2家)",
+            "置信扣分明细": {
+              "value": 0.81,
+              "raw": 81.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 14.0,
+              "breakdown": [
+                {
+                  "factor": "breakout_type",
+                  "value": "前高突破",
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.030188723115866994,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "volume_ratio_excess",
+                  "value": 0.7476850412468119,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.0,
+                  "penalty": 10.0,
+                  "missing": false
+                }
+              ]
+            },
             "5日涨幅": "12.6%",
             "量比": "1.55",
             "均线突破": "是"
@@ -1474,9 +2342,91 @@
         },
         {
           "pattern_type": "首板突破",
+          "stock_code": "002590.SZ",
+          "stock_name": "万安科技",
+          "confidence": 0.8,
+          "description": "首板突破+新能源汽车热点+5日涨幅2.1%+量比1.5+封单6.0%+突破均线",
+          "key_metrics": {
+            "涨停时间": "93800",
+            "封单额": "19536万",
+            "封单强度": "6.0%",
+            "所属行业": "新能源汽车",
+            "行业趋势": "加速期",
+            "距前高": "11.9%",
+            "量能说明": "距前高11.9%<15%，套牢盘少",
+            "板块效应": "8分(板块涨停25家)",
+            "置信扣分明细": {
+              "value": 0.8,
+              "raw": 80.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 15.0,
+              "breakdown": [
+                {
+                  "factor": "breakout_type",
+                  "value": "突破5日均线",
+                  "penalty": 5.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.06046258730333457,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "volume_ratio_excess",
+                  "value": 0.3075139314281303,
+                  "penalty": 6.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.08,
+                  "penalty": 0.0,
+                  "missing": false
+                }
+              ]
+            },
+            "5日涨幅": "2.1%",
+            "量比": "1.46",
+            "均线突破": "是"
+          },
+          "entry_price": 12.44,
+          "stop_loss": 11.5692,
+          "take_profit": 13.684000000000001,
+          "position_size": "medium",
+          "validation_rules": [
+            "今日涨停(首板)",
+            "突破形态: 突破5日均线",
+            "筹码: 距前高11.9%",
+            "均线: MA5/MA10突破",
+            "涨停时间<10:45",
+            "封单>2.5%",
+            "量比>1.15",
+            "热点概念: 新能源汽车",
+            "5日涨幅<15%（低位）"
+          ],
+          "l2_industry": "新能源汽车",
+          "is_dual_resonance": false
+        },
+        {
+          "pattern_type": "首板突破",
           "stock_code": "002072.SZ",
           "stock_name": "凯瑞德",
-          "confidence": 0.7767314005781251,
+          "confidence": 0.77,
           "description": "首板突破+煤炭概念+5日涨幅7.4%+量比1.3+封单1.5%+突破均线",
           "key_metrics": {
             "涨停时间": "103315",
@@ -1487,6 +2437,51 @@
             "距前高": "0.0%",
             "量能说明": "突破前高，无套牢盘",
             "板块效应": "0分(板块涨停1家)",
+            "置信扣分明细": {
+              "value": 0.77,
+              "raw": 77.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 18.0,
+              "breakdown": [
+                {
+                  "factor": "breakout_type",
+                  "value": "前高突破",
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.01546077717265166,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "volume_ratio_excess",
+                  "value": 0.5269948744273878,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.0,
+                  "penalty": 10.0,
+                  "missing": false
+                }
+              ]
+            },
             "5日涨幅": "7.4%",
             "量比": "1.33",
             "均线突破": "是"
@@ -1507,6 +2502,88 @@
             "5日涨幅<15%（低位）"
           ],
           "l2_industry": "煤炭概念",
+          "is_dual_resonance": false
+        },
+        {
+          "pattern_type": "首板突破",
+          "stock_code": "603610.SH",
+          "stock_name": "麒盛科技",
+          "confidence": 0.77,
+          "description": "首板突破+智能家居+5日涨幅5.7%+量比2.2+封单2.0%+突破均线",
+          "key_metrics": {
+            "涨停时间": "95034",
+            "封单额": "5877万",
+            "封单强度": "2.0%",
+            "所属行业": "智能家居",
+            "行业趋势": "非热点",
+            "距前高": "7.6%",
+            "量能说明": "突破前高，无套牢盘",
+            "板块效应": "0分(板块涨停2家)",
+            "置信扣分明细": {
+              "value": 0.77,
+              "raw": 77.0,
+              "ceiling": 95.0,
+              "floor": 45.0,
+              "total_penalty": 18.0,
+              "breakdown": [
+                {
+                  "factor": "breakout_type",
+                  "value": "前高突破",
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "seal_ratio",
+                  "value": 0.01986326731891208,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "volume_ratio_excess",
+                  "value": 1.3907191203974885,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "break_count",
+                  "value": 0.0,
+                  "penalty": 0.0,
+                  "missing": false
+                },
+                {
+                  "factor": "early_seal",
+                  "value": 0.0,
+                  "penalty": 4.0,
+                  "missing": false
+                },
+                {
+                  "factor": "sector_score",
+                  "value": 0.0,
+                  "penalty": 10.0,
+                  "missing": false
+                }
+              ]
+            },
+            "5日涨幅": "5.7%",
+            "量比": "2.19",
+            "均线突破": "是"
+          },
+          "entry_price": 19.32,
+          "stop_loss": 17.9676,
+          "take_profit": 21.252000000000002,
+          "position_size": "light",
+          "validation_rules": [
+            "今日涨停(首板)",
+            "突破形态: 前高突破",
+            "筹码: 距前高7.6%",
+            "均线: MA5/MA10突破",
+            "涨停时间<11:00",
+            "封单>1.5%",
+            "量比>0.8",
+            "行业: 智能家居（非热点，板块效应0分）",
+            "5日涨幅<15%（低位）"
+          ],
+          "l2_industry": "智能家居",
           "is_dual_resonance": false
         }
       ]
@@ -1546,19 +2623,19 @@
           "pct_change": -0.689,
           "amount": 8574.036957407,
           "vol": 343212710.0,
-          "member_count": 1001,
+          "member_count": 1003,
           "limit_cpt_rank": 6.0,
           "limit_cpt_score": 47.0,
           "limit_up_count": 17.0,
           "limit_cons_count": 4.0,
           "rank": 107.0,
           "price_score": 72.95918367346938,
-          "avg_amount": 8.565471485921078,
-          "amount_rank": 102.0,
-          "amount_score": 74.23469387755102,
-          "limit_score": 54.17978317978318,
+          "avg_amount": 8.548391782060817,
+          "amount_rank": 101.0,
+          "amount_score": 74.48979591836735,
+          "limit_score": 54.17639673571877,
           "momentum_score": 50,
-          "composite_score": 63.19761799047512,
+          "composite_score": 63.24745314321585,
           "is_hot": true,
           "is_hot_concept": true,
           "is_hot_industry": false
@@ -1570,19 +2647,19 @@
           "pct_change": -0.702,
           "amount": 6582.0604551119995,
           "vol": 345395320.0,
-          "member_count": 877,
+          "member_count": 884,
           "limit_cpt_rank": 2.0,
           "limit_cpt_score": 49.0,
           "limit_up_count": 25.0,
           "limit_cons_count": 6.0,
           "rank": 112.0,
           "price_score": 71.68367346938776,
-          "avg_amount": 7.505200062841505,
-          "amount_rank": 126.0,
-          "amount_score": 68.11224489795919,
-          "limit_score": 76.14692343426665,
+          "avg_amount": 7.445769745601809,
+          "amount_rank": 127.0,
+          "amount_score": 67.85714285714286,
+          "limit_score": 76.12435059493883,
           "momentum_score": 50,
-          "composite_score": 69.27897422240149,
+          "composite_score": 69.22005332047348,
           "is_hot": true,
           "is_hot_concept": true,
           "is_hot_industry": false
@@ -1594,19 +2671,19 @@
           "pct_change": -0.8017,
           "amount": 4925.212424748001,
           "vol": 175628220.0,
-          "member_count": 591,
+          "member_count": 599,
           "limit_cpt_rank": 4.0,
           "limit_cpt_score": 48.0,
           "limit_up_count": 18.0,
           "limit_cons_count": 3.0,
           "rank": 123.0,
           "price_score": 68.87755102040816,
-          "avg_amount": 8.333692766071067,
+          "avg_amount": 8.222391360180302,
           "amount_rank": 108.0,
           "amount_score": 72.70408163265306,
-          "limit_score": 60.37901861252114,
+          "limit_score": 60.338341680578736,
           "momentum_score": 50,
-          "composite_score": 63.83673814703546,
+          "composite_score": 63.822501220855614,
           "is_hot": true,
           "is_hot_concept": true,
           "is_hot_industry": false
@@ -1618,19 +2695,19 @@
           "pct_change": 0.5675,
           "amount": 12502.927678882,
           "vol": 312617740.0,
-          "member_count": 879,
+          "member_count": 883,
           "limit_cpt_rank": 3.0,
           "limit_cpt_score": 48.5,
           "limit_up_count": 21.0,
           "limit_cons_count": 4.0,
           "rank": 28.0,
           "price_score": 93.11224489795919,
-          "avg_amount": 14.224036039683732,
-          "amount_rank": 42.0,
-          "amount_score": 89.54081632653062,
-          "limit_score": 66.7779673871824,
+          "avg_amount": 14.159600995336355,
+          "amount_rank": 41.0,
+          "amount_score": 89.79591836734694,
+          "limit_score": 66.76714483452875,
           "momentum_score": 50,
-          "composite_score": 76.71412532020773,
+          "composite_score": 76.7613578349422,
           "is_hot": true,
           "is_hot_concept": true,
           "is_hot_industry": false
@@ -1642,19 +2719,19 @@
           "pct_change": -0.6717,
           "amount": 8254.568268246,
           "vol": 314583180.0,
-          "member_count": 1193,
+          "member_count": 1200,
           "limit_cpt_rank": 5.0,
           "limit_cpt_score": 47.5,
           "limit_up_count": 17.0,
           "limit_cons_count": 2.0,
           "rank": 106.0,
           "price_score": 73.21428571428571,
-          "avg_amount": 6.919168707666387,
-          "amount_rank": 140.0,
-          "amount_score": 64.54081632653062,
-          "limit_score": 55.4064605259073,
+          "avg_amount": 6.8788068902049995,
+          "amount_rank": 139.0,
+          "amount_score": 64.79591836734694,
+          "limit_score": 55.398148148148145,
           "momentum_score": 50,
-          "composite_score": 61.76471016365939,
+          "composite_score": 61.812821239606954,
           "is_hot": true,
           "is_hot_concept": true,
           "is_hot_industry": false
@@ -1666,19 +2743,19 @@
           "pct_change": -0.1149,
           "amount": 5080.312009705,
           "vol": 196041290.0,
-          "member_count": 670,
+          "member_count": 674,
           "limit_cpt_rank": 9.0,
           "limit_cpt_score": 45.5,
           "limit_up_count": 13.0,
           "limit_cons_count": 1.0,
           "rank": 60.0,
           "price_score": 84.94897959183673,
-          "avg_amount": 7.582555238365671,
-          "amount_rank": 123.0,
-          "amount_score": 68.87755102040816,
-          "limit_score": 42.51437258153676,
+          "avg_amount": 7.537554910541543,
+          "amount_rank": 122.0,
+          "amount_score": 69.13265306122449,
+          "limit_score": 42.502857456863396,
           "momentum_score": 50,
-          "composite_score": 61.64023448517052,
+          "composite_score": 61.687224599698105,
           "is_hot": true,
           "is_hot_concept": true,
           "is_hot_industry": false
@@ -1690,19 +2767,19 @@
           "pct_change": -0.1915,
           "amount": 8194.769223207,
           "vol": 271599090.0,
-          "member_count": 1041,
+          "member_count": 1042,
           "limit_cpt_rank": 1.0,
           "limit_cpt_score": 49.5,
           "limit_up_count": 27.0,
           "limit_cons_count": 2.0,
           "rank": 69.0,
           "price_score": 82.6530612244898,
-          "avg_amount": 7.872016544867435,
+          "avg_amount": 7.864461826494242,
           "amount_rank": 116.0,
           "amount_score": 70.66326530612244,
-          "limit_score": 81.09365994236312,
+          "limit_score": 81.0911708253359,
           "momentum_score": 50,
-          "composite_score": 74.81135240839852,
+          "composite_score": 74.81048121743899,
           "is_hot": true,
           "is_hot_concept": true,
           "is_hot_industry": false
@@ -1714,19 +2791,19 @@
           "pct_change": 0.1896,
           "amount": 5418.7866711550005,
           "vol": 169850350.0,
-          "member_count": 483,
+          "member_count": 488,
           "limit_cpt_rank": 10.0,
           "limit_cpt_score": 45.0,
           "limit_up_count": 12.0,
           "limit_cons_count": 2.0,
           "rank": 37.0,
           "price_score": 90.81632653061224,
-          "avg_amount": 11.21902002309524,
-          "amount_rank": 60.0,
-          "amount_score": 84.94897959183673,
-          "limit_score": 39.706694271911665,
+          "avg_amount": 11.104071047448771,
+          "amount_rank": 61.0,
+          "amount_score": 84.6938775510204,
+          "limit_score": 39.681238615664846,
           "momentum_score": 50,
-          "composite_score": 65.63203687272011,
+          "composite_score": 65.57210698487046,
           "is_hot": true,
           "is_hot_concept": true,
           "is_hot_industry": false
@@ -1942,17 +3019,17 @@
           "pct_change": 0.4234,
           "amount": 55014.918686582394,
           "vol": 7472712.8,
-          "member_count": 33,
+          "member_count": 35,
           "limit_up_count": 2,
           "limit_cpt_rank": 999,
           "rank": 23.0,
           "price_score": 89.26829268292683,
-          "avg_amount": 1667.1187480782544,
-          "amount_rank": 50.0,
-          "amount_score": 76.09756097560975,
-          "limit_score": 48.24242424242425,
+          "avg_amount": 1571.8548196166398,
+          "amount_rank": 52.0,
+          "amount_score": 75.1219512195122,
+          "limit_score": 46.85714285714286,
           "momentum_score": 50,
-          "composite_score": 68.51182557280119,
+          "composite_score": 67.82404181184668,
           "is_hot": true,
           "is_hot_concept": false,
           "is_hot_industry": true
@@ -2052,39 +3129,6 @@
       ],
       "rows": [
         {
-          "板块名称": "华为概念",
-          "板块类型": "概念",
-          "ts_code": "885806.TI",
-          "热点天数": 7,
-          "统计天数": 7,
-          "总天数": 10,
-          "热点频率": 70.0,
-          "热点日期": "20260604,20260602,20260601,20260528,20260526,20260525,20260522",
-          "平均排名": 136.9,
-          "最新排名": 107,
-          "排名趋势": "下降",
-          "平均涨幅": 0.38,
-          "最新涨幅": -0.69,
-          "持续性评分": 23.9,
-          "是否持续热门": true,
-          "所处阶段": "加速期",
-          "涨停家数": 17.0,
-          "操作建议": "积极关注",
-          "策略理由": "近10天7次热点; 排名有所下降; 当前处于加速期; 涨停17.0家情绪高涨",
-          "_date_list": [
-            "20260604",
-            "20260603",
-            "20260602",
-            "20260601",
-            "20260529",
-            "20260528",
-            "20260527",
-            "20260526",
-            "20260525",
-            "20260522"
-          ]
-        },
-        {
           "板块名称": "新能源汽车",
           "板块类型": "概念",
           "ts_code": "885431.TI",
@@ -2104,6 +3148,39 @@
           "涨停家数": 27.0,
           "操作建议": "积极关注",
           "策略理由": "近10天7次热点; 排名持续上升; 当前处于加速期; 涨停27.0家情绪高涨",
+          "_date_list": [
+            "20260604",
+            "20260603",
+            "20260602",
+            "20260601",
+            "20260529",
+            "20260528",
+            "20260527",
+            "20260526",
+            "20260525",
+            "20260522"
+          ]
+        },
+        {
+          "板块名称": "华为概念",
+          "板块类型": "概念",
+          "ts_code": "885806.TI",
+          "热点天数": 7,
+          "统计天数": 7,
+          "总天数": 10,
+          "热点频率": 70.0,
+          "热点日期": "20260604,20260602,20260601,20260528,20260526,20260525,20260522",
+          "平均排名": 136.9,
+          "最新排名": 107,
+          "排名趋势": "下降",
+          "平均涨幅": 0.38,
+          "最新涨幅": -0.69,
+          "持续性评分": 23.9,
+          "是否持续热门": true,
+          "所处阶段": "加速期",
+          "涨停家数": 17.0,
+          "操作建议": "积极关注",
+          "策略理由": "近10天7次热点; 排名有所下降; 当前处于加速期; 涨停17.0家情绪高涨",
           "_date_list": [
             "20260604",
             "20260603",
@@ -2217,39 +3294,6 @@
           ]
         },
         {
-          "板块名称": "锂电池概念",
-          "板块类型": "概念",
-          "ts_code": "885710.TI",
-          "热点天数": 4,
-          "统计天数": 4,
-          "总天数": 10,
-          "热点频率": 40.0,
-          "热点日期": "20260604,20260528,20260526,20260522",
-          "平均排名": 89.8,
-          "最新排名": 123,
-          "排名趋势": "下降",
-          "平均涨幅": 0.62,
-          "最新涨幅": -0.8,
-          "持续性评分": 23.1,
-          "是否持续热门": true,
-          "所处阶段": "主升浪",
-          "涨停家数": 18.0,
-          "操作建议": "逢低布局",
-          "策略理由": "近10天4次热点; 排名有所下降; 当前处于主升浪; 涨停18.0家情绪高涨",
-          "_date_list": [
-            "20260604",
-            "20260603",
-            "20260602",
-            "20260601",
-            "20260529",
-            "20260528",
-            "20260527",
-            "20260526",
-            "20260525",
-            "20260522"
-          ]
-        },
-        {
           "板块名称": "消费电子概念",
           "板块类型": "概念",
           "ts_code": "885800.TI",
@@ -2269,6 +3313,39 @@
           "涨停家数": 12.0,
           "操作建议": "逢低布局",
           "策略理由": "近10天4次热点; 当前处于主升浪; 涨停12.0家情绪高涨",
+          "_date_list": [
+            "20260604",
+            "20260603",
+            "20260602",
+            "20260601",
+            "20260529",
+            "20260528",
+            "20260527",
+            "20260526",
+            "20260525",
+            "20260522"
+          ]
+        },
+        {
+          "板块名称": "锂电池概念",
+          "板块类型": "概念",
+          "ts_code": "885710.TI",
+          "热点天数": 4,
+          "统计天数": 4,
+          "总天数": 10,
+          "热点频率": 40.0,
+          "热点日期": "20260604,20260528,20260526,20260522",
+          "平均排名": 89.8,
+          "最新排名": 123,
+          "排名趋势": "下降",
+          "平均涨幅": 0.62,
+          "最新涨幅": -0.8,
+          "持续性评分": 23.1,
+          "是否持续热门": true,
+          "所处阶段": "主升浪",
+          "涨停家数": 18.0,
+          "操作建议": "逢低布局",
+          "策略理由": "近10天4次热点; 排名有所下降; 当前处于主升浪; 涨停18.0家情绪高涨",
           "_date_list": [
             "20260604",
             "20260603",
@@ -2443,72 +3520,6 @@
           ]
         },
         {
-          "板块名称": "通信线缆及配套",
-          "板块类型": "行业",
-          "ts_code": "884263.TI",
-          "热点天数": 5,
-          "统计天数": 5,
-          "总天数": 10,
-          "热点频率": 50.0,
-          "热点日期": "20260604,20260603,20260602,20260529,20260522",
-          "平均排名": 7.2,
-          "最新排名": 6,
-          "排名趋势": "上升",
-          "平均涨幅": 4.17,
-          "最新涨幅": 2.21,
-          "持续性评分": 90.8,
-          "是否持续热门": true,
-          "所处阶段": "主升浪",
-          "涨停家数": 1,
-          "操作建议": "逢低布局",
-          "策略理由": "近10天5次热点; 排名持续上升; 当前处于主升浪",
-          "_date_list": [
-            "20260604",
-            "20260603",
-            "20260602",
-            "20260601",
-            "20260529",
-            "20260528",
-            "20260527",
-            "20260526",
-            "20260525",
-            "20260522"
-          ]
-        },
-        {
-          "板块名称": "煤炭开采加工",
-          "板块类型": "行业",
-          "ts_code": "881105.TI",
-          "热点天数": 5,
-          "统计天数": 5,
-          "总天数": 10,
-          "热点频率": 50.0,
-          "热点日期": "20260604,20260603,20260602,20260601,20260525",
-          "平均排名": 19.4,
-          "最新排名": 7,
-          "排名趋势": "平稳",
-          "平均涨幅": 2.84,
-          "最新涨幅": 2.18,
-          "持续性评分": 49.2,
-          "是否持续热门": true,
-          "所处阶段": "主升浪",
-          "涨停家数": 3,
-          "操作建议": "逢低布局",
-          "策略理由": "近10天5次热点; 当前处于主升浪",
-          "_date_list": [
-            "20260604",
-            "20260603",
-            "20260602",
-            "20260601",
-            "20260529",
-            "20260528",
-            "20260527",
-            "20260526",
-            "20260525",
-            "20260522"
-          ]
-        },
-        {
           "板块名称": "玻璃玻纤",
           "板块类型": "行业",
           "ts_code": "884059.TI",
@@ -2528,6 +3539,39 @@
           "涨停家数": 1,
           "操作建议": "逢低布局",
           "策略理由": "近10天5次热点; 当前处于主升浪",
+          "_date_list": [
+            "20260604",
+            "20260603",
+            "20260602",
+            "20260601",
+            "20260529",
+            "20260528",
+            "20260527",
+            "20260526",
+            "20260525",
+            "20260522"
+          ]
+        },
+        {
+          "板块名称": "通信线缆及配套",
+          "板块类型": "行业",
+          "ts_code": "884263.TI",
+          "热点天数": 5,
+          "统计天数": 5,
+          "总天数": 10,
+          "热点频率": 50.0,
+          "热点日期": "20260604,20260603,20260602,20260529,20260522",
+          "平均排名": 7.2,
+          "最新排名": 6,
+          "排名趋势": "上升",
+          "平均涨幅": 4.17,
+          "最新涨幅": 2.21,
+          "持续性评分": 90.8,
+          "是否持续热门": true,
+          "所处阶段": "主升浪",
+          "涨停家数": 1,
+          "操作建议": "逢低布局",
+          "策略理由": "近10天5次热点; 排名持续上升; 当前处于主升浪",
           "_date_list": [
             "20260604",
             "20260603",
@@ -2575,25 +3619,25 @@
           ]
         },
         {
-          "板块名称": "其他电源设备Ⅲ",
+          "板块名称": "煤炭开采加工",
           "板块类型": "行业",
-          "ts_code": "884225.TI",
-          "热点天数": 3,
-          "统计天数": 3,
+          "ts_code": "881105.TI",
+          "热点天数": 5,
+          "统计天数": 5,
           "总天数": 10,
-          "热点频率": 30.0,
-          "热点日期": "20260604,20260602,20260525",
-          "平均排名": 28.0,
-          "最新排名": 23,
+          "热点频率": 50.0,
+          "热点日期": "20260604,20260603,20260602,20260601,20260525",
+          "平均排名": 19.4,
+          "最新排名": 7,
           "排名趋势": "平稳",
-          "平均涨幅": 1.0,
-          "最新涨幅": 0.42,
-          "持续性评分": 56.6,
+          "平均涨幅": 2.84,
+          "最新涨幅": 2.18,
+          "持续性评分": 49.2,
           "是否持续热门": true,
-          "所处阶段": "启动期",
-          "涨停家数": 2,
-          "操作建议": "关注启动信号",
-          "策略理由": "近10天3次热点; 当前处于启动期",
+          "所处阶段": "主升浪",
+          "涨停家数": 3,
+          "操作建议": "逢低布局",
+          "策略理由": "近10天5次热点; 当前处于主升浪",
           "_date_list": [
             "20260604",
             "20260603",
@@ -2658,6 +3702,39 @@
           "是否持续热门": true,
           "所处阶段": "启动期",
           "涨停家数": 1,
+          "操作建议": "关注启动信号",
+          "策略理由": "当前处于启动期",
+          "_date_list": [
+            "20260604",
+            "20260603",
+            "20260602",
+            "20260601",
+            "20260529",
+            "20260528",
+            "20260527",
+            "20260526",
+            "20260525",
+            "20260522"
+          ]
+        },
+        {
+          "板块名称": "电子化学品",
+          "板块类型": "行业",
+          "ts_code": "881172.TI",
+          "热点天数": 2,
+          "统计天数": 2,
+          "总天数": 10,
+          "热点频率": 20.0,
+          "热点日期": "20260604,20260522",
+          "平均排名": 5.0,
+          "最新排名": 1,
+          "排名趋势": "平稳",
+          "平均涨幅": 5.42,
+          "最新涨幅": 5.63,
+          "持续性评分": 38.5,
+          "是否持续热门": true,
+          "所处阶段": "启动期",
+          "涨停家数": 4,
           "操作建议": "关注启动信号",
           "策略理由": "当前处于启动期",
           "_date_list": [
@@ -3809,9 +4886,9 @@
         },
         {
           "概念名称": "数据中心(AIDC)",
-          "涨停总数": 13,
+          "涨停总数": 14,
           "最高连板": 2,
-          "梯队分布": "2板1家, 1板12家",
+          "梯队分布": "2板1家, 1板13家",
           "龙头股": "豫能控股(001896)",
           "板块代码": "885887.TI"
         },
@@ -3824,20 +4901,20 @@
           "板块代码": "885997.TI"
         },
         {
+          "概念名称": "专精特新",
+          "涨停总数": 13,
+          "最高连板": 4,
+          "梯队分布": "4板1家, 1板12家",
+          "龙头股": "天洋新材(603330)",
+          "板块代码": "885929.TI"
+        },
+        {
           "概念名称": "消费电子概念",
           "涨停总数": 12,
           "最高连板": 4,
           "梯队分布": "4板1家, 3板1家, 1板10家",
           "龙头股": "天洋新材(603330)",
           "板块代码": "885800.TI"
-        },
-        {
-          "概念名称": "专精特新",
-          "涨停总数": 12,
-          "最高连板": 4,
-          "梯队分布": "4板1家, 1板11家",
-          "龙头股": "天洋新材(603330)",
-          "板块代码": "885929.TI"
         },
         {
           "概念名称": "5G",
@@ -3880,28 +4957,28 @@
           "板块代码": "885700.TI"
         },
         {
+          "概念名称": "共封装光学(CPO)",
+          "涨停总数": 9,
+          "最高连板": 4,
+          "梯队分布": "4板1家, 1板8家",
+          "龙头股": "天洋新材(603330)",
+          "板块代码": "886033.TI"
+        },
+        {
+          "概念名称": "人工智能",
+          "涨停总数": 8,
+          "最高连板": 2,
+          "梯队分布": "2板1家, 1板7家",
+          "龙头股": "豫能控股(001896)",
+          "板块代码": "885728.TI"
+        },
+        {
           "概念名称": "一带一路",
           "涨停总数": 7,
           "最高连板": 2,
           "梯队分布": "2板1家, 1板6家",
           "龙头股": "瑞贝卡(600439)",
           "板块代码": "885494.TI"
-        },
-        {
-          "概念名称": "人工智能",
-          "涨停总数": 7,
-          "最高连板": 2,
-          "梯队分布": "2板1家, 1板6家",
-          "龙头股": "豫能控股(001896)",
-          "板块代码": "885728.TI"
-        },
-        {
-          "概念名称": "共封装光学(CPO)",
-          "涨停总数": 7,
-          "最高连板": 1,
-          "梯队分布": "1板7家",
-          "龙头股": "振华科技(000733)",
-          "板块代码": "886033.TI"
         }
       ]
     },
@@ -3925,49 +5002,49 @@
       ],
       "rows": [
         {
-          "代码": "003036.SZ",
-          "名称": "泰坦股份",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "74.86",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
-          "所属板块": "专用设备",
-          "10日涨幅": "47.1%",
-          "涨停次数": 4,
-          "当前状态": "观察中",
-          "状态变更日": "",
-          "观察天数": 1
-        },
-        {
-          "代码": "603135.SH",
-          "名称": "中重科技",
-          "龙头类型": "连板龙头",
-          "最高连板": 3.0,
-          "最高点": "14.03",
-          "见顶日期": "20260605",
-          "入池日期": "20260605",
-          "所属板块": "专用设备",
-          "10日涨幅": "25.3%",
-          "涨停次数": 3,
-          "当前状态": "观察中",
-          "状态变更日": "",
-          "观察天数": 0
-        },
-        {
           "代码": "001896.SZ",
           "名称": "豫能控股",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "22.09",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
+          "最高点": "20.08",
+          "见顶日期": "20260603",
+          "入池日期": "20260603",
           "所属板块": "电力",
-          "10日涨幅": "40.2%",
+          "10日涨幅": "22.7%",
           "涨停次数": 2,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 11
+        },
+        {
+          "代码": "600255.SH",
+          "名称": "鑫科材料",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "4.39",
+          "见顶日期": "20260603",
+          "入池日期": "20260603",
+          "所属板块": "金属新材料",
+          "10日涨幅": "28.4%",
+          "涨停次数": 2,
+          "当前状态": "观察中",
+          "状态变更日": "",
+          "观察天数": 11
+        },
+        {
+          "代码": "600403.SH",
+          "名称": "大有能源",
+          "龙头类型": "连板龙头",
+          "最高连板": 3.0,
+          "最高点": "6.73",
+          "见顶日期": "20260603",
+          "入池日期": "20260603",
+          "所属板块": "煤炭开采加工",
+          "10日涨幅": "32.0%",
+          "涨停次数": 3,
+          "当前状态": "观察中",
+          "状态变更日": "",
+          "观察天数": 11
         },
         {
           "代码": "002484.SZ",
@@ -3982,7 +5059,7 @@
           "涨停次数": 3,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
         },
         {
           "代码": "002585.SZ",
@@ -3997,7 +5074,7 @@
           "涨停次数": 4,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
         },
         {
           "代码": "002806.SZ",
@@ -4012,7 +5089,7 @@
           "涨停次数": 5,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
         },
         {
           "代码": "002951.SZ",
@@ -4027,7 +5104,22 @@
           "涨停次数": 5,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
+        },
+        {
+          "代码": "003036.SZ",
+          "名称": "泰坦股份",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "74.86",
+          "见顶日期": "20260604",
+          "入池日期": "20260604",
+          "所属板块": "专用设备",
+          "10日涨幅": "47.1%",
+          "涨停次数": 4,
+          "当前状态": "观察中",
+          "状态变更日": "",
+          "观察天数": 10
         },
         {
           "代码": "300726.SZ",
@@ -4042,7 +5134,7 @@
           "涨停次数": 2,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
         },
         {
           "代码": "600246.SH",
@@ -4057,37 +5149,7 @@
           "涨停次数": 3,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
-        },
-        {
-          "代码": "600255.SH",
-          "名称": "鑫科材料",
-          "龙头类型": "连板龙头",
-          "最高连板": 3.0,
-          "最高点": "4.83",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
-          "所属板块": "金属新材料",
-          "10日涨幅": "33.4%",
-          "涨停次数": 3,
-          "当前状态": "观察中",
-          "状态变更日": "",
-          "观察天数": 1
-        },
-        {
-          "代码": "600403.SH",
-          "名称": "大有能源",
-          "龙头类型": "连板龙头",
-          "最高连板": 4.0,
-          "最高点": "7.40",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
-          "所属板块": "煤炭开采加工",
-          "10日涨幅": "43.1%",
-          "涨停次数": 4,
-          "当前状态": "观察中",
-          "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
         },
         {
           "代码": "600667.SH",
@@ -4102,7 +5164,7 @@
           "涨停次数": 2,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
         },
         {
           "代码": "601666.SH",
@@ -4117,7 +5179,7 @@
           "涨停次数": 2,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
         },
         {
           "代码": "688146.SH",
@@ -4132,7 +5194,7 @@
           "涨停次数": 3,
           "当前状态": "观察中",
           "状态变更日": "",
-          "观察天数": 1
+          "观察天数": 10
         }
       ]
     },
@@ -4162,45 +5224,87 @@
       ],
       "rows": [
         {
-          "代码": "603663.SH",
-          "名称": "三祥新材",
+          "代码": "300411.SZ",
+          "名称": "金盾股份",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "67.97",
-          "见顶日期": "20260603",
-          "入池日期": "20260603",
-          "所属板块": "非金属材料",
-          "10日涨幅": "48.1%",
-          "涨停次数": 4,
+          "最高点": "10.00",
+          "见顶日期": "20260609",
+          "入池日期": "20260609",
+          "所属板块": "专用设备",
+          "10日涨幅": "24.1%",
+          "涨停次数": 2,
           "当前状态": "已走弱",
-          "状态变更日": "20260603",
-          "观察天数": 2,
-          "走弱日期": "20260603",
-          "走弱类型": "尾盘板",
-          "走弱价格": "67.97",
-          "当前价格": "66.90",
-          "回调幅度": "4.0%",
+          "状态变更日": "20260610",
+          "观察天数": 5,
+          "走弱日期": "20260610",
+          "走弱类型": "断板",
+          "走弱价格": "10.00",
+          "当前价格": "9.46",
+          "回调幅度": "19.7%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
-          "代码": "600863.SH",
-          "名称": "华能蒙电",
+          "代码": "603039.SH",
+          "名称": "泛微网络",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "7.30",
-          "见顶日期": "20260529",
-          "入池日期": "20260529",
-          "所属板块": "电力",
-          "10日涨幅": "48.1%",
-          "涨停次数": 4,
+          "最高点": "45.27",
+          "见顶日期": "20260609",
+          "入池日期": "20260609",
+          "所属板块": "人工智能",
+          "10日涨幅": "23.4%",
+          "涨停次数": 2,
           "当前状态": "已走弱",
-          "状态变更日": "20260529",
-          "观察天数": 7,
-          "走弱日期": "20260529",
-          "走弱类型": "烂板(4次)",
-          "走弱价格": "7.30",
-          "当前价格": "6.88",
-          "回调幅度": "14.7%",
+          "状态变更日": "20260610",
+          "观察天数": 5,
+          "走弱日期": "20260610",
+          "走弱类型": "断板",
+          "走弱价格": "45.27",
+          "当前价格": "37.46",
+          "回调幅度": "19.1%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "603687.SH",
+          "名称": "大胜达",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "19.18",
+          "见顶日期": "20260610",
+          "入池日期": "20260610",
+          "所属板块": "包装印刷",
+          "10日涨幅": "20.3%",
+          "涨停次数": 2,
+          "当前状态": "已走弱",
+          "状态变更日": "20260610",
+          "观察天数": 4,
+          "走弱日期": "20260610",
+          "走弱类型": "尾盘板",
+          "走弱价格": "19.18",
+          "当前价格": "18.50",
+          "回调幅度": "18.9%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "600881.SH",
+          "名称": "亚泰集团",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "1.77",
+          "见顶日期": "20260610",
+          "入池日期": "20260610",
+          "所属板块": "综合",
+          "10日涨幅": "19.6%",
+          "涨停次数": 2,
+          "当前状态": "已走弱",
+          "状态变更日": "20260611",
+          "观察天数": 4,
+          "走弱日期": "20260611",
+          "走弱类型": "断板",
+          "走弱价格": "1.77",
+          "当前价格": "1.50",
+          "回调幅度": "18.6%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4216,12 +5320,180 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260529",
-          "观察天数": 7,
+          "观察天数": 16,
           "走弱日期": "20260529",
           "走弱类型": "尾盘板",
           "走弱价格": "28.78",
           "当前价格": "27.76",
           "回调幅度": "11.1%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "603115.SH",
+          "名称": "海星股份",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "113.08",
+          "见顶日期": "20260527",
+          "入池日期": "20260527",
+          "所属板块": "电子化学品",
+          "10日涨幅": "60.5%",
+          "涨停次数": 4,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 18,
+          "走弱日期": "20260528",
+          "走弱类型": "断板",
+          "走弱价格": "113.08",
+          "当前价格": "107.55",
+          "回调幅度": "9.8%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "000636.SZ",
+          "名称": "风华高科",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "48.64",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
+          "所属板块": "被动元件",
+          "10日涨幅": "80.1%",
+          "涨停次数": 4,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 17,
+          "走弱日期": "20260528",
+          "走弱类型": "烂板(4次)",
+          "走弱价格": "48.64",
+          "当前价格": "63.50",
+          "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "002552.SZ",
+          "名称": "宝鼎科技",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "55.58",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
+          "所属板块": "印制电路板",
+          "10日涨幅": "73.0%",
+          "涨停次数": 6,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 17,
+          "走弱日期": "20260528",
+          "走弱类型": "烂板(2次)",
+          "走弱价格": "55.58",
+          "当前价格": "59.00",
+          "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "603989.SH",
+          "名称": "艾华集团",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "34.93",
+          "见顶日期": "20260527",
+          "入池日期": "20260527",
+          "所属板块": "被动元件",
+          "10日涨幅": "70.4%",
+          "涨停次数": 4,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 18,
+          "走弱日期": "20260528",
+          "走弱类型": "尾盘板",
+          "走弱价格": "38.42",
+          "当前价格": "34.25",
+          "回调幅度": "10.9%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "603663.SH",
+          "名称": "三祥新材",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "67.97",
+          "见顶日期": "20260603",
+          "入池日期": "20260603",
+          "所属板块": "非金属材料",
+          "10日涨幅": "48.1%",
+          "涨停次数": 4,
+          "当前状态": "已走弱",
+          "状态变更日": "20260603",
+          "观察天数": 11,
+          "走弱日期": "20260603",
+          "走弱类型": "尾盘板",
+          "走弱价格": "67.97",
+          "当前价格": "66.90",
+          "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "002927.SZ",
+          "名称": "泰永长征",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "23.60",
+          "见顶日期": "20260527",
+          "入池日期": "20260527",
+          "所属板块": "输变电设备",
+          "10日涨幅": "22.9%",
+          "涨停次数": 3,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 18,
+          "走弱日期": "20260528",
+          "走弱类型": "断板",
+          "走弱价格": "23.60",
+          "当前价格": "21.30",
+          "回调幅度": "6.4%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "003036.SZ",
+          "名称": "泰坦股份",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "71.36",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
+          "所属板块": "专用设备",
+          "10日涨幅": "66.5%",
+          "涨停次数": 4,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 17,
+          "走弱日期": "20260528",
+          "走弱类型": "烂板(3次)",
+          "走弱价格": "71.36",
+          "当前价格": "74.86",
+          "回调幅度": "5.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "600863.SH",
+          "名称": "华能蒙电",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "7.30",
+          "见顶日期": "20260529",
+          "入池日期": "20260529",
+          "所属板块": "电力",
+          "10日涨幅": "48.1%",
+          "涨停次数": 4,
+          "当前状态": "已走弱",
+          "状态变更日": "20260529",
+          "观察天数": 16,
+          "走弱日期": "20260529",
+          "走弱类型": "烂板(4次)",
+          "走弱价格": "7.30",
+          "当前价格": "6.88",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4237,12 +5509,12 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260601",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260601",
           "走弱类型": "烂板(4次)",
           "走弱价格": "28.07",
           "当前价格": "27.06",
-          "回调幅度": "3.6%",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4258,12 +5530,12 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260602",
           "走弱类型": "断板",
           "走弱价格": "65.68",
           "当前价格": "61.40",
-          "回调幅度": "6.5%",
+          "回调幅度": "1.8%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4278,13 +5550,13 @@
           "10日涨幅": "50.4%",
           "涨停次数": 4,
           "当前状态": "已走弱",
-          "状态变更日": "20260601",
-          "观察天数": 8,
-          "走弱日期": "20260601",
+          "状态变更日": "20260529",
+          "观察天数": 17,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
           "走弱价格": "5.73",
           "当前价格": "4.79",
-          "回调幅度": "16.9%",
+          "回调幅度": "14.7%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4300,7 +5572,7 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260602",
           "走弱类型": "断板",
           "走弱价格": "18.32",
@@ -4320,13 +5592,13 @@
           "10日涨幅": "32.0%",
           "涨停次数": 4,
           "当前状态": "已走弱",
-          "状态变更日": "20260601",
-          "观察天数": 8,
-          "走弱日期": "20260601",
+          "状态变更日": "20260529",
+          "观察天数": 17,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
           "走弱价格": "14.60",
           "当前价格": "14.48",
-          "回调幅度": "8.0%",
+          "回调幅度": "7.7%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4342,12 +5614,75 @@
           "涨停次数": 5,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260602",
           "走弱类型": "烂板(3次)",
           "走弱价格": "20.76",
           "当前价格": "20.61",
-          "回调幅度": "10.0%",
+          "回调幅度": "6.3%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "600162.SH",
+          "名称": "香江控股",
+          "龙头类型": "连板龙头",
+          "最高连板": 5.0,
+          "最高点": "2.79",
+          "见顶日期": "20260529",
+          "入池日期": "20260529",
+          "所属板块": "零售",
+          "10日涨幅": "53.3%",
+          "涨停次数": 5,
+          "当前状态": "已走弱",
+          "状态变更日": "20260601",
+          "观察天数": 16,
+          "走弱日期": "20260601",
+          "走弱类型": "断板",
+          "走弱价格": "2.79",
+          "当前价格": "3.42",
+          "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "600726.SH",
+          "名称": "华电能源",
+          "龙头类型": "连板龙头",
+          "最高连板": 5.0,
+          "最高点": "10.13",
+          "见顶日期": "20260529",
+          "入池日期": "20260529",
+          "所属板块": "煤炭开采加工",
+          "10日涨幅": "45.1%",
+          "涨停次数": 5,
+          "当前状态": "已走弱",
+          "状态变更日": "20260601",
+          "观察天数": 16,
+          "走弱日期": "20260601",
+          "走弱类型": "断板",
+          "走弱价格": "10.13",
+          "当前价格": "10.39",
+          "回调幅度": "8.8%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "002056.SZ",
+          "名称": "横店东磁",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "26.97",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
+          "所属板块": "中证500成份股",
+          "10日涨幅": "40.6%",
+          "涨停次数": 2,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 17,
+          "走弱日期": "20260528",
+          "走弱类型": "尾盘板",
+          "走弱价格": "26.97",
+          "当前价格": "29.42",
+          "回调幅度": "9.8%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4363,7 +5698,7 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 1,
+          "观察天数": 10,
           "走弱日期": "20260604",
           "走弱类型": "尾盘板",
           "走弱价格": "106.79",
@@ -4373,23 +5708,65 @@
         },
         {
           "代码": "600367.SH",
-          "名称": "XD红星发",
-          "龙头类型": "连板龙头",
-          "最高连板": 4.0,
-          "最高点": "46.98",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
+          "名称": "红星发展",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "35.31",
+          "见顶日期": "20260601",
+          "入池日期": "20260601",
           "所属板块": "化学原料",
-          "10日涨幅": "78.8%",
-          "涨停次数": 6,
+          "10日涨幅": "40.7%",
+          "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 1,
+          "观察天数": 13,
           "走弱日期": "20260604",
           "走弱类型": "尾盘板",
           "走弱价格": "46.98",
           "当前价格": "46.98",
           "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "601958.SH",
+          "名称": "金钼股份",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "26.85",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
+          "所属板块": "小金属",
+          "10日涨幅": "27.6%",
+          "涨停次数": 2,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 17,
+          "走弱日期": "20260528",
+          "走弱类型": "烂板(2次)",
+          "走弱价格": "26.85",
+          "当前价格": "23.09",
+          "回调幅度": "13.6%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "603353.SH",
+          "名称": "和顺石油",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "56.78",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
+          "所属板块": "石油加工贸易",
+          "10日涨幅": "24.5%",
+          "涨停次数": 3,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 17,
+          "走弱日期": "20260528",
+          "走弱类型": "尾盘板",
+          "走弱价格": "56.78",
+          "当前价格": "44.69",
+          "回调幅度": "19.7%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4405,7 +5782,7 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260602",
           "走弱类型": "烂板(2次)",
           "走弱价格": "58.61",
@@ -4426,7 +5803,7 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260602",
           "走弱类型": "断板",
           "走弱价格": "114.49",
@@ -4435,24 +5812,87 @@
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
+          "代码": "605376.SH",
+          "名称": "博迁新材",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "182.45",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
+          "所属板块": "光伏概念",
+          "10日涨幅": "48.3%",
+          "涨停次数": 3,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 17,
+          "走弱日期": "20260528",
+          "走弱类型": "尾盘板",
+          "走弱价格": "182.45",
+          "当前价格": "188.00",
+          "回调幅度": "2.3%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "688172.SH",
+          "名称": "燕东微",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "78.18",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
+          "所属板块": "半导体",
+          "10日涨幅": "52.1%",
+          "涨停次数": 3,
+          "当前状态": "已走弱",
+          "状态变更日": "20260528",
+          "观察天数": 17,
+          "走弱日期": "20260528",
+          "走弱类型": "烂板(5次)",
+          "走弱价格": "78.18",
+          "当前价格": "70.72",
+          "回调幅度": "18.5%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "920725.BJ",
+          "名称": "惠丰钻石",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "80.60",
+          "见顶日期": "20260602",
+          "入池日期": "20260602",
+          "所属板块": "通用设备",
+          "10日涨幅": "150.0%",
+          "涨停次数": 5,
+          "当前状态": "已走弱",
+          "状态变更日": "20260603",
+          "观察天数": 12,
+          "走弱日期": "20260603",
+          "走弱类型": "断板",
+          "走弱价格": "80.60",
+          "当前价格": "90.70",
+          "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
           "代码": "002484.SZ",
           "名称": "江海股份",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "96.35",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
+          "最高点": "67.60",
+          "见顶日期": "20260527",
+          "入池日期": "20260527",
           "所属板块": "被动元件",
-          "10日涨幅": "59.3%",
+          "10日涨幅": "47.3%",
           "涨停次数": 3,
           "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
+          "状态变更日": "20260529",
+          "观察天数": 18,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
-          "走弱价格": "96.35",
+          "走弱价格": "67.60",
           "当前价格": "96.35",
-          "回调幅度": "6.6%",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4467,13 +5907,13 @@
           "10日涨幅": "24.4%",
           "涨停次数": 2,
           "当前状态": "已走弱",
-          "状态变更日": "20260601",
-          "观察天数": 8,
-          "走弱日期": "20260601",
+          "状态变更日": "20260529",
+          "观察天数": 17,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
           "走弱价格": "12.10",
           "当前价格": "12.57",
-          "回调幅度": "5.1%",
+          "回调幅度": "2.5%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4489,12 +5929,12 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260601",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260601",
           "走弱类型": "烂板(2次)",
           "走弱价格": "4.87",
           "当前价格": "4.51",
-          "回调幅度": "7.4%",
+          "回调幅度": "4.7%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4509,13 +5949,13 @@
           "10日涨幅": "35.5%",
           "涨停次数": 2,
           "当前状态": "已走弱",
-          "状态变更日": "20260601",
-          "观察天数": 8,
-          "走弱日期": "20260601",
+          "状态变更日": "20260529",
+          "观察天数": 17,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
           "走弱价格": "69.82",
           "当前价格": "94.39",
-          "回调幅度": "0.0%",
+          "回调幅度": "0.9%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4531,12 +5971,12 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "66.69",
           "当前价格": "64.65",
-          "回调幅度": "9.7%",
+          "回调幅度": "0.9%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4551,9 +5991,9 @@
           "10日涨幅": "50.6%",
           "涨停次数": 3,
           "当前状态": "已走弱",
-          "状态变更日": "20260601",
-          "观察天数": 8,
-          "走弱日期": "20260601",
+          "状态变更日": "20260529",
+          "观察天数": 17,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
           "走弱价格": "43.13",
           "当前价格": "51.38",
@@ -4565,20 +6005,20 @@
           "名称": "万通发展",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "18.87",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
+          "最高点": "16.81",
+          "见顶日期": "20260528",
+          "入池日期": "20260528",
           "所属板块": "房地产",
-          "10日涨幅": "20.3%",
-          "涨停次数": 3,
+          "10日涨幅": "26.3%",
+          "涨停次数": 2,
           "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
+          "状态变更日": "20260529",
+          "观察天数": 17,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
-          "走弱价格": "18.87",
+          "走弱价格": "16.81",
           "当前价格": "18.87",
-          "回调幅度": "7.8%",
+          "回调幅度": "7.1%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4593,13 +6033,13 @@
           "10日涨幅": "22.2%",
           "涨停次数": 2,
           "当前状态": "已走弱",
-          "状态变更日": "20260601",
-          "观察天数": 8,
-          "走弱日期": "20260601",
+          "状态变更日": "20260529",
+          "观察天数": 17,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
           "走弱价格": "27.69",
           "当前价格": "24.16",
-          "回调幅度": "12.7%",
+          "回调幅度": "11.2%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4614,9 +6054,9 @@
           "10日涨幅": "47.6%",
           "涨停次数": 3,
           "当前状态": "已走弱",
-          "状态变更日": "20260601",
-          "观察天数": 8,
-          "走弱日期": "20260601",
+          "状态变更日": "20260529",
+          "观察天数": 17,
+          "走弱日期": "20260529",
           "走弱类型": "断板",
           "走弱价格": "197.91",
           "当前价格": "195.01",
@@ -4636,12 +6076,12 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "78.98",
           "当前价格": "81.11",
-          "回调幅度": "5.3%",
+          "回调幅度": "2.4%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4657,12 +6097,12 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 2,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "28.28",
           "当前价格": "28.51",
-          "回调幅度": "7.5%",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4670,20 +6110,20 @@
           "名称": "华锋股份",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "20.68",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
+          "最高点": "20.33",
+          "见顶日期": "20260602",
+          "入池日期": "20260602",
           "所属板块": "汽车零部件",
-          "10日涨幅": "23.2%",
-          "涨停次数": 5,
+          "10日涨幅": "36.0%",
+          "涨停次数": 4,
           "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
-          "走弱类型": "断板",
-          "走弱价格": "20.68",
+          "状态变更日": "20260602",
+          "观察天数": 12,
+          "走弱日期": "20260602",
+          "走弱类型": "尾盘板",
+          "走弱价格": "20.33",
           "当前价格": "20.68",
-          "回调幅度": "4.4%",
+          "回调幅度": "7.5%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4699,7 +6139,7 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260602",
           "走弱类型": "断板",
           "走弱价格": "27.41",
@@ -4711,21 +6151,42 @@
           "代码": "000539.SZ",
           "名称": "粤电力Ａ",
           "龙头类型": "连板龙头",
-          "最高连板": 4.0,
-          "最高点": "9.77",
-          "见顶日期": "20260601",
-          "入池日期": "20260601",
+          "最高连板": 3.0,
+          "最高点": "8.88",
+          "见顶日期": "20260529",
+          "入池日期": "20260529",
           "所属板块": "电力",
-          "10日涨幅": "39.0%",
-          "涨停次数": 4,
+          "10日涨幅": "27.2%",
+          "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260601",
-          "观察天数": 4,
+          "观察天数": 16,
           "走弱日期": "20260601",
           "走弱类型": "尾盘板",
           "走弱价格": "9.77",
           "当前价格": "9.17",
-          "回调幅度": "15.6%",
+          "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "000926.SZ",
+          "名称": "福星股份",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "2.59",
+          "见顶日期": "20260529",
+          "入池日期": "20260529",
+          "所属板块": "房地产",
+          "10日涨幅": "28.2%",
+          "涨停次数": 3,
+          "当前状态": "已走弱",
+          "状态变更日": "20260601",
+          "观察天数": 16,
+          "走弱日期": "20260601",
+          "走弱类型": "断板",
+          "走弱价格": "2.59",
+          "当前价格": "2.27",
+          "回调幅度": "10.4%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4733,41 +6194,41 @@
           "名称": "步步高",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "4.86",
-          "见顶日期": "20260605",
-          "入池日期": "20260605",
+          "最高点": "4.88",
+          "见顶日期": "20260529",
+          "入池日期": "20260529",
           "所属板块": "零售",
-          "10日涨幅": "28.9%",
-          "涨停次数": 4,
+          "10日涨幅": "27.4%",
+          "涨停次数": 3,
           "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 0,
-          "走弱日期": "20260605",
-          "走弱类型": "尾盘板",
-          "走弱价格": "4.86",
+          "状态变更日": "20260601",
+          "观察天数": 16,
+          "走弱日期": "20260601",
+          "走弱类型": "断板",
+          "走弱价格": "4.88",
           "当前价格": "4.42",
-          "回调幅度": "0.0%",
+          "回调幅度": "0.8%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
-          "代码": "603890.SH",
-          "名称": "春秋电子",
+          "代码": "600110.SH",
+          "名称": "诺德股份",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "27.29",
-          "见顶日期": "20260601",
-          "入池日期": "20260601",
-          "所属板块": "消费电子",
-          "10日涨幅": "34.6%",
-          "涨停次数": 3,
+          "最高点": "12.66",
+          "见顶日期": "20260529",
+          "入池日期": "20260529",
+          "所属板块": "新能源汽车",
+          "10日涨幅": "26.6%",
+          "涨停次数": 2,
           "当前状态": "已走弱",
-          "状态变更日": "20260603",
-          "观察天数": 4,
-          "走弱日期": "20260603",
+          "状态变更日": "20260601",
+          "观察天数": 16,
+          "走弱日期": "20260601",
           "走弱类型": "断板",
-          "走弱价格": "27.29",
-          "当前价格": "29.36",
-          "回调幅度": "0.0%",
+          "走弱价格": "12.66",
+          "当前价格": "11.54",
+          "回调幅度": "6.5%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4783,12 +6244,12 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260601",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260601",
           "走弱类型": "尾盘板",
           "走弱价格": "12.65",
           "当前价格": "11.46",
-          "回调幅度": "13.4%",
+          "回调幅度": "6.1%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4804,12 +6265,12 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260601",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260601",
           "走弱类型": "烂板(4次)",
           "走弱价格": "18.16",
           "当前价格": "15.33",
-          "回调幅度": "17.2%",
+          "回调幅度": "13.1%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4825,12 +6286,12 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260601",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260601",
           "走弱类型": "尾盘板",
           "走弱价格": "9.76",
           "当前价格": "8.75",
-          "回调幅度": "14.0%",
+          "回调幅度": "6.9%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4846,12 +6307,12 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260602",
           "走弱类型": "断板",
           "走弱价格": "6.14",
           "当前价格": "5.74",
-          "回调幅度": "13.0%",
+          "回调幅度": "1.1%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4867,12 +6328,12 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260602",
           "走弱类型": "断板",
           "走弱价格": "25.11",
           "当前价格": "23.62",
-          "回调幅度": "10.4%",
+          "回调幅度": "0.3%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4888,12 +6349,12 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260602",
           "走弱类型": "断板",
           "走弱价格": "2.92",
           "当前价格": "2.77",
-          "回调幅度": "5.1%",
+          "回调幅度": "2.4%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4909,7 +6370,7 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260602",
-          "观察天数": 4,
+          "观察天数": 13,
           "走弱日期": "20260602",
           "走弱类型": "断板",
           "走弱价格": "13.27",
@@ -4930,12 +6391,33 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 2,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "5.69",
           "当前价格": "5.70",
-          "回调幅度": "8.3%",
+          "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "603890.SH",
+          "名称": "春秋电子",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "24.81",
+          "见顶日期": "20260529",
+          "入池日期": "20260529",
+          "所属板块": "消费电子",
+          "10日涨幅": "24.4%",
+          "涨停次数": 2,
+          "当前状态": "已走弱",
+          "状态变更日": "20260603",
+          "观察天数": 16,
+          "走弱日期": "20260603",
+          "走弱类型": "断板",
+          "走弱价格": "24.81",
+          "当前价格": "29.36",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4951,12 +6433,33 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "8.99",
           "当前价格": "8.60",
-          "回调幅度": "11.3%",
+          "回调幅度": "0.0%",
+          "观察信号": "高开>3%, 竞价量>10%"
+        },
+        {
+          "代码": "001210.SZ",
+          "名称": "金房能源",
+          "龙头类型": "趋势龙头",
+          "最高连板": 0,
+          "最高点": "36.86",
+          "见顶日期": "20260602",
+          "入池日期": "20260602",
+          "所属板块": "电力",
+          "10日涨幅": "18.7%",
+          "涨停次数": 2,
+          "当前状态": "已走弱",
+          "状态变更日": "20260603",
+          "观察天数": 12,
+          "走弱日期": "20260603",
+          "走弱类型": "断板",
+          "走弱价格": "36.86",
+          "当前价格": "35.06",
+          "回调幅度": "2.6%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4972,12 +6475,12 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "147.95",
           "当前价格": "154.11",
-          "回调幅度": "1.0%",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -4993,7 +6496,7 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "88.20",
@@ -5006,20 +6509,20 @@
           "名称": "金时科技",
           "龙头类型": "趋势龙头",
           "最高连板": 0,
-          "最高点": "24.79",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
+          "最高点": "21.34",
+          "见顶日期": "20260602",
+          "入池日期": "20260602",
           "所属板块": "其他电源设备Ⅲ",
-          "10日涨幅": "54.6%",
-          "涨停次数": 5,
+          "10日涨幅": "27.6%",
+          "涨停次数": 4,
           "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
+          "状态变更日": "20260603",
+          "观察天数": 12,
+          "走弱日期": "20260603",
           "走弱类型": "断板",
-          "走弱价格": "24.79",
+          "走弱价格": "21.34",
           "当前价格": "24.79",
-          "回调幅度": "10.0%",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -5035,12 +6538,12 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "148.58",
           "当前价格": "143.60",
-          "回调幅度": "10.9%",
+          "回调幅度": "0.4%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -5056,12 +6559,12 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "37.30",
           "当前价格": "38.60",
-          "回调幅度": "0.1%",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -5077,12 +6580,12 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "3.87",
           "当前价格": "3.59",
-          "回调幅度": "12.1%",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -5098,12 +6601,12 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "66.55",
           "当前价格": "64.07",
-          "回调幅度": "9.8%",
+          "回调幅度": "1.2%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -5119,7 +6622,7 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "23.45",
@@ -5140,7 +6643,7 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260603",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260603",
           "走弱类型": "断板",
           "走弱价格": "25.28",
@@ -5161,33 +6664,12 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 3,
+          "观察天数": 12,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "2.32",
           "当前价格": "2.79",
           "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "001896.SZ",
-          "名称": "豫能控股",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "20.08",
-          "见顶日期": "20260603",
-          "入池日期": "20260603",
-          "所属板块": "电力",
-          "10日涨幅": "22.7%",
-          "涨停次数": 2,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 2,
-          "走弱日期": "20260605",
-          "走弱类型": "断板",
-          "走弱价格": "20.08",
-          "当前价格": "22.09",
-          "回调幅度": "1.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -5203,7 +6685,7 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 2,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "16.18",
@@ -5224,32 +6706,11 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 2,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "33.94",
           "当前价格": "34.10",
-          "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "600255.SH",
-          "名称": "鑫科材料",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "4.39",
-          "见顶日期": "20260603",
-          "入池日期": "20260603",
-          "所属板块": "金属新材料",
-          "10日涨幅": "28.4%",
-          "涨停次数": 2,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 2,
-          "走弱日期": "20260605",
-          "走弱类型": "断板",
-          "走弱价格": "4.39",
-          "当前价格": "4.83",
           "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
@@ -5266,12 +6727,12 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 2,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "6.35",
           "当前价格": "6.29",
-          "回调幅度": "10.9%",
+          "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
@@ -5287,32 +6748,11 @@
           "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 2,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "21.34",
           "当前价格": "21.97",
-          "回调幅度": "6.2%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "600403.SH",
-          "名称": "大有能源",
-          "龙头类型": "连板龙头",
-          "最高连板": 5.0,
-          "最高点": "8.14",
-          "见顶日期": "20260605",
-          "入池日期": "20260605",
-          "所属板块": "煤炭开采加工",
-          "10日涨幅": "57.4%",
-          "涨停次数": 5,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 0,
-          "走弱日期": "20260605",
-          "走弱类型": "尾盘板",
-          "走弱价格": "8.14",
-          "当前价格": "7.40",
           "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         },
@@ -5329,7 +6769,7 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 2,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "91.43",
@@ -5350,7 +6790,7 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 2,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "断板",
           "走弱价格": "37.51",
@@ -5359,40 +6799,19 @@
           "观察信号": "高开>3%, 竞价量>10%"
         },
         {
-          "代码": "920725.BJ",
-          "名称": "惠丰钻石",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "80.60",
-          "见顶日期": "20260602",
-          "入池日期": "20260602",
-          "所属板块": "通用设备",
-          "10日涨幅": "150.0%",
-          "涨停次数": 5,
-          "当前状态": "已走弱",
-          "状态变更日": "20260603",
-          "观察天数": 3,
-          "走弱日期": "20260603",
-          "走弱类型": "断板",
-          "走弱价格": "80.60",
-          "当前价格": "90.70",
-          "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
           "代码": "603330.SH",
           "名称": "天洋新材",
           "龙头类型": "连板龙头",
-          "最高连板": 4.0,
-          "最高点": "9.41",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
+          "最高连板": 3.0,
+          "最高点": "8.55",
+          "见顶日期": "20260603",
+          "入池日期": "20260603",
           "所属板块": "其他塑料制品",
-          "10日涨幅": "35.6%",
-          "涨停次数": 4,
+          "10日涨幅": "28.8%",
+          "涨停次数": 3,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 1,
+          "观察天数": 11,
           "走弱日期": "20260604",
           "走弱类型": "烂板(3次)",
           "走弱价格": "9.41",
@@ -5413,7 +6832,7 @@
           "涨停次数": 2,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 1,
+          "观察天数": 10,
           "走弱日期": "20260604",
           "走弱类型": "尾盘板",
           "走弱价格": "12.22",
@@ -5434,200 +6853,11 @@
           "涨停次数": 4,
           "当前状态": "已走弱",
           "状态变更日": "20260604",
-          "观察天数": 1,
+          "观察天数": 10,
           "走弱日期": "20260604",
           "走弱类型": "烂板(2次)",
           "走弱价格": "57.21",
           "当前价格": "57.21",
-          "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "002585.SZ",
-          "名称": "双星新材",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "11.80",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
-          "所属板块": "膜材料",
-          "10日涨幅": "31.4%",
-          "涨停次数": 4,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
-          "走弱类型": "断板",
-          "走弱价格": "11.80",
-          "当前价格": "11.80",
-          "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "300726.SZ",
-          "名称": "宏达电子",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "79.92",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
-          "所属板块": "军工电子Ⅲ",
-          "10日涨幅": "26.4%",
-          "涨停次数": 2,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
-          "走弱类型": "断板",
-          "走弱价格": "79.92",
-          "当前价格": "79.92",
-          "回调幅度": "6.1%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "600667.SH",
-          "名称": "太极实业",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "16.36",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
-          "所属板块": "建筑装饰",
-          "10日涨幅": "29.7%",
-          "涨停次数": 2,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
-          "走弱类型": "断板",
-          "走弱价格": "16.36",
-          "当前价格": "16.36",
-          "回调幅度": "1.3%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "601666.SH",
-          "名称": "平煤股份",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "9.22",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
-          "所属板块": "煤炭开采加工",
-          "10日涨幅": "28.1%",
-          "涨停次数": 2,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
-          "走弱类型": "断板",
-          "走弱价格": "9.22",
-          "当前价格": "9.22",
-          "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "688146.SH",
-          "名称": "中船特气",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "219.19",
-          "见顶日期": "20260604",
-          "入池日期": "20260604",
-          "所属板块": "电子化学品",
-          "10日涨幅": "67.7%",
-          "涨停次数": 3,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 1,
-          "走弱日期": "20260605",
-          "走弱类型": "断板",
-          "走弱价格": "219.19",
-          "当前价格": "219.19",
-          "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "600063.SH",
-          "名称": "皖维高新",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "8.22",
-          "见顶日期": "20260605",
-          "入池日期": "20260605",
-          "所属板块": "其他纤维",
-          "10日涨幅": "23.2%",
-          "涨停次数": 2,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 0,
-          "走弱日期": "20260605",
-          "走弱类型": "尾盘板",
-          "走弱价格": "8.22",
-          "当前价格": "7.47",
-          "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "688056.SH",
-          "名称": "莱伯泰科",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "48.16",
-          "见顶日期": "20260605",
-          "入池日期": "20260605",
-          "所属板块": "通用设备",
-          "10日涨幅": "34.1%",
-          "涨停次数": 2,
-          "当前状态": "已走弱",
-          "状态变更日": "20260605",
-          "观察天数": 0,
-          "走弱日期": "20260605",
-          "走弱类型": "烂板(2次)",
-          "走弱价格": "48.16",
-          "当前价格": "40.13",
-          "回调幅度": "0.0%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "000520.SZ",
-          "名称": "凤凰航运",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "4.60",
-          "见顶日期": "20260605",
-          "入池日期": "20260605",
-          "所属板块": "港口航运",
-          "10日涨幅": "18.3%",
-          "涨停次数": 2,
-          "当前状态": "已走弱",
-          "状态变更日": "20260604",
-          "观察天数": 0,
-          "走弱日期": "20260604",
-          "走弱类型": "趋势回调(9.1%)",
-          "走弱价格": "4.18",
-          "当前价格": "4.18",
-          "回调幅度": "9.1%",
-          "观察信号": "高开>3%, 竞价量>10%"
-        },
-        {
-          "代码": "000608.SZ",
-          "名称": "阳光股份",
-          "龙头类型": "趋势龙头",
-          "最高连板": 0,
-          "最高点": "5.52",
-          "见顶日期": "20260605",
-          "入池日期": "20260605",
-          "所属板块": "房地产",
-          "10日涨幅": "47.6%",
-          "涨停次数": 3,
-          "当前状态": "已走弱",
-          "状态变更日": "20260604",
-          "观察天数": 0,
-          "走弱日期": "20260604",
-          "走弱类型": "断板",
-          "走弱价格": "5.52",
-          "当前价格": "5.02",
           "回调幅度": "0.0%",
           "观察信号": "高开>3%, 竞价量>10%"
         }
@@ -5639,11 +6869,17 @@
       "columns": [
         "股票代码",
         "股票名称",
-        "净买入(万)",
-        "信誉加权净(万)",
+        "净向",
         "买方信誉",
+        "买席",
+        "卖席",
+        "信誉构成",
+        "买盘占比",
+        "机构",
         "席位数",
-        "主要席位"
+        "主要席位",
+        "净买入(万)",
+        "信誉加权净(万)"
       ],
       "rows": [
         {
@@ -5652,6 +6888,12 @@
           "净买入(万)": -58189,
           "信誉加权净(万)": 29097,
           "买方信誉": "白买入",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 1,
+          "信誉构成": "白1/灰1/黑0",
+          "买盘占比": 45.5,
+          "机构": "机构买",
           "席位数": 3,
           "主要席位": "深股通专用[未知50]卖-102393万 / 章盟主[白83]买+44086万 / 机构专用[灰50]买+118万"
         },
@@ -5661,6 +6903,12 @@
           "净买入(万)": -72611,
           "信誉加权净(万)": 10889,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 0,
+          "卖席": 5,
+          "信誉构成": "白0/灰1/黑3",
+          "买盘占比": 27.6,
+          "机构": "机构卖",
           "席位数": 5,
           "主要席位": "沪股通专用[未知50]卖-19809万 / 机构专用[灰50]卖-16505万 / 量化基金[黑35]卖-14859万 / 量化基金[黑35]卖-14342万"
         },
@@ -5670,6 +6918,12 @@
           "净买入(万)": 14279,
           "信誉加权净(万)": 8023,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 5,
+          "信誉构成": "白0/灰1/黑5",
+          "买盘占比": 53.7,
+          "机构": "机构买",
           "席位数": 7,
           "主要席位": "机构专用[灰50]买+48299万 / 量化基金[黑35]卖-12504万 / 量化基金[黑35]卖-10566万 / 量化基金[黑35]卖-8870万"
         },
@@ -5679,6 +6933,12 @@
           "净买入(万)": 129415,
           "信誉加权净(万)": 7806,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 2,
+          "信誉构成": "白0/灰1/黑2",
+          "买盘占比": 61.0,
+          "机构": "机构买",
           "席位数": 4,
           "主要席位": "机构专用[灰50]买+96766万 / 沪股通专用[未知50]买+58669万 / 量化基金[黑35]卖-24848万 / 量化基金[黑35]卖-1172万"
         },
@@ -5688,6 +6948,12 @@
           "净买入(万)": -14917,
           "信誉加权净(万)": 6776,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 1,
+          "卖席": 2,
+          "信誉构成": "白0/灰2/黑0",
+          "买盘占比": 47.7,
+          "机构": "机构卖",
           "席位数": 3,
           "主要席位": "深股通专用[未知50]买+55953万 / 炒新一族[灰42]卖-42350万 / 机构专用[灰50]卖-28519万"
         },
@@ -5697,6 +6963,12 @@
           "净买入(万)": 15945,
           "信誉加权净(万)": 6434,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 4,
+          "卖席": 2,
+          "信誉构成": "白1/灰0/黑3",
+          "买盘占比": 61.0,
+          "机构": "",
           "席位数": 6,
           "主要席位": "章盟主[白83]买+11034万 / 沪股通专用[未知50]买+6892万 / 量化基金[黑35]买+6523万 / 量化基金[黑35]卖-5542万"
         },
@@ -5706,6 +6978,12 @@
           "净买入(万)": 11498,
           "信誉加权净(万)": 4735,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑2",
+          "买盘占比": 57.5,
+          "机构": "机构卖",
           "席位数": 5,
           "主要席位": "紫阳东路[未知50]买+20913万 / 沪股通专用[未知50]买+12794万 / 量化基金[黑35]卖-8644万 / 机构专用[灰50]卖-8209万"
         },
@@ -5715,6 +6993,12 @@
           "净买入(万)": -15498,
           "信誉加权净(万)": 3841,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 1,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑1",
+          "买盘占比": 44.3,
+          "机构": "机构卖",
           "席位数": 4,
           "主要席位": "量化基金[黑35]卖-12802万 / 机构专用[灰50]卖-12536万 / 小鳄鱼[未知50]买+10164万 / 深股通专用[未知50]卖-324万"
         },
@@ -5724,6 +7008,12 @@
           "净买入(万)": 2362,
           "信誉加权净(万)": 1651,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 4,
+          "信誉构成": "白0/灰0/黑5",
+          "买盘占比": 50.6,
+          "机构": "",
           "席位数": 6,
           "主要席位": "量化基金[黑35]卖-8911万 / 量化基金[黑35]买+8504万 / 沪股通专用[未知50]买+7866万 / 量化基金[黑35]卖-2505万"
         },
@@ -5733,6 +7023,12 @@
           "净买入(万)": 29166,
           "信誉加权净(万)": 1451,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 5,
+          "卖席": 1,
+          "信誉构成": "白0/灰3/黑0",
+          "买盘占比": 59.6,
+          "机构": "机构买",
           "席位数": 6,
           "主要席位": "深股通专用[未知50]买+13561万 / 方新侠[灰58]买+12466万 / 成都系[未知50]卖-8556万 / 量化打板[灰45]买+5437万"
         },
@@ -5742,6 +7038,12 @@
           "净买入(万)": -18417,
           "信誉加权净(万)": 1013,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 1,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 12.5,
+          "机构": "",
           "席位数": 4,
           "主要席位": "量化打板[灰45]卖-10133万 / 沪股通专用[未知50]卖-5732万 / 宁波和源路[未知50]卖-5620万 / T王[未知50]买+3068万"
         },
@@ -5751,6 +7053,12 @@
           "净买入(万)": -6791,
           "信誉加权净(万)": 705,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 1,
+          "卖席": 2,
+          "信誉构成": "白0/灰1/黑1",
+          "买盘占比": 48.8,
+          "机构": "机构买",
           "席位数": 3,
           "主要席位": "深股通专用[未知50]卖-10425万 / 机构专用[灰50]买+5985万 / 量化基金[黑35]卖-2351万"
         },
@@ -5760,6 +7068,12 @@
           "净买入(万)": 11756,
           "信誉加权净(万)": 357,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑2",
+          "买盘占比": 58.1,
+          "机构": "机构买",
           "席位数": 5,
           "主要席位": "机构专用[灰50]买+10565万 / 深股通专用[未知50]买+2888万 / T王[未知50]卖-806万 / T王[黑30]卖-568万"
         },
@@ -5769,6 +7083,12 @@
           "净买入(万)": -280,
           "信誉加权净(万)": 286,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 2,
+          "信誉构成": "白0/灰2/黑1",
+          "买盘占比": 48.4,
+          "机构": "机构买",
           "席位数": 4,
           "主要席位": "炒新一族[灰42]卖-1374万 / 独股一剑[未知50]买+1119万 / T王[黑30]卖-166万 / 机构专用[灰50]买+140万"
         },
@@ -5778,6 +7098,12 @@
           "净买入(万)": 486,
           "信誉加权净(万)": 280,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 1,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑2",
+          "买盘占比": 51.5,
+          "机构": "机构卖",
           "席位数": 4,
           "主要席位": "呼家楼[未知50]买+1535万 / T王[黑30]卖-605万 / 机构专用[灰50]卖-349万 / T王[黑30]卖-95万"
         },
@@ -5787,6 +7113,12 @@
           "净买入(万)": -3906,
           "信誉加权净(万)": 246,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 0,
+          "卖席": 2,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 26.9,
+          "机构": "",
           "席位数": 2,
           "主要席位": "量化打板[灰45]卖-2457万 / 沪股通专用[未知50]卖-1449万"
         },
@@ -5796,6 +7128,12 @@
           "净买入(万)": -5687,
           "信誉加权净(万)": 211,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 4,
+          "卖席": 2,
+          "信誉构成": "白0/灰2/黑2",
+          "买盘占比": 41.3,
+          "机构": "机构买",
           "席位数": 6,
           "主要席位": "量化打板[灰45]卖-7583万 / 深股通专用[未知50]买+2452万 / 低位挖掘[未知50]卖-1958万 / T王[黑30]买+804万"
         },
@@ -5805,6 +7143,12 @@
           "净买入(万)": 686,
           "信誉加权净(万)": 186,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 1,
+          "卖席": 1,
+          "信誉构成": "白0/灰0/黑1",
+          "买盘占比": 67.8,
+          "机构": "",
           "席位数": 2,
           "主要席位": "粉葛[未知50]买+1307万 / 量化基金[黑35]卖-621万"
         },
@@ -5814,6 +7158,12 @@
           "净买入(万)": -2546,
           "信誉加权净(万)": 84,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 0,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑2",
+          "买盘占比": 37.9,
+          "机构": "机构卖",
           "席位数": 3,
           "主要席位": "机构专用[灰50]卖-2335万 / T王[黑30]卖-111万 / T王[黑30]卖-99万"
         },
@@ -5823,6 +7173,12 @@
           "净买入(万)": 183,
           "信誉加权净(万)": 77,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 4,
+          "卖席": 1,
+          "信誉构成": "白0/灰1/黑2",
+          "买盘占比": 54.5,
+          "机构": "机构买",
           "席位数": 5,
           "主要席位": "一瞬流光[未知50]买+308万 / T王[黑30]卖-202万 / 机构专用[灰50]买+54万 / 低位挖掘[未知50]买+12万"
         },
@@ -5832,6 +7188,12 @@
           "净买入(万)": -2205,
           "信誉加权净(万)": 61,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 3,
+          "卖席": 4,
+          "信誉构成": "白0/灰3/黑2",
+          "买盘占比": 46.4,
+          "机构": "机构卖",
           "席位数": 7,
           "主要席位": "量化打板[灰45]卖-4453万 / 量化打板[灰45]买+2329万 / 量化基金[黑35]买+602万 / 温州帮[未知50]卖-589万"
         },
@@ -5841,6 +7203,12 @@
           "净买入(万)": 97,
           "信誉加权净(万)": 61,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 2,
+          "信誉构成": "白0/灰0/黑2",
+          "买盘占比": 59.9,
+          "机构": "",
           "席位数": 4,
           "主要席位": "低位挖掘[未知50]买+149万 / 山东帮[未知50]买+100万 / T王[黑30]卖-87万 / T王[黑30]卖-65万"
         },
@@ -5850,6 +7218,12 @@
           "净买入(万)": -2154,
           "信誉加权净(万)": 44,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 2,
+          "信誉构成": "白0/灰0/黑2",
+          "买盘占比": 48.0,
+          "机构": "",
           "席位数": 4,
           "主要席位": "沪股通专用[未知50]卖-11887万 / 红岭路[未知50]买+11061万 / 量化基金[黑35]卖-4869万 / T王[黑30]买+3542万"
         },
@@ -5859,6 +7233,12 @@
           "净买入(万)": -1913,
           "信誉加权净(万)": 40,
           "买方信誉": "中性",
+          "净向": "净买",
+          "买席": 0,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑1",
+          "买盘占比": 40.4,
+          "机构": "机构卖",
           "席位数": 3,
           "主要席位": "山东帮[未知50]卖-939万 / 机构专用[灰50]卖-873万 / T王[黑30]卖-100万"
         },
@@ -5868,6 +7248,12 @@
           "净买入(万)": -714,
           "信誉加权净(万)": 25,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑4",
+          "买盘占比": 38.5,
+          "机构": "机构卖",
           "席位数": 5,
           "主要席位": "机构专用[灰50]卖-650万 / T王[黑30]卖-67万 / T王[黑30]卖-37万 / T王[黑30]买+31万"
         },
@@ -5877,6 +7263,12 @@
           "净买入(万)": 18,
           "信誉加权净(万)": 9,
           "买方信誉": "黑买入⚠",
+          "净向": "净买",
+          "买席": 2,
+          "卖席": 2,
+          "信誉构成": "白0/灰1/黑3",
+          "买盘占比": 61.7,
+          "机构": "",
           "席位数": 4,
           "主要席位": "徐留胜[灰55]买+33万 / T王[黑30]卖-16万 / T王[黑30]买+14万 / T王[黑30]卖-13万"
         },
@@ -5886,6 +7278,12 @@
           "净买入(万)": 94029,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 2,
+          "卖席": 1,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 62.4,
+          "机构": "机构卖",
           "席位数": 3,
           "主要席位": "深股通专用[未知50]买+65413万 / 紫阳东路[未知50]买+31529万 / 机构专用[灰50]卖-2913万"
         },
@@ -5895,6 +7293,12 @@
           "净买入(万)": 40694,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 3,
+          "卖席": 0,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 66.7,
+          "机构": "机构买",
           "席位数": 3,
           "主要席位": "紫阳东路[未知50]买+20638万 / 深股通专用[未知50]买+18303万 / 机构专用[灰50]买+1753万"
         },
@@ -5904,6 +7308,12 @@
           "净买入(万)": -19851,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 0,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 35.1,
+          "机构": "机构卖",
           "席位数": 3,
           "主要席位": "机构专用[灰50]卖-8491万 / 深股通专用[未知50]卖-5851万 / 玉兰路[未知50]卖-5509万"
         },
@@ -5913,6 +7323,12 @@
           "净买入(万)": -1355,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 3,
+          "卖席": 2,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 38.2,
+          "机构": "机构买",
           "席位数": 5,
           "主要席位": "温州帮[未知50]卖-1770万 / 深股通专用[未知50]卖-809万 / 温州帮[未知50]买+720万 / 机构专用[灰50]买+346万"
         },
@@ -5922,6 +7338,12 @@
           "净买入(万)": 20817,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 1,
+          "卖席": 2,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 54.8,
+          "机构": "机构买",
           "席位数": 3,
           "主要席位": "机构专用[灰50]买+30700万 / 温州帮[未知50]卖-5224万 / 深股通专用[未知50]卖-4659万"
         },
@@ -5931,6 +7353,12 @@
           "净买入(万)": -2015,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 1,
+          "卖席": 3,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 38.1,
+          "机构": "机构卖",
           "席位数": 4,
           "主要席位": "机构专用[灰50]卖-904万 / 温州帮[未知50]卖-728万 / 温州帮[未知50]卖-705万 / 毛老板[未知50]买+322万"
         },
@@ -5940,6 +7368,12 @@
           "净买入(万)": 239,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 2,
+          "卖席": 1,
+          "信誉构成": "白0/灰0/黑0",
+          "买盘占比": 72.4,
+          "机构": "",
           "席位数": 3,
           "主要席位": "温州帮[未知50]买+166万 / 成都系[未知50]买+161万 / T王[未知50]卖-88万"
         },
@@ -5949,6 +7383,12 @@
           "净买入(万)": 19247,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 2,
+          "卖席": 0,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 63.7,
+          "机构": "机构买",
           "席位数": 2,
           "主要席位": "机构专用[灰50]买+9799万 / 深股通专用[未知50]买+9448万"
         },
@@ -5958,6 +7398,12 @@
           "净买入(万)": 26768,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 2,
+          "卖席": 0,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 73.9,
+          "机构": "机构买",
           "席位数": 2,
           "主要席位": "深股通专用[未知50]买+15897万 / 机构专用[灰50]买+10871万"
         },
@@ -5967,6 +7413,12 @@
           "净买入(万)": 5488,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 1,
+          "卖席": 1,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 53.7,
+          "机构": "机构买",
           "席位数": 2,
           "主要席位": "机构专用[灰50]买+13082万 / 深股通专用[未知50]卖-7594万"
         },
@@ -5976,6 +7428,12 @@
           "净买入(万)": -1953,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 1,
+          "卖席": 1,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 48.1,
+          "机构": "机构买",
           "席位数": 2,
           "主要席位": "深股通专用[未知50]卖-7049万 / 机构专用[灰50]买+5096万"
         },
@@ -5985,6 +7443,12 @@
           "净买入(万)": 166023,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 2,
+          "卖席": 0,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 54.7,
+          "机构": "机构买",
           "席位数": 2,
           "主要席位": "机构专用[灰50]买+93843万 / 深股通专用[未知50]买+72180万"
         },
@@ -5994,6 +7458,12 @@
           "净买入(万)": 21560,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 1,
+          "卖席": 0,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 70.8,
+          "机构": "机构买",
           "席位数": 1,
           "主要席位": "机构专用[灰50]买+21560万"
         },
@@ -6003,6 +7473,12 @@
           "净买入(万)": 8652,
           "信誉加权净(万)": 0,
           "买方信誉": "中性",
+          "净向": "持平",
+          "买席": 1,
+          "卖席": 0,
+          "信誉构成": "白0/灰1/黑0",
+          "买盘占比": 66.9,
+          "机构": "机构买",
           "席位数": 1,
           "主要席位": "机构专用[灰50]买+8652万"
         }
@@ -6013,11 +7489,17 @@
           "columns": [
             "股票代码",
             "股票名称",
-            "净买入(万)",
-            "信誉加权净(万)",
+            "净向",
             "买方信誉",
+            "买席",
+            "卖席",
+            "信誉构成",
+            "买盘占比",
+            "机构",
             "席位数",
-            "主要席位"
+            "主要席位",
+            "净买入(万)",
+            "信誉加权净(万)"
           ],
           "rows": [
             {
@@ -6026,6 +7508,12 @@
               "净买入(万)": -58189,
               "信誉加权净(万)": 29097,
               "买方信誉": "白买入",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 1,
+              "信誉构成": "白1/灰1/黑0",
+              "买盘占比": 45.5,
+              "机构": "机构买",
               "席位数": 3,
               "主要席位": "深股通专用[未知50]卖-102393万 / 章盟主[白83]买+44086万 / 机构专用[灰50]买+118万"
             },
@@ -6035,6 +7523,12 @@
               "净买入(万)": -72611,
               "信誉加权净(万)": 10889,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 0,
+              "卖席": 5,
+              "信誉构成": "白0/灰1/黑3",
+              "买盘占比": 27.6,
+              "机构": "机构卖",
               "席位数": 5,
               "主要席位": "沪股通专用[未知50]卖-19809万 / 机构专用[灰50]卖-16505万 / 量化基金[黑35]卖-14859万 / 量化基金[黑35]卖-14342万"
             },
@@ -6044,6 +7538,12 @@
               "净买入(万)": 14279,
               "信誉加权净(万)": 8023,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 5,
+              "信誉构成": "白0/灰1/黑5",
+              "买盘占比": 53.7,
+              "机构": "机构买",
               "席位数": 7,
               "主要席位": "机构专用[灰50]买+48299万 / 量化基金[黑35]卖-12504万 / 量化基金[黑35]卖-10566万 / 量化基金[黑35]卖-8870万"
             },
@@ -6053,6 +7553,12 @@
               "净买入(万)": 129415,
               "信誉加权净(万)": 7806,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 2,
+              "信誉构成": "白0/灰1/黑2",
+              "买盘占比": 61.0,
+              "机构": "机构买",
               "席位数": 4,
               "主要席位": "机构专用[灰50]买+96766万 / 沪股通专用[未知50]买+58669万 / 量化基金[黑35]卖-24848万 / 量化基金[黑35]卖-1172万"
             },
@@ -6062,6 +7568,12 @@
               "净买入(万)": -14917,
               "信誉加权净(万)": 6776,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 1,
+              "卖席": 2,
+              "信誉构成": "白0/灰2/黑0",
+              "买盘占比": 47.7,
+              "机构": "机构卖",
               "席位数": 3,
               "主要席位": "深股通专用[未知50]买+55953万 / 炒新一族[灰42]卖-42350万 / 机构专用[灰50]卖-28519万"
             },
@@ -6071,6 +7583,12 @@
               "净买入(万)": 15945,
               "信誉加权净(万)": 6434,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 4,
+              "卖席": 2,
+              "信誉构成": "白1/灰0/黑3",
+              "买盘占比": 61.0,
+              "机构": "",
               "席位数": 6,
               "主要席位": "章盟主[白83]买+11034万 / 沪股通专用[未知50]买+6892万 / 量化基金[黑35]买+6523万 / 量化基金[黑35]卖-5542万"
             },
@@ -6080,6 +7598,12 @@
               "净买入(万)": 11498,
               "信誉加权净(万)": 4735,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑2",
+              "买盘占比": 57.5,
+              "机构": "机构卖",
               "席位数": 5,
               "主要席位": "紫阳东路[未知50]买+20913万 / 沪股通专用[未知50]买+12794万 / 量化基金[黑35]卖-8644万 / 机构专用[灰50]卖-8209万"
             },
@@ -6089,6 +7613,12 @@
               "净买入(万)": -15498,
               "信誉加权净(万)": 3841,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 1,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑1",
+              "买盘占比": 44.3,
+              "机构": "机构卖",
               "席位数": 4,
               "主要席位": "量化基金[黑35]卖-12802万 / 机构专用[灰50]卖-12536万 / 小鳄鱼[未知50]买+10164万 / 深股通专用[未知50]卖-324万"
             },
@@ -6098,6 +7628,12 @@
               "净买入(万)": 2362,
               "信誉加权净(万)": 1651,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 4,
+              "信誉构成": "白0/灰0/黑5",
+              "买盘占比": 50.6,
+              "机构": "",
               "席位数": 6,
               "主要席位": "量化基金[黑35]卖-8911万 / 量化基金[黑35]买+8504万 / 沪股通专用[未知50]买+7866万 / 量化基金[黑35]卖-2505万"
             },
@@ -6107,6 +7643,12 @@
               "净买入(万)": 29166,
               "信誉加权净(万)": 1451,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 5,
+              "卖席": 1,
+              "信誉构成": "白0/灰3/黑0",
+              "买盘占比": 59.6,
+              "机构": "机构买",
               "席位数": 6,
               "主要席位": "深股通专用[未知50]买+13561万 / 方新侠[灰58]买+12466万 / 成都系[未知50]卖-8556万 / 量化打板[灰45]买+5437万"
             },
@@ -6116,6 +7658,12 @@
               "净买入(万)": -18417,
               "信誉加权净(万)": 1013,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 1,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 12.5,
+              "机构": "",
               "席位数": 4,
               "主要席位": "量化打板[灰45]卖-10133万 / 沪股通专用[未知50]卖-5732万 / 宁波和源路[未知50]卖-5620万 / T王[未知50]买+3068万"
             },
@@ -6125,6 +7673,12 @@
               "净买入(万)": -6791,
               "信誉加权净(万)": 705,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 1,
+              "卖席": 2,
+              "信誉构成": "白0/灰1/黑1",
+              "买盘占比": 48.8,
+              "机构": "机构买",
               "席位数": 3,
               "主要席位": "深股通专用[未知50]卖-10425万 / 机构专用[灰50]买+5985万 / 量化基金[黑35]卖-2351万"
             },
@@ -6134,6 +7688,12 @@
               "净买入(万)": 11756,
               "信誉加权净(万)": 357,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑2",
+              "买盘占比": 58.1,
+              "机构": "机构买",
               "席位数": 5,
               "主要席位": "机构专用[灰50]买+10565万 / 深股通专用[未知50]买+2888万 / T王[未知50]卖-806万 / T王[黑30]卖-568万"
             },
@@ -6143,6 +7703,12 @@
               "净买入(万)": -280,
               "信誉加权净(万)": 286,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 2,
+              "信誉构成": "白0/灰2/黑1",
+              "买盘占比": 48.4,
+              "机构": "机构买",
               "席位数": 4,
               "主要席位": "炒新一族[灰42]卖-1374万 / 独股一剑[未知50]买+1119万 / T王[黑30]卖-166万 / 机构专用[灰50]买+140万"
             },
@@ -6152,6 +7718,12 @@
               "净买入(万)": 486,
               "信誉加权净(万)": 280,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 1,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑2",
+              "买盘占比": 51.5,
+              "机构": "机构卖",
               "席位数": 4,
               "主要席位": "呼家楼[未知50]买+1535万 / T王[黑30]卖-605万 / 机构专用[灰50]卖-349万 / T王[黑30]卖-95万"
             },
@@ -6161,6 +7733,12 @@
               "净买入(万)": -3906,
               "信誉加权净(万)": 246,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 0,
+              "卖席": 2,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 26.9,
+              "机构": "",
               "席位数": 2,
               "主要席位": "量化打板[灰45]卖-2457万 / 沪股通专用[未知50]卖-1449万"
             },
@@ -6170,6 +7748,12 @@
               "净买入(万)": -5687,
               "信誉加权净(万)": 211,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 4,
+              "卖席": 2,
+              "信誉构成": "白0/灰2/黑2",
+              "买盘占比": 41.3,
+              "机构": "机构买",
               "席位数": 6,
               "主要席位": "量化打板[灰45]卖-7583万 / 深股通专用[未知50]买+2452万 / 低位挖掘[未知50]卖-1958万 / T王[黑30]买+804万"
             },
@@ -6179,6 +7763,12 @@
               "净买入(万)": 686,
               "信誉加权净(万)": 186,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 1,
+              "卖席": 1,
+              "信誉构成": "白0/灰0/黑1",
+              "买盘占比": 67.8,
+              "机构": "",
               "席位数": 2,
               "主要席位": "粉葛[未知50]买+1307万 / 量化基金[黑35]卖-621万"
             },
@@ -6188,6 +7778,12 @@
               "净买入(万)": -2546,
               "信誉加权净(万)": 84,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 0,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑2",
+              "买盘占比": 37.9,
+              "机构": "机构卖",
               "席位数": 3,
               "主要席位": "机构专用[灰50]卖-2335万 / T王[黑30]卖-111万 / T王[黑30]卖-99万"
             },
@@ -6197,6 +7793,12 @@
               "净买入(万)": 183,
               "信誉加权净(万)": 77,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 4,
+              "卖席": 1,
+              "信誉构成": "白0/灰1/黑2",
+              "买盘占比": 54.5,
+              "机构": "机构买",
               "席位数": 5,
               "主要席位": "一瞬流光[未知50]买+308万 / T王[黑30]卖-202万 / 机构专用[灰50]买+54万 / 低位挖掘[未知50]买+12万"
             },
@@ -6206,6 +7808,12 @@
               "净买入(万)": -2205,
               "信誉加权净(万)": 61,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 3,
+              "卖席": 4,
+              "信誉构成": "白0/灰3/黑2",
+              "买盘占比": 46.4,
+              "机构": "机构卖",
               "席位数": 7,
               "主要席位": "量化打板[灰45]卖-4453万 / 量化打板[灰45]买+2329万 / 量化基金[黑35]买+602万 / 温州帮[未知50]卖-589万"
             },
@@ -6215,6 +7823,12 @@
               "净买入(万)": 97,
               "信誉加权净(万)": 61,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 2,
+              "信誉构成": "白0/灰0/黑2",
+              "买盘占比": 59.9,
+              "机构": "",
               "席位数": 4,
               "主要席位": "低位挖掘[未知50]买+149万 / 山东帮[未知50]买+100万 / T王[黑30]卖-87万 / T王[黑30]卖-65万"
             },
@@ -6224,6 +7838,12 @@
               "净买入(万)": -2154,
               "信誉加权净(万)": 44,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 2,
+              "信誉构成": "白0/灰0/黑2",
+              "买盘占比": 48.0,
+              "机构": "",
               "席位数": 4,
               "主要席位": "沪股通专用[未知50]卖-11887万 / 红岭路[未知50]买+11061万 / 量化基金[黑35]卖-4869万 / T王[黑30]买+3542万"
             },
@@ -6233,6 +7853,12 @@
               "净买入(万)": -1913,
               "信誉加权净(万)": 40,
               "买方信誉": "中性",
+              "净向": "净买",
+              "买席": 0,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑1",
+              "买盘占比": 40.4,
+              "机构": "机构卖",
               "席位数": 3,
               "主要席位": "山东帮[未知50]卖-939万 / 机构专用[灰50]卖-873万 / T王[黑30]卖-100万"
             },
@@ -6242,6 +7868,12 @@
               "净买入(万)": -714,
               "信誉加权净(万)": 25,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑4",
+              "买盘占比": 38.5,
+              "机构": "机构卖",
               "席位数": 5,
               "主要席位": "机构专用[灰50]卖-650万 / T王[黑30]卖-67万 / T王[黑30]卖-37万 / T王[黑30]买+31万"
             },
@@ -6251,6 +7883,12 @@
               "净买入(万)": 18,
               "信誉加权净(万)": 9,
               "买方信誉": "黑买入⚠",
+              "净向": "净买",
+              "买席": 2,
+              "卖席": 2,
+              "信誉构成": "白0/灰1/黑3",
+              "买盘占比": 61.7,
+              "机构": "",
               "席位数": 4,
               "主要席位": "徐留胜[灰55]买+33万 / T王[黑30]卖-16万 / T王[黑30]买+14万 / T王[黑30]卖-13万"
             },
@@ -6260,6 +7898,12 @@
               "净买入(万)": 94029,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 2,
+              "卖席": 1,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 62.4,
+              "机构": "机构卖",
               "席位数": 3,
               "主要席位": "深股通专用[未知50]买+65413万 / 紫阳东路[未知50]买+31529万 / 机构专用[灰50]卖-2913万"
             },
@@ -6269,6 +7913,12 @@
               "净买入(万)": 40694,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 3,
+              "卖席": 0,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 66.7,
+              "机构": "机构买",
               "席位数": 3,
               "主要席位": "紫阳东路[未知50]买+20638万 / 深股通专用[未知50]买+18303万 / 机构专用[灰50]买+1753万"
             },
@@ -6278,6 +7928,12 @@
               "净买入(万)": -19851,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 0,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 35.1,
+              "机构": "机构卖",
               "席位数": 3,
               "主要席位": "机构专用[灰50]卖-8491万 / 深股通专用[未知50]卖-5851万 / 玉兰路[未知50]卖-5509万"
             },
@@ -6287,6 +7943,12 @@
               "净买入(万)": -1355,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 3,
+              "卖席": 2,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 38.2,
+              "机构": "机构买",
               "席位数": 5,
               "主要席位": "温州帮[未知50]卖-1770万 / 深股通专用[未知50]卖-809万 / 温州帮[未知50]买+720万 / 机构专用[灰50]买+346万"
             },
@@ -6296,6 +7958,12 @@
               "净买入(万)": 20817,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 1,
+              "卖席": 2,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 54.8,
+              "机构": "机构买",
               "席位数": 3,
               "主要席位": "机构专用[灰50]买+30700万 / 温州帮[未知50]卖-5224万 / 深股通专用[未知50]卖-4659万"
             },
@@ -6305,6 +7973,12 @@
               "净买入(万)": -2015,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 1,
+              "卖席": 3,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 38.1,
+              "机构": "机构卖",
               "席位数": 4,
               "主要席位": "机构专用[灰50]卖-904万 / 温州帮[未知50]卖-728万 / 温州帮[未知50]卖-705万 / 毛老板[未知50]买+322万"
             },
@@ -6314,6 +7988,12 @@
               "净买入(万)": 239,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 2,
+              "卖席": 1,
+              "信誉构成": "白0/灰0/黑0",
+              "买盘占比": 72.4,
+              "机构": "",
               "席位数": 3,
               "主要席位": "温州帮[未知50]买+166万 / 成都系[未知50]买+161万 / T王[未知50]卖-88万"
             },
@@ -6323,6 +8003,12 @@
               "净买入(万)": 19247,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 2,
+              "卖席": 0,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 63.7,
+              "机构": "机构买",
               "席位数": 2,
               "主要席位": "机构专用[灰50]买+9799万 / 深股通专用[未知50]买+9448万"
             },
@@ -6332,6 +8018,12 @@
               "净买入(万)": 26768,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 2,
+              "卖席": 0,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 73.9,
+              "机构": "机构买",
               "席位数": 2,
               "主要席位": "深股通专用[未知50]买+15897万 / 机构专用[灰50]买+10871万"
             },
@@ -6341,6 +8033,12 @@
               "净买入(万)": 5488,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 1,
+              "卖席": 1,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 53.7,
+              "机构": "机构买",
               "席位数": 2,
               "主要席位": "机构专用[灰50]买+13082万 / 深股通专用[未知50]卖-7594万"
             },
@@ -6350,6 +8048,12 @@
               "净买入(万)": -1953,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 1,
+              "卖席": 1,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 48.1,
+              "机构": "机构买",
               "席位数": 2,
               "主要席位": "深股通专用[未知50]卖-7049万 / 机构专用[灰50]买+5096万"
             },
@@ -6359,6 +8063,12 @@
               "净买入(万)": 166023,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 2,
+              "卖席": 0,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 54.7,
+              "机构": "机构买",
               "席位数": 2,
               "主要席位": "机构专用[灰50]买+93843万 / 深股通专用[未知50]买+72180万"
             },
@@ -6368,6 +8078,12 @@
               "净买入(万)": 21560,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 1,
+              "卖席": 0,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 70.8,
+              "机构": "机构买",
               "席位数": 1,
               "主要席位": "机构专用[灰50]买+21560万"
             },
@@ -6377,6 +8093,12 @@
               "净买入(万)": 8652,
               "信誉加权净(万)": 0,
               "买方信誉": "中性",
+              "净向": "持平",
+              "买席": 1,
+              "卖席": 0,
+              "信誉构成": "白0/灰1/黑0",
+              "买盘占比": 66.9,
+              "机构": "机构买",
               "席位数": 1,
               "主要席位": "机构专用[灰50]买+8652万"
             }
@@ -6620,83 +8342,116 @@
       "columns": [
         "股票代码",
         "股票名称",
+        "方向",
+        "主力净占比",
+        "买盘占比",
+        "结构",
         "主力净流入(万)",
-        "散户净流入(万)",
-        "方向"
+        "散户净流入(万)"
       ],
       "rows": [
         {
           "股票代码": "000725.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 8.9,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 353733,
-          "散户净流入(万)": -175434,
-          "方向": "流入"
+          "散户净流入(万)": -175434
         },
         {
           "股票代码": "001309.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 4.7,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 118298,
-          "散户净流入(万)": -28,
-          "方向": "流入"
+          "散户净流入(万)": -28
         },
         {
           "股票代码": "000733.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 8.7,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 76576,
-          "散户净流入(万)": -30334,
-          "方向": "流入"
+          "散户净流入(万)": -30334
         },
         {
           "股票代码": "000670.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 17.8,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 33168,
-          "散户净流入(万)": -18135,
-          "方向": "流入"
+          "散户净流入(万)": -18135
         },
         {
           "股票代码": "000536.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 28.5,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 25589,
-          "散户净流入(万)": -14067,
-          "方向": "流入"
+          "散户净流入(万)": -14067
         },
         {
           "股票代码": "002051.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 11.1,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 21786,
-          "散户净流入(万)": -12313,
-          "方向": "流入"
+          "散户净流入(万)": -12313
         },
         {
           "股票代码": "001896.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 1.5,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 13286,
-          "散户净流入(万)": -309,
-          "方向": "流入"
+          "散户净流入(万)": -309
         },
         {
           "股票代码": "000520.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 15.1,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 8156,
-          "散户净流入(万)": -4751,
-          "方向": "流入"
+          "散户净流入(万)": -4751
         },
         {
           "股票代码": "001376.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 15.5,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 7398,
-          "散户净流入(万)": -4173,
-          "方向": "流入"
+          "散户净流入(万)": -4173
         },
         {
           "股票代码": "000718.SZ",
           "股票名称": "",
+          "方向": "流入",
+          "主力净占比": 22.5,
+          "买盘占比": 50.0,
+          "结构": "主力吸筹·散户离场",
           "主力净流入(万)": 5699,
-          "散户净流入(万)": -3320,
-          "方向": "流入"
+          "散户净流入(万)": -3320
         }
       ],
-      "note": "主力 = 大单+特大单；散户 = 小单。金额单位：万元。"
+      "note": "主力净占比 = 主力净流入 / 当日总成交额；买盘占比 = 总买额 / 总成交额；结构看主力与散户资金的相对方向。"
     },
     {
       "name": "复盘总结",
@@ -6720,17 +8475,7 @@
           "平均收益": "+0.28%",
           "最大收益": "+0.28%",
           "最小收益": "+0.28%",
-          "平均置信度": 0.65
-        },
-        {
-          "模式": "弱转强",
-          "信号数": 6,
-          "盈利数": 3,
-          "胜率": "50.0%",
-          "平均收益": "+1.27%",
-          "最大收益": "+10.05%",
-          "最小收益": "-8.50%",
-          "平均置信度": 0.65
+          "平均置信度": 0.58
         },
         {
           "模式": "首板突破",
@@ -6740,7 +8485,17 @@
           "平均收益": "-0.39%",
           "最大收益": "+3.14%",
           "最小收益": "-3.22%",
-          "平均置信度": 0.8
+          "平均置信度": 0.79
+        },
+        {
+          "模式": "弱转强",
+          "信号数": 5,
+          "盈利数": 2,
+          "胜率": "40.0%",
+          "平均收益": "-0.49%",
+          "最大收益": "+5.36%",
+          "最小收益": "-8.50%",
+          "平均置信度": 0.55
         },
         {
           "模式": "二板定龙",
@@ -6750,7 +8505,7 @@
           "平均收益": "-5.03%",
           "最大收益": "+3.25%",
           "最小收益": "-10.00%",
-          "平均置信度": 0.95
+          "平均置信度": 0.79
         }
       ],
       "blocks": [
@@ -6775,17 +8530,7 @@
               "平均收益": "+0.28%",
               "最大收益": "+0.28%",
               "最小收益": "+0.28%",
-              "平均置信度": 0.65
-            },
-            {
-              "模式": "弱转强",
-              "信号数": 6,
-              "盈利数": 3,
-              "胜率": "50.0%",
-              "平均收益": "+1.27%",
-              "最大收益": "+10.05%",
-              "最小收益": "-8.50%",
-              "平均置信度": 0.65
+              "平均置信度": 0.58
             },
             {
               "模式": "首板突破",
@@ -6795,7 +8540,17 @@
               "平均收益": "-0.39%",
               "最大收益": "+3.14%",
               "最小收益": "-3.22%",
-              "平均置信度": 0.8
+              "平均置信度": 0.79
+            },
+            {
+              "模式": "弱转强",
+              "信号数": 5,
+              "盈利数": 2,
+              "胜率": "40.0%",
+              "平均收益": "-0.49%",
+              "最大收益": "+5.36%",
+              "最小收益": "-8.50%",
+              "平均置信度": 0.55
             },
             {
               "模式": "二板定龙",
@@ -6805,7 +8560,7 @@
               "平均收益": "-5.03%",
               "最大收益": "+3.25%",
               "最小收益": "-10.00%",
-              "平均置信度": 0.95
+              "平均置信度": 0.79
             }
           ]
         },
@@ -6842,19 +8597,19 @@
             {
               "方向": "维持",
               "模式": "全局",
-              "原因": "当日信号数量(14个)在合理范围内",
+              "原因": "当日信号数量(13个)在合理范围内",
               "建议动作": "当前参数设置合理，无需调整"
             },
             {
               "方向": "收紧",
               "模式": "弱转强",
-              "原因": "弱转强信号过多(6个)",
+              "原因": "弱转强信号过多(5个)",
               "建议动作": "考虑提高弱转强的置信度阈值"
             }
           ]
         }
       ],
-      "summary": "今日共发出14个交易信号；其中7个盈利；表现最佳模式: 龙二波(胜率100.0%)；情绪趋势: 当前情绪: 上升期；参数建议: 考虑提高弱转强的置信度阈值",
+      "summary": "今日共发出13个交易信号；其中6个盈利；表现最佳模式: 龙二波(胜率100.0%)；情绪趋势: 当前情绪: 上升期；参数建议: 考虑提高弱转强的置信度阈值",
       "note": "统计来源：今日 T+1"
     },
     {
@@ -6870,31 +8625,31 @@
       "rows": [
         {
           "情绪周期 \\ 模式": "高潮期",
-          "首板突破": "33%(n=3)",
-          "二板定龙": "60%(n=10)",
-          "弱转强": "—",
-          "龙二波": "25%(n=8)"
+          "首板突破": "37%(n=19)",
+          "二板定龙": "50%(n=12)",
+          "弱转强": "57%(n=44)",
+          "龙二波": "58%(n=19)"
         },
         {
           "情绪周期 \\ 模式": "上升期",
-          "首板突破": "50%(n=12)",
-          "二板定龙": "65%(n=17)",
-          "弱转强": "50%(n=14)",
-          "龙二波": "N/A(n=1)"
+          "首板突破": "56%(n=50)",
+          "二板定龙": "64%(n=39)",
+          "弱转强": "59%(n=92)",
+          "龙二波": "58%(n=19)"
         },
         {
           "情绪周期 \\ 模式": "震荡期",
-          "首板突破": "67%(n=3)",
-          "二板定龙": "43%(n=7)",
-          "弱转强": "50%(n=4)",
+          "首板突破": "N/A(n=2)",
+          "二板定龙": "N/A(n=2)",
+          "弱转强": "33%(n=18)",
           "龙二波": "N/A(n=1)"
         },
         {
           "情绪周期 \\ 模式": "退潮期",
-          "首板突破": "58%(n=38)",
-          "二板定龙": "56%(n=34)",
-          "弱转强": "48%(n=56)",
-          "龙二波": "48%(n=25)"
+          "首板突破": "71%(n=17)",
+          "二板定龙": "60%(n=5)",
+          "弱转强": "50%(n=14)",
+          "龙二波": "67%(n=3)"
         }
       ],
       "blocks": [
@@ -6910,31 +8665,31 @@
           "rows": [
             {
               "情绪周期 \\ 模式": "高潮期",
-              "首板突破": "33%(n=3)",
-              "二板定龙": "60%(n=10)",
-              "弱转强": "—",
-              "龙二波": "25%(n=8)"
+              "首板突破": "37%(n=19)",
+              "二板定龙": "50%(n=12)",
+              "弱转强": "57%(n=44)",
+              "龙二波": "58%(n=19)"
             },
             {
               "情绪周期 \\ 模式": "上升期",
-              "首板突破": "50%(n=12)",
-              "二板定龙": "65%(n=17)",
-              "弱转强": "50%(n=14)",
-              "龙二波": "N/A(n=1)"
+              "首板突破": "56%(n=50)",
+              "二板定龙": "64%(n=39)",
+              "弱转强": "59%(n=92)",
+              "龙二波": "58%(n=19)"
             },
             {
               "情绪周期 \\ 模式": "震荡期",
-              "首板突破": "67%(n=3)",
-              "二板定龙": "43%(n=7)",
-              "弱转强": "50%(n=4)",
+              "首板突破": "N/A(n=2)",
+              "二板定龙": "N/A(n=2)",
+              "弱转强": "33%(n=18)",
               "龙二波": "N/A(n=1)"
             },
             {
               "情绪周期 \\ 模式": "退潮期",
-              "首板突破": "58%(n=38)",
-              "二板定龙": "56%(n=34)",
-              "弱转强": "48%(n=56)",
-              "龙二波": "48%(n=25)"
+              "首板突破": "71%(n=17)",
+              "二板定龙": "60%(n=5)",
+              "弱转强": "50%(n=14)",
+              "龙二波": "67%(n=3)"
             }
           ]
         },
@@ -6950,36 +8705,36 @@
           "rows": [
             {
               "情绪周期 \\ 模式": "高潮期",
-              "首板突破": "-1.67%(n=3)",
-              "二板定龙": "+2.57%(n=10)",
-              "弱转强": "—",
-              "龙二波": "-3.15%(n=8)"
+              "首板突破": "-0.08%(n=19)",
+              "二板定龙": "+1.84%(n=12)",
+              "弱转强": "+1.51%(n=44)",
+              "龙二波": "+1.43%(n=19)"
             },
             {
               "情绪周期 \\ 模式": "上升期",
-              "首板突破": "+0.68%(n=12)",
-              "二板定龙": "+1.46%(n=17)",
-              "弱转强": "+0.17%(n=14)",
-              "龙二波": "N/A(n=1)"
+              "首板突破": "+1.62%(n=50)",
+              "二板定龙": "+3.09%(n=39)",
+              "弱转强": "+1.68%(n=92)",
+              "龙二波": "+0.98%(n=19)"
             },
             {
               "情绪周期 \\ 模式": "震荡期",
-              "首板突破": "+3.46%(n=3)",
-              "二板定龙": "+4.00%(n=7)",
-              "弱转强": "+1.32%(n=4)",
+              "首板突破": "N/A(n=2)",
+              "二板定龙": "N/A(n=2)",
+              "弱转强": "-1.78%(n=18)",
               "龙二波": "N/A(n=1)"
             },
             {
               "情绪周期 \\ 模式": "退潮期",
-              "首板突破": "+0.94%(n=38)",
-              "二板定龙": "+2.90%(n=34)",
-              "弱转强": "+1.08%(n=56)",
-              "龙二波": "-0.38%(n=25)"
+              "首板突破": "+1.72%(n=17)",
+              "二板定龙": "+7.18%(n=5)",
+              "弱转强": "+1.55%(n=14)",
+              "龙二波": "+2.01%(n=3)"
             }
           ]
         }
       ],
-      "note": "样本窗口 20260515~20260604 · 共 233 个历史信号；样本数 < 3 显示 N/A，避免小样本误导。历史统计不代表未来。"
+      "note": "样本窗口 20260506~20260604 · 共 356 个历史信号；样本数 < 3 显示 N/A，避免小样本误导。历史统计不代表未来。"
     },
     {
       "name": "交易计划",
@@ -7010,7 +8765,7 @@
           "股票名称": "奕东电子",
           "模式类型": "弱转强",
           "优先级": 100,
-          "综合评分": 63.7,
+          "综合评分": 60.2,
           "仓位等级": "轻仓",
           "建议仓位": "10%",
           "仓位依据": "启发式",
@@ -7030,7 +8785,7 @@
           "股票名称": "铜峰电子",
           "模式类型": "弱转强",
           "优先级": 100,
-          "综合评分": 63.3,
+          "综合评分": 59.8,
           "仓位等级": "轻仓",
           "建议仓位": "10%",
           "仓位依据": "启发式",
@@ -7039,7 +8794,7 @@
           "入场区间": "竞价确定",
           "止损": "-4.0%",
           "止盈": "+10.0%",
-          "次日预期": "震荡走高预期，关注开盘方向",
+          "次日预期": "需竞价确认，谨慎参与",
           "风险提示": "无特别风险提示",
           "风控动作": "拒绝",
           "风控后仓位": "0%",
@@ -7050,7 +8805,7 @@
           "股票名称": "龙辰科技",
           "模式类型": "弱转强",
           "优先级": 100,
-          "综合评分": 56.9,
+          "综合评分": 53.4,
           "仓位等级": "轻仓",
           "建议仓位": "10%",
           "仓位依据": "启发式",
@@ -7067,10 +8822,10 @@
         },
         {
           "股票代码": "600367.SH",
-          "股票名称": "XD红星发",
+          "股票名称": "红星发展",
           "模式类型": "弱转强",
           "优先级": 100,
-          "综合评分": 46.1,
+          "综合评分": 42.6,
           "仓位等级": "观察",
           "建议仓位": "5%",
           "仓位依据": "启发式",
@@ -7090,7 +8845,7 @@
           "股票名称": "天洋新材",
           "模式类型": "弱转强",
           "优先级": 100,
-          "综合评分": 44.5,
+          "综合评分": 41.0,
           "仓位等级": "观察",
           "建议仓位": "5%",
           "仓位依据": "启发式",
@@ -7110,7 +8865,7 @@
           "股票名称": "豫能控股",
           "模式类型": "二板定龙",
           "优先级": 85,
-          "综合评分": 69.4,
+          "综合评分": 64.2,
           "仓位等级": "轻仓",
           "建议仓位": "10%",
           "仓位依据": "启发式",
@@ -7130,7 +8885,7 @@
           "股票名称": "上海石化",
           "模式类型": "二板定龙",
           "优先级": 85,
-          "综合评分": 68.0,
+          "综合评分": 62.8,
           "仓位等级": "轻仓",
           "建议仓位": "10%",
           "仓位依据": "启发式",
@@ -7150,9 +8905,9 @@
           "股票名称": "瑞贝卡",
           "模式类型": "二板定龙",
           "优先级": 85,
-          "综合评分": 53.0,
-          "仓位等级": "轻仓",
-          "建议仓位": "10%",
+          "综合评分": 46.3,
+          "仓位等级": "观察",
+          "建议仓位": "5%",
           "仓位依据": "启发式",
           "竞价条件": "不限",
           "竞价区间": "-3.0%~+9.0%",
@@ -7170,7 +8925,7 @@
           "股票名称": "力诺药包",
           "模式类型": "龙二波",
           "优先级": 70,
-          "综合评分": 60.6,
+          "综合评分": 58.0,
           "仓位等级": "轻仓",
           "建议仓位": "10%",
           "仓位依据": "启发式",
@@ -7179,18 +8934,18 @@
           "入场区间": "竞价确定",
           "止损": "-4.0%",
           "止盈": "+10.0%",
-          "次日预期": "震荡走高预期，关注开盘方向",
+          "次日预期": "需竞价确认，谨慎参与",
           "风险提示": "无特别风险提示",
           "风控动作": "通过",
           "风控后仓位": "10%",
           "风控提示": "通过"
         },
         {
-          "股票代码": "002590.SZ",
-          "股票名称": "万安科技",
+          "股票代码": "000718.SZ",
+          "股票名称": "苏宁环球",
           "模式类型": "首板突破",
           "优先级": 50,
-          "综合评分": 66.2,
+          "综合评分": 65.9,
           "仓位等级": "轻仓",
           "建议仓位": "10%",
           "仓位依据": "启发式",
@@ -7221,8 +8976,8 @@
       ],
       "rows": [
         {
-          "stock_code": "002590.SZ",
-          "stock_name": "万安科技",
+          "stock_code": "000718.SZ",
+          "stock_name": "苏宁环球",
           "pattern_type": "首板突破",
           "original_position_pct": 0.1,
           "final_position_pct": 0.1,
@@ -7266,7 +9021,7 @@
           "stock_code": "600439.SH",
           "stock_name": "瑞贝卡",
           "pattern_type": "二板定龙",
-          "original_position_pct": 0.1,
+          "original_position_pct": 0.05,
           "final_position_pct": 0.0,
           "action": "REJECT",
           "reasons": [
@@ -7312,7 +9067,7 @@
         },
         {
           "stock_code": "600367.SH",
-          "stock_name": "XD红星发",
+          "stock_name": "红星发展",
           "pattern_type": "弱转强",
           "original_position_pct": 0.05,
           "final_position_pct": 0.0,
@@ -7342,10 +9097,10 @@
       "columns": [
         "stock_code",
         "tech_D1_n_day_high_low",
-        "tech_D5_ma_bull_align",
         "tech_D2_vol_price_coord",
         "tech_D3_seal_strength",
         "tech_D4_turnover_health",
+        "tech_D5_ma_bull_align",
         "mf_E1_main_net_ratio",
         "mf_E2_retail_net_ratio",
         "mf_E3_large_buy_ratio",
@@ -7355,10 +9110,10 @@
         {
           "stock_code": "000520.SZ",
           "tech_D1_n_day_high_low": 57.4,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 23.729911139051257,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 15.12,
           "mf_E2_retail_net_ratio": -15.12,
           "mf_E3_large_buy_ratio": 28.16,
@@ -7367,10 +9122,10 @@
         {
           "stock_code": "000536.SZ",
           "tech_D1_n_day_high_low": 32.4,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 81.37061017366264,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 28.48,
           "mf_E2_retail_net_ratio": -28.48,
           "mf_E3_large_buy_ratio": 41.2,
@@ -7379,10 +9134,10 @@
         {
           "stock_code": "000670.SZ",
           "tech_D1_n_day_high_low": 1.2,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 34.258718608299844,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 17.85,
           "mf_E2_retail_net_ratio": -17.85,
           "mf_E3_large_buy_ratio": 32.79,
@@ -7391,10 +9146,10 @@
         {
           "stock_code": "000718.SZ",
           "tech_D1_n_day_high_low": 81.2,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 29.153865727975017,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 22.48,
           "mf_E2_retail_net_ratio": -22.48,
           "mf_E3_large_buy_ratio": 35.96,
@@ -7403,10 +9158,10 @@
         {
           "stock_code": "000725.SZ",
           "tech_D1_n_day_high_low": 4.8,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 91.61748833270374,
           "tech_D3_seal_strength": 45.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 8.87,
           "mf_E2_retail_net_ratio": -8.87,
           "mf_E3_large_buy_ratio": 35.15,
@@ -7415,10 +9170,10 @@
         {
           "stock_code": "000733.SZ",
           "tech_D1_n_day_high_low": 2.5,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 82.9277849309103,
           "tech_D3_seal_strength": 30.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 8.73,
           "mf_E2_retail_net_ratio": -8.73,
           "mf_E3_large_buy_ratio": 32.62,
@@ -7427,10 +9182,10 @@
         {
           "stock_code": "001309.SZ",
           "tech_D1_n_day_high_low": 8.5,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 19.39269648001335,
           "tech_D3_seal_strength": 30.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 4.66,
           "mf_E2_retail_net_ratio": -4.66,
           "mf_E3_large_buy_ratio": 36.11,
@@ -7439,10 +9194,10 @@
         {
           "stock_code": "001376.SZ",
           "tech_D1_n_day_high_low": 70.3,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 38.87267345767313,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 15.54,
           "mf_E2_retail_net_ratio": -15.54,
           "mf_E3_large_buy_ratio": 29.11,
@@ -7451,10 +9206,10 @@
         {
           "stock_code": "001896.SZ",
           "tech_D1_n_day_high_low": 26.2,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 81.433251865825,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 1.48,
           "mf_E2_retail_net_ratio": -1.48,
           "mf_E3_large_buy_ratio": 29.43,
@@ -7463,10 +9218,10 @@
         {
           "stock_code": "002051.SZ",
           "tech_D1_n_day_high_low": 31.4,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 38.020169120861794,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 11.06,
           "mf_E2_retail_net_ratio": -11.06,
           "mf_E3_large_buy_ratio": 29.65,
@@ -7475,10 +9230,10 @@
         {
           "stock_code": "002072.SZ",
           "tech_D1_n_day_high_low": 21.5,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 83.63879420338822,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 6.77,
           "mf_E2_retail_net_ratio": -6.77,
           "mf_E3_large_buy_ratio": 22.3,
@@ -7487,10 +9242,10 @@
         {
           "stock_code": "002213.SZ",
           "tech_D1_n_day_high_low": 50.8,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 87.26338536380048,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 15.83,
           "mf_E2_retail_net_ratio": -15.83,
           "mf_E3_large_buy_ratio": 30.98,
@@ -7499,10 +9254,10 @@
         {
           "stock_code": "002353.SZ",
           "tech_D1_n_day_high_low": 72.5,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 94.4905939228529,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 4.89,
           "mf_E2_retail_net_ratio": -4.89,
           "mf_E3_large_buy_ratio": 32.15,
@@ -7511,10 +9266,10 @@
         {
           "stock_code": "002395.SZ",
           "tech_D1_n_day_high_low": 81.2,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 24.59722231036153,
           "tech_D3_seal_strength": 45.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 12.96,
           "mf_E2_retail_net_ratio": -12.96,
           "mf_E3_large_buy_ratio": 27.74,
@@ -7523,10 +9278,10 @@
         {
           "stock_code": "002484.SZ",
           "tech_D1_n_day_high_low": 3.1,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 88.40502487380833,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 2.9,
           "mf_E2_retail_net_ratio": -2.9,
           "mf_E3_large_buy_ratio": 32.65,
@@ -7535,10 +9290,10 @@
         {
           "stock_code": "002491.SZ",
           "tech_D1_n_day_high_low": 10.3,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 100,
           "tech_D3_seal_strength": 30.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 8.25,
           "mf_E2_retail_net_ratio": -8.25,
           "mf_E3_large_buy_ratio": 28.3,
@@ -7547,10 +9302,10 @@
         {
           "stock_code": "002520.SZ",
           "tech_D1_n_day_high_low": 24.7,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 29.751397038112245,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 12.65,
           "mf_E2_retail_net_ratio": -12.65,
           "mf_E3_large_buy_ratio": 23.51,
@@ -7559,10 +9314,10 @@
         {
           "stock_code": "002570.SZ",
           "tech_D1_n_day_high_low": 26.8,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 50.0,
           "tech_D3_seal_strength": 30.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 11.67,
           "mf_E2_retail_net_ratio": -11.67,
           "mf_E3_large_buy_ratio": 27.4,
@@ -7571,10 +9326,10 @@
         {
           "stock_code": "002585.SZ",
           "tech_D1_n_day_high_low": 9.2,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 29.147011247078396,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 17.86,
           "mf_E2_retail_net_ratio": -17.86,
           "mf_E3_large_buy_ratio": 37.8,
@@ -7583,10 +9338,10 @@
         {
           "stock_code": "002590.SZ",
           "tech_D1_n_day_high_low": 37.7,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 84.48449226782546,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 10.79,
           "mf_E2_retail_net_ratio": -10.79,
           "mf_E3_large_buy_ratio": 27.87,
@@ -7595,10 +9350,10 @@
         {
           "stock_code": "002645.SZ",
           "tech_D1_n_day_high_low": 3.3,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 94.1215996067195,
           "tech_D3_seal_strength": 45.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 3.57,
           "mf_E2_retail_net_ratio": -3.57,
           "mf_E3_large_buy_ratio": 31.37,
@@ -7607,10 +9362,10 @@
         {
           "stock_code": "002733.SZ",
           "tech_D1_n_day_high_low": 45.0,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 100,
           "tech_D3_seal_strength": 45.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 8.65,
           "mf_E2_retail_net_ratio": -8.65,
           "mf_E3_large_buy_ratio": 25.95,
@@ -7619,10 +9374,10 @@
         {
           "stock_code": "002787.SZ",
           "tech_D1_n_day_high_low": 12.9,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 28.62905794089688,
           "tech_D3_seal_strength": 30.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 7.7,
           "mf_E2_retail_net_ratio": -7.7,
           "mf_E3_large_buy_ratio": 24.67,
@@ -7631,10 +9386,10 @@
         {
           "stock_code": "002806.SZ",
           "tech_D1_n_day_high_low": 5.5,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 32.3405100952619,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 15.73,
           "mf_E2_retail_net_ratio": -15.73,
           "mf_E3_large_buy_ratio": 34.27,
@@ -7643,10 +9398,10 @@
         {
           "stock_code": "002824.SZ",
           "tech_D1_n_day_high_low": 47.1,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 24.02891966530289,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 9.14,
           "mf_E2_retail_net_ratio": -9.14,
           "mf_E3_large_buy_ratio": 20.79,
@@ -7655,10 +9410,10 @@
         {
           "stock_code": "002931.SZ",
           "tech_D1_n_day_high_low": 39.1,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 33.222745231822834,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 11.75,
           "mf_E2_retail_net_ratio": -11.75,
           "mf_E3_large_buy_ratio": 24.94,
@@ -7667,10 +9422,10 @@
         {
           "stock_code": "002951.SZ",
           "tech_D1_n_day_high_low": 2.2,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 15.736911315499537,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 3.99,
           "mf_E2_retail_net_ratio": -3.99,
           "mf_E3_large_buy_ratio": 20.33,
@@ -7679,10 +9434,10 @@
         {
           "stock_code": "002971.SZ",
           "tech_D1_n_day_high_low": 8.4,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 31.75446098430921,
           "tech_D3_seal_strength": 75.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 9.16,
           "mf_E2_retail_net_ratio": -9.16,
           "mf_E3_large_buy_ratio": 28.21,
@@ -7691,10 +9446,10 @@
         {
           "stock_code": "002981.SZ",
           "tech_D1_n_day_high_low": 8.8,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 29.95978439556739,
           "tech_D3_seal_strength": 30.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 1.67,
           "mf_E2_retail_net_ratio": -1.67,
           "mf_E3_large_buy_ratio": 13.61,
@@ -7703,10 +9458,10 @@
         {
           "stock_code": "003011.SZ",
           "tech_D1_n_day_high_low": 55.0,
-          "tech_D5_ma_bull_align": 50.0,
           "tech_D2_vol_price_coord": 92.07764133631775,
           "tech_D3_seal_strength": 15.0,
           "tech_D4_turnover_health": 40.0,
+          "tech_D5_ma_bull_align": 50.0,
           "mf_E1_main_net_ratio": 7.9,
           "mf_E2_retail_net_ratio": -7.9,
           "mf_E3_large_buy_ratio": 30.64,
