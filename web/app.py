@@ -24,6 +24,8 @@ from snapshot.reader import SnapshotReader
 BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 reader = SnapshotReader(SNAPSHOT_DIR)
+_REALTIME_QUOTE_SERVICE = None
+_REALTIME_SECTOR_SERVICE = None
 
 
 def _money(value: Any, signed: bool = False) -> str:
@@ -197,6 +199,35 @@ def intraday_page(request: Request) -> Any:
     return templates.TemplateResponse(request, "intraday.html", {"rt": view})
 
 
+@app.get("/realtime", response_class=HTMLResponse)
+def realtime_page(request: Request) -> Any:
+    """实时行情面板：个股批量行情、板块行情、行情源健康。"""
+    latest = reader.latest()
+    snapshot = reader.load(latest) if latest else None
+    return templates.TemplateResponse(
+        request,
+        "realtime.html",
+        {
+            "date": latest,
+            "default_codes": _default_realtime_codes(snapshot),
+        },
+    )
+
+
+def _default_realtime_codes(snapshot: Optional[Dict], limit: int = 8) -> List[str]:
+    """从最新交易计划里提取默认监控代码。"""
+    codes: List[str] = []
+    if snapshot:
+        for row in (snapshot.get("trade_plans", {}) or {}).get("rows", []) or []:
+            code = row.get("股票代码") or row.get("stock_code") or row.get("代码") or ""
+            code = _normalize_stock_code(code)
+            if code and code not in codes:
+                codes.append(code)
+            if len(codes) >= limit:
+                break
+    return codes or ["000001", "600000", "300750", "002594"]
+
+
 @app.post("/api/intraday/run")
 def api_intraday_run(payload: dict = Body(default={})) -> Any:
     """手动跑一轮盘中转强观测，合并落盘后返回最新结果。"""
@@ -350,6 +381,97 @@ def api_stock_chart(code: str, date: Optional[str] = None, daily_count: int = 12
         "plans": context.get("plans") or [],
         "signals": context.get("signals") or [],
         "risk": context.get("risk") or [],
+    })
+
+
+def _split_codes(codes: Optional[str]) -> List[str]:
+    if not codes:
+        return []
+    return [c.strip() for c in str(codes).replace("，", ",").split(",") if c.strip()]
+
+
+def _get_realtime_quote_service(stale_after_seconds: int = 90):
+    global _REALTIME_QUOTE_SERVICE
+    if _REALTIME_QUOTE_SERVICE is None:
+        from core.realtime.quote_service import RealtimeQuoteService
+
+        _REALTIME_QUOTE_SERVICE = RealtimeQuoteService(stale_after_seconds=stale_after_seconds)
+    else:
+        _REALTIME_QUOTE_SERVICE.stale_after_seconds = max(float(stale_after_seconds), 1.0)
+    return _REALTIME_QUOTE_SERVICE
+
+
+def _get_realtime_sector_service():
+    global _REALTIME_SECTOR_SERVICE
+    if _REALTIME_SECTOR_SERVICE is None:
+        from core.realtime.sector_service import RealtimeSectorService
+
+        _REALTIME_SECTOR_SERVICE = RealtimeSectorService()
+    return _REALTIME_SECTOR_SERVICE
+
+
+@app.get("/api/realtime/quote/{code}")
+def api_realtime_quote(code: str, include_raw: bool = False) -> Any:
+    service = _get_realtime_quote_service()
+    quote = service.get_quote(code, include_raw=include_raw)
+    if not quote:
+        return JSONResponse({"ok": False, "message": "未获取到实时行情", "quote": {}}, status_code=502)
+    return JSONResponse({"ok": True, "quote": quote})
+
+
+@app.get("/api/realtime/quotes")
+def api_realtime_quotes(
+    codes: Optional[str] = None,
+    include_raw: bool = False,
+    stale_after_seconds: int = 90,
+) -> Any:
+    code_list = _split_codes(codes)
+    if not code_list:
+        return JSONResponse({"ok": False, "message": "codes 参数不能为空", "quotes": []}, status_code=400)
+    service = _get_realtime_quote_service(stale_after_seconds=stale_after_seconds)
+    return JSONResponse(service.get_quotes(code_list, include_raw=include_raw))
+
+
+@app.get("/api/realtime/sectors")
+def api_realtime_sectors(
+    codes: Optional[str] = None,
+    source: str = "east",
+    limit: int = 20,
+    include_raw: bool = False,
+) -> Any:
+    service = _get_realtime_sector_service()
+    return JSONResponse(
+        service.get_sector_quotes(
+            _split_codes(codes) or None,
+            source=source,
+            limit=max(1, min(int(limit or 20), 100)),
+            include_raw=include_raw,
+        )
+    )
+
+
+@app.get("/api/realtime/market")
+def api_realtime_market(
+    codes: Optional[str] = None,
+    limit: int = 100,
+    include_raw: bool = False,
+) -> Any:
+    service = _get_realtime_sector_service()
+    return JSONResponse(
+        service.get_market_quotes(
+            _split_codes(codes) or None,
+            limit=max(1, min(int(limit or 100), 500)),
+            include_raw=include_raw,
+        )
+    )
+
+
+@app.get("/api/realtime/health")
+def api_realtime_health(probe: bool = False) -> Any:
+    return JSONResponse({
+        "ok": True,
+        "quotes": _get_realtime_quote_service().health(probe=probe),
+        "sectors": _get_realtime_sector_service().health(probe=probe),
     })
 
 

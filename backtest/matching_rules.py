@@ -83,6 +83,24 @@ def _get(ohlc: Dict, key: str) -> float:
         return 0.0
 
 
+def open_gap_pct(ohlc: Dict, pre_close: Optional[float] = None) -> Optional[float]:
+    """开盘相对昨收涨跌幅；缺少开盘价/昨收价时返回 None。"""
+    open_price = _get(ohlc, "open")
+    try:
+        prev = _get(ohlc, "pre_close") if pre_close is None else float(pre_close or 0)
+    except Exception:
+        prev = 0.0
+    if open_price <= 0 or prev <= 0:
+        return None
+    return (open_price - prev) / prev
+
+
+def is_positive_open_gap(ohlc: Dict, pre_close: Optional[float] = None) -> bool:
+    """是否满足“早盘竞价高开才买入”：开盘价必须严格高于昨收。"""
+    gap = open_gap_pct(ohlc, pre_close)
+    return gap is not None and gap > 0
+
+
 def is_suspended(ohlc: Optional[Dict]) -> bool:
     """停牌 / 无行情：无 OHLC 或成交量为 0。"""
     if not ohlc:
@@ -199,6 +217,7 @@ def simulate_sell(target_price: float, ohlc: Dict, pre_close: float,
 __all__ = [
     "normalize_code", "is_st", "get_price_limit_pct", "round_price",
     "limit_up_price", "limit_down_price", "is_suspended",
+    "open_gap_pct", "is_positive_open_gap",
     "is_limit_up", "is_limit_down",
     "is_one_word_limit_up", "is_one_word_limit_down",
     "simulate_buy", "simulate_sell",

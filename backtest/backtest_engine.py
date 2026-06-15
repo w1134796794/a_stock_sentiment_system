@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import loguru
 
+from backtest.matching_rules import open_gap_pct
 from backtest.trade_calendar import TradeCalendar
 
 logger = loguru.logger
@@ -328,26 +329,35 @@ class BacktestEngine:
             daily_data = self.dm.get_stock_daily_data(standardized_code, date)
             
             if not daily_data:
-                logger.debug(f"{stock_name} 无法获取当日数据，使用目标价买入")
-                entry_price = target_price * (1 + self.config.slippage)
-                return True, entry_price
+                logger.info(f"{stock_name} 无法获取当日开盘数据，不能确认高开，放弃买入")
+                return False, 0
             
             open_price = daily_data.get('open', 0)
             high_price = daily_data.get('high', 0)
             low_price = daily_data.get('low', 0)
             
             if open_price <= 0:
-                logger.debug(f"{stock_name} 开盘价无效，使用目标价买入")
-                entry_price = target_price * (1 + self.config.slippage)
-                return True, entry_price
+                logger.info(f"{stock_name} 开盘价无效，不能确认高开，放弃买入")
+                return False, 0
                 
         except Exception as e:
-            logger.debug(f"{stock_name} 获取开盘数据失败: {e}，使用目标价买入")
-            entry_price = target_price * (1 + self.config.slippage)
-            return True, entry_price
+            logger.debug(f"{stock_name} 获取开盘数据失败: {e}，不能确认高开，放弃买入")
+            return False, 0
         
+        # 早盘竞价硬规则：必须高开才允许执行；低开/平开/缺昨收直接放弃。
+        prev_close = float(daily_data.get('pre_close') or 0)
+        if prev_close <= 0:
+            prev_close = self._get_prev_close(stock_code, date) or 0
+        gap = open_gap_pct({"open": open_price, "pre_close": prev_close}, prev_close)
+        if gap is None:
+            logger.info(f"{stock_name} 昨收价缺失，不能确认高开，放弃买入")
+            return False, 0
+        if gap <= 0:
+            label = "低开" if gap < 0 else "平开"
+            logger.info(f"{stock_name} {label}{gap:.2%}，未高开，放弃竞价买点")
+            return False, 0
+
         # 检查是否涨停开盘（无法买入）
-        prev_close = self._get_prev_close(stock_code, date)
         if prev_close and prev_close > 0:
             limit_up_price = prev_close * 1.1
             if open_price >= limit_up_price * 0.998:  # 考虑浮点误差

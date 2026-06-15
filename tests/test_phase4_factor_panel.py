@@ -36,7 +36,7 @@ def overrides_sandbox():
 def test_confidence_mode_defaults_present():
     for grp in ["second_board_dragon", "weak_to_strong",
                 "first_board_breakout", "dragon_second_wave"]:
-        assert pp.get_params(grp).get("confidence_mode") == "legacy", grp
+        assert pp.get_default_params(grp).get("confidence_mode") == "legacy", grp
 
 
 def test_factor_registry_honors_yaml_override(overrides_sandbox):

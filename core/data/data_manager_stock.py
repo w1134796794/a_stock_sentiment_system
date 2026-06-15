@@ -3,7 +3,9 @@
 
 数据来源：
 - Tushare daily / daily_basic：盘后历史日线行情与基本面指标
-- eltdx：实时/历史分时、K 线、集合竞价（唯一行情源，缺数据则返回空）
+- pqquotation / easyquotation：实时快照（可选，优先用于盘中轮询）
+- eltdx：实时/历史分时、K 线、集合竞价
+- AshareProvider：分钟线 / K 线兜底
 """
 import json
 import time
@@ -38,6 +40,36 @@ class StockDataManager(DataManagerBase):
             logger.debug(f"[StockDataManager] eltdx provider unavailable: {e}")
             return None
 
+    def _get_quotation_provider(self):
+        provider = getattr(self, "_quotation_provider", None)
+        if provider is not None:
+            return provider
+        try:
+            from core.data.providers.quotation_provider import QuotationProvider
+
+            if not QuotationProvider.available():
+                return None
+            provider = QuotationProvider(source="sina")
+            self._quotation_provider = provider
+            return provider
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[StockDataManager] quotation provider unavailable: {e}")
+            return None
+
+    def _get_ashare_provider(self):
+        provider = getattr(self, "_ashare_provider", None)
+        if provider is not None:
+            return provider
+        try:
+            from core.data.providers.ashare_provider import AshareProvider
+
+            provider = AshareProvider()
+            self._ashare_provider = provider
+            return provider
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[StockDataManager] Ashare provider unavailable: {e}")
+            return None
+
     def get_stock_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """获取个股历史日线数据"""
         code = ts_code
@@ -62,15 +94,15 @@ class StockDataManager(DataManagerBase):
         except Exception as e:
             logger.error(f"[get_stock_daily] 获取个股{code}历史数据失败: {e}")
 
-        # 盘中实时兜底：Tushare daily 仅在收盘后才有当日K线，盘中查询「当日」必然返回空。
-        # 此时改用 eltdx 实时行情快照拼出当日动态日线（不落盘，收盘后由 Tushare 真实日线覆盖）。
-        rt_df = self._get_realtime_daily_via_eltdx(code, start_date, end_date)
+        # 盘中实时兜底：Tushare daily 仅在收盘后才有当日K线，盘中查询「当日」可能返回空。
+        # 此时用实时行情快照拼出当日动态日线（不落盘，收盘后由 Tushare 真实日线覆盖）。
+        rt_df = self._get_realtime_daily_via_quote(code, start_date, end_date)
         if rt_df is not None and not rt_df.empty:
             return rt_df
         return pd.DataFrame()
 
-    def _get_realtime_daily_via_eltdx(self, ts_code: str, start_date: str, end_date: str):
-        """盘中用 eltdx 实时行情快照拼出「当日」日线。
+    def _get_realtime_daily_via_quote(self, ts_code: str, start_date: str, end_date: str):
+        """盘中用实时行情快照拼出「当日」日线。
 
         仅当查询的是「当前交易日」的单日（start==end==今天，且今天是交易日）时生效；
         其余情况返回 None（继续走 Tushare 历史日线）。返回的当日行情是动态的，
@@ -81,13 +113,10 @@ class StockDataManager(DataManagerBase):
         if not (str(start_date) == str(end_date) == today == get_nearest_trade_date(today)):
             return None
 
-        provider = self._get_eltdx_provider()
-        if provider is None:
-            return None
         try:
-            q = provider.get_quote_snapshot(ts_code) or {}
+            q = self.get_quote_snapshot(ts_code) or {}
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"[get_stock_daily] eltdx 实时快照失败 {ts_code}: {e}")
+            logger.debug(f"[get_stock_daily] 实时快照失败 {ts_code}: {e}")
             return None
 
         last = float(q.get('last_price') or 0)
@@ -114,8 +143,9 @@ class StockDataManager(DataManagerBase):
             'amount': amount_yuan / 1000.0,      # 千元，与 Tushare amount 同口径
         }
         logger.info(
-            f"[get_stock_daily] eltdx 实时快照拼当日日线 {ts_code} {today}: "
-            f"close={last} vol={vol_hand:.0f}手 amount={amount_yuan / 1e8:.2f}亿"
+            f"[get_stock_daily] 实时快照拼当日日线 {ts_code} {today}: "
+            f"source={q.get('source', '')} close={last} "
+            f"vol={vol_hand:.0f}手 amount={amount_yuan / 1e8:.2f}亿"
         )
         return pd.DataFrame([row])
 
@@ -225,8 +255,8 @@ class StockDataManager(DataManagerBase):
     def get_stock_tick(self, ts_code: str, trade_date: str) -> pd.DataFrame:
         """获取个股分时数据（1分钟线）。
 
-        唯一数据源为 eltdx：当日走实时分时，历史交易日走 ``get_history_minute``。
-        eltdx 不可用或当日/当历史无数据时，直接返回空 DataFrame（不再走其它行情接口）。
+        优先使用 eltdx：当日走实时分时，历史交易日走 ``get_history_minute``。
+        eltdx 不可用时，用 AshareProvider 公共接口兜底。
         """
         cache_file = self.stock_dir / "tick" / f"{ts_code}_{trade_date}.csv"
 
@@ -245,6 +275,14 @@ class StockDataManager(DataManagerBase):
             if df is not None and not df.empty:
                 df.to_csv(cache_file, index=False)
                 logger.info(f"[get_stock_tick] eltdx 获取 {ts_code} {trade_date} 分时: {len(df)}条")
+                return df
+
+        ashare_provider = self._get_ashare_provider()
+        if ashare_provider is not None:
+            df = ashare_provider.get_minute_bars(ts_code, trade_date)
+            if df is not None and not df.empty:
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_stock_tick] Ashare 获取 {ts_code} {trade_date} 分时: {len(df)}条")
                 return df
 
         return pd.DataFrame()
@@ -413,13 +451,22 @@ class StockDataManager(DataManagerBase):
         }
 
     def get_quote_snapshot(self, ts_code: str) -> Dict:
-        """获取个股最新实时行情快照（eltdx）。
+        """获取个股最新实时行情快照。
 
-        仅含 ``last_price`` / ``open_price`` / ``pre_close`` / ``open_amount`` 等盘中
-        实时字段，**不落盘**（快照随行情变化）。eltdx 不可用时返回空字典。
+        仅含 ``last_price`` / ``open_price`` / ``pre_close`` 等盘中实时字段，**不落盘**
+        （快照随行情变化）。优先 pqquotation/easyquotation，失败再回退 eltdx。
 
         主要服务盘中实时观测（如弱转强走弱池的盘中转强监控）。
         """
+        provider = self._get_quotation_provider()
+        if provider is not None:
+            try:
+                quote = provider.get_quote_snapshot(ts_code) or {}
+                if quote:
+                    return quote
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[get_quote_snapshot] quotation 实时快照失败 {ts_code}: {e}")
+
         provider = self._get_eltdx_provider()
         if provider is None:
             return {}
@@ -430,11 +477,20 @@ class StockDataManager(DataManagerBase):
             return {}
 
     def get_quote_snapshots(self, ts_codes) -> Dict[str, Dict]:
-        """**批量**获取多只实时行情快照（eltdx，一条连接）。
+        """**批量**获取多只实时行情快照。
 
-        返回 ``{6位代码: 快照dict}``。相比逐只 ``get_quote_snapshot`` 快一两个
-        数量级，适合走弱池/候选池盘中轮询。eltdx 不可用时返回空字典。
+        返回 ``{6位代码: 快照dict}``。优先 pqquotation/easyquotation 批量 HTTP，
+        失败再回退 eltdx，适合走弱池/候选池盘中轮询。
         """
+        provider = self._get_quotation_provider()
+        if provider is not None:
+            try:
+                quotes = provider.get_quote_snapshots(ts_codes) or {}
+                if quotes:
+                    return quotes
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[get_quote_snapshots] quotation 批量快照失败: {e}")
+
         provider = self._get_eltdx_provider()
         if provider is None:
             return {}
@@ -461,7 +517,7 @@ class StockDataManager(DataManagerBase):
             return pd.DataFrame()
 
     def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
-        """获取个股 K 线：唯一数据源为 eltdx，无数据则返回空。
+        """获取个股 K 线：eltdx 优先，AshareProvider 兜底。
 
         盘后批量分析仍使用 Tushare 的 ``get_stock_daily`` / ``get_all_stocks_daily``；
         本方法主要服务前端图表与无 token 数据展示。
@@ -477,6 +533,13 @@ class StockDataManager(DataManagerBase):
         eltdx_provider = self._get_eltdx_provider()
         if eltdx_provider is not None:
             df = eltdx_provider.get_kline(ts_code, period=period, count=count)
+            if df is not None and not df.empty:
+                df.to_csv(cache_file, index=False)
+                return df
+
+        ashare_provider = self._get_ashare_provider()
+        if ashare_provider is not None:
+            df = ashare_provider.get_kline(ts_code, period=period, count=count)
             if df is not None and not df.empty:
                 df.to_csv(cache_file, index=False)
                 return df
