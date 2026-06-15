@@ -138,19 +138,26 @@ def _score_phases(metrics: Dict, TH: Dict) -> Dict[str, float]:
     if prom_eff >= TH["prom_strong"]:
         s["高潮"] += 1
 
-    # 发酵：高度"抬升中"（未见顶）+ 晋级率健康 + 炸板可控
-    if TH["ferment_board"] <= mb < TH["climax_board"]:
-        s["发酵"] += 3
-    if prom_eff >= TH["prom_strong"]:
-        s["发酵"] += 3
-    elif prom_eff >= 20:
-        s["发酵"] += 1
-    if cr >= 20:
-        s["发酵"] += 2
-    if br < TH["broken_div"]:
-        s["发酵"] += 2
-    if premium is not None and premium > 1:
-        s["发酵"] += 1
+    # 发酵：高度"抬升中"（未见顶）+ 晋级率健康 + 炸板可控。
+    # 若核按钮/炸板/赚钱效应已明显恶化，则不再把连板高度和昨日溢价误读成发酵。
+    ferment_risk_ok = (
+        ldr < TH["ldr_high"]
+        and br <= TH["broken_high"]
+        and (wr is None or wr > TH["wr_weak"])
+    )
+    if ferment_risk_ok:
+        if TH["ferment_board"] <= mb < TH["climax_board"]:
+            s["发酵"] += 3
+        if prom_eff >= TH["prom_strong"]:
+            s["发酵"] += 3
+        elif prom_eff >= 20:
+            s["发酵"] += 1
+        if cr >= 20:
+            s["发酵"] += 2
+        if br < TH["broken_div"]:
+            s["发酵"] += 2
+        if premium is not None and premium > 1:
+            s["发酵"] += 1
 
     # 修复：赚钱效应回正 + 涨停回升但高度未起
     if wr is None or wr >= 45:

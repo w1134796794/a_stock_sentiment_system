@@ -28,7 +28,7 @@ import pandas as pd
 import loguru
 
 from backtest.backtest_engine import TradeRecord
-from backtest.matching_rules import normalize_code, simulate_buy, simulate_sell
+from backtest.matching_rules import normalize_code, open_gap_pct, simulate_buy, simulate_sell
 from backtest.trade_calendar import TradeCalendar
 from risk.portfolio_state import PortfolioState
 from risk.risk_config import RiskConfig
@@ -260,6 +260,14 @@ class ReplayEngine:
             if not ohlc:
                 continue  # 停牌 / 无行情
             pre_close = ohlc.get("pre_close", 0.0)
+            gap = open_gap_pct(ohlc, pre_close)
+            if gap is None:
+                logger.debug(f"[{date}] {plan.name}({code}) 无法确认早盘是否高开，放弃买入")
+                continue
+            if gap <= 0:
+                label = "低开" if gap < 0 else "平开"
+                logger.info(f"[{date}] {plan.name}({code}) {label}{gap:.2%}，未高开，放弃竞价买点")
+                continue
 
             position_pct = self.sizing_fn(plan) if self.sizing_fn else plan.position_pct
             if position_pct <= 0:

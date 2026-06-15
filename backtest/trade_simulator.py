@@ -49,6 +49,14 @@ class TradeSimulator:
                 'stock_code': stock_code
             }
 
+        open_gap = self._check_open_gap(price_data)
+        if not open_gap['passed']:
+            return {
+                'executed': False,
+                'reason': open_gap['failed_reason'],
+                'stock_code': stock_code
+            }
+
         # 检查前置条件
         pre_conditions = plan.get('前置条件', '').split('; ')
         conditions_met = self._check_pre_conditions(pre_conditions, price_data)
@@ -116,11 +124,34 @@ class TradeSimulator:
             logger.error(f"获取价格数据失败 {stock_code} {date}: {e}")
             return None
 
+    def _check_open_gap(self, price_data: Dict) -> Dict:
+        """早盘竞价硬规则：开盘价必须严格高于昨收，否则不买入。"""
+        open_price = float(price_data.get('open') or 0)
+        pre_close = float(price_data.get('pre_close') or 0)
+        if open_price <= 0 or pre_close <= 0:
+            return {
+                'passed': False,
+                'failed_reason': '无法确认开盘价/昨收价，放弃买入'
+            }
+        gap_ratio = (open_price - pre_close) / pre_close
+        if gap_ratio <= 0:
+            label = '低开' if gap_ratio < 0 else '平开'
+            return {
+                'passed': False,
+                'failed_reason': f'{label}{gap_ratio:.2%}，未高开，放弃竞价买点'
+            }
+        return {'passed': True, 'failed_reason': None}
+
     def _check_pre_conditions(self, conditions: List[str], price_data: Dict) -> Dict:
         """检查前置条件"""
         # 简化实现，实际应解析条件并检查
         # 这里假设大部分条件都能满足（回测乐观估计）
 
+        if float(price_data.get('pre_close') or 0) <= 0:
+            return {
+                'passed': False,
+                'failed_reason': '昨收价缺失'
+            }
         gap_ratio = (price_data['open'] - price_data['pre_close']) / price_data['pre_close']
 
         for condition in conditions:
@@ -141,6 +172,8 @@ class TradeSimulator:
 
     def _check_cancel_conditions(self, conditions: List[str], price_data: Dict) -> Dict:
         """检查取消条件"""
+        if float(price_data.get('pre_close') or 0) <= 0:
+            return {'should_cancel': True, 'reason': '昨收价缺失'}
         gap_ratio = (price_data['open'] - price_data['pre_close']) / price_data['pre_close']
 
         for condition in conditions:
@@ -299,4 +332,3 @@ class TradeSimulator:
             results.append(result)
 
         return pd.DataFrame(results)
-
