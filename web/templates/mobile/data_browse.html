@@ -27,7 +27,7 @@
 {% if snapshot is none %}
   <div class="m-card p-8 text-center">
     <div class="text-lg font-bold mb-1">没有找到 {{ date }} 的快照</div>
-    <div class="text-sm text-slate-400">请确认该日已运行收盘分析。</div>
+    <div class="text-sm text-slate-400">请确认该日已运行ETL。</div>
   </div>
 {% else %}
   {% set view_q = 'echelon' if cat == 'limitup'

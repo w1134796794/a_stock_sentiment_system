@@ -115,6 +115,10 @@ class SharedContext:
     # 因子收集器输出的 JSON 路径（pipeline.execute 末尾写入）
     factor_results_path: str = ""
 
+    # ETL Phase 3/4：Gold 表筛选结果与轻量分析摘要（旁路接入，不替换旧 L3/L4）
+    etl_screening: Dict[str, Any] = field(default_factory=dict)
+    etl_gold_summary: Dict[str, Any] = field(default_factory=dict)
+
     # Sprint F：龙虎榜 / 游资信誉（LHBResult）
     # 类型：``core.analysis.lhb_analyzer.LHBResult`` 或 None
     # available=False 表示积分不足 / 无 token，下游需降级跳过
@@ -533,6 +537,30 @@ class ReviewPipeline:
             )
             logger.info(f"[Layer3] 大盘+情绪交叉判断: {ctx.market_env.cross_judgment}")
 
+        self._execute_etl_screening_sidecar(ctx)
+
+    def _execute_etl_screening_sidecar(self, ctx: SharedContext):
+        """Phase 3/4：从 Gold 指标表跑配置化筛选，作为旧 L3 的并行对照结果。"""
+        try:
+            from config.settings import FACTOR_DB_PATH
+
+            if not Path(FACTOR_DB_PATH).exists():
+                return
+            from core.screening.gold_analysis import build_gold_analysis_summary
+            from core.screening.screening_engine import ScreeningEngine
+
+            screening = ScreeningEngine().run(ctx.trade_date, profile="default", persist=True)
+            ctx.etl_screening = screening.to_dict()
+            ctx.etl_gold_summary = build_gold_analysis_summary(ctx.trade_date)
+            logger.info(
+                f"[ETL Screening] profile={screening.profile}, "
+                f"输入{screening.input_count}只, 输出{len(screening.final)}只"
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[ETL Screening] 旁路筛选失败，旧流程继续: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
     def _execute_cycle_pattern_matrix(self, ctx: SharedContext):
         """Sprint D-2：算周期 × 模式胜率矩阵。
 
@@ -865,6 +893,9 @@ class ReviewPipeline:
             'enabled_factors': ctx.enabled_factors,
             'trade_plans_df': ctx.trade_plans_df,
             'factor_results_path': ctx.factor_results_path,
+            # ETL Phase 3/4：Gold 指标筛选旁路结果
+            'etl_screening': ctx.etl_screening,
+            'etl_gold_summary': ctx.etl_gold_summary,
             # Sprint D-2：周期 × 模式胜率矩阵
             'cycle_pattern_matrix': ctx.cycle_pattern_matrix,
             # Sprint E：情绪相位 + 历史相似日

@@ -9,7 +9,7 @@
     <span class="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-500/15 text-emerald-300 font-bold text-lg">情</span>
     <div>
       <div class="font-bold text-lg">A股情绪系统 · 管理控制台</div>
-      <div class="text-xs text-slate-500">五层复盘流水线 · 桌面工具</div>
+      <div class="text-xs text-slate-500">ETL指标体系 · 桌面工具</div>
     </div>
   </div>
   <p class="text-sm text-slate-300 leading-relaxed">
@@ -26,7 +26,8 @@
     <div class="flex gap-3"><dt class="w-28 text-slate-400 shrink-0">龙头池</dt><dd class="mono text-slate-200">龙头 {{ ov.dragon_count }} · 走弱 {{ ov.weak_count }} · {{ ov.pool_update_time or '—' }}</dd></div>
   </dl>
   <div class="text-xs text-slate-500 mt-4 leading-relaxed">
-    报告输出在 <span class="mono">output/</span>；每日快照在 <span class="mono">webdata/snapshots/</span>；
+    指标仓库在 <span class="mono">webdata/factors.duckdb</span>；筛选结果在 <span class="mono">webdata/screening/</span>；
+    每日快照在 <span class="mono">webdata/snapshots/</span>；
     日志在 <span class="mono">logs/system.log</span>；龙头池状态持久化在 <span class="mono">dragon_pools.json</span>。
   </div>
 </section>

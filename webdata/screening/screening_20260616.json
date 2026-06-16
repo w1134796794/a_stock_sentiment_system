@@ -1,0 +1,1897 @@
+{
+  "trade_date": "20260616",
+  "profile": "default",
+  "ok": true,
+  "message": "筛选完成，输入 5513，最终 10",
+  "input_count": 5513,
+  "after_hard_filter": 3584,
+  "after_priority_filter": 297,
+  "final_count": 10,
+  "final": [
+    {
+      "code": "688484",
+      "ts_code": "688484.SH",
+      "name": "",
+      "score": 93.9982,
+      "rank": 1,
+      "gold_rank": 1,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 90.22395082398464,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 91.92039309650255,
+        "stk_new_high_20d": 100.0,
+        "stk_liquidity_percentile": 93.6695084346091
+      }
+    },
+    {
+      "code": "601696",
+      "ts_code": "601696.SH",
+      "name": "",
+      "score": 93.4478,
+      "rank": 2,
+      "gold_rank": 6,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 86.14909916016688,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 100.0,
+        "stk_new_high_20d": 100.0,
+        "stk_liquidity_percentile": 96.80754580083439
+      }
+    },
+    {
+      "code": "000510",
+      "ts_code": "000510.SZ",
+      "name": "",
+      "score": 93.2891,
+      "rank": 3,
+      "gold_rank": 2,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 88.14335671949085,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 91.92393139786402,
+        "stk_new_high_20d": 100.0,
+        "stk_liquidity_percentile": 95.93687647378923
+      }
+    },
+    {
+      "code": "601958",
+      "ts_code": "601958.SH",
+      "name": "",
+      "score": 92.9448,
+      "rank": 4,
+      "gold_rank": 8,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 84.50728171231634,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 100.0,
+        "stk_new_high_20d": 100.0,
+        "stk_liquidity_percentile": 99.16560856158172
+      }
+    },
+    {
+      "code": "002972",
+      "ts_code": "002972.SZ",
+      "name": "",
+      "score": 92.0666,
+      "rank": 5,
+      "gold_rank": 5,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 86.92924079629967,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 100.0,
+        "stk_new_high_20d": 100.0,
+        "stk_liquidity_percentile": 79.48485398149828
+      }
+    },
+    {
+      "code": "605198",
+      "ts_code": "605198.SH",
+      "name": "",
+      "score": 91.1398,
+      "rank": 6,
+      "gold_rank": 3,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 87.78129742082868,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 82.56599699768327,
+        "stk_new_high_20d": 100.0,
+        "stk_liquidity_percentile": 87.30273898059133
+      }
+    },
+    {
+      "code": "301176",
+      "ts_code": "301176.SZ",
+      "name": "",
+      "score": 90.4841,
+      "rank": 7,
+      "gold_rank": 4,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 87.77545963937978,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 71.25863811630796,
+        "stk_new_high_20d": 100.0,
+        "stk_liquidity_percentile": 94.34064937420642
+      }
+    },
+    {
+      "code": "002303",
+      "ts_code": "002303.SZ",
+      "name": "",
+      "score": 89.4193,
+      "rank": 8,
+      "gold_rank": 7,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 85.22776206378506,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 100.0,
+        "stk_new_high_20d": 94.77124183006532,
+        "stk_liquidity_percentile": 68.5107926718665
+      }
+    },
+    {
+      "code": "603271",
+      "ts_code": "603271.SH",
+      "name": "",
+      "score": 87.1595,
+      "rank": 9,
+      "gold_rank": 9,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 83.80511335028314,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 100.0,
+        "stk_new_high_20d": 79.91120976692554,
+        "stk_liquidity_percentile": 74.60547796118266
+      }
+    },
+    {
+      "code": "000541",
+      "ts_code": "000541.SZ",
+      "name": "",
+      "score": 86.2959,
+      "rank": 10,
+      "gold_rank": 11,
+      "reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 82.26422909184083,
+        "stk_amount_ratio_5d": 100.0,
+        "stk_vol_ratio_5d": 100.0,
+        "stk_new_high_20d": 89.3451720310765,
+        "stk_liquidity_percentile": 58.75204063123526
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "code": "000008",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 27.262833303101758,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000010",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 23.217848721204426,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000011",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 12.243787411572645,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000014",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 16.887357155813532,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000016",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 31.99709776890985,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000017",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 28.44186468347542,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000019",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 20.079811354979142,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000020",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 23.399238164338833,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000028",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 14.22093234173771,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000030",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 33.3031017594776,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000042",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.88264103029204,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000045",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.161073825503358,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000055",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 34.30074369671685,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000058",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.01197170324687,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000061",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 30.6910937783421,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000069",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 30.600399056774897,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000089",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 25.19499365136949,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000096",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 15.90785416288772,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000153",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.922002539452205,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000401",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 5.3509885724650825,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000407",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.77380736441139,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000409",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 20.460729185561398,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000419",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 10.756393977870488,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000421",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 7.836023943406493,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000428",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 14.78323961545438,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000488",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 4.335207690912389,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000498",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.26900054416833,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000501",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 20.0616724106657,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000504",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 27.952113187012518,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000505",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 12.189370578632323,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000507",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 10.865227643751133,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000514",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 17.77616542717214,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000516",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 26.791220750952295,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000521",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 31.162706330491563,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000523",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 14.293488118991474,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000524",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 29.312534010520586,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000529",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 3.138037366225286,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000544",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 10.139669871213496,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000548",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 8.761110103391982,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000553",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 19.84400507890441,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000554",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 33.95610375476147,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000557",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 10.99220025394522,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000565",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 21.385815345546888,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000570",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 27.915835298385634,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000576",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 21.89370578632324,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000590",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 7.709051333212407,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000597",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 26.392163976056594,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000599",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.886631598040996,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000605",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 8.615998548884454,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000607",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 12.987484128423727,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000610",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 20.80536912751678,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000615",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 8.216941773988754,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000619",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 28.496281516415745,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000626",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 29.911119172864137,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000632",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 29.784146562670056,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000633",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 28.84092145837112,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000635",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.1966261563577,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000637",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 15.871576274260837,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000639",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 27.22655541447488,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000650",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 23.199709776890984,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000652",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.39288953382913,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000655",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 17.957554870306545,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000656",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 33.91982586613459,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000663",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 12.86051151822964,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000665",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 20.152367132232904,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000669",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 8.470886994376928,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000692",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.66823870850716,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000698",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 3.754761472882278,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000701",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.777072374387814,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000702",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 10.883366588064575,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000705",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 23.67132232904045,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000707",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.432251042989298,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000710",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 20.932341737710868,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000713",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 10.828949755124253,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000715",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 19.29983674950118,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000717",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.28713948848177,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000721",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 13.85815345546889,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000726",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 6.149102122256485,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000731",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.06947215672048,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000752",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.429167422456015,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000755",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 4.679847632867768,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000756",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 19.390531471068385,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000757",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 29.856702339923817,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000761",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 15.690186831126429,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000779",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 31.05387266461092,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000789",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 2.6664248140758207,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000790",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 26.627970252131327,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000793",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 34.5909668057319,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000797",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 26.91819336114638,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000798",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 20.714674405949573,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000803",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 34.699800471612555,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000812",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 19.10030836205333,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000813",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 33.992381643388356,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000816",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.215490658443677,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000820",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 3.2287320877924905,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000822",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.777797932160347,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000826",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 23.000181389443135,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000828",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 19.191003083620533,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000838",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 14.837656448394704,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000850",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 12.89678940685652,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000852",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 33.08543442771631,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000856",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 30.509704335207694,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000860",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 23.943406493742064,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000868",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 20.043533466352258,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000869",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 3.827317250136042,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000877",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.9551968075458,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000885",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 19.952838744785055,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000886",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 23.70760021766733,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000888",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 21.04117540359151,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000897",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 13.65862506802104,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000900",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 7.128605115182296,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000906",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 21.168148013785597,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000909",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 3.065481588971522,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000910",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 2.956647923090876,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000911",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 30.781788499909307,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000915",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 14.801378559767823,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000919",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 17.485942318157083,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000930",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 26.954471249773267,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000931",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 5.242154906584437,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000948",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 22.601124614547434,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000952",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 13.694902956647923,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000953",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.53800108833666,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000965",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 26.029385089787777,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000972",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 5.1151822963903495,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000978",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 27.734445855251224,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000985",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 5.29657173952476,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "000989",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 27.970252131325957,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001201",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 4.317068746598948,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001202",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 5.205877017957555,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001207",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 34.971884636314165,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001209",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 16.379466715037186,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001213",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 21.077453292218394,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001216",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.74079448576093,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001217",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 10.248503537094141,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001218",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.05224015962271,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001219",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 8.869943769272629,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001220",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.64991837475059,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001221",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 28.26047524034101,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001222",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 5.822601124614548,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001225",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.56013060039906,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001226",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.30545982223835,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001228",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.501723199709776,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001231",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 14.093959731543624,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001234",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 28.387447850535096,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001238",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.359695265735535,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001255",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 11.590785416288773,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001260",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 6.965354616361327,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001277",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 5.840740068927988,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001278",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 19.499365136949027,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001279",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 4.988209686196264,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001285",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 16.071104661708688,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001296",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 12.769816796662434,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001299",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 31.362234717939412,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001306",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 19.934699800471613,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001312",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 31.18084527480501,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001318",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 4.008706693270452,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001319",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 27.879557409758753,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001322",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 17.594775984037728,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001323",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 3.446399419553782,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001324",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.469435878831852,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001325",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 33.049156539089424,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001328",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.63268637765282,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001333",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 24.541991656085614,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001336",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 23.12715399963722,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001356",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 6.130963177943044,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001358",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.846363141665154,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001366",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 25.267549428623255,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001367",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 13.676764012334482,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001368",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 12.425176854707056,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001373",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 28.02466896426628,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001379",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 8.815526936332306,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001380",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 8.706693270451659,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001382",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 28.93161617993833,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001386",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 31.561763105387264,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001388",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.704335207690912,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001390",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 21.60348267730818,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001391",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.46871032105931,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001395",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 18.592417921276983,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "001396",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 16.034826773081807,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002005",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 11.844730636676944,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002014",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 9.08761110103392,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002016",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 13.313985126065663,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002019",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.287320877924905,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002022",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 7.436967168510793,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002024",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 21.422093234173772,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002032",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 34.409577362597496,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002035",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 7.76346816615273,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002037",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 10.085253038273173,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002047",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 31.942680935969527,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002053",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.86776709595502,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002054",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 28.804643569744243,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002059",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 14.892073281335028,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002060",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 17.866860148739345,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002061",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 29.276256121893706,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002069",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 6.112824233629603,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002073",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 33.3937964810448,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002086",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 21.36767640123345,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002088",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 30.799927444222746,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002090",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 30.54598222383457,
+      "reason": "未通过硬过滤：个股流动性合格"
+    },
+    {
+      "code": "002093",
+      "name": "",
+      "stage": "hard_filter",
+      "factor": "stk_liquidity_percentile",
+      "value": 32.359876655178674,
+      "reason": "未通过硬过滤：个股流动性合格"
+    }
+  ],
+  "traces": [
+    {
+      "stage": "hard_filter",
+      "name": "市场环境不弱",
+      "factor": "mkt_market_score",
+      "op": ">=",
+      "value": 35,
+      "before_count": 5513,
+      "passed_count": 5513,
+      "kept_count": 5513,
+      "relaxed": false,
+      "message": ""
+    },
+    {
+      "stage": "hard_filter",
+      "name": "个股流动性合格",
+      "factor": "stk_liquidity_percentile",
+      "op": ">=",
+      "value": 35,
+      "before_count": 5513,
+      "passed_count": 3584,
+      "kept_count": 3584,
+      "relaxed": false,
+      "message": ""
+    },
+    {
+      "stage": "priority_filter",
+      "name": "综合强度优先",
+      "factor": "stk_total_score",
+      "op": ">=",
+      "value": 55,
+      "before_count": 3584,
+      "passed_count": 1063,
+      "kept_count": 1063,
+      "relaxed": false,
+      "message": ""
+    },
+    {
+      "stage": "priority_filter",
+      "name": "量能放大优先",
+      "factor": "stk_amount_ratio_5d",
+      "op": ">=",
+      "value": 45,
+      "before_count": 1063,
+      "passed_count": 84,
+      "kept_count": 319,
+      "relaxed": true,
+      "message": "触发 min_keep/max_drop_ratio，按综合分保留"
+    },
+    {
+      "stage": "priority_filter",
+      "name": "趋势位置优先",
+      "factor": "stk_new_high_20d",
+      "op": ">=",
+      "value": 45,
+      "before_count": 319,
+      "passed_count": 297,
+      "kept_count": 297,
+      "relaxed": false,
+      "message": ""
+    }
+  ],
+  "output_path": ""
+}

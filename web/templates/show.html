@@ -295,7 +295,7 @@
         DATA = await r.json();
         if (!DATA || DATA.error || !(DATA.scenes || []).length) throw new Error('no recap');
       } catch (e) {
-        $('#loading').textContent = '暂无该日复盘分镜，请先在「运行分析」生成快照后重试。';
+        $('#loading').textContent = '暂无该日复盘分镜，请先在「运行ETL」生成快照后重试。';
         return;
       }
       $('#loading').style.display = 'none';

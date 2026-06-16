@@ -1,22 +1,30 @@
 {% extends "mobile/base.html" %}
-{% block title %}运行分析 · 手机端{% endblock %}
-{% block page_title %}运行分析{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">一键跑批 · 实时日志</div>{% endblock %}
+{% block title %}运行ETL · 手机端{% endblock %}
+{% block page_title %}运行ETL{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">Silver · Gold · Screening · Snapshot</div>{% endblock %}
 
 {% block content %}
 <section class="m-card p-4 mb-4">
   <label class="block text-xs text-slate-500 mb-1">分析日期（留空=今日/最近交易日）</label>
   <input id="run-date" type="text" inputmode="numeric" placeholder="YYYYMMDD"
          class="mono w-full bg-slate-950/70 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
-  <button id="run-btn" class="m-btn m-btn-primary w-full mt-3 disabled:opacity-40">开始运行</button>
+  <button id="run-btn" class="m-btn m-btn-primary w-full mt-3 disabled:opacity-40">开始ETL</button>
   <div class="flex items-center gap-2 mt-3">
     <span class="text-xs text-slate-500">状态</span>
     <span id="run-state" class="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-700 text-slate-200">空闲</span>
   </div>
   <div id="run-meta" class="text-[11px] text-slate-500 mt-2 break-all"></div>
   <div class="text-[11px] text-slate-500 mt-3 leading-relaxed">
-    等价于命令行 python main.py --date ...。生成快照后，可在手机数据页和图文素材页查看。
+    等价于命令行 python main.py --mode analysis --date ...。生成快照后，可在ETL计划、指标筛选和实时确认页查看。
   </div>
+</section>
+
+<section class="m-card p-4 mb-4">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-sm font-bold text-slate-200">ETL产物</h2>
+    <button id="artifact-refresh" class="text-xs text-emerald-300">刷新</button>
+  </div>
+  <div id="artifact-list" class="space-y-2"></div>
 </section>
 
 <section class="m-card overflow-hidden">
@@ -35,6 +43,7 @@
 <script>
 (function () {
   const initial = {{ run|tojson }};
+  let artifacts = {{ artifacts|tojson }};
   let since = initial.next || 0;
   let polling = false;
 
@@ -60,6 +69,31 @@
     metaEl.textContent = meta || '';
   }
 
+  function esc(v) {
+    return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+
+  function renderArtifacts(data) {
+    artifacts = data || artifacts || {};
+    const rows = artifacts.items || [];
+    const el = document.getElementById('artifact-list');
+    if (!rows.length) {
+      el.innerHTML = '<div class="text-sm text-slate-500 py-3">暂无产物状态</div>';
+      return;
+    }
+    el.innerHTML = rows.map(item => `
+      <div class="flex items-start justify-between gap-2 border-b border-slate-800/70 pb-2 last:border-b-0">
+        <div class="min-w-0">
+          <div class="text-xs font-bold text-slate-200">${esc(item.label)}</div>
+          <div class="mono text-[10px] text-slate-500 truncate">${esc(item.updated_at || item.path || '--')}</div>
+        </div>
+        <span class="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold ${item.ok ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}">
+          ${item.ok ? '就绪' : '缺失'}
+        </span>
+      </div>
+    `).join('');
+  }
+
   function appendLines(lines) {
     if (!lines || !lines.length) return;
     logEl.textContent += lines.join('\n') + '\n';
@@ -74,6 +108,7 @@
       const d = await r.json();
       since = d.next;
       appendLines(d.lines);
+      if (d.artifacts) renderArtifacts(d.artifacts);
       const meta = (d.date ? ('日期 ' + d.date + ' · ') : '') +
                    (d.finished_at ? ('完成于 ' + d.finished_at) : (d.started_at ? ('开始于 ' + d.started_at) : ''));
       setState(d.state, meta);
@@ -89,6 +124,7 @@
   }
 
   appendLines(initial.lines);
+  renderArtifacts(artifacts);
   setState(initial.state,
     (initial.date ? ('日期 ' + initial.date + ' · ') : '') +
     (initial.finished_at ? ('完成于 ' + initial.finished_at) : (initial.started_at ? ('开始于 ' + initial.started_at) : '')));
@@ -119,6 +155,11 @@
   });
 
   document.getElementById('run-clear').addEventListener('click', () => { logEl.textContent = ''; });
+  document.getElementById('artifact-refresh').addEventListener('click', async () => {
+    const params = dateEl.value.trim() ? ('?date=' + encodeURIComponent(dateEl.value.trim())) : '';
+    const r = await fetch('/api/etl/artifacts' + params);
+    renderArtifacts(await r.json());
+  });
 })();
 </script>
 {% endblock %}
