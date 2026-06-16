@@ -54,8 +54,8 @@
 {% if not dp.exists %}
   <div class="m-card p-8 text-center">
     <div class="text-lg font-bold mb-1">暂无龙头池数据</div>
-    <div class="text-sm text-slate-400">运行一次收盘分析后会生成 dragon_pools.json。</div>
-    <a href="/m/run" class="m-btn m-btn-primary mt-4">去运行</a>
+    <div class="text-sm text-slate-400">运行一次ETL后会生成 dragon_pools.json。</div>
+    <a href="/m/run" class="m-btn m-btn-primary mt-4">去运行ETL</a>
   </div>
 {% else %}
   {% if dp.update_time %}

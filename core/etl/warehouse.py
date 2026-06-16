@@ -1,0 +1,205 @@
+"""Silver storage for Phase 1 ETL outputs."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+from loguru import logger
+
+from core.data.market_dataset import MarketDataset
+from core.etl.normalizers import (
+    standardize_index_daily_frame,
+    standardize_sector_daily_frame,
+    standardize_stock_daily_frame,
+)
+from core.etl.quality import QualityReport, build_quality_report
+
+
+class SilverWarehouse:
+    """Write normalized silver tables to DuckDB when available, else parquet/csv."""
+
+    def __init__(self, *, duckdb_path: Optional[Path] = None, silver_dir: Optional[Path] = None):
+        self.duckdb_path = Path(duckdb_path) if duckdb_path else None
+        self.silver_dir = Path(silver_dir) if silver_dir else None
+
+    def write_table(self, table_name: str, df: pd.DataFrame, *, mode: str = "replace") -> Dict[str, Any]:
+        df = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+        result = {
+            "table": table_name,
+            "rows": int(len(df)),
+            "duckdb": False,
+            "file": "",
+        }
+
+        if self.duckdb_path is not None:
+            try:
+                self.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
+                import duckdb  # type: ignore
+
+                with duckdb.connect(str(self.duckdb_path)) as con:
+                    con.register("_etl_df", df)
+                    if mode == "append":
+                        con.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM _etl_df WHERE 1=0")
+                        con.execute(f"INSERT INTO {table_name} SELECT * FROM _etl_df")
+                    else:
+                        con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _etl_df")
+                    con.unregister("_etl_df")
+                result["duckdb"] = True
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[SilverWarehouse] DuckDB 写入失败，降级文件落盘 {table_name}: {e}")
+
+        if self.silver_dir is not None:
+            self.silver_dir.mkdir(parents=True, exist_ok=True)
+            base = self.silver_dir / table_name
+            try:
+                path = base.with_suffix(".parquet")
+                df.to_parquet(path, index=False)
+                result["file"] = str(path)
+            except Exception as e:  # noqa: BLE001
+                path = base.with_suffix(".csv")
+                df.to_csv(path, index=False, encoding="utf-8-sig")
+                result["file"] = str(path)
+                logger.debug(f"[SilverWarehouse] parquet 写入失败，已降级 CSV {table_name}: {e}")
+
+        return result
+
+
+def _normalize_stock_tables(ds: MarketDataset) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+
+    for date, df in (ds.all_daily or {}).items():
+        frames.append(
+            standardize_stock_daily_frame(
+                df,
+                trade_date=str(date),
+                as_of_date=ds.trade_date,
+                source="all_daily",
+                amount_unit="thousand_yuan",
+            )
+        )
+
+    for code, df in (ds.daily or {}).items():
+        frames.append(
+            standardize_stock_daily_frame(
+                df,
+                as_of_date=ds.trade_date,
+                source="stock_daily_window",
+                default_code=code,
+                amount_unit="thousand_yuan",
+            )
+        )
+
+    if not frames:
+        return standardize_stock_daily_frame(pd.DataFrame())
+    out = pd.concat(frames, ignore_index=True)
+    if not out.empty:
+        out = out.drop_duplicates(["trade_date", "code"], keep="first")
+    return out
+
+
+def _normalize_sector_tables(ds: MarketDataset) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+    for key, value in (ds.calls or {}).items():
+        if not str(key).startswith("ths_daily|"):
+            continue
+        if not isinstance(value, pd.DataFrame):
+            continue
+        frames.append(
+            standardize_sector_daily_frame(
+                value,
+                as_of_date=ds.trade_date,
+                source="ths_daily",
+                amount_unit="yuan",
+            )
+        )
+    if not frames:
+        return standardize_sector_daily_frame(pd.DataFrame())
+    out = pd.concat(frames, ignore_index=True)
+    if not out.empty:
+        out = out.drop_duplicates(["trade_date", "sector_code"], keep="first")
+    return out
+
+
+def _parse_call_param(key: str, param: str) -> str:
+    for part in str(key).split("|"):
+        prefix = f"{param}="
+        if part.startswith(prefix):
+            return part[len(prefix):]
+    return ""
+
+
+def _normalize_index_tables(ds: MarketDataset) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+    for key, value in (ds.calls or {}).items():
+        if not str(key).startswith("index_daily|"):
+            continue
+        if not isinstance(value, pd.DataFrame):
+            continue
+        code = _parse_call_param(str(key), "ts_code")
+        frames.append(
+            standardize_index_daily_frame(
+                value,
+                as_of_date=ds.trade_date,
+                source="index_daily",
+                default_index_code=code,
+                amount_unit="thousand_yuan",
+            )
+        )
+    if not frames:
+        return standardize_index_daily_frame(pd.DataFrame())
+    out = pd.concat(frames, ignore_index=True)
+    if not out.empty:
+        out = out.drop_duplicates(["trade_date", "index_code"], keep="first")
+    return out
+
+
+def build_silver_frames(ds: MarketDataset) -> Dict[str, pd.DataFrame]:
+    return {
+        "stock_daily_silver": _normalize_stock_tables(ds),
+        "sector_daily_silver": _normalize_sector_tables(ds),
+        "index_daily_silver": _normalize_index_tables(ds),
+    }
+
+
+def persist_market_dataset_silver(
+    ds: MarketDataset,
+    *,
+    duckdb_path: Optional[Path] = None,
+    silver_dir: Optional[Path] = None,
+    quality_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Normalize a MarketDataset, write silver tables and emit quality reports."""
+    if duckdb_path is None or silver_dir is None or quality_dir is None:
+        from config.settings import FACTOR_DB_PATH, WEB_DATA_DIR
+
+        duckdb_path = duckdb_path or FACTOR_DB_PATH
+        silver_dir = silver_dir or WEB_DATA_DIR / "warehouse" / "silver"
+        quality_dir = quality_dir or WEB_DATA_DIR / "etl_quality"
+
+    frames = build_silver_frames(ds)
+    warehouse = SilverWarehouse(duckdb_path=duckdb_path, silver_dir=silver_dir)
+    writes = {
+        name: warehouse.write_table(name, frame)
+        for name, frame in frames.items()
+    }
+
+    report: QualityReport = build_quality_report(ds.trade_date, frames)
+    qdir = Path(quality_dir)
+    report.write_json(qdir / f"quality_{ds.trade_date}.json")
+    report.write_markdown(qdir / f"quality_{ds.trade_date}.md")
+
+    summary = {
+        "trade_date": ds.trade_date,
+        "writes": writes,
+        "quality_ok": report.ok,
+        "issue_count": len(report.issues),
+        "quality_json": str(qdir / f"quality_{ds.trade_date}.json"),
+        "quality_md": str(qdir / f"quality_{ds.trade_date}.md"),
+    }
+    ds.meta["silver_persist"] = summary
+    logger.info(
+        f"[SilverWarehouse] Phase1 silver 落盘完成 {ds.trade_date}: "
+        f"quality_ok={report.ok} issues={len(report.issues)}"
+    )
+    return summary

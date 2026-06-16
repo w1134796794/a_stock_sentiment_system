@@ -1,9 +1,25 @@
 {% extends "base.html" %}
-{% block title %}运行分析 · 管理控制台{% endblock %}
-{% block page_title %}运行分析{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">一键执行收盘分析 · 实时日志</div>{% endblock %}
+{% block title %}运行ETL · 管理控制台{% endblock %}
+{% block page_title %}运行ETL{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">Silver预取 · Gold因子 · Screening筛选 · Snapshot看板</div>{% endblock %}
 
 {% block content %}
+<section class="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
+  {% for step in [
+    ['1', 'Silver', '预取标准化数据'],
+    ['2', 'Gold', '批处理因子指标'],
+    ['3', 'Screening', '配置化筛选排序'],
+    ['4', 'Snapshot', '生成页面快照'],
+    ['5', 'Overlay', '盘中确认/取消']
+  ] %}
+  <div class="etl-step">
+    <div class="etl-step-no mono">{{ step[0] }}</div>
+    <div class="font-bold">{{ step[1] }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">{{ step[2] }}</div>
+  </div>
+  {% endfor %}
+</section>
+
 <section class="card border border-slate-800 rounded-xl p-4 mb-4">
   <div class="flex items-end gap-3 flex-wrap">
     <div>
@@ -13,7 +29,7 @@
     </div>
     <button id="run-btn"
             class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-5 py-2 disabled:opacity-40">
-      开始运行
+      开始ETL
     </button>
     <div class="flex items-center gap-2 text-sm">
       <span class="text-slate-400">状态</span>
@@ -22,12 +38,13 @@
     </div>
   </div>
   <div class="text-[11px] text-slate-500 mt-2">
-    运行将在管理工具进程内直接执行（等价于命令行 <span class="mono">python main.py --date …</span>），
-    需已配置 Tushare Token 与网络。生成的报告在 <span class="mono">output/</span>，快照供「明日计划」页浏览。
+    页面运行等价于 <span class="mono">python main.py --mode analysis --date …</span>。主路径会写入
+    <span class="mono">webdata/factors.duckdb</span>、<span class="mono">webdata/screening</span> 和最新快照。
   </div>
 </section>
 
-<section class="card border border-slate-800 rounded-xl overflow-hidden">
+<section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
+<section class="card border border-slate-800 rounded-xl overflow-hidden min-w-0">
   <div class="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-900/60">
     <div class="text-sm font-semibold text-slate-300">运行日志</div>
     <div class="flex items-center gap-3 text-xs">
@@ -40,9 +57,42 @@
   <pre id="run-log" class="mono text-xs leading-relaxed text-slate-200 p-4 h-[58vh] overflow-auto whitespace-pre-wrap"></pre>
 </section>
 
+<aside class="space-y-4">
+  <section class="card border border-slate-800 rounded-xl p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-bold">ETL产物</h2>
+      <button id="artifact-refresh" class="text-xs text-emerald-300 hover:text-emerald-200">刷新</button>
+    </div>
+    <div id="artifact-list" class="space-y-2"></div>
+  </section>
+  <section class="card border border-slate-800 rounded-xl p-4">
+    <h2 class="font-bold mb-3">运行后查看</h2>
+    <div class="grid gap-2 text-sm">
+      <a class="run-link" href="/report">ETL交易计划</a>
+      <a class="run-link" href="/data/strategy">指标筛选明细</a>
+      <a class="run-link" href="/data/sector">Gold板块排序</a>
+      <a class="run-link" href="/realtime">实时确认 Overlay</a>
+    </div>
+  </section>
+</aside>
+</section>
+
+<style>
+  .etl-step { background:rgba(15,23,42,.52); border:1px solid rgba(51,65,85,.7); border-radius:.75rem; padding:.75rem .9rem; min-height:82px; }
+  .etl-step-no { display:inline-flex; align-items:center; justify-content:center; width:1.45rem; height:1.45rem; border-radius:.45rem; background:rgba(16,185,129,.14); color:#6ee7b7; font-weight:800; font-size:.8rem; margin-bottom:.45rem; }
+  .artifact-row { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; border-bottom:1px solid rgba(51,65,85,.42); padding:.45rem 0; }
+  .artifact-row:last-child { border-bottom:0; }
+  .artifact-pill { flex:0 0 auto; border-radius:.45rem; padding:.1rem .45rem; font-size:.68rem; font-weight:800; }
+  .artifact-pill.ok { color:#042f2e; background:#5eead4; }
+  .artifact-pill.warn { color:#fde68a; background:rgba(245,158,11,.18); border:1px solid rgba(245,158,11,.36); }
+  .run-link { border:1px solid rgba(51,65,85,.9); border-radius:.55rem; padding:.55rem .75rem; color:#cbd5e1; }
+  .run-link:hover { border-color:rgba(16,185,129,.7); color:#6ee7b7; }
+</style>
+
 <script>
 (function () {
   const initial = {{ run|tojson }};
+  let artifacts = {{ artifacts|tojson }};
   let since = initial.next || 0;
   let polling = false;
 
@@ -68,6 +118,29 @@
     metaEl.textContent = meta || '';
   }
 
+  function esc(v) {
+    return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+
+  function renderArtifacts(data) {
+    artifacts = data || artifacts || {};
+    const wrap = document.getElementById('artifact-list');
+    const rows = artifacts.items || [];
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="text-sm text-slate-500 py-4">暂无产物状态</div>';
+      return;
+    }
+    wrap.innerHTML = rows.map(item => `
+      <div class="artifact-row">
+        <div class="min-w-0">
+          <div class="text-sm font-semibold text-slate-200">${esc(item.label)}</div>
+          <div class="text-[11px] text-slate-500 truncate" title="${esc(item.path)}">${esc(item.path || '--')}</div>
+          ${item.updated_at ? `<div class="text-[10px] text-slate-600 mono">${esc(item.updated_at)}</div>` : ''}
+        </div>
+        <span class="artifact-pill ${item.ok ? 'ok' : 'warn'}">${item.ok ? '就绪' : '缺失'}</span>
+      </div>`).join('');
+  }
+
   function appendLines(lines) {
     if (!lines || !lines.length) return;
     logEl.textContent += lines.join('\n') + '\n';
@@ -82,6 +155,7 @@
       const d = await r.json();
       since = d.next;
       appendLines(d.lines);
+      if (d.artifacts) renderArtifacts(d.artifacts);
       const meta = (d.date ? ('日期 ' + d.date + ' · ') : '') +
                    (d.finished_at ? ('完成于 ' + d.finished_at) : (d.started_at ? ('开始于 ' + d.started_at) : ''));
       setState(d.state, meta);
@@ -98,6 +172,7 @@
 
   // 初始化：渲染已有日志、根据状态决定是否续接轮询
   appendLines(initial.lines);
+  renderArtifacts(artifacts);
   setState(initial.state,
     (initial.date ? ('日期 ' + initial.date + ' · ') : '') +
     (initial.finished_at ? ('完成于 ' + initial.finished_at) : (initial.started_at ? ('开始于 ' + initial.started_at) : '')));
@@ -127,6 +202,11 @@
   });
 
   document.getElementById('run-clear').addEventListener('click', () => { logEl.textContent = ''; });
+  document.getElementById('artifact-refresh').addEventListener('click', async () => {
+    const params = dateEl.value.trim() ? ('?date=' + encodeURIComponent(dateEl.value.trim())) : '';
+    const r = await fetch('/api/etl/artifacts' + params);
+    renderArtifacts(await r.json());
+  });
 })();
 </script>
 {% endblock %}
