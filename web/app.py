@@ -1,5 +1,5 @@
 """
-FastAPI 应用（P1）—— 明日计划看板 + 18-sheet 浏览（只读）。
+FastAPI 应用 —— ETL 指标体系看板 + 数据浏览（只读）。
 
 启动：
     python run_web.py
@@ -60,7 +60,7 @@ templates.env.filters["num2"] = _num2
 # 未收录的列（含已是中文的列）原样返回。
 # ----------------------------------------------------------------------
 COLUMN_LABELS: Dict[str, str] = {
-    # 策略信号 / 交易计划 / 风控闸门
+    # 指标筛选 / 交易计划 / 风控闸门
     "pattern_type": "模式类型",
     "stock_code": "股票代码",
     "stock_name": "股票名称",
@@ -81,7 +81,7 @@ COLUMN_LABELS: Dict[str, str] = {
     "reason_text": "决策原因",
     "original_position_pct": "原始仓位%",
     "final_position_pct": "风控后仓位%",
-    # 板块题材（热点概念 / 热点行业 / 持续性）
+    # Gold板块（热点概念 / 热点行业 / 持续性）
     "rank": "排名",
     "pct_change": "涨跌幅",
     "limit_up_count": "涨停家数",
@@ -141,24 +141,24 @@ def _col_label(col: Any) -> str:
 templates.env.filters["col_label"] = _col_label
 
 # ----------------------------------------------------------------------
-# 数据浏览分类：把原「明日计划 · 数据浏览」里的 section 按主题拆成独立菜单。
-# signals=True 表示纳入 kind=="signals" 的策略模式 section（弱转强/二板定龙/…）。
+# 数据浏览分类：ETL 主路径优先展示 Gold/Screening 结果。
+# signals=True 仅作为旧快照兼容读取，不再是默认主路径。
 # 注：龙头池 / 走弱池 由专门的「龙头池」页（/dragon）承载，这里不重复。
 # ----------------------------------------------------------------------
 DATA_CATEGORIES: List[Dict[str, Any]] = [
-    {"key": "strategy", "label": "策略信号", "signals": True, "names": []},
-    {"key": "sector", "label": "板块题材", "signals": False,
+    {"key": "strategy", "label": "指标筛选", "signals": True, "names": ["ETL指标筛选", "交易计划"]},
+    {"key": "sector", "label": "Gold板块", "signals": False,
      "names": ["热点概念", "热点行业", "概念持续性", "行业持续性", "主线主题"]},
-    {"key": "limitup", "label": "涨停梯队", "signals": False,
+    {"key": "limitup", "label": "涨停数据", "signals": False,
      "names": ["涨停梯队", "概念连板梯队"]},
     {"key": "capital", "label": "龙虎榜资金", "signals": False,
      "names": ["龙虎榜", "资金流向", "筹码结构"]},
-    {"key": "review", "label": "复盘统计", "signals": False,
-     "names": ["复盘总结", "周期模式胜率", "因子原始数据", "交易计划", "风控闸门"]},
+    {"key": "review", "label": "ETL产物", "signals": False,
+     "names": ["ETL指标筛选", "交易计划", "因子原始数据", "风控闸门"]},
 ]
 _CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
 
-app = FastAPI(title="A股情绪系统 · 明日计划看板", docs_url="/api/docs")
+app = FastAPI(title="A股情绪系统 · ETL指标看板", docs_url="/api/docs")
 
 _static_dir = BASE / "static"
 _static_dir.mkdir(parents=True, exist_ok=True)
@@ -252,10 +252,15 @@ def api_intraday_status(date: Optional[str] = None) -> Any:
 
 @app.get("/run", response_class=HTMLResponse)
 def run_page(request: Request) -> Any:
-    """运行分析页：一键执行收盘分析并实时查看日志。"""
+    """运行ETL页：一键执行 ETL 指标主流程并实时查看日志。"""
     from desktop.runner import CONTROLLER
+    from desktop.status import etl_artifacts
 
-    return templates.TemplateResponse(request, "run.html", {"run": CONTROLLER.status(0)})
+    return templates.TemplateResponse(
+        request,
+        "run.html",
+        {"run": CONTROLLER.status(0), "artifacts": etl_artifacts()},
+    )
 
 
 @app.get("/logs", response_class=HTMLResponse)
@@ -285,8 +290,11 @@ def api_run(payload: dict = Body(default={})) -> Any:
 @app.get("/api/run/status")
 def api_run_status(since: int = 0) -> Any:
     from desktop.runner import CONTROLLER
+    from desktop.status import etl_artifacts
 
-    return JSONResponse(CONTROLLER.status(since))
+    status = CONTROLLER.status(since)
+    status["artifacts"] = etl_artifacts(status.get("date"))
+    return JSONResponse(status)
 
 
 @app.get("/api/logs")
@@ -301,6 +309,13 @@ def api_overview() -> Any:
     from desktop.status import overview
 
     return JSONResponse(overview())
+
+
+@app.get("/api/etl/artifacts")
+def api_etl_artifacts(date: Optional[str] = None) -> Any:
+    from desktop.status import etl_artifacts
+
+    return JSONResponse(etl_artifacts(date))
 
 
 @app.get("/report/{date}", response_class=HTMLResponse)
@@ -473,6 +488,45 @@ def api_realtime_health(probe: bool = False) -> Any:
         "quotes": _get_realtime_quote_service().health(probe=probe),
         "sectors": _get_realtime_sector_service().health(probe=probe),
     })
+
+
+@app.get("/api/realtime/overlay")
+def api_realtime_overlay(
+    date: Optional[str] = None,
+    profile: str = "",
+    limit: int = 20,
+    persist: bool = False,
+    stale_after_seconds: int = 90,
+) -> Any:
+    from core.realtime.overlay_service import RealtimeOverlayService
+
+    trade_date = date or reader.latest()
+    service = RealtimeOverlayService(
+        quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
+    )
+    return JSONResponse(
+        service.build_overlay(
+            trade_date,
+            profile=profile,
+            limit=max(1, min(int(limit or 20), 100)),
+            persist=bool(persist),
+        )
+    )
+
+
+@app.get("/api/etl/screening/{date}")
+def api_etl_screening(date: str) -> Any:
+    from core.screening.screening_engine import ScreeningEngine
+
+    result = ScreeningEngine().run(date, persist=False)
+    return JSONResponse(result.to_dict())
+
+
+@app.get("/api/etl/analysis/{date}")
+def api_etl_analysis(date: str) -> Any:
+    from core.screening.gold_analysis import build_gold_analysis_summary
+
+    return JSONResponse(build_gold_analysis_summary(date))
 
 
 def _load_winrate() -> Optional[Dict]:
@@ -772,10 +826,15 @@ def mobile_content_page(date: str) -> Any:
 
 @app.get("/m/run", response_class=HTMLResponse)
 def mobile_run_page(request: Request) -> Any:
-    """手机运行分析：复用运行控制器与状态 API。"""
+    """手机运行ETL：复用运行控制器与状态 API。"""
     from desktop.runner import CONTROLLER
+    from desktop.status import etl_artifacts
 
-    return templates.TemplateResponse(request, "mobile/run.html", {"run": CONTROLLER.status()})
+    return templates.TemplateResponse(
+        request,
+        "mobile/run.html",
+        {"run": CONTROLLER.status(), "artifacts": etl_artifacts()},
+    )
 
 
 @app.get("/ask", response_class=HTMLResponse)
@@ -849,7 +908,7 @@ def section_fragment(request: Request, date: str, idx: int, view: str = "table")
     """HTMX 片段：返回某个 section 的 HTML。
 
     view=detail → 折叠主从卡片（紧凑列表 + 点击展开全字段，避免横向滚动），
-    用于字段很多的策略信号 / 板块题材；其余分类默认 view=table 宽表。
+    用于字段很多的指标筛选 / Gold板块；其余分类默认 view=table 宽表。
     """
     snapshot = reader.load(date)
     sections: List[Dict] = (snapshot or {}).get("sections", [])

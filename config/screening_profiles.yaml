@@ -1,0 +1,100 @@
+screening_profiles:
+  default:
+    description: "ETL Gold 默认筛选：先过滤市场与流动性，再按强度、量能、形态逐层收敛。"
+    candidate_source: factor_stock_wide
+    missing:
+      neutral_score: 50
+    hard_filters:
+      - name: "市场环境不弱"
+        factor: mkt_market_score
+        op: ">="
+        value: 35
+        reason: "市场综合分不低于防守线"
+      - name: "个股流动性合格"
+        factor: stk_liquidity_percentile
+        op: ">="
+        value: 35
+        reason: "成交额分位达到基础流动性要求"
+    priority_filters:
+      - priority: 1
+        name: "综合强度优先"
+        factor: stk_total_score
+        op: ">="
+        value: 55
+        min_keep: 30
+        max_drop_ratio: 0.75
+        reason: "个股综合分进入可观察区"
+      - priority: 2
+        name: "量能放大优先"
+        factor: stk_amount_ratio_5d
+        op: ">="
+        value: 45
+        min_keep: 15
+        max_drop_ratio: 0.70
+        reason: "成交额相对近 5 日均值有改善"
+      - priority: 3
+        name: "趋势位置优先"
+        factor: stk_new_high_20d
+        op: ">="
+        value: 45
+        min_keep: 8
+        max_drop_ratio: 0.70
+        reason: "价格位置接近阶段强势区"
+    ranking:
+      weights:
+        stk_total_score: 0.45
+        stk_amount_ratio_5d: 0.18
+        stk_vol_ratio_5d: 0.12
+        stk_new_high_20d: 0.15
+        stk_liquidity_percentile: 0.10
+      top_n: 10
+
+  weak_to_strong:
+    description: "弱转强候选筛选：强调市场可进攻、量价修复和阶段新高位置。"
+    candidate_source: factor_stock_wide
+    missing:
+      neutral_score: 50
+    hard_filters:
+      - name: "市场允许进攻"
+        factor: mkt_market_score
+        op: ">="
+        value: 45
+        reason: "市场环境未进入明显防守"
+      - name: "流动性不能太弱"
+        factor: stk_liquidity_percentile
+        op: ">="
+        value: 40
+        reason: "弱转强需要足够承接"
+    priority_filters:
+      - priority: 1
+        name: "当日强度修复"
+        factor: stk_pct_chg_1d
+        op: ">="
+        value: 55
+        min_keep: 25
+        max_drop_ratio: 0.75
+        reason: "当日涨跌幅评分体现修复"
+      - priority: 2
+        name: "放量确认"
+        factor: stk_vol_ratio_5d
+        op: ">="
+        value: 50
+        min_keep: 15
+        max_drop_ratio: 0.70
+        reason: "成交量相对近 5 日均值有确认"
+      - priority: 3
+        name: "靠近强势区"
+        factor: stk_new_high_20d
+        op: ">="
+        value: 50
+        min_keep: 8
+        max_drop_ratio: 0.70
+        reason: "走势位置不能离强势区太远"
+    ranking:
+      weights:
+        stk_pct_chg_1d: 0.25
+        stk_vol_ratio_5d: 0.20
+        stk_amount_ratio_5d: 0.20
+        stk_new_high_20d: 0.20
+        stk_liquidity_percentile: 0.15
+      top_n: 8

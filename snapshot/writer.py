@@ -203,19 +203,36 @@ def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
                     cols.append(k)
         sections.append({"name": "因子原始数据", "kind": "table", "columns": cols, "rows": factor_rows})
 
+    etl_screening = to_jsonable(data_dict.get("etl_screening") or {})
+    etl_gold_summary = to_jsonable(data_dict.get("etl_gold_summary") or {})
+    etl_rows = (etl_screening or {}).get("final") or []
+    if etl_rows:
+        sections.append({
+            "name": "ETL指标筛选",
+            "kind": "table",
+            "columns": ["rank", "code", "name", "score", "gold_rank", "reasons"],
+            "rows": etl_rows,
+        })
+
     snapshot = {
         "meta": {
             "date": date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "schema_version": SCHEMA_VERSION,
+            "engine": str(data_dict.get("engine") or "legacy"),
             # Phase 2：因子 profile + 启用因子清单（复盘归因留痕）
             "factor_profile": str(data_dict.get("factor_profile") or ""),
             "enabled_factors": list(data_dict.get("enabled_factors") or []),
+            "screening_profile": str((etl_screening or {}).get("profile") or ""),
         },
         "market": market,
         "trade_plans": trade_plans,
         "risk_gate": risk_gate,
         "patterns": patterns,
+        "etl": {
+            "screening": etl_screening,
+            "gold_summary": etl_gold_summary,
+        },
         "sections": sections,
     }
     return snapshot

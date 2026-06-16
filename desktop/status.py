@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 from config.settings import (
     BASE_DIR,
+    FACTOR_DB_PATH,
     KB_DB_PATH,
     LLM_CONFIG,
     OUTPUT_DIR,
@@ -53,7 +54,7 @@ def health_items() -> List[Dict[str, Any]]:
             "title": "Tushare Token",
             "status": _ok(token_ok),
             "value": "已配置" if token_ok else "未配置",
-            "detail": "收盘分析需要 Tushare 历史数据接口；可在「参数配置」或 .env 中设置 TUSHARE_TOKEN。",
+            "detail": "ETL预取需要 Tushare 历史数据接口；可在「参数配置」或 .env 中设置 TUSHARE_TOKEN。",
             "badge": "正常" if token_ok else "缺失",
         },
         {
@@ -64,11 +65,18 @@ def health_items() -> List[Dict[str, Any]]:
             "badge": "正常" if ai_ok else "可选",
         },
         {
-            "title": "最新快照",
+            "title": "最新 ETL 快照",
             "status": _ok(latest is not None),
             "value": (f"{latest}（共 {len(dates)} 天）" if latest else "暂无快照"),
             "detail": f"快照目录：{SNAPSHOT_DIR}",
             "badge": "已生成" if latest else "缺失",
+        },
+        {
+            "title": "ETL 指标仓库",
+            "status": _ok(Path(FACTOR_DB_PATH).exists()),
+            "value": str(FACTOR_DB_PATH),
+            "detail": "Silver/Gold/Screening 主路径依赖此 DuckDB 文件。",
+            "badge": "已就绪" if Path(FACTOR_DB_PATH).exists() else "缺失",
         },
         {
             "title": "龙头池",
@@ -85,11 +93,44 @@ def health_items() -> List[Dict[str, Any]]:
             "title": "数据目录",
             "status": _ok(Path(WEB_DATA_DIR).exists()),
             "value": str(WEB_DATA_DIR),
-            "detail": f"报告输出：{OUTPUT_DIR} · 知识库：{KB_DB_PATH}",
+            "detail": f"ETL产物：{WEB_DATA_DIR} · 知识库：{KB_DB_PATH} · 兼容输出：{OUTPUT_DIR}",
             "badge": "存在" if Path(WEB_DATA_DIR).exists() else "缺失",
         },
     ]
     return items
+
+
+def etl_artifacts(date: str | None = None) -> Dict[str, Any]:
+    """Return the current ETL artifact status for the run page and APIs."""
+    reader = SnapshotReader(SNAPSHOT_DIR)
+    target = str(date or reader.latest() or "")
+    quality = Path(WEB_DATA_DIR) / "etl_quality" / f"quality_{target}.json" if target else None
+    screening = Path(WEB_DATA_DIR) / "screening" / f"screening_{target}.json" if target else None
+    analysis = Path(WEB_DATA_DIR) / "screening" / f"analysis_{target}.json" if target else None
+    snapshot = Path(SNAPSHOT_DIR) / f"{target}.json" if target else None
+
+    def _item(label: str, path: Path | None) -> Dict[str, Any]:
+        exists = bool(path and path.exists())
+        return {
+            "label": label,
+            "ok": exists,
+            "path": str(path) if path else "",
+            "updated_at": (
+                datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                if exists and path is not None else ""
+            ),
+        }
+
+    return {
+        "date": target,
+        "items": [
+            _item("DuckDB 指标仓库", Path(FACTOR_DB_PATH)),
+            _item("Silver 质量报告", quality),
+            _item("Screening 候选池", screening),
+            _item("Gold 分析摘要", analysis),
+            _item("Web 快照", snapshot),
+        ],
+    }
 
 
 def _f(v: Any, default: float = 0.0) -> float:
@@ -110,9 +151,40 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
     metrics = m.get("metrics") or {}
     phase = m.get("phase") or {}
     phase_model = m.get("phase_model") or {}
+    is_etl = ((snap.get("meta") or {}).get("engine") == "etl") or env.get("engine") == "etl_gold"
     width = env.get("width") or {}
     volume = env.get("volume") or {}
     trend = env.get("trend") or {}
+
+    if is_etl:
+        market_score = _f(env.get("market_score"))
+        return {
+            "available": True,
+            "engine": "etl",
+            "date": snap.get("meta", {}).get("date") or m.get("date"),
+            "indices": [],
+            "limit_up": metrics.get("limit_up_count"),
+            "limit_down": metrics.get("limit_down_count"),
+            "up_count": None,
+            "down_count": None,
+            "flat_count": None,
+            "up_ratio": round(_f(metrics.get("up_ratio")) * 100, 1) if metrics.get("up_ratio") is not None else None,
+            "vol_ratio": metrics.get("amount_ratio_5d"),
+            "vol_pct": round((_f(metrics.get("amount_ratio_5d"), 1.0) - 1.0) * 100, 1)
+            if metrics.get("amount_ratio_5d") is not None else None,
+            "vol_word": "放量" if _f(metrics.get("amount_ratio_5d"), 1.0) >= 1.05
+            else ("缩量" if _f(metrics.get("amount_ratio_5d"), 1.0) <= 0.95 else "平量"),
+            "cycle_name": m.get("cycle_name"),
+            "position": m.get("position"),
+            "strategy": m.get("strategy"),
+            "composite_score": round(market_score, 0),
+            "trend_score": round(_f(env.get("trend_score")), 0),
+            "trend_state": "偏强" if _f(env.get("trend_score")) >= 60 else ("偏弱" if _f(env.get("trend_score")) < 40 else "中性"),
+            "risk_level": "低" if market_score >= 70 else ("中" if market_score >= 50 else ("高" if market_score >= 35 else "极高")),
+            "suggested_position": m.get("position"),
+            "analysis_summary": f"ETL市场分 {market_score:.0f}，红盘占比 {round(_f(metrics.get('up_ratio')) * 100, 1)}%，成交额量比 {round(_f(metrics.get('amount_ratio_5d'), 1.0), 2)}。",
+            "cross_judgment": "盘中买入只由实时 Overlay 确认；低开候选直接取消。",
+        }
 
     # —— 各指数涨跌幅 ——
     idx_defs = [("上证", "sh_index"), ("深证", "sz_index"), ("创业板", "cyb_index"),

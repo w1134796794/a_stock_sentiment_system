@@ -33,7 +33,7 @@ def _harden_streams() -> None:
     """窗口化打包后 sys.stdout/stderr 可能为 None，导致 print / loguru 默认 sink 崩溃。
 
     - 用空流兜底，避免任何 print 抛异常；
-    - 移除 loguru 指向 None stderr 的默认 handler（运行分析时我们自带文件 + 内存 sink）。
+    - 移除 loguru 指向 None stderr 的默认 handler（运行ETL时我们自带文件 + 内存 sink）。
     """
     if sys.stdout is None:
         sys.stdout = _NullStream()

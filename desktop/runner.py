@@ -1,4 +1,4 @@
-"""在管理工具进程内执行「收盘分析」，并把日志实时缓冲给前端轮询。
+"""在管理工具进程内执行「ETL分析」，并把日志实时缓冲给前端轮询。
 
 设计要点：
   - 单例 ``CONTROLLER``：同一时刻只允许一个分析在跑。
@@ -162,12 +162,12 @@ class RunController:
         sys.stdout = _StreamTee(old_out, self.buffer)
         sys.stderr = _StreamTee(old_err, self.buffer)
         try:
-            self.buffer.append_line(f"=== 开始收盘分析 · 日期={date or '今日(自动取最近交易日)'} ===")
+            self.buffer.append_line(f"=== 开始ETL指标分析 · 日期={date or '今日(自动取最近交易日)'} ===")
             from main import SentimentSystem  # 惰性导入重依赖
 
             system = SentimentSystem()
             system.run_daily_analysis(date)
-            self.buffer.append_line("=== 分析完成，报告与快照已生成 ===")
+            self.buffer.append_line("=== ETL分析完成，Silver/Gold/Screening/快照已生成 ===")
             self.state = "done"
         except Exception as exc:  # noqa: BLE001
             self.error = repr(exc)
@@ -295,7 +295,7 @@ class BacktestController:
             trade_plans_dir = Path(OUTPUT_DIR) / "trade_plans"
             if not trade_plans_dir.exists():
                 self.buffer.append_line(f"!!! 交易计划目录不存在：{trade_plans_dir}")
-                self.buffer.append_line("请先到「运行分析」生成每日交易计划后再回测。")
+                self.buffer.append_line("请先到「运行ETL」生成每日交易计划后再回测。")
                 self.error = "trade_plans 目录不存在"
                 self.state = "error"
                 return
