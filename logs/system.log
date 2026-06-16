@@ -3379,3 +3379,37 @@
 2026-06-16 19:44:01.936 | INFO     | core.execution.intraday_recovery:run_once:145 - [盘中转强] 第1轮完成：走弱池89只，活跃转强35只，失效0只
 2026-06-16 19:44:13.876 | INFO     | core.data.data_manager_main:__init__:52 - [DataManager] 初始化完成，缓存目录: G:\a_stock_sentiment_system\data\cache
 2026-06-16 19:44:14.023 | INFO     | core.data.data_manager_stock:get_stock_tick:277 - [get_stock_tick] eltdx 获取 605198.SH 20260616 分时: 240条
+2026-06-16 22:47:32.954 | INFO     | core.data.data_manager_main:__init__:52 - [DataManager] 初始化完成，缓存目录: G:\a_stock_sentiment_system\data\cache
+2026-06-16 22:47:32.955 | INFO     | main:run_daily_analysis:70 - 开始执行 20260616 的日度分析（ETL 指标体系主路径）...
+2026-06-16 22:47:32.956 | INFO     | main:run_daily_analysis:71 - 对比日期: 20260615
+2026-06-16 22:47:32.957 | INFO     | core.etl.daily_pipeline:run:80 - [ETL] 开始 ETL 主流程: 20260616, prev=20260615
+2026-06-16 22:47:33.005 | INFO     | core.data.data_prep:_prefetch_all_daily:206 - [DataPrep] all_daily 预取：5513 行 @ 20260616
+2026-06-16 22:47:33.280 | INFO     | core.data.data_prep:_prefetch_limit_up:268 - [DataPrep] limit_up 预取：16 个交易日，非空 16 个
+2026-06-16 22:47:33.412 | INFO     | core.data.data_prep:_prefetch_sectors:334 - [DataPrep] 板块/资金流预取：['ths_index', 'ths_daily', 'limit_cpt_list', 'moneyflow_summary']（板块按日窗口 10 天，调用缓存 25 条）
+2026-06-16 22:47:33.471 | INFO     | core.data.data_prep:_prefetch_index_daily:243 - [DataPrep] index_daily 预取：3 指数 × 2 窗口，成功 6 次
+2026-06-16 22:47:35.947 | INFO     | core.data.data_manager_stock:get_stocks_daily_batch:607 - [批量获取] 完成: 233/233 只股票
+2026-06-16 22:47:35.948 | INFO     | core.data.data_prep:_prefetch_daily:193 - [DataPrep] daily 预取：233 只 universe，非空 233 只，窗口 20260216~20260616
+2026-06-16 22:47:37.710 | DEBUG    | core.etl.warehouse:write_table:63 - [SilverWarehouse] parquet 写入失败，已降级 CSV stock_daily_silver: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - `Import pyarrow` failed. pyarrow is required for parquet support. Use pip or conda to install the pyarrow package.
+ - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip or conda to install the fastparquet package.
+2026-06-16 22:47:38.070 | DEBUG    | core.etl.warehouse:write_table:63 - [SilverWarehouse] parquet 写入失败，已降级 CSV sector_daily_silver: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - `Import pyarrow` failed. pyarrow is required for parquet support. Use pip or conda to install the pyarrow package.
+ - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip or conda to install the fastparquet package.
+2026-06-16 22:47:38.231 | DEBUG    | core.etl.warehouse:write_table:63 - [SilverWarehouse] parquet 写入失败，已降级 CSV index_daily_silver: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - `Import pyarrow` failed. pyarrow is required for parquet support. Use pip or conda to install the pyarrow package.
+ - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip or conda to install the fastparquet package.
+2026-06-16 22:47:38.447 | INFO     | core.etl.warehouse:persist_market_dataset_silver:201 - [SilverWarehouse] Phase1 silver 落盘完成 20260616: quality_ok=True issues=0
+2026-06-16 22:47:38.450 | INFO     | core.data.data_prep:build:135 - [DataPrep] MarketDataset(20260616) daily=233 all_daily=1 auction=0 sector_map=0 limit_up=16 prefetched=['all_daily', 'daily', 'index_daily', 'limit_cpt_list', 'limit_up', 'moneyflow_summary', 'ths_daily', 'ths_index']
+2026-06-16 22:47:42.241 | INFO     | snapshot.writer:write:280 - [Snapshot] 20260616 快照已落盘: json, sqlite
+2026-06-16 22:48:21.849 | WARNING  | kb.embeddings:embed:51 - [KB] 云嵌入调用失败，回退词法检索: 400 Client Error: Bad Request for url: https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings
+2026-06-16 22:48:21.851 | INFO     | kb.ingest:ingest_snapshot:29 - [KB] 20260616 未取得向量，按词法检索入库
+2026-06-16 22:48:22.104 | INFO     | kb.ingest:ingest_snapshot:33 - [KB] 20260616 入库 11 块（词法）
+2026-06-16 22:48:22.105 | INFO     | core.etl.daily_pipeline:run:126 - [ETL] 主流程完成: ok=True, 候选=10, snapshot=G:\a_stock_sentiment_system\webdata\snapshots\20260616.json
+2026-06-16 22:49:42.401 | INFO     | core.data.data_manager_main:__init__:52 - [DataManager] 初始化完成，缓存目录: G:\a_stock_sentiment_system\data\cache
+2026-06-16 22:49:42.704 | INFO     | core.data.data_manager_stock:get_stock_tick:277 - [get_stock_tick] eltdx 获取 688484.SH 20260616 分时: 240条
