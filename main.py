@@ -2,13 +2,15 @@
 A股短线情绪量化系统 - 主程序入口
 整合所有模块，提供CLI交互
 
-架构：五层复盘流水线 (Review Pipeline)
-  Layer 1: 看大盘（定仓位）- MarketEnvAnalyzer
-  Layer 2: 看板块（定方向）- SectorAnalysisOrchestrator
-  Layer 3: 看个股（定标的）- StockSelectionEngine
-  Layer 4: 定计划（定执行）- TradePlanGenerator
-  Layer 5: 盘后总结 - ReviewAnalyzer
+架构：ETL 指标体系主流程
+  Phase 1: 预取并标准化 Silver 数据
+  Phase 2: 批处理 Gold 因子指标
+  Phase 3: 配置化筛选
+  Phase 4: 生成快照与 Web 看板数据
+  Phase 5: 盘中实时 Overlay 由 /realtime 叠加
 """
+from __future__ import annotations
+
 import sys
 import argparse
 from datetime import datetime, timedelta
@@ -26,44 +28,37 @@ from config.settings import (
     SNAPSHOT_DIR, APP_DB_PATH, FACTOR_DB_PATH, KB_DB_PATH,
 )
 from core.data.data_manager_main import DataManager
-from core.data.industry_mapper import IndustryMapper
-from core.report.report_generator_v2 import ReportGeneratorV2
 from core.execution.retail_trader_support_v2 import RetailTraderSupportV2
 from core.utils import DateUtils
 
-from core.pipeline.review_pipeline import ReviewPipeline, SharedContext
+from core.etl.daily_pipeline import ETLDailyPipeline, ETLDailyResult
 
 logger = loguru.logger
 
 class SentimentSystem:
     """A股短线情绪量化系统主入口
 
-    职责被收敛为：
-      - 持有共享的 DataManager / IndustryMapper / Reporter
-      - 通过 ReviewPipeline 执行五层复盘流程
-      - 生成 Excel 报告与散户决策报告
+    当前主路径已切换为 ETL 指标体系：
+      - DataPrep 预取并落 Silver
+      - FactorJobRunner 生成 Gold
+      - ScreeningEngine 生成候选池
+      - SnapshotWriter 写 Web 快照
     """
 
     def __init__(self):
         self.dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
-        self.mapper = IndustryMapper(self.dm)
-        self.reporter = ReportGeneratorV2(OUTPUT_DIR)
+        self.mapper = None
+        self.reporter = None
         self.retail_support: RetailTraderSupportV2 | None = None
         self.today = datetime.now().strftime("%Y%m%d")
         self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
-        self.pipeline = ReviewPipeline(self.dm, self.mapper)
+        self.etl_pipeline = ETLDailyPipeline(self.dm)
+        self.pipeline = None
 
     def run_daily_analysis(self, date: str = None):
         """
-        执行每日完整分析流程 - 使用五层复盘流水线
-
-        五层流水线：
-          Layer 1: 看大盘（定仓位）
-          Layer 2: 看板块（定方向）
-          Layer 3: 看个股（定标的）
-          Layer 4: 定计划（定执行）
-          Layer 5: 盘后总结
+        执行每日完整分析流程 - 使用 ETL 指标体系主路径。
         """
         if date is None:
             date = self.today
@@ -72,37 +67,39 @@ class SentimentSystem:
         date = date_utils.get_nearest_trade_date(date)
         self.yesterday = date_utils.get_prev_trade_date(date)
 
-        logger.info(f"开始执行 {date} 的日度分析（五层复盘流水线）...")
+        logger.info(f"开始执行 {date} 的日度分析（ETL 指标体系主路径）...")
         logger.info(f"对比日期: {self.yesterday}")
 
-        # ========== 执行五层复盘流水线 ==========
-        ctx = self.pipeline.execute(date)
+        result = self.etl_pipeline.run(date, self.yesterday)
+        self._print_etl_summary(result)
+        if not result.ok:
+            raise RuntimeError("ETL 主流程未完整成功，请查看日志和 webdata/etl_quality 质量报告")
+        return result
 
-        if ctx.errors:
-            logger.error(f"流水线执行出现 {len(ctx.errors)} 个错误")
-            for err in ctx.errors:
-                logger.error(f"  - {err}")
-
-        # ========== 打印流水线摘要 ==========
-        self.pipeline.print_summary(ctx)
-
-        # ========== DEBUG: 情绪周期详细数据 ==========
-        self._print_emotion_debug(ctx.emotion_result)
-
-        # ========== 生成报告 ==========
-        self._generate_reports(ctx)
-
-        # ========== 生成散户决策支持报告 ==========
-        self._generate_retail_support_report_v2(ctx)
-
-        # ========== 输出交易建议 ==========
-        all_persistence_df = pd.concat(
-            [ctx.concept_persistence_df, ctx.industry_persistence_df],
-            ignore_index=True
-        ) if not ctx.concept_persistence_df.empty or not ctx.industry_persistence_df.empty else pd.DataFrame()
-
-        self._print_trading_advice(ctx.main_themes_df, ctx.patterns,
-                                   ctx.emotion_result, all_persistence_df)
+    def _print_etl_summary(self, result: ETLDailyResult):
+        """打印 ETL 主流程摘要。"""
+        print("\n" + "=" * 70)
+        print("【ETL 指标体系 - 执行摘要】")
+        print("=" * 70)
+        print(f"交易日: {result.trade_date}")
+        print(f"Silver质量: ok={result.silver_summary.get('quality_ok')} issues={result.silver_summary.get('issue_count')}")
+        print("\n[Phase 2 - Gold 因子]")
+        for item in result.factor_results:
+            print(f"  {item.get('name')}: ok={item.get('ok')} rows={item.get('rows')}")
+            for msg in item.get("messages") or []:
+                print(f"    - {msg}")
+        print("\n[Phase 3 - Screening]")
+        print(f"  profile={result.screening.get('profile')} input={result.screening.get('input_count')} final={result.screening.get('final_count')}")
+        for row in (result.screening.get("final") or [])[:5]:
+            print(f"  #{row.get('rank')} {row.get('name')}({row.get('code')}) score={row.get('score')}")
+        print("\n[Phase 4 - Snapshot]")
+        print(f"  snapshot={result.snapshot_paths.get('json') or '-'}")
+        print(f"  analysis={result.analysis_path or '-'}")
+        if result.warnings:
+            print("\n[Warnings]")
+            for warning in result.warnings:
+                print(f"  - {warning}")
+        print("=" * 70)
 
     def _print_emotion_debug(self, emotion_result: Dict):
         """打印情绪周期DEBUG数据"""

@@ -63,7 +63,11 @@ class DataPrep:
               prefetch_sectors: bool = True,
               sector_history_days: int = 10,
               index_codes: Optional[Iterable[str]] = None,
-              index_lookbacks: tuple = (120, 30)) -> MarketDataset:
+              index_lookbacks: tuple = (120, 30),
+              persist_silver: bool = False,
+              warehouse_path=None,
+              silver_dir=None,
+              quality_dir=None) -> MarketDataset:
         """构建当日只读数据集。
 
         预取域：
@@ -89,9 +93,10 @@ class DataPrep:
 
             ds.meta["universe_size"] = len(universe)
 
-            # all_daily / limit_up / 板块列表 不依赖 universe，先做（即使 universe 为空也有价值）
+            # all_daily / limit_up / 板块列表 / daily_basic 不依赖 universe，先做（即使 universe 为空也有价值）
             if prefetch_all_daily:
                 self._prefetch_all_daily(ds, trade_date)
+            self._prefetch_daily_basic(ds, trade_date)
             if prefetch_limit_up:
                 self._prefetch_limit_up(ds, trade_date, limit_up_history_days)
             if prefetch_sectors:
@@ -101,6 +106,13 @@ class DataPrep:
 
             if not universe:
                 logger.info("[DataPrep] universe 为空，跳过 daily/auction 预取")
+                if persist_silver:
+                    self.persist_silver(
+                        ds,
+                        warehouse_path=warehouse_path,
+                        silver_dir=silver_dir,
+                        quality_dir=quality_dir,
+                    )
                 logger.info(f"[DataPrep] {ds.summary()}")
                 return ds
 
@@ -113,8 +125,37 @@ class DataPrep:
             logger.warning(f"[DataPrep] 预取过程异常（将回退 dm）：{e}")
             logger.debug(traceback.format_exc())
 
+        if persist_silver:
+            self.persist_silver(
+                ds,
+                warehouse_path=warehouse_path,
+                silver_dir=silver_dir,
+                quality_dir=quality_dir,
+            )
+
         logger.info(f"[DataPrep] {ds.summary()}")
         return ds
+
+    def persist_silver(self, ds: MarketDataset, *, warehouse_path=None, silver_dir=None, quality_dir=None) -> dict:
+        """把已预取数据集标准化并落到 Phase 1 silver 表。
+
+        默认写入 ``config.settings.FACTOR_DB_PATH`` 和
+        ``webdata/warehouse/silver``；当运行环境未安装 duckdb 时自动保留 parquet/csv
+        文件落盘，不影响原复盘流程。
+        """
+        try:
+            from core.etl.warehouse import persist_market_dataset_silver
+
+            return persist_market_dataset_silver(
+                ds,
+                duckdb_path=warehouse_path,
+                silver_dir=silver_dir,
+                quality_dir=quality_dir,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[DataPrep] silver 落盘失败（不影响分析流程）：{e}")
+            ds.meta["silver_persist_error"] = str(e)
+            return {"ok": False, "error": str(e)}
 
     # ------------------------------------------------------------------
     def _prefetch_daily(self, ds: MarketDataset, universe: List[str],
@@ -166,6 +207,19 @@ class DataPrep:
                 logger.info(f"[DataPrep] all_daily 预取：{len(df)} 行 @ {trade_date}")
         except Exception as e:
             logger.warning(f"[DataPrep] all_daily 预取失败（将回退 dm）：{e}")
+
+    def _prefetch_daily_basic(self, ds: MarketDataset, trade_date: str) -> None:
+        """预取当日全市场 daily_basic（流通股本/换手率/市值等，单次接口调用）。"""
+        if not hasattr(self.dm, "get_daily_basic"):
+            return
+        try:
+            df = self.dm.get_daily_basic(str(trade_date))
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                ds.daily_basic[str(trade_date)] = df
+                ds.prefetched.add("daily_basic")
+                logger.info(f"[DataPrep] daily_basic 预取：{len(df)} 行 @ {trade_date}")
+        except Exception as e:
+            logger.warning(f"[DataPrep] daily_basic 预取失败（将回退 dm）：{e}")
 
     def _prefetch_index_daily(self, ds: MarketDataset, index_codes: Iterable[str],
                               trade_date: str, lookbacks: tuple = (120, 30)) -> None:

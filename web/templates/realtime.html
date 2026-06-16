@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}实时行情 · 管理控制台{% endblock %}
 {% block page_title %}实时行情{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 个股快照 · 板块行情 · 数据源健康</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 实时确认 Overlay · 个股快照 · 板块行情 · 数据源健康</div>{% endblock %}
 
 {% block header_extra %}
   <span id="rt-clock" class="mono text-xs text-slate-500 mr-2"></span>
@@ -13,7 +13,8 @@
 {% endblock %}
 
 {% block content %}
-<section class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+<section class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+  <div class="rt-kpi"><div id="kpi-overlay-count" class="rt-kpi-v mono">--</div><div class="rt-kpi-l">确认/取消</div></div>
   <div class="rt-kpi"><div id="kpi-quote-count" class="rt-kpi-v mono">--</div><div class="rt-kpi-l">个股快照</div></div>
   <div class="rt-kpi"><div id="kpi-sector-count" class="rt-kpi-v mono">--</div><div class="rt-kpi-l">板块行情</div></div>
   <div class="rt-kpi"><div id="kpi-quote-source" class="rt-kpi-v mono text-sm">--</div><div class="rt-kpi-l">个股源</div></div>
@@ -22,6 +23,35 @@
 
 <section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
   <div class="space-y-4 min-w-0">
+    <section class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <h2 class="font-bold mr-auto">实时确认 Overlay</h2>
+        <span id="overlay-source" class="rt-pill">--</span>
+        <button id="load-overlay" title="刷新确认状态"
+                class="inline-flex items-center gap-1 border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-md px-3 py-1.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-5"/><circle cx="12" cy="12" r="9"/></svg>
+          <span>确认</span>
+        </button>
+      </div>
+      <div class="overflow-x-auto border border-slate-800 rounded-lg">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-900/70 text-slate-400 text-xs">
+            <tr class="text-left">
+              <th class="px-3 py-2">标的</th>
+              <th class="px-3 py-2">状态</th>
+              <th class="px-3 py-2 text-right">开盘</th>
+              <th class="px-3 py-2 text-right">现价/涨幅</th>
+              <th class="px-3 py-2 text-right">筛选分</th>
+              <th class="px-3 py-2">原因</th>
+              <th class="px-3 py-2 text-right">时间</th>
+            </tr>
+          </thead>
+          <tbody id="overlay-rows"></tbody>
+        </table>
+        <div id="overlay-empty" class="hidden text-sm text-slate-500 py-10 text-center">暂无实时确认候选</div>
+      </div>
+    </section>
+
     <section class="card border border-slate-800 rounded-xl p-4">
       <div class="flex flex-wrap items-center gap-2 mb-3">
         <h2 class="font-bold mr-auto">个股实时</h2>
@@ -121,6 +151,10 @@
   .rt-health-row span { color:#64748b; flex:0 0 auto; }
   .rt-health-row strong { color:#e2e8f0; text-align:right; font-weight:600; overflow-wrap:anywhere; }
   .rt-chip { font-size:.72rem; border:1px solid rgba(51,65,85,.8); color:#cbd5e1; border-radius:.45rem; padding:.18rem .5rem; background:rgba(15,23,42,.62); }
+  .rt-status { display:inline-flex; align-items:center; border-radius:.45rem; padding:.14rem .48rem; font-size:.72rem; font-weight:800; }
+  .rt-status.confirmed { color:#042f2e; background:#5eead4; }
+  .rt-status.cancelled { color:#fff1f2; background:#e11d48; }
+  .rt-status.observe { color:#fde68a; background:rgba(245,158,11,.18); border:1px solid rgba(245,158,11,.36); }
   .rt-up { color:#ff6b6b; }
   .rt-down { color:#34d399; }
   .rt-muted { color:#64748b; }
@@ -134,7 +168,10 @@
 
 <script>
   const defaultCodes = {{ default_codes|tojson }};
+  const tradeDate = {{ (date or '')|tojson }};
   const els = {
+    overlayRows: document.getElementById('overlay-rows'),
+    overlayEmpty: document.getElementById('overlay-empty'),
     quoteRows: document.getElementById('quote-rows'),
     quoteEmpty: document.getElementById('quote-empty'),
     sectorRows: document.getElementById('sector-rows'),
@@ -165,6 +202,14 @@
     if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + '亿';
     if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + '万';
     return n.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+  }
+  function gap(v) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '--';
+    const n = Number(v);
+    return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+  }
+  function statusText(v) {
+    return { confirmed: '确认', cancelled: '取消', observe: '观察' }[v] || '观察';
   }
   function toast(text, ok) {
     const t = document.getElementById('rt-toast');
@@ -211,6 +256,43 @@
       pill.textContent = '异常';
       pill.className = 'rt-pill err';
       document.getElementById('health-error').textContent = String(e);
+    }
+  }
+
+  async function loadOverlay() {
+    els.overlayRows.innerHTML = '<tr><td colspan="7" class="px-3 py-8 text-center text-slate-500">加载中...</td></tr>';
+    els.overlayEmpty.classList.add('hidden');
+    try {
+      const params = new URLSearchParams({ limit: '20' });
+      if (tradeDate) params.set('date', tradeDate);
+      const r = await fetch('/api/realtime/overlay?' + params.toString());
+      const j = await r.json();
+      const rows = j.rows || [];
+      const counts = j.counts || {};
+      document.getElementById('kpi-overlay-count').textContent = `${counts.confirmed || 0}/${counts.cancelled || 0}`;
+      document.getElementById('overlay-source').textContent = j.source || '--';
+      if (!rows.length) {
+        els.overlayRows.innerHTML = '';
+        els.overlayEmpty.classList.remove('hidden');
+        return;
+      }
+      els.overlayRows.innerHTML = rows.map(r => `
+        <tr class="border-t border-slate-800/70 hover:bg-slate-800/30">
+          <td class="px-3 py-2">
+            <a class="hover:text-emerald-300" href="/stock/${esc(r.code)}">
+              <div class="font-medium">${esc(r.name || '--')}</div>
+              <div class="mono text-xs text-slate-500">${esc(r.code)}</div>
+            </a>
+          </td>
+          <td class="px-3 py-2"><span class="rt-status ${esc(r.confirm_status || 'observe')}">${statusText(r.confirm_status)}</span></td>
+          <td class="px-3 py-2 text-right mono"><div>${px(r.open_price)}</div><div class="text-xs ${clsPct(r.open_gap_pct)}">${gap(r.open_gap_pct)}</div></td>
+          <td class="px-3 py-2 text-right mono"><div>${px(r.last_price)}</div><div class="text-xs ${clsPct(r.pct_chg)}">${pct(r.pct_chg)}</div></td>
+          <td class="px-3 py-2 text-right mono">${Number(r.screening_score || 0).toFixed(1)}</td>
+          <td class="px-3 py-2 text-slate-300">${esc(r.reason || '--')}</td>
+          <td class="px-3 py-2 text-right mono text-xs ${r.is_stale ? 'text-amber-300' : 'text-slate-500'}">${esc(r.received_at || '--')}</td>
+        </tr>`).join('');
+    } catch (e) {
+      els.overlayRows.innerHTML = `<tr><td colspan="7" class="px-3 py-8 text-center text-rose-300">${esc(e)}</td></tr>`;
     }
   }
 
@@ -289,7 +371,7 @@
     els.refreshAll.disabled = true;
     els.refreshSpin.classList.remove('hidden');
     try {
-      await Promise.all([loadHealth(), loadQuotes(), loadSectors()]);
+      await Promise.all([loadHealth(), loadOverlay(), loadQuotes(), loadSectors()]);
       toast('实时行情已刷新', true);
     } finally {
       els.refreshSpin.classList.add('hidden');
@@ -300,6 +382,7 @@
 
   document.getElementById('load-quotes').addEventListener('click', loadQuotes);
   document.getElementById('load-sectors').addEventListener('click', loadSectors);
+  document.getElementById('load-overlay').addEventListener('click', loadOverlay);
   document.getElementById('refresh-all').addEventListener('click', refreshAll);
   document.getElementById('quote-codes').addEventListener('keydown', e => { if (e.key === 'Enter') loadQuotes(); });
   document.getElementById('sector-codes').addEventListener('keydown', e => { if (e.key === 'Enter') loadSectors(); });

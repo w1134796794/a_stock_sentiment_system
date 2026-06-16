@@ -58,7 +58,7 @@
     </section>
 
     <section class="card border border-slate-800 rounded-xl p-4">
-      <h2 class="font-bold mb-3">策略信号</h2>
+      <h2 class="font-bold mb-3">指标信号</h2>
       <div id="signal-list" class="space-y-2"></div>
     </section>
 
@@ -164,7 +164,7 @@
               ? '当前仅有日线开盘价兜底，未取得真实集合竞价成交量。'
               : (a['价格趋势'] && a['价格趋势'].length ? `竞价序列点数：${a['价格趋势'].length}` : ''));
 
-      renderMiniRows(document.getElementById('signal-list'), data.signals, '暂无策略信号', row => `
+      renderMiniRows(document.getElementById('signal-list'), data.signals, '暂无指标信号', row => `
         <div class="mini-row">
           <div class="mini-title"><span>${row._section || row.pattern_type || '信号'}</span><span class="mono text-emerald-300">${row.confidence || '--'}</span></div>
           <div class="mini-text">${row.description || row.key_metrics || ''}</div>
@@ -189,4 +189,3 @@
     });
 </script>
 {% endblock %}
-
