@@ -616,10 +616,17 @@ class HotspotFirstBoardStrategy:
             if hour > 14 or (hour == 14 and minute >= 30):
                 return f"尾盘板({limit_up_time})"
 
-        # 5. 流通市值过大排除（仅用涨停池自带字段，零成本）
-        float_cap = float(stock.get('流通市值', 0)) / 100000000  # 亿
-        if isinstance(stock.get('流通市值', 0), str):
-            float_cap = float(str(stock.get('流通市值', '')).replace('亿', ''))
+        # 5. 流通市值过大排除
+        # 优先用 daily_basic 的 close * free_share 计算实际流通市值
+        ts_code = self._add_suffix(code)
+        daily_basic = self.dm.get_stock_daily_basic(ts_code, date_str)
+        if daily_basic:
+            float_cap = daily_basic.get('close', 0) * daily_basic.get('free_share', 0) / 10000  # 亿
+        else:
+            # 回退到涨停池自带字段
+            float_cap = float(stock.get('流通市值', 0)) / 100000000
+            if isinstance(stock.get('流通市值', 0), str):
+                float_cap = float(str(stock.get('流通市值', '')).replace('亿', ''))
         if float_cap > self.params['max_float_cap']:
             return f"市值过大({float_cap:.1f}亿>{self.params['max_float_cap']}亿)"
 
