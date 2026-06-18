@@ -10,6 +10,7 @@ import pandas as pd
 import yaml
 from loguru import logger
 
+from core.screening.explanations import build_screening_reasons
 from core.screening.screening_models import FilterTrace, ScreeningResult
 
 
@@ -87,12 +88,12 @@ class ScreeningEngine:
             candidates = self.load_candidates(trade_date, candidate_codes=candidate_codes)
         except Exception as e:  # noqa: BLE001
             result.ok = False
-            result.message = f"读取 Gold 指标失败: {e}"
+            result.message = f"读取指标数据失败: {e}"
             return result
         result.input_count = int(len(candidates))
         if candidates.empty:
             result.ok = False
-            result.message = "未读取到 Gold 个股指标，请先运行 Phase 2 factor jobs"
+            result.message = "未读取到个股指标数据，请先生成指标数据"
             return result
 
         neutral_score = _to_float((cfg.get("missing") or {}).get("neutral_score"), 50.0)
@@ -339,18 +340,41 @@ class ScreeningEngine:
         ranked = ranked.sort_values(["_screening_score", "stk_total_score"], ascending=[False, False]).head(top_n)
         final: List[Dict[str, Any]] = []
         metric_cols = list((ranking_cfg.get("weights") or {}).keys())
+        context_cols = [
+            "pct_chg",
+            "vol_ratio",
+            "amount_ratio",
+            "new_high_ratio",
+            "liquidity_score",
+            "sector_resonance_score",
+        ]
         for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
             code = str(row.get("code") or "")
             metrics = {col: _to_float(row.get(col), 50.0) for col in metric_cols}
+            context = {
+                col: _to_float(row.get(col), 0.0)
+                for col in context_cols
+                if col in ranked.columns
+            }
+            score = round(_to_float(row.get("_screening_score"), 0.0), 4)
+            base_reasons = reasons.get(code, [])[:8]
             final.append({
                 "code": code,
                 "ts_code": str(row.get("ts_code") or ""),
                 "name": str(row.get("name") or ""),
-                "score": round(_to_float(row.get("_screening_score"), 0.0), 4),
+                "score": score,
                 "rank": rank,
                 "gold_rank": int(_to_float(row.get("rank"), rank)),
-                "reasons": reasons.get(code, [])[:8],
+                "reasons": build_screening_reasons(
+                    metrics=metrics,
+                    context=context,
+                    score=score,
+                    rank=rank,
+                    base_reasons=base_reasons,
+                ),
+                "rule_reasons": base_reasons,
                 "metrics": metrics,
+                "context": context,
             })
         return final
 

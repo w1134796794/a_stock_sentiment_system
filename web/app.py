@@ -1,5 +1,5 @@
 """
-FastAPI 应用 —— ETL 指标体系看板 + 数据浏览（只读）。
+FastAPI 应用 —— 指标体系看板 + 数据浏览（只读）。
 
 启动：
     python run_web.py
@@ -67,6 +67,155 @@ def _num2(value: Any) -> Any:
 templates.env.filters["num2"] = _num2
 
 
+DISPLAY_TEXT_REPLACEMENTS = (
+    ("ETL指标筛选", "指标筛选"),
+    ("ETL交易计划", "交易计划"),
+    ("ETL计划", "交易计划"),
+    ("ETL产物", "数据产物"),
+    ("运行ETL", "生成数据"),
+    ("开始ETL", "开始生成"),
+    ("ETL市场分", "市场分"),
+    ("实时 Overlay", "实时行情"),
+    ("Overlay", "实时行情"),
+    ("按 Gold 指标排序", "按指标评分排序"),
+    ("Gold板块", "板块热度"),
+    ("Gold 指标", "指标"),
+    ("Silver 质量报告", "数据质量报告"),
+    ("Screening 候选池", "候选池"),
+    ("Gold 分析摘要", "分析摘要"),
+    ("cancelled/observe", "取消/观察"),
+    ("cancelled", "取消"),
+    ("observe", "观察"),
+)
+
+
+def _display_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value
+    for old, new in DISPLAY_TEXT_REPLACEMENTS:
+        text = text.replace(old, new)
+    return text
+
+
+def _sanitize_display(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _sanitize_display(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_display(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_display(v) for v in obj)
+    return _display_text(obj)
+
+
+templates.env.filters["display_text"] = _display_text
+
+
+def _screening_context_map(date: Any, codes: List[str]) -> Dict[str, Dict[str, Any]]:
+    if not date or not codes or not Path(FACTOR_DB_PATH).exists():
+        return {}
+    wanted = {_normalize_stock_code(code) for code in codes if _normalize_stock_code(code)}
+    if not wanted:
+        return {}
+    try:
+        import duckdb  # type: ignore
+    except Exception:
+        return {}
+
+    con = duckdb.connect(str(FACTOR_DB_PATH), read_only=True)
+    try:
+        exists = con.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_stock_wide'"
+        ).fetchone()[0]
+        if not exists:
+            return {}
+        rows = con.execute(
+            """
+            SELECT code, pct_chg, vol_ratio, amount_ratio, new_high_ratio,
+                   liquidity_score, sector_resonance_score
+            FROM factor_stock_wide
+            WHERE trade_date = ?
+            """,
+            [str(date)],
+        ).fetchall()
+    except Exception:
+        return {}
+    finally:
+        con.close()
+
+    out: Dict[str, Dict[str, Any]] = {}
+    columns = [
+        "code", "pct_chg", "vol_ratio", "amount_ratio", "new_high_ratio",
+        "liquidity_score", "sector_resonance_score",
+    ]
+    for raw in rows:
+        row = dict(zip(columns, raw))
+        code = _normalize_stock_code(row.get("code"))
+        if code in wanted:
+            row.pop("code", None)
+            out[code] = row
+    return out
+
+
+def _enrich_screening_display_reasons(snapshot: Dict[str, Any]) -> None:
+    """Backfill per-stock screening reasons for old snapshots at display time."""
+    try:
+        from core.screening.explanations import build_screening_reasons
+    except Exception:
+        return
+
+    screening = ((snapshot.get("etl") or {}).get("screening") or {})
+    final = screening.get("final") or []
+    codes = [
+        _normalize_stock_code(item.get("code") or item.get("股票代码") or "")
+        for item in final
+        if isinstance(item, dict)
+    ]
+    date = ((snapshot.get("meta") or {}).get("date") or snapshot.get("date") or screening.get("trade_date"))
+    context_by_code = _screening_context_map(date, codes)
+    by_code: Dict[str, List[str]] = {}
+    for item in final:
+        if not isinstance(item, dict):
+            continue
+        code = _normalize_stock_code(item.get("code") or item.get("股票代码") or "")
+        if not code:
+            continue
+        base_reasons = item.get("rule_reasons") or item.get("reasons") or []
+        reasons = build_screening_reasons(
+            metrics=item.get("metrics") or {},
+            context=item.get("context") or context_by_code.get(code) or {},
+            score=item.get("score") or item.get("综合评分"),
+            rank=item.get("rank") or item.get("优先级"),
+            base_reasons=base_reasons,
+        )
+        item["reasons"] = reasons
+        by_code[code] = reasons
+
+    if not by_code:
+        return
+
+    for row in ((snapshot.get("trade_plans") or {}).get("rows") or []):
+        if not isinstance(row, dict):
+            continue
+        code = _normalize_stock_code(row.get("股票代码") or row.get("code") or "")
+        reasons = by_code.get(code)
+        if reasons:
+            row["筛选理由"] = "；".join(reasons[:5])
+
+    for section in snapshot.get("sections") or []:
+        for row in section.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            code = _normalize_stock_code(row.get("code") or row.get("股票代码") or row.get("stock_code") or "")
+            reasons = by_code.get(code)
+            if not reasons:
+                continue
+            if "reasons" in row:
+                row["reasons"] = reasons
+            if "筛选理由" in row:
+                row["筛选理由"] = "；".join(reasons[:5])
+
+
 # ----------------------------------------------------------------------
 # 表头英文列名 → 中文展示名（只翻译显示，底层数据 key 不变，无需重生成快照）。
 # 未收录的列（含已是中文的列）原样返回。
@@ -93,7 +242,7 @@ COLUMN_LABELS: Dict[str, str] = {
     "reason_text": "决策原因",
     "original_position_pct": "原始仓位%",
     "final_position_pct": "风控后仓位%",
-    # Gold板块（热点概念 / 热点行业 / 持续性）
+    # 板块热度（热点概念 / 热点行业 / 持续性）
     "rank": "排名",
     "pct_change": "涨跌幅",
     "limit_up_count": "涨停家数",
@@ -178,7 +327,7 @@ def _sector_type_label(value: Any) -> str:
 
 @lru_cache(maxsize=1)
 def _sector_meta_map() -> Dict[str, Dict[str, str]]:
-    """Local THS sector code map used to backfill ETL snapshots."""
+    """Local THS sector code map used to backfill snapshots."""
     mapping: Dict[str, Dict[str, str]] = {}
     base = Path(CACHE_DIR) / "sector" / "ths_index"
     for name in ("index_all.csv", "index_N.csv", "index_I.csv", "adata_concept_ths.csv"):
@@ -664,6 +813,9 @@ def _build_concept_echelon_section(rows: List[Dict[str, Any]]) -> Optional[Dict[
 
 def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[str, Any]]:
     prepared = [dict(s) for s in sections or []]
+    for section in prepared:
+        if section.get("name") == "ETL指标筛选":
+            section["name"] = "指标筛选"
 
     hotspot_rows = _factor_sector_rows(date, limit=20)
     mainline_rows = _mainline_theme_rows(date, limit=20)
@@ -751,27 +903,28 @@ def _prepare_snapshot(snapshot: Optional[Dict[str, Any]], date: str) -> Optional
         return None
     prepared = dict(snapshot)
     prepared["sections"] = _prepare_sections((snapshot or {}).get("sections", []), date)
-    return prepared
+    _enrich_screening_display_reasons(prepared)
+    return _sanitize_display(prepared)
 
 # ----------------------------------------------------------------------
-# 数据浏览分类：ETL 主路径优先展示 Gold/Screening 结果。
+# 数据浏览分类：优先展示指标筛选和板块强度结果。
 # signals=True 仅作为旧快照兼容读取，不再是默认主路径。
 # 注：龙头池 / 走弱池 由专门的「龙头池」页（/dragon）承载，这里不重复。
 # ----------------------------------------------------------------------
 DATA_CATEGORIES: List[Dict[str, Any]] = [
-    {"key": "strategy", "label": "指标筛选", "signals": True, "names": ["ETL指标筛选", "交易计划"]},
-    {"key": "sector", "label": "Gold板块", "signals": False,
+    {"key": "strategy", "label": "指标筛选", "signals": True, "names": ["ETL指标筛选", "指标筛选", "交易计划"]},
+    {"key": "sector", "label": "板块热度", "signals": False,
      "names": ["热点概念", "热点行业", "概念持续性", "行业持续性", "主线主题"]},
     {"key": "limitup", "label": "涨停数据", "signals": False,
      "names": ["涨停梯队", "概念连板梯队"]},
     {"key": "capital", "label": "龙虎榜资金", "signals": False,
      "names": ["龙虎榜", "资金流向", "筹码结构"]},
-    {"key": "review", "label": "ETL产物", "signals": False,
-     "names": ["ETL指标筛选", "交易计划", "因子原始数据", "风控闸门"]},
+    {"key": "review", "label": "数据产物", "signals": False,
+     "names": ["ETL指标筛选", "指标筛选", "交易计划", "因子原始数据", "风控闸门"]},
 ]
 _CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
 
-app = FastAPI(title="A股情绪系统 · ETL指标看板", docs_url="/api/docs")
+app = FastAPI(title="A股情绪系统 · 指标看板", docs_url="/api/docs")
 
 _static_dir = BASE / "static"
 _static_dir.mkdir(parents=True, exist_ok=True)
@@ -865,7 +1018,7 @@ def api_intraday_status(date: Optional[str] = None) -> Any:
 
 @app.get("/run", response_class=HTMLResponse)
 def run_page(request: Request) -> Any:
-    """运行ETL页：一键执行 ETL 指标主流程并实时查看日志。"""
+    """生成数据页：一键执行指标主流程并实时查看日志。"""
     from desktop.runner import CONTROLLER
     from desktop.status import etl_artifacts
 
@@ -1050,7 +1203,7 @@ def _add_stock_name(mapping: Dict[str, str], code: Any, name: Any) -> None:
 
 
 def _stock_name_map(snapshot: Optional[Dict], date: Optional[str] = None) -> Dict[str, str]:
-    """Build a best-effort stock name map from local ETL/snapshot artifacts."""
+    """Build a best-effort stock name map from local snapshot artifacts."""
     mapping: Dict[str, str] = {}
 
     def scan_row(row: Dict[str, Any]) -> None:
@@ -1356,7 +1509,7 @@ def api_config_reset(payload: dict = Body(default={})) -> Any:
 
 
 # ----------------------------------------------------------------------
-# Phase 4：因子面板（因子开关 / profile / 各策略置信度模式）
+# 指标因子页面（因子开关 / 情绪方案 / 各策略打分模式）
 # 写入复用 /api/config（apply_updates），本页仅提供友好读取 + 编排。
 # ----------------------------------------------------------------------
 def _latest_active_profile() -> str:
@@ -1372,7 +1525,7 @@ def _latest_active_profile() -> str:
 
 @app.get("/factors", response_class=HTMLResponse)
 def factors_page(request: Request) -> Any:
-    """因子面板：因子启用开关 + 情绪周期 profile + 各策略置信度模式。"""
+    """指标因子：因子启用开关 + 情绪周期方案 + 各策略打分模式。"""
     from web.factor_panel import build_factor_state
 
     state = build_factor_state(active_profile=_latest_active_profile())
@@ -1513,7 +1666,7 @@ def mobile_content_page(date: str) -> Any:
 
 @app.get("/m/run", response_class=HTMLResponse)
 def mobile_run_page(request: Request) -> Any:
-    """手机运行ETL：复用运行控制器与状态 API。"""
+    """手机生成数据：复用运行控制器与状态 API。"""
     from desktop.runner import CONTROLLER
     from desktop.status import etl_artifacts
 
@@ -1595,7 +1748,7 @@ def section_fragment(request: Request, date: str, idx: int, view: str = "table")
     """HTMX 片段：返回某个 section 的 HTML。
 
     view=detail → 折叠主从卡片（紧凑列表 + 点击展开全字段，避免横向滚动），
-    用于字段很多的指标筛选 / Gold板块；其余分类默认 view=table 宽表。
+    用于字段很多的指标筛选 / 板块热度；其余分类默认 view=table 宽表。
     """
     snapshot = _prepare_snapshot(reader.load(date), date)
     sections: List[Dict] = (snapshot or {}).get("sections", [])

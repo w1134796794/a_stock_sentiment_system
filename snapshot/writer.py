@@ -208,7 +208,7 @@ def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
     etl_rows = (etl_screening or {}).get("final") or []
     if etl_rows:
         sections.append({
-            "name": "ETL指标筛选",
+            "name": "指标筛选",
             "kind": "table",
             "columns": ["rank", "code", "name", "score", "gold_rank", "reasons"],
             "rows": etl_rows,

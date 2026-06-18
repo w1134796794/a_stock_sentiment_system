@@ -44,8 +44,8 @@
 {% if not pack %}
   <div class="m-card p-8 text-center">
     <div class="text-lg font-bold mb-1">没有找到 {{ date }} 的快照</div>
-    <div class="text-sm text-slate-400">先运行一次ETL生成快照后再来。</div>
-    <a href="/m/run" class="m-btn m-btn-primary mt-4">去运行ETL</a>
+    <div class="text-sm text-slate-400">先生成一次数据快照后再来。</div>
+    <a href="/m/run" class="m-btn m-btn-primary mt-4">去生成数据</a>
   </div>
 {% else %}
   <div class="m-soft px-3 py-2 mb-3 text-xs text-slate-400 leading-relaxed">

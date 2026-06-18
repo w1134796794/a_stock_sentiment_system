@@ -1,19 +1,19 @@
 {% extends "base.html" %}
-{% block title %}运行ETL · 管理控制台{% endblock %}
-{% block page_title %}运行ETL{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">Silver预取 · Gold因子 · Screening筛选 · Snapshot看板</div>{% endblock %}
+{% block title %}生成数据 · 管理控制台{% endblock %}
+{% block page_title %}生成数据{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">预取行情 · 计算指标 · 生成候选 · 刷新页面</div>{% endblock %}
 
 {% block content %}
 <section class="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
   {% for step in [
-    ['1', 'Silver', '预取标准化数据'],
-    ['2', 'Gold', '批处理因子指标'],
-    ['3', 'Screening', '配置化筛选排序'],
-    ['4', 'Snapshot', '生成页面快照'],
-    ['5', 'Overlay', '盘中确认/取消']
+    ['1', '数据预取', '统一代码、日期和行情口径'],
+    ['2', '指标计算', '计算大盘、板块和个股指标'],
+    ['3', '候选筛选', '按配置筛选排序'],
+    ['4', '页面刷新', '生成页面可读结果'],
+    ['5', '实时确认', '盘中确认/取消']
   ] %}
-  <div class="etl-step">
-    <div class="etl-step-no mono">{{ step[0] }}</div>
+  <div class="flow-step">
+    <div class="flow-step-no mono">{{ step[0] }}</div>
     <div class="font-bold">{{ step[1] }}</div>
     <div class="text-[11px] text-slate-500 mt-1">{{ step[2] }}</div>
   </div>
@@ -29,7 +29,7 @@
     </div>
     <button id="run-btn"
             class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-5 py-2 disabled:opacity-40">
-      开始ETL
+      开始生成
     </button>
     <div class="flex items-center gap-2 text-sm">
       <span class="text-slate-400">状态</span>
@@ -38,8 +38,8 @@
     </div>
   </div>
   <div class="text-[11px] text-slate-500 mt-2">
-    页面运行等价于 <span class="mono">python main.py --mode analysis --date …</span>。主路径会写入
-    <span class="mono">webdata/factors.duckdb</span>、<span class="mono">webdata/screening</span> 和最新快照。
+    页面运行等价于 <span class="mono">python main.py --mode analysis --date …</span>。结果会写入
+    <span class="mono">webdata/factors.duckdb</span>、<span class="mono">webdata/screening</span> 和最新页面快照。
   </div>
 </section>
 
@@ -60,7 +60,7 @@
 <aside class="space-y-4">
   <section class="card border border-slate-800 rounded-xl p-4">
     <div class="flex items-center justify-between mb-3">
-      <h2 class="font-bold">ETL产物</h2>
+      <h2 class="font-bold">数据产物</h2>
       <button id="artifact-refresh" class="text-xs text-emerald-300 hover:text-emerald-200">刷新</button>
     </div>
     <div id="artifact-list" class="space-y-2"></div>
@@ -68,18 +68,18 @@
   <section class="card border border-slate-800 rounded-xl p-4">
     <h2 class="font-bold mb-3">运行后查看</h2>
     <div class="grid gap-2 text-sm">
-      <a class="run-link" href="/report">ETL交易计划</a>
+      <a class="run-link" href="/report">交易计划</a>
       <a class="run-link" href="/data/strategy">指标筛选明细</a>
-      <a class="run-link" href="/data/sector">Gold板块排序</a>
-      <a class="run-link" href="/realtime">实时确认 Overlay</a>
+      <a class="run-link" href="/data/sector">板块热度</a>
+      <a class="run-link" href="/realtime">实时确认</a>
     </div>
   </section>
 </aside>
 </section>
 
 <style>
-  .etl-step { background:rgba(15,23,42,.52); border:1px solid rgba(51,65,85,.7); border-radius:.75rem; padding:.75rem .9rem; min-height:82px; }
-  .etl-step-no { display:inline-flex; align-items:center; justify-content:center; width:1.45rem; height:1.45rem; border-radius:.45rem; background:rgba(16,185,129,.14); color:#6ee7b7; font-weight:800; font-size:.8rem; margin-bottom:.45rem; }
+  .flow-step { background:rgba(15,23,42,.52); border:1px solid rgba(51,65,85,.7); border-radius:.75rem; padding:.75rem .9rem; min-height:82px; }
+  .flow-step-no { display:inline-flex; align-items:center; justify-content:center; width:1.45rem; height:1.45rem; border-radius:.45rem; background:rgba(16,185,129,.14); color:#6ee7b7; font-weight:800; font-size:.8rem; margin-bottom:.45rem; }
   .artifact-row { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; border-bottom:1px solid rgba(51,65,85,.42); padding:.45rem 0; }
   .artifact-row:last-child { border-bottom:0; }
   .artifact-pill { flex:0 0 auto; border-radius:.45rem; padding:.1rem .45rem; font-size:.68rem; font-weight:800; }

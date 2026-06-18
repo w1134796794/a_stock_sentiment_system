@@ -1,0 +1,124 @@
+"""Human-readable explanations for screening candidates."""
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Optional
+
+
+FACTOR_LABELS: Dict[str, str] = {
+    "mkt_market_score": "市场综合分",
+    "stk_total_score": "个股综合分",
+    "stk_amount_ratio_5d": "成交额相对5日",
+    "stk_vol_ratio_5d": "成交量相对5日",
+    "stk_new_high_20d": "阶段强势位置",
+    "stk_liquidity_percentile": "流动性分位",
+    "stk_pct_chg_1d": "当日涨跌幅强度",
+    "stk_sector_resonance_score": "板块共振",
+}
+
+FACTOR_NOTE: Dict[str, str] = {
+    "mkt_market_score": "市场环境可交易",
+    "stk_total_score": "个股综合强度靠前",
+    "stk_amount_ratio_5d": "资金关注度改善",
+    "stk_vol_ratio_5d": "成交活跃度改善",
+    "stk_new_high_20d": "走势接近阶段强势区",
+    "stk_liquidity_percentile": "承接能力较好",
+    "stk_pct_chg_1d": "当日修复力度较强",
+    "stk_sector_resonance_score": "板块联动较强",
+}
+
+
+def _to_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _fmt_score(value: Any) -> str:
+    num = _to_float(value)
+    if num is None:
+        return "--"
+    return f"{num:.1f}"
+
+
+def _compact_base_reasons(base_reasons: Iterable[Any]) -> str:
+    texts = [str(x).strip() for x in base_reasons if str(x).strip()]
+    if not texts:
+        return "通过基础过滤"
+    stage_words: List[str] = []
+    if any("市场" in text for text in texts):
+        stage_words.append("市场")
+    if any("流动性" in text or "成交额分位" in text for text in texts):
+        stage_words.append("流动性")
+    if any("综合" in text or "强度" in text for text in texts):
+        stage_words.append("强度")
+    if any("量" in text or "成交额" in text for text in texts):
+        stage_words.append("量能")
+    if any("趋势" in text or "价格位置" in text or "强势区" in text for text in texts):
+        stage_words.append("趋势")
+    if not stage_words:
+        return texts[0]
+    return "通过" + "、".join(dict.fromkeys(stage_words)) + "过滤"
+
+
+def build_screening_reasons(
+    *,
+    metrics: Dict[str, Any],
+    context: Optional[Dict[str, Any]] = None,
+    score: Any = None,
+    rank: Any = None,
+    base_reasons: Optional[Iterable[Any]] = None,
+    max_parts: int = 5,
+) -> List[str]:
+    """Build per-stock explanations from factor metrics plus rule pass reasons."""
+    parts: List[str] = []
+    rank_num = _to_float(rank)
+    score_num = _to_float(score)
+    if score_num is not None:
+        prefix = f"综合评分 {_fmt_score(score_num)}"
+        if rank_num is not None:
+            prefix += f"，候选排名第 {int(rank_num)}"
+        parts.append(prefix)
+
+    context = context or {}
+    pct_chg = _to_float(context.get("pct_chg"))
+    if pct_chg is not None:
+        parts.append(f"当日涨幅 {pct_chg:+.2f}%，短线强度已确认")
+
+    amount_ratio = _to_float(context.get("amount_ratio"))
+    vol_ratio = _to_float(context.get("vol_ratio"))
+    if amount_ratio is not None and vol_ratio is not None:
+        if amount_ratio >= 1.2 or vol_ratio >= 1.2:
+            parts.append(f"量价活跃，成交额/成交量约为5日均值 {amount_ratio:.2f}/{vol_ratio:.2f} 倍")
+        elif amount_ratio < 0.9 or vol_ratio < 0.9:
+            parts.append(f"量能未明显放大，成交额/成交量约为5日均值 {amount_ratio:.2f}/{vol_ratio:.2f} 倍")
+
+    numeric_metrics = []
+    for key, value in (metrics or {}).items():
+        num = _to_float(value)
+        if num is None:
+            continue
+        numeric_metrics.append((key, num))
+
+    for key, num in sorted(numeric_metrics, key=lambda item: item[1], reverse=True)[:2]:
+        label = FACTOR_LABELS.get(key, key)
+        note = FACTOR_NOTE.get(key, "指标表现靠前")
+        parts.append(f"{label} {_fmt_score(num)}，{note}")
+
+    weak = [(key, num) for key, num in numeric_metrics if num < 45]
+    if weak:
+        key, num = sorted(weak, key=lambda item: item[1])[0]
+        label = FACTOR_LABELS.get(key, key)
+        parts.append(f"{label} {_fmt_score(num)}偏弱，需盘中确认")
+
+    base_summary = _compact_base_reasons(base_reasons or [])
+    if base_summary and base_summary not in parts:
+        parts.append(base_summary)
+
+    deduped: List[str] = []
+    for part in parts:
+        if part and part not in deduped:
+            deduped.append(part)
+    return deduped[:max(1, int(max_parts or 5))]

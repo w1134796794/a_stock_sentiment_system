@@ -1,7 +1,7 @@
 {% extends "mobile/base.html" %}
 {% block title %}情绪系统{% endblock %}
 {% block page_title %}概览{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">ETL状态 · 快速操作</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">数据状态 · 快速操作</div>{% endblock %}
 
 {% block content %}
 {% set st = ov.run.state %}
@@ -37,7 +37,7 @@
     <span class="text-[11px] text-slate-500">{{ ov.now }}</span>
   </div>
   <div class="grid grid-cols-2 gap-2">
-    <a href="/m/run" class="m-btn m-btn-primary">运行ETL</a>
+    <a href="/m/run" class="m-btn m-btn-primary">生成数据</a>
     <a href="/m/recap" class="m-btn m-btn-ghost">复盘</a>
     <a href="/m/data/strategy" class="m-btn m-btn-ghost">指标筛选</a>
     <a href="/realtime" class="m-btn m-btn-ghost">实时确认</a>

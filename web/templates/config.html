@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}参数配置{% endblock %}
-{% block page_title %}参数配置中心{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">策略/打分/大盘 · 系统设置 · YAML · 风控</div>{% endblock %}
+{% block page_title %}参数配置{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">常用参数 · 策略阈值 · 风控设置</div>{% endblock %}
 
 {% macro render_input(f) %}
   {%- if f.type == 'bool' -%}
@@ -34,12 +34,19 @@
 {% endmacro %}
 
 {% block content %}
-<div class="mb-4">
-  <p class="text-sm text-slate-400">
-    全系统可调参数（策略/打分/大盘、系统设置、YAML、风控）集中在此编辑。
-    改动保存后写入 <span class="mono">webdata/config_overrides.json</span>，
-    <span class="text-amber-300">下次跑批（main.py / scheduler）自动生效</span>；优先级：网页覆盖 &gt; 文件/代码默认值。
-  </p>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">当前覆盖</div>
+    <div class="text-2xl font-bold mono text-emerald-300">{{ registry.override_count }}</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">参数分区</div>
+    <div class="text-2xl font-bold mono text-slate-200">{{ registry.sections|length }}</div>
+  </div>
+  <a href="/factors" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
+    <div class="text-xs text-slate-400 mb-1">指标开关</div>
+    <div class="text-sm font-semibold text-emerald-300">已移至指标因子页</div>
+  </a>
 </div>
 
 <div class="sticky top-0 z-10 -mx-6 px-6 py-3 bg-slate-950/90 backdrop-blur border-b border-slate-800 mb-5">
@@ -49,23 +56,20 @@
     <label class="text-sm text-slate-400 flex items-center gap-1.5 cursor-pointer select-none">
       <input id="cfg-only-changed" type="checkbox" class="h-4 w-4 accent-amber-500"> 只看已改
     </label>
-    <button id="cfg-expand"
-            class="border border-slate-700 text-slate-300 hover:bg-slate-800/40 text-sm rounded-md px-3 py-1.5">展开全部</button>
-    <button id="cfg-collapse"
-            class="border border-slate-700 text-slate-300 hover:bg-slate-800/40 text-sm rounded-md px-3 py-1.5">收起全部</button>
-    <span class="text-sm text-slate-400">当前覆盖
-      <span class="mono text-emerald-300">{{ registry.override_count }}</span> 项</span>
     <span class="text-sm text-slate-400">待保存
       <span id="cfg-changed" class="mono text-amber-300">0</span> 项</span>
     <button id="cfg-save"
             class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-md px-4 py-1.5 disabled:opacity-40"
             disabled>保存改动</button>
+    <button id="cfg-expand"
+            class="border border-slate-700 text-slate-300 hover:bg-slate-800/40 text-sm rounded-md px-3 py-1.5">展开</button>
+    <button id="cfg-collapse"
+            class="border border-slate-700 text-slate-300 hover:bg-slate-800/40 text-sm rounded-md px-3 py-1.5">收起</button>
     <button id="cfg-reset-all"
             class="border border-rose-700 text-rose-300 hover:bg-rose-900/30 text-sm rounded-md px-3 py-1.5">全部重置</button>
   </div>
-  {# 分区快速跳转：默认全部折叠，点击直达对应分区 #}
   <div class="flex items-center gap-2 flex-wrap mt-2.5 text-xs">
-    <span class="text-slate-500">快速跳转</span>
+    <span class="text-slate-500">分区</span>
     {% for section in registry.sections %}
     {% set ns = namespace(n=0) %}
     {% for g in section.groups %}{% set ns.n = ns.n + (g.fields|length) %}{% endfor %}
@@ -86,13 +90,11 @@
   {% endif %}
   {% for group in section.groups %}
   {% if group.key == 'factor_registry' %}
-  <div class="card border border-slate-800 rounded-xl mb-3 px-4 py-3 text-sm text-slate-400">
-    因子启用开关已迁至 <a href="/factors" class="text-emerald-300 hover:underline">因子面板</a>（含 profile、各策略置信度模式）。
-  </div>
+  {# 指标开关已在 /factors 独立维护，此处不再重复展示。 #}
   {% else %}
   {% set ns_ov = namespace(n=0) %}
   {% for f in group.fields %}{% if f.overridden %}{% set ns_ov.n = ns_ov.n + 1 %}{% endif %}{% endfor %}
-  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" data-group>
+  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" data-group {% if ns_ov.n %}open{% endif %}>
     <summary class="cursor-pointer select-none px-4 py-2.5 font-semibold text-slate-200 hover:bg-slate-800/40 flex items-center gap-2">
       <span>{{ group.label }}</span>
       <span class="text-xs text-slate-500 mono">{{ section.scope }} · {{ group.fields|length }} 项</span>

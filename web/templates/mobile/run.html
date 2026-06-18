@@ -1,27 +1,27 @@
 {% extends "mobile/base.html" %}
-{% block title %}运行ETL · 手机端{% endblock %}
-{% block page_title %}运行ETL{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">Silver · Gold · Screening · Snapshot</div>{% endblock %}
+{% block title %}生成数据 · 手机端{% endblock %}
+{% block page_title %}生成数据{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">预取行情 · 计算指标 · 生成候选</div>{% endblock %}
 
 {% block content %}
 <section class="m-card p-4 mb-4">
   <label class="block text-xs text-slate-500 mb-1">分析日期（留空=今日/最近交易日）</label>
   <input id="run-date" type="text" inputmode="numeric" placeholder="YYYYMMDD"
          class="mono w-full bg-slate-950/70 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
-  <button id="run-btn" class="m-btn m-btn-primary w-full mt-3 disabled:opacity-40">开始ETL</button>
+  <button id="run-btn" class="m-btn m-btn-primary w-full mt-3 disabled:opacity-40">开始生成</button>
   <div class="flex items-center gap-2 mt-3">
     <span class="text-xs text-slate-500">状态</span>
     <span id="run-state" class="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-700 text-slate-200">空闲</span>
   </div>
   <div id="run-meta" class="text-[11px] text-slate-500 mt-2 break-all"></div>
   <div class="text-[11px] text-slate-500 mt-3 leading-relaxed">
-    等价于命令行 python main.py --mode analysis --date ...。生成快照后，可在ETL计划、指标筛选和实时确认页查看。
+    等价于命令行 python main.py --mode analysis --date ...。生成快照后，可在交易计划、指标筛选和实时确认页查看。
   </div>
 </section>
 
 <section class="m-card p-4 mb-4">
   <div class="flex items-center justify-between mb-2">
-    <h2 class="text-sm font-bold text-slate-200">ETL产物</h2>
+    <h2 class="text-sm font-bold text-slate-200">数据产物</h2>
     <button id="artifact-refresh" class="text-xs text-emerald-300">刷新</button>
   </div>
   <div id="artifact-list" class="space-y-2"></div>

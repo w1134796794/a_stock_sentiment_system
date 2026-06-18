@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}ETL交易计划 · {{ date }}{% endblock %}
-{% block page_title %}ETL交易计划{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">Gold指标筛选 · 竞价高开确认 · 实时Overlay取消/观察</div>{% endblock %}
+{% block title %}交易计划 · {{ date }}{% endblock %}
+{% block page_title %}交易计划{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">指标筛选 · 竞价高开确认 · 实时取消/观察</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
@@ -19,7 +19,7 @@
 {% if snapshot is none %}
   <div class="card border border-slate-800 rounded-xl p-10 text-center">
     <div class="text-xl font-semibold mb-1">没有找到 {{ date }} 的快照</div>
-    <div class="text-slate-400">请确认该日已运行ETL。</div>
+    <div class="text-slate-400">请确认该日已生成数据。</div>
   </div>
 {% else %}
 {% set meta = snapshot.get('meta') or {} %}
@@ -33,14 +33,14 @@
 {% if is_etl %}
 <section class="card border border-emerald-900/60 rounded-xl p-4 mb-6 bg-emerald-950/10">
   <div class="flex flex-wrap items-center gap-3">
-    <span class="text-xs font-bold text-emerald-300 border border-emerald-500/40 rounded px-2 py-0.5">ETL</span>
-    <span class="text-sm text-slate-300">Profile <span class="mono text-sky-300">{{ screening.get('profile') or meta.get('screening_profile') or '--' }}</span></span>
+    <span class="text-xs font-bold text-emerald-300 border border-emerald-500/40 rounded px-2 py-0.5">指标</span>
+    <span class="text-sm text-slate-300">方案 <span class="mono text-sky-300">{{ screening.get('profile') or meta.get('screening_profile') or '--' }}</span></span>
     <span class="text-sm text-slate-300">输入 <span class="mono">{{ screening.get('input_count') or 0 }}</span></span>
     <span class="text-sm text-slate-300">入选 <span class="mono text-emerald-300">{{ screening.get('final_count') or plans|length }}</span></span>
     {% if gold.get('market') %}
     <span class="text-sm text-slate-300">市场分 <span class="mono text-amber-300">{{ '%.0f'|format(gold.get('market').get('market_score') or 0) }}</span></span>
     {% endif %}
-    <a href="/realtime" class="ml-auto text-sm text-emerald-300 hover:text-emerald-200">打开实时确认 Overlay</a>
+    <a href="/realtime" class="ml-auto text-sm text-emerald-300 hover:text-emerald-200">打开实时确认</a>
   </div>
 </section>
 {% endif %}
@@ -163,13 +163,13 @@
 </section>
 {% endif %}
 
-{# ===== ETL计划卡片 ===== #}
+{# ===== 交易计划卡片 ===== #}
 <section class="mb-8">
-  <h2 class="text-lg font-bold mb-3 flex items-center gap-2">ETL交易计划
-    <span class="text-xs font-normal text-slate-500">先看盘后指标，盘中由 Overlay 确认/取消</span></h2>
+  <h2 class="text-lg font-bold mb-3 flex items-center gap-2">交易计划
+    <span class="text-xs font-normal text-slate-500">先看盘后指标，盘中由实时行情确认/取消</span></h2>
   {% if not plans %}
     <div class="card border border-slate-800 rounded-xl p-8 text-center text-slate-400">
-      今日无ETL交易计划（Gold指标筛选为空或市场风险过高）
+      今日无交易计划（指标筛选为空或市场风险过高）
     </div>
   {% else %}
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -245,9 +245,9 @@
   <h2 class="text-lg font-bold mb-3">数据浏览</h2>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
     {% for c in [
-      {"href": "/data/strategy/" ~ date, "title": "指标筛选", "desc": "ETL候选池与交易计划"},
-      {"href": "/data/sector/" ~ date, "title": "Gold板块", "desc": "板块主线和强度排序"},
-      {"href": "/data/review/" ~ date, "title": "ETL产物", "desc": "筛选、因子、快照结果"},
+      {"href": "/data/strategy/" ~ date, "title": "指标筛选", "desc": "候选池与交易计划"},
+      {"href": "/data/sector/" ~ date, "title": "板块热度", "desc": "板块主线和强度排序"},
+      {"href": "/data/review/" ~ date, "title": "数据产物", "desc": "筛选、因子、快照结果"},
       {"href": "/realtime", "title": "实时确认", "desc": "盘中确认/取消/观察"},
     ] %}
     <a href="{{ c.href }}" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
