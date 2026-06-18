@@ -1,24 +1,34 @@
 {% extends "base.html" %}
-{% block title %}因子面板{% endblock %}
-{% block page_title %}因子面板{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">因子开关 · 情绪周期 Profile · 各策略置信度模式</div>{% endblock %}
+{% block title %}指标因子{% endblock %}
+{% block page_title %}指标因子{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">启用状态 · 指标数据 · 高级调参</div>{% endblock %}
 
 {% block content %}
-<div class="mb-4">
-  <p class="text-sm text-slate-400">
-    在此统一开关因子、切换情绪周期 Profile、选择各策略的置信度算法。改动即时写入
-    <span class="mono">webdata/config_overrides.json</span>，
-    <span class="text-amber-300">下次跑批自动生效</span>；优先级：网页覆盖 &gt; 文件/代码默认值。
-  </p>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">启用指标</div>
+    <div class="text-2xl font-bold mono text-emerald-300">{{ state.factor_enabled }} / {{ state.factor_total }}</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">当前方案</div>
+    <div class="text-lg font-bold mono text-sky-300">{{ state.active_profile or 'default' }}</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">参数覆盖</div>
+    <div class="text-2xl font-bold mono text-slate-200">{{ state.override_count }}</div>
+  </div>
 </div>
 
 <div class="sticky top-0 z-10 -mx-6 px-6 py-3 bg-slate-950/90 backdrop-blur border-b border-slate-800 mb-5">
-  <div class="flex items-center gap-4 flex-wrap text-sm text-slate-400">
-    <span>启用因子 <span class="mono text-emerald-300">{{ state.factor_enabled }}</span> / {{ state.factor_total }}</span>
-    <span>当前覆盖 <span class="mono text-emerald-300">{{ state.override_count }}</span> 项</span>
-    {% if state.active_profile %}
-    <span>最新快照 Profile <span class="mono text-sky-300">{{ state.active_profile }}</span></span>
-    {% endif %}
+  <div class="flex items-center gap-3 flex-wrap text-sm text-slate-400">
+    <input id="fp-search" type="text" placeholder="搜索指标 / 分组 / 描述…"
+           class="flex-1 min-w-[220px] bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500">
+    <label class="flex items-center gap-1.5 cursor-pointer select-none">
+      <input id="fp-only-enabled" type="checkbox" class="h-4 w-4 accent-emerald-500"> 只看启用
+    </label>
+    <label class="flex items-center gap-1.5 cursor-pointer select-none">
+      <input id="fp-only-changed" type="checkbox" class="h-4 w-4 accent-amber-500"> 只看已改
+    </label>
     <span id="fp-toast" class="hidden"></span>
     <div class="flex-1"></div>
     <button id="fp-reset-all"
@@ -30,12 +40,12 @@
 <section class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-8">
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="flex items-center justify-between gap-3 mb-3">
-      <h2 class="text-lg font-bold text-emerald-300">当前启用指标</h2>
+      <h2 class="text-lg font-bold text-emerald-300">启用中的指标</h2>
       <span class="mono text-xs text-slate-500">{{ state.factor_enabled }} / {{ state.factor_total }}</span>
     </div>
     {% if state.snapshot_enabled_factors %}
     <div class="mb-3">
-      <div class="text-xs text-slate-500 mb-1">最新快照实际启用</div>
+      <div class="text-xs text-slate-500 mb-1">当前快照使用</div>
       <div class="flex flex-wrap gap-1.5">
         {% for fid in state.snapshot_enabled_factors %}
         <span class="mono text-[11px] px-2 py-1 rounded border border-sky-700/60 bg-sky-950/30 text-sky-200">{{ fid }}</span>
@@ -58,7 +68,7 @@
 
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="flex items-center justify-between gap-3 mb-3">
-      <h2 class="text-lg font-bold text-emerald-300">最新因子指标数据</h2>
+      <h2 class="text-lg font-bold text-emerald-300">最新指标数据</h2>
       <span class="mono text-xs text-slate-500">{{ state.latest_factor_trade_date or '--' }}</span>
     </div>
     {% if state.latest_factor_summary %}
@@ -67,7 +77,7 @@
         <thead class="bg-slate-950/90 sticky top-0 text-slate-500">
           <tr class="text-left">
             <th class="px-3 py-2 font-medium">层级</th>
-            <th class="px-3 py-2 font-medium">指标</th>
+            <th class="px-3 py-2 font-medium">指标ID</th>
             <th class="px-3 py-2 font-medium text-right">实体数</th>
             <th class="px-3 py-2 font-medium text-right">原值均值</th>
             <th class="px-3 py-2 font-medium text-right">评分均值</th>
@@ -89,18 +99,14 @@
       </table>
     </div>
     {% else %}
-    <div class="text-sm text-slate-500 border border-slate-800 rounded-lg px-3 py-6">暂无因子指标数据</div>
+    <div class="text-sm text-slate-500 border border-slate-800 rounded-lg px-3 py-6">暂无指标数据</div>
     {% endif %}
   </div>
 </section>
 
-{# ===================== 1. 各策略置信度模式 ===================== #}
+{# ===================== 1. 策略打分模式 ===================== #}
 <section class="mb-8">
-  <h2 class="text-lg font-bold text-emerald-300 mb-3">策略置信度模式</h2>
-  <p class="text-xs text-slate-500 mb-3">
-    <span class="mono">legacy</span> = 旧的「基础分 + 加分」（默认，行为不变）；
-    <span class="mono">deduction</span> = 统一「满分起扣」扣分制（见 <span class="mono">config/confidence_rules.yaml</span>）。
-  </p>
+  <h2 class="text-lg font-bold text-emerald-300 mb-3">策略打分模式</h2>
   <div class="card border border-slate-800 rounded-xl overflow-hidden">
     <table class="w-full text-sm">
       <tbody>
@@ -117,7 +123,9 @@
             <select class="fp-mode mono bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
                     data-scope="patterns" data-path="{{ s.override_path }}" data-type="str">
               {% for m in state.confidence_modes %}
-              <option value="{{ m }}" {% if m == s.mode %}selected{% endif %}>{{ m }}</option>
+              <option value="{{ m }}" {% if m == s.mode %}selected{% endif %}>
+                {% if m == 'legacy' %}标准模式{% elif m == 'deduction' %}扣分模式{% else %}{{ m }}{% endif %}
+              </option>
               {% endfor %}
             </select>
           </td>
@@ -128,20 +136,19 @@
   </div>
 </section>
 
-{# ===================== 2. 情绪周期 Profile ===================== #}
+{# ===================== 2. 情绪周期方案 ===================== #}
 <section class="mb-8">
-  <h2 class="text-lg font-bold text-emerald-300 mb-3">情绪周期 Profile</h2>
+  <h2 class="text-lg font-bold text-emerald-300 mb-3">情绪周期方案</h2>
   <div class="card border border-slate-800 rounded-xl p-4 mb-4">
     <div class="flex items-center gap-3 flex-wrap">
-      <span class="text-sm text-slate-300">强制 Profile</span>
+      <span class="text-sm text-slate-300">强制方案</span>
       <select id="fp-forced" class="mono bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
               data-scope="settings" data-path="FACTOR_PROFILE_OVERRIDE" data-type="str">
-        <option value="" {% if not state.forced_profile %}selected{% endif %}>（自动 · 按当日情绪周期）</option>
+        <option value="" {% if not state.forced_profile %}selected{% endif %}>自动匹配当日情绪</option>
         {% for name in state.profile_names %}
         <option value="{{ name }}" {% if name == state.forced_profile %}selected{% endif %}>{{ name }}</option>
         {% endfor %}
       </select>
-      <span class="text-xs text-slate-500">留空 = 跑批时按当日情绪周期自动选取（默认）。</span>
     </div>
   </div>
   {% if state.profiles %}
@@ -149,7 +156,7 @@
     <table class="w-full text-sm">
       <thead>
         <tr class="text-left text-xs text-slate-500 border-b border-slate-800">
-          <th class="px-4 py-2 font-medium">Profile</th>
+          <th class="px-4 py-2 font-medium">方案</th>
           <th class="px-4 py-2 font-medium">禁用因子</th>
         </tr>
       </thead>
@@ -182,13 +189,9 @@
 {# ===================== 2.5 生命周期 / 仲裁参数 ===================== #}
 {% if state.param_groups %}
 <section class="mb-8">
-  <h2 class="text-lg font-bold text-emerald-300 mb-3">生命周期 / 仲裁参数</h2>
-  <p class="text-xs text-slate-500 mb-3">
-    龙头生命周期阶段窗口、龙二波候选来源、跨策略仲裁与情绪路由。改动写入
-    <span class="mono">patterns</span> 覆盖，下次跑批生效。
-  </p>
+  <h2 class="text-lg font-bold text-emerald-300 mb-3">高级策略参数</h2>
   {% for g in state.param_groups %}
-  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" open>
+  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden">
     <summary class="cursor-pointer select-none px-4 py-2.5 font-semibold text-slate-200 hover:bg-slate-800/40 flex items-center gap-2">
       <span>{{ g.label }}</span>
       <span class="text-xs text-slate-500 mono">{{ g.params|length }} 项</span>
@@ -235,18 +238,24 @@
 {# ===================== 3. 因子开关 ===================== #}
 <section class="mb-8">
   <h2 class="text-lg font-bold text-emerald-300 mb-3">因子开关</h2>
-  <p class="text-xs text-slate-500 mb-3">关闭某因子后，对应 Layer 计算将跳过它（启用集会按权重重归一化）。</p>
   {% for g in state.factor_groups %}
-  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" open>
+  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" data-factor-group
+           {% if g.overridden_count or loop.first %}open{% endif %}>
     <summary class="cursor-pointer select-none px-4 py-2.5 font-semibold text-slate-200 hover:bg-slate-800/40 flex items-center gap-2">
       <span>{{ g.label }}</span>
-      <span class="text-xs text-slate-500 mono">{{ g.factors|length }} 个因子</span>
+      <span class="text-xs text-slate-500 mono">启用 {{ g.enabled_count }} / {{ g.factors|length }}</span>
+      {% if g.overridden_count %}
+      <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">已改 {{ g.overridden_count }}</span>
+      {% endif %}
     </summary>
     <div class="border-t border-slate-800">
       <table class="w-full text-sm">
         <tbody>
           {% for f in g.factors %}
-          <tr class="border-b border-slate-800/60 hover:bg-slate-800/20">
+          <tr class="border-b border-slate-800/60 hover:bg-slate-800/20" data-factor-row
+              data-enabled="{{ 'true' if f.enabled else 'false' }}"
+              data-overridden="{{ 'true' if f.overridden else 'false' }}"
+              data-name="{{ f.factor_id|lower }} {{ f.name|lower }} {{ f.sub_category|lower }} {{ f.description|lower }}">
             <td class="px-4 py-2 align-top w-12">
               <input type="checkbox" class="fp-factor h-4 w-4 accent-emerald-500"
                      data-scope="yaml" data-path="{{ f.override_path }}" data-type="bool"
@@ -320,6 +329,34 @@
     });
     showToast('已全部重置，即将刷新…', true);
     setTimeout(() => location.reload(), 600);
+  });
+
+  const search = document.getElementById('fp-search');
+  const onlyEnabled = document.getElementById('fp-only-enabled');
+  const onlyChanged = document.getElementById('fp-only-changed');
+  function applyFactorFilters() {
+    const q = (search?.value || '').trim().toLowerCase();
+    const enabledOnly = !!onlyEnabled?.checked;
+    const changedOnly = !!onlyChanged?.checked;
+    const active = !!q || enabledOnly || changedOnly;
+    document.querySelectorAll('[data-factor-group]').forEach(group => {
+      let visible = 0;
+      group.querySelectorAll('[data-factor-row]').forEach(row => {
+        const hitQ = !q || (row.dataset.name || '').includes(q);
+        const hitEnabled = !enabledOnly || row.dataset.enabled === 'true';
+        const hitChanged = !changedOnly || row.dataset.overridden === 'true';
+        const hit = hitQ && hitEnabled && hitChanged;
+        row.style.display = hit ? '' : 'none';
+        if (hit) visible++;
+      });
+      group.style.display = visible ? '' : 'none';
+      if (active && visible) group.open = true;
+    });
+  }
+  [search, onlyEnabled, onlyChanged].forEach(el => {
+    if (!el) return;
+    el.addEventListener('input', applyFactorFilters);
+    el.addEventListener('change', applyFactorFilters);
   });
 })();
 </script>

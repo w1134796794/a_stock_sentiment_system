@@ -62,7 +62,7 @@ def health_items() -> List[Dict[str, Any]]:
             "title": "Tushare Token",
             "status": _ok(token_ok),
             "value": "已配置" if token_ok else "未配置",
-            "detail": "ETL预取需要 Tushare 历史数据接口；可在「参数配置」或 .env 中设置 TUSHARE_TOKEN。",
+            "detail": "数据更新需要 Tushare 历史数据接口；可在「参数配置」或 .env 中设置 TUSHARE_TOKEN。",
             "badge": "正常" if token_ok else "缺失",
         },
         {
@@ -73,17 +73,17 @@ def health_items() -> List[Dict[str, Any]]:
             "badge": "正常" if ai_ok else "可选",
         },
         {
-            "title": "最新 ETL 快照",
+            "title": "最新数据快照",
             "status": _ok(latest is not None),
             "value": (f"{latest}（共 {len(dates)} 天）" if latest else "暂无快照"),
             "detail": f"快照目录：{SNAPSHOT_DIR}",
             "badge": "已生成" if latest else "缺失",
         },
         {
-            "title": "ETL 指标仓库",
+            "title": "指标仓库",
             "status": _ok(Path(FACTOR_DB_PATH).exists()),
             "value": str(FACTOR_DB_PATH),
-            "detail": "Silver/Gold/Screening 主路径依赖此 DuckDB 文件。",
+            "detail": "行情、指标和筛选结果依赖此 DuckDB 文件。",
             "badge": "已就绪" if Path(FACTOR_DB_PATH).exists() else "缺失",
         },
         {
@@ -101,7 +101,7 @@ def health_items() -> List[Dict[str, Any]]:
             "title": "数据目录",
             "status": _ok(Path(WEB_DATA_DIR).exists()),
             "value": str(WEB_DATA_DIR),
-            "detail": f"ETL产物：{WEB_DATA_DIR} · 知识库：{KB_DB_PATH} · 兼容输出：{OUTPUT_DIR}",
+            "detail": f"数据产物：{WEB_DATA_DIR} · 知识库：{KB_DB_PATH} · 兼容输出：{OUTPUT_DIR}",
             "badge": "存在" if Path(WEB_DATA_DIR).exists() else "缺失",
         },
     ]
@@ -109,7 +109,7 @@ def health_items() -> List[Dict[str, Any]]:
 
 
 def etl_artifacts(date: str | None = None) -> Dict[str, Any]:
-    """Return the current ETL artifact status for the run page and APIs."""
+    """Return the current data artifact status for the run page and APIs."""
     reader = SnapshotReader(SNAPSHOT_DIR)
     target = str(date or reader.latest() or "")
     quality = Path(WEB_DATA_DIR) / "etl_quality" / f"quality_{target}.json" if target else None
@@ -133,10 +133,10 @@ def etl_artifacts(date: str | None = None) -> Dict[str, Any]:
         "date": target,
         "items": [
             _item("DuckDB 指标仓库", Path(FACTOR_DB_PATH)),
-            _item("Silver 质量报告", quality),
-            _item("Screening 候选池", screening),
-            _item("Gold 分析摘要", analysis),
-            _item("Web 快照", snapshot),
+            _item("数据质量报告", quality),
+            _item("候选池", screening),
+            _item("分析摘要", analysis),
+            _item("页面快照", snapshot),
         ],
     }
 
@@ -516,7 +516,7 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
         limit_down = overlay.get("limit_down")
         max_board = overlay.get("max_board")
         summary_parts = [
-            f"ETL市场分 {market_score:.0f}",
+            f"市场分 {market_score:.0f}",
             f"红盘占比 {up_ratio:.1f}%" if up_ratio is not None else "",
             f"涨停/跌停 {limit_up}/{limit_down}" if limit_up is not None and limit_down is not None else "",
             f"成交额 {amount_total / 1e12:.2f}万亿" if amount_total else "",
@@ -560,7 +560,7 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
             "risk_level": "低" if market_score >= 70 else ("中" if market_score >= 50 else ("高" if market_score >= 35 else "极高")),
             "suggested_position": position,
             "analysis_summary": "，".join(p for p in summary_parts if p) + "。",
-            "cross_judgment": "盘中买入只由实时 Overlay 确认；低开候选直接取消。",
+            "cross_judgment": "盘中买入只由实时行情确认；低开候选直接取消。",
         }
 
     # —— 各指数涨跌幅 ——

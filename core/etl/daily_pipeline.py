@@ -1,8 +1,8 @@
-"""ETL-first daily analysis pipeline.
+"""Daily analysis pipeline based on prefetched data and factor tables.
 
-This is the main path after the ETL redesign:
-Phase 1 silver prefetch -> Phase 2 gold factors -> Phase 3 screening ->
-Phase 4 snapshot-ready analysis payload.
+Main path:
+prefetch normalized data -> compute factors -> screen candidates ->
+write snapshot-ready analysis payload.
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class ETLDailyResult:
 
 
 class ETLDailyPipeline:
-    """Run the ETL-based daily analysis and write Web-facing artifacts."""
+    """Run the daily analysis pipeline and write Web-facing artifacts."""
 
     index_codes = ["000001.SH", "399001.SZ", "399006.SZ"]
 
@@ -77,7 +77,7 @@ class ETLDailyPipeline:
         prev_trade_date = str(prev_trade_date or "")
         result = ETLDailyResult(trade_date=trade_date, prev_trade_date=prev_trade_date)
 
-        logger.info(f"[ETL] 开始 ETL 主流程: {trade_date}, prev={prev_trade_date or '-'}")
+        logger.info(f"[数据生成] 开始主流程: {trade_date}, prev={prev_trade_date or '-'}")
 
         zt_pool = self._safe_df(lambda: self.dm.get_limit_up_pool(trade_date), "今日涨停池")
         prev_zt_pool = self._safe_df(lambda: self.dm.get_limit_up_pool(prev_trade_date), "昨日涨停池") if prev_trade_date else pd.DataFrame()
@@ -125,7 +125,7 @@ class ETLDailyPipeline:
             self._ingest_kb(data_dict, self.kb_db_path)
 
         logger.info(
-            f"[ETL] 主流程完成: ok={result.ok}, "
+            f"[数据生成] 主流程完成: ok={result.ok}, "
             f"候选={len(result.screening.get('final') or [])}, snapshot={result.snapshot_paths.get('json', '')}"
         )
         return result
@@ -187,7 +187,7 @@ class ETLDailyPipeline:
             "strategy": {
                 "position": position,
                 "strategy": strategy,
-                "forbidden_actions": "低开候选直接放弃；实时 Overlay cancelled 不买入",
+                "forbidden_actions": "低开候选直接放弃；实时行情取消时不买入",
             },
         }
 
@@ -203,7 +203,7 @@ class ETLDailyPipeline:
             rows.append({
                 "股票代码": code,
                 "股票名称": name,
-                "模式类型": f"ETL指标筛选/{screening.get('profile') or 'default'}",
+                "模式类型": f"指标筛选/{screening.get('profile') or 'default'}",
                 "优先级": item.get("rank"),
                 "综合评分": round(score, 2),
                 "建议仓位": position,
@@ -211,8 +211,8 @@ class ETLDailyPipeline:
                 "止损": "实时取消线或-3%",
                 "止盈": "分批止盈/次日弱转强失败退出",
                 "竞价条件": "高开才买入，低开直接放弃",
-                "次日预期": "按 Gold 指标排序，盘中只做确认/取消",
-                "风险提示": "实时 Overlay 为 cancelled/observe 时不主动买入",
+                "次日预期": "按指标评分排序，盘中只做确认/取消",
+                "风险提示": "实时行情为取消/观察时不主动买入",
                 "筛选理由": "；".join(str(x) for x in reasons[:4]),
             })
         return pd.DataFrame(rows)
@@ -241,7 +241,7 @@ class ETLDailyPipeline:
             df = fn()
             return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"[ETL] {label} 读取失败，继续预取其他数据: {e}")
+            logger.warning(f"[数据生成] {label} 读取失败，继续预取其他数据: {e}")
             return pd.DataFrame()
 
     @staticmethod
@@ -254,7 +254,7 @@ class ETLDailyPipeline:
 
             ingest_snapshot(build_snapshot(data_dict), KBStore(kb_db_path), get_embedder())
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"[ETL] 知识库灌库失败（不影响主流程）: {e}")
+            logger.warning(f"[数据生成] 知识库灌库失败（不影响主流程）: {e}")
 
 
 def _f(value: Any, default: float = 0.0) -> float:

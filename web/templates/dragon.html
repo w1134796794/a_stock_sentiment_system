@@ -70,8 +70,8 @@
 {% if not dp.exists %}
   <div class="card border border-slate-800 rounded-xl p-10 text-center">
     <div class="text-lg font-semibold mb-1">暂无龙头池数据</div>
-    <div class="text-slate-400 text-sm">运行一次ETL后会生成 <span class="mono">dragon_pools.json</span>。</div>
-    <a href="/run" class="inline-block mt-4 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">去运行ETL</a>
+    <div class="text-slate-400 text-sm">生成一次数据后会更新 <span class="mono">dragon_pools.json</span>。</div>
+    <a href="/run" class="inline-block mt-4 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">去生成数据</a>
   </div>
 {% else %}
   <section class="mb-7">

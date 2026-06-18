@@ -1,4 +1,4 @@
-"""Phase 4：因子面板状态构建。
+"""指标因子页面状态构建。
 
 把"因子启用开关 / 情绪周期 profile / 各策略置信度模式"汇总成网页可渲染的结构。
 写入复用既有覆盖通道（/api/config -> config_registry.apply_updates）：
@@ -16,12 +16,12 @@ from typing import Any, Dict, List, Optional
 
 # 因子大类中文标签（与 FactorCategory.value 对应）
 CATEGORY_LABELS: Dict[str, str] = {
-    "market_env": "大盘环境 (Layer1)",
+    "market_env": "大盘环境",
     "emotion": "情绪周期",
-    "sector": "板块 (Layer2)",
-    "stock_tech": "个股技术 D (Layer3)",
-    "moneyflow": "资金流 E (Layer3/4)",
-    "cross_cycle": "跨周期 (Layer4)",
+    "sector": "板块",
+    "stock_tech": "个股技术",
+    "moneyflow": "资金流",
+    "cross_cycle": "跨周期",
 }
 
 # 已接入 confidence_mode 的策略组
@@ -36,7 +36,7 @@ CONFIDENCE_MODES = ["legacy", "deduction"]
 
 
 def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
-    """构建因子面板完整状态。active_profile 为最新快照实际生效的 profile（仅展示用）。"""
+    """构建指标因子页面完整状态。active_profile 为最新快照实际生效的方案（仅展示用）。"""
     from config import overrides as ov
     from config import pattern_params as pp
     from config.config_loader import get_config_loader
@@ -81,6 +81,8 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
     for cat in sorted(groups.keys(), key=lambda c: (cat_order.index(c) if c in cat_order else 99, c)):
         g = groups[cat]
         g["factors"].sort(key=lambda x: (x["sub_category"], x["factor_id"]))
+        g["enabled_count"] = sum(1 for x in g["factors"] if x["enabled"])
+        g["overridden_count"] = sum(1 for x in g["factors"] if x["overridden"])
         factor_groups.append(g)
 
     total = sum(len(g["factors"]) for g in factor_groups)

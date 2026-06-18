@@ -197,3 +197,103 @@ Trying to import the above resulted in these errors:
 2026-06-18 12:52:22.990 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer4_trade_plan.yaml
 2026-06-18 12:52:22.993 | INFO     | core.factors.factor_registry:_load_profiles:311 - [FactorRegistry] 加载 5 个情绪周期 profile
 2026-06-18 12:52:22.993 | INFO     | core.factors.factor_registry:reload:295 - [FactorRegistry] 配置已重新加载
+2026-06-18 17:49:52.469 | INFO     | core.data.data_manager_main:__init__:52 - [DataManager] 初始化完成，缓存目录: G:\a_stock_sentiment_system\data\cache
+2026-06-18 17:49:52.470 | INFO     | main:run_daily_analysis:70 - 开始执行 20260618 的日度分析（ETL 指标体系主路径）...
+2026-06-18 17:49:52.470 | INFO     | main:run_daily_analysis:71 - 对比日期: 20260617
+2026-06-18 17:49:52.471 | INFO     | core.etl.daily_pipeline:run:80 - [数据生成] 开始主流程: 20260618, prev=20260617
+2026-06-18 17:50:08.794 | INFO     | core.data.data_manager_market:get_limit_up_pool:170 - [get_limit_up_pool] 获取 20260618 涨停池数据: 91条
+2026-06-18 17:50:08.822 | INFO     | core.data.data_manager_market:_append_to_limit_up_summary:376 - 追加91条涨停数据: G:\a_stock_sentiment_system\data\cache\summary\limit_up_stocks.csv
+2026-06-18 17:50:11.937 | INFO     | core.data.data_manager_stock:get_all_stocks_daily:225 - [get_all_stocks_daily] 20260618 获取 5507 只股票日线数据
+2026-06-18 17:50:11.938 | INFO     | core.data.data_prep:_prefetch_all_daily:212 - [DataPrep] all_daily 预取：5507 行 @ 20260618
+2026-06-18 17:50:11.953 | INFO     | core.data.data_prep:_prefetch_stock_basic:237 - [DataPrep] stock_basic 预取：5529 行
+2026-06-18 17:50:16.409 | INFO     | config.config_loader:_load_all_configs:54 - [ConfigLoader] 加载配置: emotion_cycle_config.yaml
+2026-06-18 17:50:16.419 | INFO     | config.config_loader:_load_all_configs:54 - [ConfigLoader] 加载配置: sector_tracker_config.yaml
+2026-06-18 17:50:16.477 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/factor_registry.yaml
+2026-06-18 17:50:16.482 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer1_market_env.yaml
+2026-06-18 17:50:16.486 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/emotion_cycle.yaml
+2026-06-18 17:50:16.490 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer2_sector.yaml
+2026-06-18 17:50:16.496 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer3_stock_select.yaml
+2026-06-18 17:50:16.500 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer4_trade_plan.yaml
+2026-06-18 17:50:16.502 | INFO     | config.config_loader:reload_config:251 - [ConfigLoader] 重新加载所有配置
+2026-06-18 17:50:16.503 | INFO     | core.factors.factor_registry:_load_registry:137 - [FactorRegistry] 从注册表加载 54 个因子
+2026-06-18 17:50:16.503 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer1_market_env.yaml
+2026-06-18 17:50:16.504 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: emotion_cycle.yaml
+2026-06-18 17:50:16.504 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer2_sector.yaml
+2026-06-18 17:50:16.505 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer3_stock_select.yaml
+2026-06-18 17:50:16.506 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer4_trade_plan.yaml
+2026-06-18 17:50:16.508 | INFO     | core.factors.factor_registry:_load_profiles:311 - [FactorRegistry] 加载 5 个情绪周期 profile
+2026-06-18 17:50:16.509 | INFO     | core.factors.factor_registry:reload:295 - [FactorRegistry] 配置已重新加载
+2026-06-18 17:50:18.486 | INFO     | core.data.data_prep:_prefetch_daily_basic:225 - [DataPrep] daily_basic 预取：5507 行 @ 20260618
+2026-06-18 17:50:18.816 | INFO     | core.data.data_prep:_prefetch_limit_up:299 - [DataPrep] limit_up 预取：16 个交易日，非空 16 个
+2026-06-18 17:50:23.257 | INFO     | core.data.data_manager_market:get_limit_cpt_list:255 - [get_limit_cpt_list] 过滤ST板块后剩余: 20条
+2026-06-18 17:50:23.259 | INFO     | core.data.data_manager_market:get_limit_cpt_list:258 - [get_limit_cpt_list] 获取 20260618 最强板块数据: 20条
+2026-06-18 17:50:24.531 | INFO     | core.data.data_manager_moneyflow:get_moneyflow_summary:95 - [get_moneyflow_summary] 20260618 全市场资金流向: 5188条
+2026-06-18 17:50:24.549 | INFO     | core.data.data_prep:_prefetch_sectors:365 - [DataPrep] 板块/资金流预取：['ths_index', 'ths_daily', 'limit_cpt_list', 'moneyflow_summary']（板块按日窗口 10 天，调用缓存 26 条）
+2026-06-18 17:50:25.027 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 000001.SH 获取 121 条数据
+2026-06-18 17:50:26.026 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 000001.SH 获取 31 条数据
+2026-06-18 17:50:27.505 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399001.SZ 获取 121 条数据
+2026-06-18 17:50:28.996 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399001.SZ 获取 31 条数据
+2026-06-18 17:50:33.140 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399006.SZ 获取 121 条数据
+2026-06-18 17:50:33.923 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399006.SZ 获取 31 条数据
+2026-06-18 17:50:33.924 | INFO     | core.data.data_prep:_prefetch_index_daily:274 - [DataPrep] index_daily 预取：3 指数 × 2 窗口，成功 6 次
+2026-06-18 17:50:33.924 | INFO     | core.data.data_prep:build:124 - [DataPrep] ETL主路径跳过逐股历史日线批量获取，使用 all_daily/silver 因子主表
+2026-06-18 17:50:41.988 | DEBUG    | core.etl.warehouse:write_table:63 - [SilverWarehouse] parquet 写入失败，已降级 CSV stock_daily_silver: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - `Import pyarrow` failed. pyarrow is required for parquet support. Use pip or conda to install the pyarrow package.
+ - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip or conda to install the fastparquet package.
+2026-06-18 17:50:42.354 | DEBUG    | core.etl.warehouse:write_table:63 - [SilverWarehouse] parquet 写入失败，已降级 CSV sector_daily_silver: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - `Import pyarrow` failed. pyarrow is required for parquet support. Use pip or conda to install the pyarrow package.
+ - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip or conda to install the fastparquet package.
+2026-06-18 17:50:42.516 | DEBUG    | core.etl.warehouse:write_table:63 - [SilverWarehouse] parquet 写入失败，已降级 CSV index_daily_silver: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - `Import pyarrow` failed. pyarrow is required for parquet support. Use pip or conda to install the pyarrow package.
+ - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip or conda to install the fastparquet package.
+2026-06-18 17:50:42.626 | INFO     | core.etl.warehouse:persist_market_dataset_silver:315 - [SilverWarehouse] Phase1 silver 落盘完成 20260618: quality_ok=True issues=0
+2026-06-18 17:50:42.627 | INFO     | core.data.data_prep:build:141 - [DataPrep] MarketDataset(20260618) daily=0 all_daily=1 auction=0 sector_map=0 limit_up=16 prefetched=['all_daily', 'daily_basic', 'index_daily', 'limit_cpt_list', 'limit_up', 'moneyflow_summary', 'stock_basic', 'ths_daily', 'ths_index']
+2026-06-18 17:50:45.456 | INFO     | snapshot.writer:write:280 - [Snapshot] 20260618 快照已落盘: json, sqlite
+2026-06-18 17:50:52.848 | WARNING  | kb.embeddings:embed:51 - [KB] 云嵌入调用失败，回退词法检索: 400 Client Error: Bad Request for url: https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings
+2026-06-18 17:50:52.849 | INFO     | kb.ingest:ingest_snapshot:29 - [KB] 20260618 未取得向量，按词法检索入库
+2026-06-18 17:50:53.019 | INFO     | kb.ingest:ingest_snapshot:33 - [KB] 20260618 入库 11 块（词法）
+2026-06-18 17:50:53.020 | INFO     | core.etl.daily_pipeline:run:127 - [数据生成] 主流程完成: ok=True, 候选=10, snapshot=G:\a_stock_sentiment_system\webdata\snapshots\20260618.json
+2026-06-18 18:22:46.251 | INFO     | core.data.data_manager_main:__init__:52 - [DataManager] 初始化完成，缓存目录: G:\a_stock_sentiment_system\data\cache
+2026-06-18 18:22:46.252 | INFO     | backtest.backtest_engine:run_backtest:119 - 开始回测: 20260615 至 20260618
+2026-06-18 18:22:46.252 | INFO     | backtest.backtest_engine:run_backtest:120 - 初始资金: 100,000.00
+2026-06-18 18:22:46.255 | INFO     | backtest.backtest_engine:_process_date:154 - [20260615] 加载 20260612 制定的 4 条交易计划
+2026-06-18 18:22:46.259 | INFO     | backtest.backtest_engine:_check_buy_conditions:357 - 和远气体 低开-3.91%，未高开，放弃竞价买点
+2026-06-18 18:22:46.265 | INFO     | backtest.backtest_engine:_execute_buy:293 - [20260615] 买入 逸豪新材(301176.SZ): 100股 @ 61.63, 成本:6165.15
+2026-06-18 18:22:46.269 | INFO     | backtest.backtest_engine:_execute_buy:293 - [20260615] 买入 盛龙股份(001257.SZ): 500股 @ 29.96, 成本:14984.39
+2026-06-18 18:22:46.277 | INFO     | backtest.backtest_engine:_check_buy_conditions:357 - 海亮股份 低开-1.88%，未高开，放弃竞价买点
+2026-06-18 18:22:46.283 | INFO     | backtest.backtest_engine:_check_stop_loss_take_profit:495 - [20260616] 逸豪新材 触发基础止盈: 81.50 (盈利32.23%)
+2026-06-18 18:22:46.287 | INFO     | backtest.backtest_engine:_check_stop_loss_take_profit:475 - [20260616] 盛龙股份 触发第一次分批止盈: 33.56 (盈利12.02%, 卖出200股)
+2026-06-18 18:22:46.288 | INFO     | backtest.backtest_engine:_execute_partial_sell:619 - [20260616] 分批卖出 盛龙股份(001257.SZ): 200股 @ 33.49, 盈亏:696.11(11.61%), 剩余:300股
+2026-06-18 18:22:46.289 | INFO     | backtest.backtest_engine:_execute_sell:555 - [20260616] 卖出 逸豪新材(301176.SZ): 100股 @ 81.34, 盈亏:1957.98(31.76%)
+2026-06-18 18:22:46.292 | INFO     | backtest.backtest_engine:_process_date:154 - [20260616] 加载 20260615 制定的 10 条交易计划
+2026-06-18 18:22:46.296 | INFO     | backtest.backtest_engine:_check_buy_conditions:357 - 利和兴 低开-1.03%，未高开，放弃竞价买点
+2026-06-18 18:22:46.300 | INFO     | backtest.backtest_engine:_check_buy_conditions:357 - 江丰电子 低开-0.20%，未高开，放弃竞价买点
+2026-06-18 18:22:46.305 | DEBUG    | backtest.backtest_engine:_execute_buy:198 - 盛龙股份 已有持仓，跳过
+2026-06-18 18:22:46.309 | WARNING  | backtest.backtest_engine:_execute_buy:269 - 平安电工 计算股数不足1手，跳过
+2026-06-18 18:22:46.323 | INFO     | backtest.backtest_engine:_check_buy_conditions:357 - 民爆光电 低开-0.01%，未高开，放弃竞价买点
+2026-06-18 18:22:46.345 | INFO     | backtest.backtest_engine:_check_buy_conditions:364 - 迪生力 涨停开盘，无法买入
+2026-06-18 18:22:46.357 | INFO     | backtest.backtest_engine:_check_buy_conditions:364 - 安德利 涨停开盘，无法买入
+2026-06-18 18:22:46.372 | INFO     | backtest.backtest_engine:_execute_buy:293 - [20260616] 买入 泰晶科技(603738.SH): 100股 @ 57.11, 成本:5713.11
+2026-06-18 18:22:47.832 | WARNING  | backtest.backtest_engine:_execute_buy:269 - 瑞松科技 计算股数不足1手，跳过
+2026-06-18 18:22:49.257 | DEBUG    | core.data.data_manager_stock:get_stock_daily:91 - [get_stock_daily] Tushare返回空数据
+2026-06-18 18:22:49.258 | INFO     | backtest.backtest_engine:_check_buy_conditions:332 - 恒尚节能 无法获取当日开盘数据，不能确认高开，放弃买入
+2026-06-18 18:22:50.186 | INFO     | backtest.backtest_engine:_process_date:154 - [20260617] 加载 20260616 制定的 8 条交易计划
+2026-06-18 18:22:50.660 | INFO     | backtest.backtest_engine:_check_buy_conditions:357 - 中科三环 低开-1.15%，未高开，放弃竞价买点
+2026-06-18 18:22:51.538 | INFO     | backtest.backtest_engine:_check_buy_conditions:357 - 逸豪新材 低开-6.43%，未高开，放弃竞价买点
+2026-06-18 18:22:52.180 | INFO     | backtest.backtest_engine:_execute_buy:293 - [20260617] 买入 深桑达Ａ(000032.SZ): 400股 @ 23.26, 成本:9305.36
+2026-06-18 18:22:52.681 | INFO     | backtest.backtest_engine:_check_buy_conditions:357 - 和胜股份 低开-0.69%，未高开，放弃竞价买点
+2026-06-18 18:22:53.265 | WARNING  | backtest.backtest_engine:_execute_buy:269 - 华正新材 计算股数不足1手，跳过
+2026-06-18 18:22:54.066 | INFO     | backtest.backtest_engine:_check_buy_conditions:364 - 旭光电子 涨停开盘，无法买入
+2026-06-18 18:22:54.505 | INFO     | backtest.backtest_engine:_check_buy_conditions:364 - 诺德股份 涨停开盘，无法买入
+2026-06-18 18:22:55.861 | INFO     | backtest.backtest_engine:_execute_buy:293 - [20260617] 买入 南方泵业(300145.SZ): 1700股 @ 5.86, 成本:9967.88
+2026-06-18 18:22:57.931 | INFO     | backtest.backtest_engine:run_backtest:131 - 回测完成: 最终资金 103,592.10
+2026-06-18 18:22:57.932 | INFO     | backtest.backtest_engine:run_backtest:132 - 总收益率: 3.59%
+2026-06-18 18:22:58.000 | INFO     | run_backtest:save_backtest_results:112 - 交易记录已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_trades_20260618_182257.csv
+2026-06-18 18:22:58.002 | INFO     | run_backtest:save_backtest_results:119 - 净值曲线已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_nav_20260618_182257.csv
+2026-06-18 18:22:58.005 | INFO     | run_backtest:save_backtest_results:137 - 汇总报告已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_summary_20260618_182257.csv

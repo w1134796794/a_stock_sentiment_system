@@ -50,8 +50,8 @@
 {% if not pack %}
   <div class="card border border-slate-800 rounded-xl p-10 text-center">
     <div class="text-lg font-semibold mb-1">没有找到 {{ date }} 的快照</div>
-    <div class="text-slate-400 text-sm">先运行一次ETL生成快照后再来。</div>
-    <a href="/run" class="inline-block mt-4 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">去运行ETL</a>
+    <div class="text-slate-400 text-sm">先生成一次数据快照后再来。</div>
+    <a href="/run" class="inline-block mt-4 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">去生成数据</a>
   </div>
 {% else %}
   <div class="mb-4 flex items-center gap-2 text-xs text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">

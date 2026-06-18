@@ -22,7 +22,7 @@
 <section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4">
   <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
     <div class="flex flex-wrap items-center gap-2 mb-4">
-      <h2 class="font-bold mr-auto">ETL候选确认</h2>
+      <h2 class="font-bold mr-auto">候选确认</h2>
       <span id="overlay-source" class="rt-pill">--</span>
       <span id="overlay-updated" class="text-xs text-slate-500 mono">--</span>
     </div>
@@ -186,7 +186,7 @@
     }
   }
 
-  async function loadOverlay() {
+  async function loadCandidateConfirm() {
     els.overlayCards.innerHTML = '<div class="text-sm text-slate-500 py-10 text-center lg:col-span-2">加载中...</div>';
     els.overlayEmpty.classList.add('hidden');
     try {
@@ -261,7 +261,7 @@
     els.refreshAll.disabled = true;
     els.refreshSpin.classList.remove('hidden');
     try {
-      await Promise.all([loadHealth(), loadOverlay(), loadSectors()]);
+      await Promise.all([loadHealth(), loadCandidateConfirm(), loadSectors()]);
       toast('已刷新', true);
     } finally {
       els.refreshSpin.classList.add('hidden');

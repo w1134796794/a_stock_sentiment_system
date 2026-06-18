@@ -42,7 +42,7 @@
         </a>
         <a class="nav-link" href="/report" data-prefix="/report">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V9m4 8V5m4 12v-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-          <span>ETL计划</span>
+          <span>交易计划</span>
         </a>
 
         <div class="nav-group">数据浏览</div>
@@ -52,21 +52,15 @@
         </a>
         <a class="nav-link" href="/data/sector" data-prefix="/data/sector">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>
-          <span>Gold板块</span>
+          <span>板块热度</span>
         </a>
         <a class="nav-link" href="/data/limitup" data-prefix="/data/limitup">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>
           <span>涨停数据</span>
         </a>
-        {# 菜单隐藏（路由保留，可直接访问 /data/capital）
-        <a class="nav-link" href="/data/capital" data-prefix="/data/capital">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5a2.5 2.5 0 00-2.5-1.5c-1.4 0-2.5.8-2.5 2s1.1 1.8 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2a2.5 2.5 0 01-2.5-1.5M12 6.5v11"/></svg>
-          <span>龙虎榜资金</span>
-        </a>
-        #}
         <a class="nav-link" href="/data/review" data-prefix="/data/review">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6a1 1 0 011 1v1h-8V4a1 1 0 011-1z"/><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 11h8M8 15h5"/></svg>
-          <span>ETL产物</span>
+          <span>数据产物</span>
         </a>
         <a class="nav-link" href="/dragon" data-prefix="/dragon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/></svg>
@@ -80,17 +74,6 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-6 4 12 2-6h6"/><circle cx="5" cy="19" r="1"/><circle cx="12" cy="19" r="1"/><circle cx="19" cy="19" r="1"/></svg>
           <span>实时行情</span>
         </a>
-        {# 菜单隐藏（路由保留，可直接访问 /recap、/m）
-        <a class="nav-link" href="/recap" data-prefix="/recap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><polygon points="10 8 16 10.5 10 13 10 8" fill="currentColor" stroke="none"/><path d="M8 21h8"/></svg>
-          <span>复盘</span>
-        </a>
-        <a class="nav-link" href="/m" data-prefix="/m">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
-          <span>手机版</span>
-        </a>
-        #}
-
         <div class="nav-group">回测</div>
         <a class="nav-link" href="/backtest" data-prefix="/backtest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M19 9l-5 5-3-3-4 4"/></svg>
@@ -101,18 +84,10 @@
           <span>回撤分析</span>
         </a>
 
-        {# 菜单隐藏（路由保留，可直接访问 /ask）
-        <div class="nav-group">智能问答</div>
-        <a class="nav-link" href="/ask" data-prefix="/ask">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg>
-          <span>问 AI</span>
-        </a>
-        #}
-
         <div class="nav-group">系统</div>
         <a class="nav-link" href="/run" data-prefix="/run">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
-          <span>运行ETL</span>
+          <span>生成数据</span>
         </a>
         <a class="nav-link" href="/config" data-prefix="/config">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-2.92.67 1.65 1.65 0 01-3.16 0 1.65 1.65 0 00-2.92-.67l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -120,7 +95,7 @@
         </a>
         <a class="nav-link" href="/factors" data-prefix="/factors">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><circle cx="4" cy="12" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="14" r="2"/></svg>
-          <span>因子面板</span>
+          <span>指标因子</span>
         </a>
         <a class="nav-link" href="/logs" data-prefix="/logs">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}概览 · 管理控制台{% endblock %}
 {% block page_title %}概览{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">ETL产物 · 指标仓库 · 快速操作</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">数据产物 · 指标仓库 · 快速操作</div>{% endblock %}
 
 {% block content %}
 {% set ov = ov %}
@@ -51,7 +51,7 @@
 {# ===== 各指数涨跌幅（红涨绿跌） ===== #}
 {% if mk.indices %}
 {% if mk.index_stale %}
-<div class="text-[12px] text-amber-400 mb-2">⚠ 指数数据为 {{ mk.index_date }}（当日指数日线尚未入库），请稍后重跑ETL刷新</div>
+<div class="text-[12px] text-amber-400 mb-2">⚠ 指数数据为 {{ mk.index_date }}（当日指数日线尚未入库），请稍后重新生成数据</div>
 {% endif %}
 <section class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
   {% for ix in mk.indices %}
@@ -155,15 +155,15 @@
     <div class="text-[11px] text-slate-500 mt-1">待转强观察</div>
   </a>
 </section>
-<div class="text-sm text-slate-400 mb-6">暂无最新快照的大盘数据，请先运行ETL。</div>
+<div class="text-sm text-slate-400 mb-6">暂无最新快照的大盘数据，请先生成数据。</div>
 {% endif %}
 
 {# ===== 快速操作 ===== #}
 <section>
   <h2 class="text-base font-bold mb-3">快速操作</h2>
   <div class="flex flex-wrap gap-3">
-    <a href="/run" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">运行ETL</a>
-    <a href="/report" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">查看ETL计划</a>
+    <a href="/run" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">生成数据</a>
+    <a href="/report" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">查看交易计划</a>
     <a href="/data/strategy" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">指标筛选</a>
     <a href="/realtime" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">实时确认</a>
     <a href="/config" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">参数配置</a>
