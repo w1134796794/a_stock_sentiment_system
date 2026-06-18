@@ -8,6 +8,9 @@ FastAPI 应用 —— ETL 指标体系看板 + 数据浏览（只读）。
 """
 from __future__ import annotations
 
+import csv
+from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -18,7 +21,16 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config.settings import SNAPSHOT_DIR, KB_DB_PATH, APP_DB_PATH, WINRATE_PATH, TUSHARE_TOKEN, CACHE_DIR
+from config.settings import (
+    SNAPSHOT_DIR,
+    KB_DB_PATH,
+    APP_DB_PATH,
+    WINRATE_PATH,
+    TUSHARE_TOKEN,
+    CACHE_DIR,
+    WEB_DATA_DIR,
+    FACTOR_DB_PATH,
+)
 from snapshot.reader import SnapshotReader
 
 BASE = Path(__file__).parent
@@ -86,6 +98,9 @@ COLUMN_LABELS: Dict[str, str] = {
     "pct_change": "涨跌幅",
     "limit_up_count": "涨停家数",
     "limit_cons_count": "连板数",
+    "sector_code": "板块代码",
+    "sector_name": "板块名称",
+    "sector_type": "板块类型",
     "member_count": "成分股数",
     "amount": "成交额",
     "avg_amount": "平均成交额",
@@ -94,6 +109,16 @@ COLUMN_LABELS: Dict[str, str] = {
     "momentum_score": "动量评分",
     "price_score": "价格评分",
     "amount_score": "成交额评分",
+    "amount_ratio_score": "量能评分",
+    "persistence_score": "持续性评分",
+    "mainline_score": "主线评分",
+    "theme_score": "主线主题评分",
+    "current_score": "当日主线评分",
+    "hot_days_10": "近10日红盘天数",
+    "strong_days_10": "近10日强势天数",
+    "top50_days_10": "近10日上榜天数",
+    "cum_pct_10": "近10日累计涨幅%",
+    "avg_pct_5": "5日均涨幅%",
     "limit_score": "涨停评分",
     "amount_rank": "成交额排名",
     "limit_cpt_rank": "涨停概念排名",
@@ -139,6 +164,594 @@ def _col_label(col: Any) -> str:
 
 
 templates.env.filters["col_label"] = _col_label
+
+
+def _sector_type_label(value: Any) -> str:
+    text = str(value or "").strip()
+    return {
+        "N": "概念",
+        "I": "行业",
+        "R": "地域",
+        "S": "特色",
+    }.get(text, text)
+
+
+@lru_cache(maxsize=1)
+def _sector_meta_map() -> Dict[str, Dict[str, str]]:
+    """Local THS sector code map used to backfill ETL snapshots."""
+    mapping: Dict[str, Dict[str, str]] = {}
+    base = Path(CACHE_DIR) / "sector" / "ths_index"
+    for name in ("index_all.csv", "index_N.csv", "index_I.csv", "adata_concept_ths.csv"):
+        path = base / name
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as f:
+                for row in csv.DictReader(f):
+                    code = str(
+                        row.get("ts_code")
+                        or row.get("sector_code")
+                        or row.get("index_code")
+                        or row.get("concept_code")
+                        or row.get("code")
+                        or ""
+                    ).strip()
+                    if not code:
+                        continue
+                    label = str(row.get("name") or row.get("sector_name") or row.get("index_name") or "").strip()
+                    typ = _sector_type_label(row.get("type") or row.get("sector_type") or row.get("板块类型") or "")
+                    if name == "adata_concept_ths.csv" and not typ:
+                        typ = "概念"
+                    for key in _sector_code_keys(code):
+                        current = mapping.setdefault(key, {"name": "", "type": ""})
+                        if label and not current.get("name"):
+                            current["name"] = label
+                        if typ and not current.get("type"):
+                            current["type"] = typ
+        except Exception:
+            continue
+    return mapping
+
+
+def _sector_code_keys(code: str) -> List[str]:
+    code = str(code or "").strip()
+    if not code:
+        return []
+    keys = [code]
+    if "." not in code and code.isdigit():
+        keys.append(f"{code}.TI")
+    return keys
+
+
+@lru_cache(maxsize=1)
+def _stock_concept_map() -> Dict[str, List[str]]:
+    """Stock code -> THS concept names, sourced from local cached concept members."""
+    mapping: Dict[str, List[str]] = {}
+    base = Path(CACHE_DIR) / "concept" / "members"
+    try:
+        files = sorted(base.glob("all_*.csv"), key=lambda p: (p.name, p.stat().st_mtime), reverse=True)
+    except Exception:
+        files = []
+    if not files:
+        return mapping
+    try:
+        with files[0].open("r", encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                code = _normalize_stock_code(
+                    str(row.get("con_code") or row.get("stock_code") or row.get("ts_code") or "")
+                )
+                concept = str(row.get("concept_name") or row.get("concept") or row.get("板块名称") or "").strip()
+                if not code or not concept:
+                    continue
+                bucket = mapping.setdefault(code, [])
+                if concept not in bucket:
+                    bucket.append(concept)
+    except Exception:
+        return mapping
+    return mapping
+
+
+def _enrich_sector_rows(rows: List[Dict[str, Any]]) -> None:
+    mapping = _sector_meta_map()
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("sector_code") or row.get("板块代码") or row.get("ts_code") or "").strip()
+        meta = mapping.get(code) or {}
+        if not str(row.get("sector_name") or row.get("板块名称") or "").strip():
+            row["sector_name"] = meta.get("name") or code
+        if not str(row.get("sector_type") or row.get("板块类型") or "").strip():
+            row["sector_type"] = meta.get("type") or ""
+
+
+def _allowed_hot_sector(row: Dict[str, Any]) -> bool:
+    code = str(row.get("sector_code") or row.get("板块代码") or row.get("ts_code") or "").strip()
+    name = str(row.get("sector_name") or row.get("板块名称") or "").strip()
+    typ = _sector_type_label(row.get("sector_type") or row.get("板块类型") or "")
+    return bool(name and name != code and typ in {"概念", "行业"})
+
+
+def _score_between(value: Any, low: float, high: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if high <= low:
+        return 0.0
+    return max(0.0, min(100.0, (v - low) / (high - low) * 100.0))
+
+
+def _factor_sector_rows(date: str, limit: int = 20) -> List[Dict[str, Any]]:
+    fetch_limit = max(int(limit) * 80, 1000)
+    try:
+        import duckdb  # type: ignore
+
+        if not Path(FACTOR_DB_PATH).exists():
+            return []
+        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+            exists = con.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_sector_wide'"
+            ).fetchone()[0]
+            if not exists:
+                return []
+            df = con.execute(
+                """
+                SELECT *
+                FROM factor_sector_wide
+                WHERE trade_date = ?
+                ORDER BY rank ASC, mainline_score DESC
+                LIMIT ?
+                """,
+                [str(date), fetch_limit],
+            ).fetchdf()
+    except Exception:
+        return []
+    rows = df.to_dict(orient="records") if df is not None and not df.empty else []
+    _enrich_sector_rows(rows)
+    named = [row for row in rows if _allowed_hot_sector(row)]
+    selected = (named or rows)[: int(limit)]
+    for i, row in enumerate(selected, start=1):
+        row["rank"] = i
+    return selected
+
+
+def _mainline_theme_rows(date: str, limit: int = 10, lookback: int = 10) -> List[Dict[str, Any]]:
+    """主线主题不是当日热点复用：用近N日持续活跃 + 当日确认重新评分。"""
+    try:
+        import duckdb  # type: ignore
+
+        if not Path(FACTOR_DB_PATH).exists():
+            return []
+        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+            exists = con.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_sector_wide'"
+            ).fetchone()[0]
+            daily_exists = con.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'sector_daily_silver'"
+            ).fetchone()[0]
+            if not exists or not daily_exists:
+                return []
+            dates = [
+                str(x[0]) for x in con.execute(
+                    """
+                    SELECT DISTINCT trade_date
+                    FROM sector_daily_silver
+                    WHERE trade_date <= ?
+                    ORDER BY trade_date DESC
+                    LIMIT ?
+                    """,
+                    [str(date), int(lookback)],
+                ).fetchall()
+            ]
+            if not dates:
+                return []
+            current_df = con.execute(
+                """
+                SELECT *
+                FROM factor_sector_wide
+                WHERE trade_date = ?
+                """,
+                [str(date)],
+            ).fetchdf()
+            hist_df = con.execute(
+                """
+                SELECT trade_date, sector_code, sector_name, sector_type, pct_chg, amount_yuan
+                FROM sector_daily_silver
+                WHERE trade_date IN (
+                    SELECT DISTINCT trade_date
+                    FROM sector_daily_silver
+                    WHERE trade_date <= ?
+                    ORDER BY trade_date DESC
+                    LIMIT ?
+                )
+                """,
+                [str(date), int(lookback)],
+            ).fetchdf()
+    except Exception:
+        return []
+
+    if current_df is None or current_df.empty or hist_df is None or hist_df.empty:
+        return []
+
+    current_rows = current_df.to_dict(orient="records")
+    hist_rows = hist_df.to_dict(orient="records")
+    _enrich_sector_rows(current_rows)
+    _enrich_sector_rows(hist_rows)
+
+    import pandas as pd  # type: ignore
+
+    current = pd.DataFrame([row for row in current_rows if _allowed_hot_sector(row)])
+    hist = pd.DataFrame([row for row in hist_rows if _allowed_hot_sector(row)])
+    if current.empty or hist.empty:
+        return []
+
+    for col in ("pct_chg", "amount_yuan"):
+        hist[col] = pd.to_numeric(hist.get(col), errors="coerce").fillna(0.0)
+    for col in ("mainline_score", "momentum_score", "amount_score", "amount_ratio_score", "persistence_score"):
+        current[col] = pd.to_numeric(current.get(col), errors="coerce").fillna(0.0)
+
+    hist["daily_momentum_score"] = hist["pct_chg"].map(lambda v: _score_between(v, -5.0, 8.0))
+    hist["daily_amount_score"] = hist.groupby("trade_date")["amount_yuan"].rank(pct=True).fillna(0.0) * 100.0
+    hist["daily_heat_score"] = hist["daily_momentum_score"] * 0.65 + hist["daily_amount_score"] * 0.35
+    hist["daily_heat_rank"] = hist.groupby("trade_date")["daily_heat_score"].rank(method="dense", ascending=False)
+
+    rows: List[Dict[str, Any]] = []
+    for _, cur in current.iterrows():
+        code = str(cur.get("sector_code") or "")
+        name = str(cur.get("sector_name") or "")
+        h = hist[hist["sector_code"].astype(str) == code].sort_values("trade_date")
+        if h.empty:
+            continue
+        recent = h.tail(int(lookback))
+        current_score = float(cur.get("mainline_score") or 0.0)
+        persistence_score = float(cur.get("persistence_score") or 0.0)
+        amount_ratio_score = float(cur.get("amount_ratio_score") or 0.0)
+        hot_days = int((recent["pct_chg"] > 0).sum())
+        strong_days = int((recent["pct_chg"] >= 1.5).sum())
+        top50_days = int((recent["daily_heat_rank"] <= 50).sum())
+        cum_pct = float(recent["pct_chg"].sum())
+        avg_pct_5 = float(recent.tail(5)["pct_chg"].mean()) if not recent.tail(5).empty else 0.0
+
+        continuity_score = min(100.0, top50_days / 3.0 * 100.0)
+        hot_score = min(100.0, hot_days / 6.0 * 100.0)
+        strength_score = min(100.0, strong_days / 3.0 * 100.0)
+        trend_score = _score_between(cum_pct, -5.0, 15.0)
+        theme_score = (
+            current_score * 0.25
+            + persistence_score * 0.25
+            + continuity_score * 0.20
+            + trend_score * 0.15
+            + amount_ratio_score * 0.10
+            + strength_score * 0.05
+        )
+
+        # 主线至少需要“持续证据”或“多日红盘”，不能只因当日排名靠前入选。
+        if not (top50_days >= 2 or hot_days >= 5 or persistence_score >= 75.0):
+            continue
+        if current_score < 45.0:
+            continue
+
+        rows.append({
+            "板块名称": name,
+            "板块代码": code,
+            "板块类型": _sector_type_label(cur.get("sector_type") or ""),
+            "主线主题评分": round(theme_score, 2),
+            "当日主线评分": round(current_score, 2),
+            "近10日上榜天数": top50_days,
+            "近10日红盘天数": hot_days,
+            "近10日强势天数": strong_days,
+            "近10日累计涨幅%": round(cum_pct, 2),
+            "5日均涨幅%": round(avg_pct_5, 2),
+            "量能评分": round(amount_ratio_score, 2),
+            "持续性评分": round(persistence_score, 2),
+        })
+
+    rows.sort(key=lambda x: (float(x.get("主线主题评分") or 0), int(x.get("近10日上榜天数") or 0)), reverse=True)
+    selected = rows[: int(limit)]
+    for i, row in enumerate(selected, start=1):
+        row["排名"] = i
+    return selected
+
+
+def _limit_up_threshold(code: Any, name: Any = "") -> float:
+    code6 = _normalize_stock_code(str(code or ""))
+    label = str(name or "")
+    if "ST" in label.upper():
+        return 4.8
+    if code6.startswith(("300", "301", "688", "689")):
+        return 19.5
+    if code6.startswith(("8", "4", "920")):
+        return 29.5
+    return 9.5
+
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_board_time(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.split(".")[0]
+    if not text.isdigit() or int(text or "0") <= 0:
+        return ""
+    text = text.zfill(6)[-6:]
+    return f"{text[:2]}:{text[2:4]}:{text[4:6]}"
+
+
+def _build_limitup_section_from_cache(date: str) -> Optional[Dict[str, Any]]:
+    path = Path(CACHE_DIR) / "summary" / "limit_up_stocks.csv"
+    if not path.exists():
+        return None
+    concept_map = _stock_concept_map()
+    rows: List[Dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            for raw in csv.DictReader(f):
+                if str(raw.get("trade_date") or "").strip() != str(date):
+                    continue
+                ts_code = str(raw.get("代码") or "").strip()
+                code6 = _normalize_stock_code(ts_code)
+                concepts = concept_map.get(code6) or []
+                concept_label = " / ".join(concepts[:2])
+                amount_yuan = _to_float(raw.get("成交额"))
+                rows.append({
+                    "行业": str(raw.get("所属行业") or ""),
+                    "概念": concept_label,
+                    "股票代码": ts_code or code6,
+                    "股票名称": str(raw.get("名称") or ""),
+                    "连板数": int(_to_float(raw.get("连板数"), 1.0) or 1),
+                    "涨幅%": round(_to_float(raw.get("涨跌幅")), 2),
+                    "最新价": round(_to_float(raw.get("最新价")), 2),
+                    "成交额(亿)": round(amount_yuan / 1e8, 2) if amount_yuan else None,
+                    "首次涨停时间": _format_board_time(raw.get("首次封板时间")),
+                    "炸板次数": int(_to_float(raw.get("炸板次数"))),
+                    "_concepts": concepts[:5],
+                })
+    except Exception:
+        return None
+    if not rows:
+        return None
+    rows.sort(
+        key=lambda x: (
+            int(x.get("连板数") or 0),
+            -int(str(x.get("首次涨停时间") or "99:99:99").replace(":", "") or 999999),
+            float(x.get("涨幅%") or 0),
+            float(x.get("成交额(亿)") or 0),
+        ),
+        reverse=True,
+    )
+    return {
+        "name": "涨停梯队",
+        "kind": "table",
+        "columns": ["行业", "概念", "股票代码", "股票名称", "连板数", "涨幅%", "最新价", "成交额(亿)", "首次涨停时间", "炸板次数"],
+        "rows": rows,
+        "summary": "由本地 limit_up_stocks.csv 涨停明细缓存生成，包含连板数、封板时间、炸板次数和行业归属。",
+    }
+
+
+def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
+    cached = _build_limitup_section_from_cache(date)
+    if cached:
+        return cached
+
+    try:
+        import duckdb  # type: ignore
+
+        if not Path(FACTOR_DB_PATH).exists():
+            return None
+        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+            exists = con.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'stock_daily_silver'"
+            ).fetchone()[0]
+            if not exists:
+                return None
+            df = con.execute(
+                """
+                SELECT trade_date, code, ts_code, name, close, pct_chg, amount_yuan
+                FROM stock_daily_silver
+                WHERE trade_date <= ?
+                ORDER BY code, trade_date
+                """,
+                [str(date)],
+            ).fetchdf()
+    except Exception:
+        return None
+
+    if df is None or df.empty:
+        return None
+    df["trade_date"] = df["trade_date"].astype(str)
+    df["pct_chg"] = df["pct_chg"].fillna(0).astype(float)
+    df["is_limit_up"] = df.apply(
+        lambda r: float(r["pct_chg"]) >= _limit_up_threshold(r.get("code"), r.get("name")),
+        axis=1,
+    )
+    today = df[(df["trade_date"] == str(date)) & (df["is_limit_up"])].copy()
+    if today.empty:
+        return None
+
+    concept_map = _stock_concept_map()
+    board_count: Dict[str, int] = {}
+    for code, group in df.groupby("code", sort=False):
+        group = group.sort_values("trade_date")
+        if str(group.iloc[-1].get("trade_date")) != str(date) or not bool(group.iloc[-1].get("is_limit_up")):
+            continue
+        count = 0
+        for ok in reversed(group["is_limit_up"].tolist()):
+            if ok:
+                count += 1
+            else:
+                break
+        board_count[str(code)] = max(count, 1)
+
+    rows: List[Dict[str, Any]] = []
+    for _, r in today.iterrows():
+        amount_yuan = float(r.get("amount_yuan") or 0)
+        code = str(r.get("code") or "")
+        concepts = concept_map.get(_normalize_stock_code(code)) or []
+        concept_label = " / ".join(concepts[:2])
+        rows.append({
+            "行业": concept_label,
+            "概念": concept_label,
+            "股票代码": code,
+            "股票名称": str(r.get("name") or ""),
+            "连板数": int(board_count.get(code, 1)),
+            "涨幅%": round(float(r.get("pct_chg") or 0), 2),
+            "最新价": round(float(r.get("close") or 0), 2),
+            "成交额(亿)": round(amount_yuan / 1e8, 2) if amount_yuan else None,
+            "首次涨停时间": "",
+            "炸板次数": 0,
+            "_concepts": concepts[:5],
+        })
+    rows.sort(key=lambda x: (x.get("连板数") or 0, x.get("涨幅%") or 0, x.get("成交额(亿)") or 0), reverse=True)
+    return {
+        "name": "涨停梯队",
+        "kind": "table",
+        "columns": ["行业", "概念", "股票代码", "股票名称", "连板数", "涨幅%", "最新价", "成交额(亿)", "首次涨停时间", "炸板次数"],
+        "rows": rows,
+        "summary": "由 stock_daily_silver 按涨停阈值合成，并用本地 THS 概念成员表补充概念归属。",
+    }
+
+
+def _build_concept_echelon_section(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows or []:
+        concepts = row.get("_concepts") or []
+        if not concepts and row.get("概念"):
+            concepts = [x.strip() for x in str(row.get("概念")).split("/") if x.strip()]
+        for concept in list(concepts)[:3]:
+            groups.setdefault(str(concept), []).append(row)
+    if not groups:
+        return None
+
+    concept_rows: List[Dict[str, Any]] = []
+    for concept, stocks in groups.items():
+        if not stocks:
+            continue
+        boards = [int(s.get("连板数") or 1) for s in stocks]
+        counter = Counter(boards)
+        leaders = sorted(
+            stocks,
+            key=lambda x: (int(x.get("连板数") or 1), float(x.get("涨幅%") or 0), float(x.get("成交额(亿)") or 0)),
+            reverse=True,
+        )
+        lead = leaders[0]
+        dist = [f"{level}板{counter[level]}" for level in sorted(counter.keys(), reverse=True)]
+        representatives = "、".join(str(s.get("股票名称") or "") for s in leaders[:5] if s.get("股票名称"))
+        concept_rows.append({
+            "概念名称": concept,
+            "涨停总数": len(stocks),
+            "最高连板": max(boards) if boards else 0,
+            "梯队分布": ", ".join(dist),
+            "龙头股": f"{lead.get('股票名称') or ''} {int(lead.get('连板数') or 1)}板".strip(),
+            "代表个股": representatives,
+        })
+    if not concept_rows:
+        return None
+    filtered = [r for r in concept_rows if int(r.get("涨停总数") or 0) >= 2]
+    concept_rows = filtered or concept_rows
+    concept_rows.sort(key=lambda x: (int(x.get("最高连板") or 0), int(x.get("涨停总数") or 0), str(x.get("概念名称") or "")), reverse=True)
+    return {
+        "name": "概念连板梯队",
+        "kind": "table",
+        "columns": ["概念名称", "涨停总数", "最高连板", "梯队分布", "龙头股", "代表个股"],
+        "rows": concept_rows[:80],
+        "summary": "按涨停股所属概念聚合，展示概念内最高连板、涨停总数和梯队分布。",
+    }
+
+
+def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[str, Any]]:
+    prepared = [dict(s) for s in sections or []]
+
+    hotspot_rows = _factor_sector_rows(date, limit=20)
+    mainline_rows = _mainline_theme_rows(date, limit=20)
+    if hotspot_rows or mainline_rows:
+        sector_columns = [
+            "sector_name", "sector_code", "sector_type",
+            "mainline_score", "rank", "momentum_score", "amount_score",
+            "amount_ratio_score", "persistence_score", "trade_date", "computed_at",
+        ]
+        mainline_columns = [
+            "板块名称", "板块代码", "板块类型", "主线主题评分", "排名",
+            "当日主线评分", "近10日上榜天数", "近10日红盘天数", "近10日强势天数",
+            "近10日累计涨幅%", "5日均涨幅%", "量能评分", "持续性评分",
+        ]
+        found_hot = False
+        found_mainline = False
+        for section in prepared:
+            if section.get("name") == "热点概念" and hotspot_rows:
+                section["columns"] = [c for c in sector_columns if c in hotspot_rows[0]]
+                section["rows"] = hotspot_rows[:10]
+                section["summary"] = "当日概念/行业板块强度排名；仅保留概念和行业板块。"
+                found_hot = True
+            elif section.get("name") == "主线主题" and mainline_rows:
+                section["columns"] = [c for c in mainline_columns if c in mainline_rows[0]]
+                section["rows"] = mainline_rows[:10]
+                section["summary"] = "近10日持续活跃 + 当日确认重新计算；不是当日热点的简单复用。"
+                found_mainline = True
+        if hotspot_rows and not found_hot:
+            prepared.insert(0, {
+                "name": "热点概念",
+                "kind": "table",
+                "columns": [c for c in sector_columns if c in hotspot_rows[0]],
+                "rows": hotspot_rows[:10],
+                "summary": "当日概念/行业板块强度排名；仅保留概念和行业板块。",
+            })
+        if mainline_rows and not found_mainline:
+            insert_at = 1 if hotspot_rows else 0
+            prepared.insert(insert_at, {
+                "name": "主线主题",
+                "kind": "table",
+                "columns": [c for c in mainline_columns if c in mainline_rows[0]],
+                "rows": mainline_rows[:10],
+                "summary": "近10日持续活跃 + 当日确认重新计算；不是当日热点的简单复用。",
+            })
+    else:
+        for section in prepared:
+            if section.get("name") in ("热点概念", "热点行业", "主线主题"):
+                _enrich_sector_rows(section.get("rows") or [])
+
+    limit_section = _build_limitup_section(date)
+    if limit_section and limit_section.get("rows"):
+        replaced = False
+        for i, section in enumerate(prepared):
+            if section.get("name") == "涨停梯队":
+                if not section.get("rows"):
+                    prepared[i] = limit_section
+                replaced = True
+                break
+        if not replaced:
+            insert_at = len(prepared)
+            for i, section in enumerate(prepared):
+                if section.get("name") in ("主线主题", "热点行业", "热点概念"):
+                    insert_at = i + 1
+            prepared.insert(insert_at, limit_section)
+        concept_section = _build_concept_echelon_section(limit_section.get("rows") or [])
+        if concept_section and concept_section.get("rows"):
+            concept_replaced = False
+            for i, section in enumerate(prepared):
+                if section.get("name") == "概念连板梯队":
+                    prepared[i] = concept_section
+                    concept_replaced = True
+                    break
+            if not concept_replaced:
+                insert_at = len(prepared)
+                for i, section in enumerate(prepared):
+                    if section.get("name") == "涨停梯队":
+                        insert_at = i + 1
+                        break
+                prepared.insert(insert_at, concept_section)
+    return prepared
+
+
+def _prepare_snapshot(snapshot: Optional[Dict[str, Any]], date: str) -> Optional[Dict[str, Any]]:
+    if snapshot is None:
+        return None
+    prepared = dict(snapshot)
+    prepared["sections"] = _prepare_sections((snapshot or {}).get("sections", []), date)
+    return prepared
 
 # ----------------------------------------------------------------------
 # 数据浏览分类：ETL 主路径优先展示 Gold/Screening 结果。
@@ -329,6 +942,7 @@ def report(request: Request, date: str) -> Any:
             {"snapshot": None, "date": date, "dates": dates},
             status_code=404,
         )
+    snapshot = _prepare_snapshot(snapshot, date)
     market = snapshot.get("market", {}) or {}
     return templates.TemplateResponse(
         request,
@@ -425,12 +1039,81 @@ def _get_realtime_sector_service():
     return _REALTIME_SECTOR_SERVICE
 
 
+def _add_stock_name(mapping: Dict[str, str], code: Any, name: Any) -> None:
+    try:
+        code6 = _normalize_stock_code(str(code or ""))
+    except Exception:
+        code6 = ""
+    label = str(name or "").strip()
+    if code6 and label and not mapping.get(code6):
+        mapping[code6] = label
+
+
+def _stock_name_map(snapshot: Optional[Dict], date: Optional[str] = None) -> Dict[str, str]:
+    """Build a best-effort stock name map from local ETL/snapshot artifacts."""
+    mapping: Dict[str, str] = {}
+
+    def scan_row(row: Dict[str, Any]) -> None:
+        _add_stock_name(
+            mapping,
+            row.get("股票代码") or row.get("stock_code") or row.get("code") or row.get("代码") or row.get("ts_code"),
+            row.get("股票名称") or row.get("stock_name") or row.get("name") or row.get("名称"),
+        )
+
+    for row in ((snapshot or {}).get("trade_plans") or {}).get("rows", []) or []:
+        if isinstance(row, dict):
+            scan_row(row)
+    for section in (snapshot or {}).get("sections", []) or []:
+        for row in section.get("rows") or []:
+            if isinstance(row, dict):
+                scan_row(row)
+    for row in (((snapshot or {}).get("etl") or {}).get("screening") or {}).get("final", []) or []:
+        if isinstance(row, dict):
+            scan_row(row)
+
+    target = str(date or ((snapshot or {}).get("meta") or {}).get("date") or "")
+    if target:
+        screening_path = Path(WEB_DATA_DIR) / "screening" / f"screening_{target}.json"
+        try:
+            data = json.loads(screening_path.read_text(encoding="utf-8"))
+            for row in data.get("final") or []:
+                if isinstance(row, dict):
+                    scan_row(row)
+        except Exception:
+            pass
+
+        limit_up_path = Path(CACHE_DIR) / "market" / "limit_up" / f"{target}.csv"
+        try:
+            with limit_up_path.open("r", encoding="utf-8-sig", newline="") as f:
+                for row in csv.DictReader(f):
+                    scan_row(row)
+        except Exception:
+            pass
+
+    return mapping
+
+
+def _enrich_stock_names(rows: List[Dict[str, Any]], snapshot: Optional[Dict], date: Optional[str]) -> None:
+    mapping = _stock_name_map(snapshot, date)
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        code = _normalize_stock_code(row.get("code") or row.get("stock_code") or row.get("股票代码") or "")
+        if not code:
+            continue
+        if not str(row.get("name") or row.get("股票名称") or "").strip():
+            row["name"] = mapping.get(code) or code
+        row.setdefault("display_name", row.get("name") or mapping.get(code) or code)
+
+
 @app.get("/api/realtime/quote/{code}")
 def api_realtime_quote(code: str, include_raw: bool = False) -> Any:
     service = _get_realtime_quote_service()
     quote = service.get_quote(code, include_raw=include_raw)
     if not quote:
         return JSONResponse({"ok": False, "message": "未获取到实时行情", "quote": {}}, status_code=502)
+    latest = reader.latest()
+    _enrich_stock_names([quote], reader.load(latest) if latest else None, latest)
     return JSONResponse({"ok": True, "quote": quote})
 
 
@@ -444,7 +1127,10 @@ def api_realtime_quotes(
     if not code_list:
         return JSONResponse({"ok": False, "message": "codes 参数不能为空", "quotes": []}, status_code=400)
     service = _get_realtime_quote_service(stale_after_seconds=stale_after_seconds)
-    return JSONResponse(service.get_quotes(code_list, include_raw=include_raw))
+    payload = service.get_quotes(code_list, include_raw=include_raw)
+    latest = reader.latest()
+    _enrich_stock_names(payload.get("quotes") or [], reader.load(latest) if latest else None, latest)
+    return JSONResponse(payload)
 
 
 @app.get("/api/realtime/sectors")
@@ -504,14 +1190,15 @@ def api_realtime_overlay(
     service = RealtimeOverlayService(
         quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
     )
-    return JSONResponse(
-        service.build_overlay(
-            trade_date,
-            profile=profile,
-            limit=max(1, min(int(limit or 20), 100)),
-            persist=bool(persist),
-        )
+    payload = service.build_overlay(
+        trade_date,
+        profile=profile,
+        limit=max(1, min(int(limit or 20), 100)),
+        persist=bool(persist),
     )
+    snapshot = reader.load(trade_date) if trade_date else None
+    _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    return JSONResponse(payload)
 
 
 @app.get("/api/etl/screening/{date}")
@@ -714,7 +1401,7 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
     category = _CATEGORY_BY_KEY.get(cat)
     if category is None:
         return HTMLResponse('<div class="p-6 text-slate-400">无此分类</div>', status_code=404)
-    snapshot = reader.load(date)
+    snapshot = _prepare_snapshot(reader.load(date), date)
     return templates.TemplateResponse(
         request,
         "data_browse.html",
@@ -760,7 +1447,7 @@ def mobile_data_browse(request: Request, cat: str, date: str) -> Any:
     category = _CATEGORY_BY_KEY.get(cat)
     if category is None:
         return HTMLResponse('<div class="p-6 text-slate-400">无此分类</div>', status_code=404)
-    snapshot = reader.load(date)
+    snapshot = _prepare_snapshot(reader.load(date), date)
     return templates.TemplateResponse(
         request,
         "mobile/data_browse.html",
@@ -910,7 +1597,7 @@ def section_fragment(request: Request, date: str, idx: int, view: str = "table")
     view=detail → 折叠主从卡片（紧凑列表 + 点击展开全字段，避免横向滚动），
     用于字段很多的指标筛选 / Gold板块；其余分类默认 view=table 宽表。
     """
-    snapshot = reader.load(date)
+    snapshot = _prepare_snapshot(reader.load(date), date)
     sections: List[Dict] = (snapshot or {}).get("sections", [])
     if not snapshot or idx < 0 or idx >= len(sections):
         return HTMLResponse('<div class="p-6 text-slate-400">无此数据</div>', status_code=404)
@@ -941,7 +1628,7 @@ def api_winrate() -> Any:
 
 @app.get("/api/snapshot/{date}")
 def api_snapshot(date: str) -> Any:
-    snapshot = reader.load(date)
+    snapshot = _prepare_snapshot(reader.load(date), date)
     if snapshot is None:
         return JSONResponse({"error": "not found", "date": date}, status_code=404)
     return JSONResponse(snapshot)

@@ -59,6 +59,7 @@ class DataPrep:
               prefetch_limit_up: bool = True,
               limit_up_history_days: int = 16,
               prefetch_all_daily: bool = True,
+              prefetch_universe_daily: bool = True,
               prefetch_auction: bool = False,
               prefetch_sectors: bool = True,
               sector_history_days: int = 10,
@@ -96,6 +97,7 @@ class DataPrep:
             # all_daily / limit_up / 板块列表 / daily_basic 不依赖 universe，先做（即使 universe 为空也有价值）
             if prefetch_all_daily:
                 self._prefetch_all_daily(ds, trade_date)
+            self._prefetch_stock_basic(ds)
             self._prefetch_daily_basic(ds, trade_date)
             if prefetch_limit_up:
                 self._prefetch_limit_up(ds, trade_date, limit_up_history_days)
@@ -116,7 +118,10 @@ class DataPrep:
                 logger.info(f"[DataPrep] {ds.summary()}")
                 return ds
 
-            self._prefetch_daily(ds, universe, trade_date, daily_lookback_calendar_days)
+            if prefetch_universe_daily:
+                self._prefetch_daily(ds, universe, trade_date, daily_lookback_calendar_days)
+            else:
+                logger.info("[DataPrep] ETL主路径跳过逐股历史日线批量获取，使用 all_daily/silver 因子主表")
             if prefetch_auction:
                 self._prefetch_auction(ds, universe, trade_date)
 
@@ -220,6 +225,18 @@ class DataPrep:
                 logger.info(f"[DataPrep] daily_basic 预取：{len(df)} 行 @ {trade_date}")
         except Exception as e:
             logger.warning(f"[DataPrep] daily_basic 预取失败（将回退 dm）：{e}")
+
+    def _prefetch_stock_basic(self, ds: MarketDataset) -> None:
+        """预取股票基础资料，用于补齐 ETL 计划和实时页面的股票名称。"""
+        if not hasattr(self.dm, "get_stock_basic"):
+            return
+        try:
+            df = self.dm.get_stock_basic()
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                ds.put_call("stock_basic", df, "stock_basic")
+                logger.info(f"[DataPrep] stock_basic 预取：{len(df)} 行")
+        except Exception as e:
+            logger.warning(f"[DataPrep] stock_basic 预取失败（不影响主流程）：{e}")
 
     def _prefetch_index_daily(self, ds: MarketDataset, index_codes: Iterable[str],
                               trade_date: str, lookbacks: tuple = (120, 30)) -> None:

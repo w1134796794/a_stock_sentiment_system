@@ -165,6 +165,7 @@ class QuoteSnapshot:
 class SectorSnapshot:
     code: str
     name: str = ""
+    sector_type: str = ""
     last_price: float = 0.0
     change_pct: Optional[float] = None
     change: float = 0.0
@@ -199,6 +200,7 @@ class SectorSnapshot:
         return cls(
             code=code,
             name=str(pick(raw, ("name", "index_name", "板块名称", "概念名称", "行业名称", "名称"), "") or ""),
+            sector_type=str(pick(raw, ("sector_type", "type", "板块类型"), "") or ""),
             last_price=last_price,
             change_pct=change_pct,
             change=to_float(pick(raw, ("change", "涨跌额", "涨跌"))),
@@ -219,6 +221,7 @@ class SectorSnapshot:
         data = {
             "code": self.code,
             "name": self.name,
+            "sector_type": self.sector_type,
             "last_price": self.last_price,
             "change_pct": self.change_pct,
             "change": self.change,

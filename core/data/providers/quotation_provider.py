@@ -13,6 +13,8 @@ the existing eltdx fallback can continue to serve realtime features.
 """
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any, Dict, Iterable, List, Optional
 
 from loguru import logger
@@ -28,10 +30,16 @@ class QuotationProvider:
         *,
         source: str = "sina",
         backends: Optional[Iterable[str]] = None,
+        timeout_seconds: float = 5.0,
+        backend_cooldown_seconds: float = 120.0,
     ):
         self.source = source or "sina"
-        self.backends = list(backends or ("pqquotation", "easyquotation"))
+        self.backends = list(backends or ("easyquotation", "pqquotation"))
+        self.timeout_seconds = max(float(timeout_seconds), 1.0)
+        self.backend_cooldown_seconds = max(float(backend_cooldown_seconds), 5.0)
         self._clients: Dict[str, Any] = {}
+        self._disabled_until: Dict[str, float] = {}
+        self._last_error = ""
 
     @staticmethod
     def available() -> bool:
@@ -56,16 +64,21 @@ class QuotationProvider:
             return {}
 
         for backend in self.backends:
+            if self._backend_disabled(backend):
+                continue
             client = self._client(backend)
             if client is None:
                 continue
             try:
-                raw = client.stocks(codes, prefix=False)
+                raw = self._call_with_timeout(client, codes)
                 normalized = self._normalize_batch(raw, backend)
                 if normalized:
+                    self._last_error = ""
                     return normalized
+            except FutureTimeoutError:
+                self._cooldown_backend(backend, f"获取实时行情超过 {self.timeout_seconds:.0f}s")
             except Exception as e:  # noqa: BLE001
-                logger.debug(f"[QuotationProvider] {backend}/{self.source} quote failed: {e}")
+                self._cooldown_backend(backend, str(e))
                 continue
         return {}
 
@@ -80,6 +93,22 @@ class QuotationProvider:
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[QuotationProvider] {backend}/{self.source} unavailable: {e}")
             return None
+
+    def _call_with_timeout(self, client: Any, codes: List[str]) -> Any:
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(client.stocks, codes, prefix=False)
+        try:
+            return future.result(timeout=self.timeout_seconds)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    def _backend_disabled(self, backend: str) -> bool:
+        return time.monotonic() < self._disabled_until.get(backend, 0.0)
+
+    def _cooldown_backend(self, backend: str, reason: str) -> None:
+        self._disabled_until[backend] = time.monotonic() + self.backend_cooldown_seconds
+        self._last_error = f"{backend}/{self.source} 暂停 {self.backend_cooldown_seconds:.0f}s: {reason}"
+        logger.warning(f"[QuotationProvider] {self._last_error}")
 
     @staticmethod
     def _code6(ts_code: Any) -> str:
@@ -102,7 +131,7 @@ class QuotationProvider:
             if not code:
                 continue
             item = self._normalize_quote(code, quote, backend)
-            if item.get("last_price", 0) > 0 and item.get("pre_close", 0) > 0:
+            if item.get("last_price", 0) > 0 or item.get("pre_close", 0) > 0 or item.get("name"):
                 out[code] = item
         return out
 

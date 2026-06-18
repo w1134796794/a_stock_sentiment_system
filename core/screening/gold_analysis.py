@@ -67,6 +67,15 @@ def build_gold_analysis_summary(
         summary["market"] = market.iloc[0].to_dict()
     if not sectors.empty:
         sectors = sectors.sort_values(["rank", "mainline_score"], ascending=[True, False])
+        named = sectors[
+            sectors["sector_name"].fillna("").astype(str).str.strip().ne("")
+            & sectors["sector_name"].fillna("").astype(str).str.strip().ne(
+                sectors["sector_code"].fillna("").astype(str).str.strip()
+            )
+            & sectors["sector_type"].fillna("").astype(str).str.strip().ne("")
+        ]
+        if not named.empty:
+            sectors = named
         summary["top_sectors"] = _records(sectors, sector_limit)
     if not stocks.empty:
         stocks = stocks.sort_values(["rank", "total_score"], ascending=[True, False])
