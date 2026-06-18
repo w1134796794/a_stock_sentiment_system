@@ -29,8 +29,21 @@ class SectorFactorJob:
             return result
 
         sector["trade_date"] = sector["trade_date"].astype(str)
-        for col in ("pct_chg", "amount_yuan", "close"):
+        for col in ("pct_chg", "amount_yuan", "close", "pre_close", "vol_hand"):
             sector[col] = pd.to_numeric(sector.get(col), errors="coerce").fillna(0)
+        missing_pct = sector["pct_chg"].abs() <= 1e-12
+        can_calc_pct = (sector["pre_close"] > 0) & (sector["close"] > 0)
+        sector.loc[missing_pct & can_calc_pct, "pct_chg"] = (
+            (sector.loc[missing_pct & can_calc_pct, "close"] - sector.loc[missing_pct & can_calc_pct, "pre_close"])
+            / sector.loc[missing_pct & can_calc_pct, "pre_close"]
+            * 100.0
+        )
+        missing_amount = sector["amount_yuan"] <= 0
+        can_calc_amount = (sector["vol_hand"] > 0) & (sector["close"] > 0)
+        sector.loc[missing_amount & can_calc_amount, "amount_yuan"] = (
+            sector.loc[missing_amount & can_calc_amount, "vol_hand"]
+            * sector.loc[missing_amount & can_calc_amount, "close"]
+        )
         today = sector[sector["trade_date"] == str(trade_date)].copy()
         if today.empty:
             result.ok = False

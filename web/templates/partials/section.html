@@ -60,10 +60,12 @@
   {% if not rows %}
     <div class="text-slate-500 text-sm py-4">无数据</div>
   {% else %}
-    {% set name_prefs = ['股票名称', 'stock_name', '名称', 'name', '板块名称', '概念名称'] %}
-    {% set code_prefs = ['股票代码', 'stock_code', '代码', 'ts_code', '板块代码'] %}
+    {% set name_prefs = ['sector_name', '板块名称', '概念名称', '股票名称', 'stock_name', '名称', 'name'] %}
+    {% set code_prefs = ['sector_code', '板块代码', '股票代码', 'stock_code', '代码', 'ts_code'] %}
     {% set metric_prefs = ['模式类型', 'pattern_type', '板块类型', '类型', 'type', '置信度', 'confidence',
-                           '综合评分', 'composite_score', '持续性评分', '涨跌幅', 'pct_change',
+                           '主线主题评分', '当日主线评分', '近10日上榜天数',
+                           '综合评分', 'composite_score', 'mainline_score', '动量评分', 'momentum_score',
+                           '成交额评分', 'amount_score', '持续性评分', 'persistence_score', '涨跌幅', 'pct_change',
                            '最新排名', '排名', 'rank', '涨停家数', 'limit_up_count'] %}
     {% set ns = namespace(name=none, code=none, metrics=[]) %}
     {% for p in name_prefs %}{% if ns.name is none and p in columns %}{% set ns.name = p %}{% endif %}{% endfor %}

@@ -592,9 +592,9 @@ class StockDataManager(DataManagerBase):
                     logger.error(f"[批量获取] 获取 {code} 失败: {e}")
                     return code, pd.DataFrame()
 
-            # P3-8：并发拉取（默认 4 worker，避免 Tushare 限流）
+            # ETL 运行时常经过本地代理/SDK 服务；过高并发会把单票请求拖到 30s 超时。
             from core.utils.parallel import parallel_map
-            fetched = parallel_map(_fetch_one, codes_to_fetch, max_workers=4)
+            fetched = parallel_map(_fetch_one, codes_to_fetch, max_workers=2)
             for entry in fetched:
                 if entry is None:
                     continue

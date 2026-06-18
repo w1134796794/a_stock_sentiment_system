@@ -88,6 +88,7 @@ class ETLDailyPipeline:
             zt_pool=zt_pool,
             prev_zt_pool=prev_zt_pool,
             index_codes=self.index_codes,
+            prefetch_universe_daily=False,
             persist_silver=True,
             warehouse_path=self.duckdb_path,
             silver_dir=self.web_data_dir / "warehouse" / "silver",

@@ -67,6 +67,7 @@ class SilverWarehouse:
 
 def _normalize_stock_tables(ds: MarketDataset) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
+    name_map = _stock_name_map(ds)
 
     for date, df in (ds.all_daily or {}).items():
         frames.append(
@@ -95,30 +96,143 @@ def _normalize_stock_tables(ds: MarketDataset) -> pd.DataFrame:
     out = pd.concat(frames, ignore_index=True)
     if not out.empty:
         out = out.drop_duplicates(["trade_date", "code"], keep="first")
+        if name_map and "name" in out.columns:
+            empty_name = out["name"].fillna("").astype(str).str.strip() == ""
+            out.loc[empty_name, "name"] = out.loc[empty_name, "code"].map(name_map).fillna("")
     return out
+
+
+def _stock_name_map(ds: MarketDataset) -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+
+    def add(code: Any, name: Any) -> None:
+        text = str(code or "").strip()
+        if "." in text:
+            text = text.split(".")[0]
+        digits = "".join(ch for ch in text if ch.isdigit())
+        code6 = digits[-6:] if len(digits) >= 6 else digits
+        label = str(name or "").strip()
+        if code6 and label and not mapping.get(code6):
+            mapping[code6] = label
+
+    stock_basic = ds.calls.get("stock_basic")
+    if isinstance(stock_basic, pd.DataFrame) and not stock_basic.empty:
+        for row in stock_basic.to_dict(orient="records"):
+            add(row.get("ts_code") or row.get("symbol") or row.get("code"), row.get("name") or row.get("股票名称"))
+
+    for frame in list((ds.limit_up or {}).values()) + list((ds.limit_down or {}).values()):
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            for row in frame.to_dict(orient="records"):
+                add(row.get("代码") or row.get("ts_code") or row.get("code"), row.get("名称") or row.get("name"))
+
+    return mapping
 
 
 def _normalize_sector_tables(ds: MarketDataset) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
+    sector_map = _sector_index_map(ds)
     for key, value in (ds.calls or {}).items():
         if not str(key).startswith("ths_daily|"):
             continue
         if not isinstance(value, pd.DataFrame):
             continue
-        frames.append(
-            standardize_sector_daily_frame(
-                value,
-                as_of_date=ds.trade_date,
-                source="ths_daily",
-                amount_unit="yuan",
-            )
+        frame = standardize_sector_daily_frame(
+            value,
+            as_of_date=ds.trade_date,
+            source="ths_daily",
+            amount_unit="yuan",
         )
+        if sector_map and not frame.empty:
+            empty_name = frame["sector_name"].fillna("").astype(str).str.strip() == ""
+            frame.loc[empty_name, "sector_name"] = (
+                frame.loc[empty_name, "sector_code"].map(lambda c: sector_map.get(str(c), {}).get("name", ""))
+            )
+            empty_type = frame["sector_type"].fillna("").astype(str).str.strip() == ""
+            frame.loc[empty_type, "sector_type"] = (
+                frame.loc[empty_type, "sector_code"].map(lambda c: sector_map.get(str(c), {}).get("type", ""))
+            )
+        frames.append(frame)
     if not frames:
         return standardize_sector_daily_frame(pd.DataFrame())
     out = pd.concat(frames, ignore_index=True)
     if not out.empty:
         out = out.drop_duplicates(["trade_date", "sector_code"], keep="first")
     return out
+
+
+def _sector_index_map(ds: MarketDataset) -> Dict[str, Dict[str, str]]:
+    mapping: Dict[str, Dict[str, str]] = {}
+
+    def add(code: Any, name: Any, typ: Any) -> None:
+        code_text = str(code or "").strip()
+        if not code_text:
+            return
+        label = str(name or "").strip()
+        type_label = _sector_type_label(typ)
+        keys = [code_text]
+        if "." not in code_text and code_text.isdigit():
+            keys.append(f"{code_text}.TI")
+        for key in keys:
+            current = mapping.setdefault(key, {"name": "", "type": ""})
+            if label and not current.get("name"):
+                current["name"] = label
+            if type_label and not current.get("type"):
+                current["type"] = type_label
+
+    for key, value in (ds.calls or {}).items():
+        if not str(key).startswith("ths_index|"):
+            continue
+        if not isinstance(value, pd.DataFrame) or value.empty:
+            continue
+        for row in value.to_dict(orient="records"):
+            code = str(
+                row.get("sector_code")
+                or row.get("ts_code")
+                or row.get("index_code")
+                or row.get("code")
+                or ""
+            ).strip()
+            if not code:
+                continue
+            add(
+                code,
+                row.get("sector_name") or row.get("name") or row.get("index_name") or "",
+                row.get("sector_type") or row.get("type") or "",
+            )
+    for row in _optional_adata_concepts():
+        add(
+            row.get("index_code") or row.get("sector_code") or row.get("code") or "",
+            row.get("name") or row.get("sector_name") or "",
+            row.get("sector_type") or "概念",
+        )
+    return mapping
+
+
+def _optional_adata_concepts() -> List[Dict[str, Any]]:
+    try:
+        import adata  # type: ignore
+
+        method = getattr(getattr(getattr(adata, "stock", None), "info", None), "all_concept_code_ths", None)
+        if method is None:
+            return []
+        raw = method()
+        if hasattr(raw, "to_dict"):
+            return list(raw.to_dict(orient="records"))
+        if isinstance(raw, list):
+            return [dict(x) for x in raw if isinstance(x, dict)]
+    except Exception:
+        return []
+    return []
+
+
+def _sector_type_label(value: Any) -> str:
+    text = str(value or "").strip()
+    return {
+        "N": "概念",
+        "I": "行业",
+        "R": "地域",
+        "S": "特色",
+    }.get(text, text)
 
 
 def _parse_call_param(key: str, param: str) -> str:

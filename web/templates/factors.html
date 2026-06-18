@@ -26,6 +26,74 @@
   </div>
 </div>
 
+{# ===================== 0. 当前启用指标 + 最新因子值 ===================== #}
+<section class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-8">
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <h2 class="text-lg font-bold text-emerald-300">当前启用指标</h2>
+      <span class="mono text-xs text-slate-500">{{ state.factor_enabled }} / {{ state.factor_total }}</span>
+    </div>
+    {% if state.snapshot_enabled_factors %}
+    <div class="mb-3">
+      <div class="text-xs text-slate-500 mb-1">最新快照实际启用</div>
+      <div class="flex flex-wrap gap-1.5">
+        {% for fid in state.snapshot_enabled_factors %}
+        <span class="mono text-[11px] px-2 py-1 rounded border border-sky-700/60 bg-sky-950/30 text-sky-200">{{ fid }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <div class="max-h-72 overflow-auto pr-1">
+      <div class="flex flex-wrap gap-1.5">
+        {% for f in state.enabled_factor_list %}
+        <span class="text-[11px] px-2 py-1 rounded border border-slate-700 bg-slate-900/70 text-slate-200"
+              title="{{ f.category_label }} · {{ f.description }}">
+          <span class="mono text-emerald-300">{{ f.factor_id }}</span>
+          <span class="text-slate-400">{{ f.name }}</span>
+        </span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <h2 class="text-lg font-bold text-emerald-300">最新因子指标数据</h2>
+      <span class="mono text-xs text-slate-500">{{ state.latest_factor_trade_date or '--' }}</span>
+    </div>
+    {% if state.latest_factor_summary %}
+    <div class="overflow-auto max-h-72 border border-slate-800 rounded-lg">
+      <table class="w-full text-xs">
+        <thead class="bg-slate-950/90 sticky top-0 text-slate-500">
+          <tr class="text-left">
+            <th class="px-3 py-2 font-medium">层级</th>
+            <th class="px-3 py-2 font-medium">指标</th>
+            <th class="px-3 py-2 font-medium text-right">实体数</th>
+            <th class="px-3 py-2 font-medium text-right">原值均值</th>
+            <th class="px-3 py-2 font-medium text-right">评分均值</th>
+            <th class="px-3 py-2 font-medium text-right">评分区间</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in state.latest_factor_summary %}
+          <tr class="border-t border-slate-800/70 hover:bg-slate-800/20">
+            <td class="px-3 py-1.5 mono text-slate-400">{{ r.entity_type }}</td>
+            <td class="px-3 py-1.5 mono text-slate-200">{{ r.factor_id }}</td>
+            <td class="px-3 py-1.5 mono text-right text-slate-300">{{ r.entity_count }}</td>
+            <td class="px-3 py-1.5 mono text-right text-slate-400">{{ r.avg_raw_value | num2 if r.avg_raw_value is not none else '--' }}</td>
+            <td class="px-3 py-1.5 mono text-right text-emerald-300">{{ r.avg_score | num2 if r.avg_score is not none else '--' }}</td>
+            <td class="px-3 py-1.5 mono text-right text-slate-400">{{ r.min_score | num2 if r.min_score is not none else '--' }} - {{ r.max_score | num2 if r.max_score is not none else '--' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-sm text-slate-500 border border-slate-800 rounded-lg px-3 py-6">暂无因子指标数据</div>
+    {% endif %}
+  </div>
+</section>
+
 {# ===================== 1. 各策略置信度模式 ===================== #}
 <section class="mb-8">
   <h2 class="text-lg font-bold text-emerald-300 mb-3">策略置信度模式</h2>

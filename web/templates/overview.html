@@ -6,6 +6,7 @@
 {% block content %}
 {% set ov = ov %}
 {% set mk = ov.market %}
+{% set phase_progress = mk.get('phase_progress') if mk else none %}
 
 {% if mk and mk.available %}
 {# ===== 情绪周期 + 综合趋势 ===== #}
@@ -18,7 +19,7 @@
     <div class="flex items-baseline gap-2 flex-wrap">
       <span class="text-2xl font-bold text-amber-300">{{ mk.cycle_name or '--' }}</span>
       {% if mk.phase_label %}<span class="text-sm text-slate-300">{{ mk.phase_label }}</span>{% endif %}
-      {% if mk.phase_progress is not none %}<span class="text-[11px] text-slate-500 mono">进度 {{ mk.phase_progress|int }}%</span>{% endif %}
+      {% if phase_progress is not none %}<span class="text-[11px] text-slate-500 mono">进度 {{ phase_progress|int }}%</span>{% endif %}
     </div>
     {% if mk.strategy %}<div class="text-sm text-slate-300 mt-2">{{ mk.strategy }}{% if mk.position %} <span class="text-slate-500">· 建议仓位 {{ mk.position }}</span>{% endif %}</div>{% endif %}
     {% if mk.transition_warning %}<div class="text-[12px] text-amber-400/90 mt-2">{{ mk.transition_warning }}</div>{% endif %}
@@ -110,13 +111,13 @@
 {% endif %}
 
 {# ===== 真·晋级率（昨日 N 板今日晋级 N+1） ===== #}
-{% if mk.promotion and mk.promotion.overall is not none %}
+{% if mk.promotion %}
 <section class="mb-6">
   <div class="text-xs text-slate-400 mb-2">连板晋级率 <span class="text-slate-600">（昨日涨停今日接力，领先指标）</span></div>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
     <div class="card border border-slate-800 rounded-xl p-3">
       <div class="text-[11px] text-slate-400 mb-1">总晋级率</div>
-      <div class="text-lg font-bold mono text-slate-200">{{ mk.promotion.overall }}%</div>
+      <div class="text-lg font-bold mono text-slate-200">{{ mk.promotion.overall if mk.promotion.overall is not none else '--' }}{% if mk.promotion.overall is not none %}%{% endif %}</div>
     </div>
     <div class="card border border-slate-800 rounded-xl p-3">
       <div class="text-[11px] text-slate-400 mb-1">1 进 2</div>

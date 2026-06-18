@@ -100,7 +100,7 @@ class RealtimeQuoteService:
             raw = dict(raw)
             raw.setdefault("code", raw_key)
             item = QuoteSnapshot.from_raw(raw, stale_after_seconds=self.stale_after_seconds)
-            if item.code and item.last_price > 0:
+            if item.code and (item.last_price > 0 or item.pre_close > 0 or item.name):
                 fetched[item.code] = item
                 self._cache[item.code] = (now, item)
         self._last_error = "" if fetched else "实时行情源返回空结果"

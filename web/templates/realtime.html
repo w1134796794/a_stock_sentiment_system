@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}实时行情 · 管理控制台{% endblock %}
-{% block page_title %}实时行情{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 实时确认 Overlay · 个股快照 · 板块行情 · 数据源健康</div>{% endblock %}
+{% block title %}实时确认 · 管理控制台{% endblock %}
+{% block page_title %}实时确认{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 候选确认 · 板块行情</div>{% endblock %}
 
 {% block header_extra %}
   <span id="rt-clock" class="mono text-xs text-slate-500 mr-2"></span>
-  <button id="refresh-all" title="刷新实时行情"
+  <button id="refresh-all" title="刷新实时确认"
           class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg px-4 py-1.5">
     <svg id="refresh-spin" class="hidden animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
     <span>刷新</span>
@@ -13,168 +13,100 @@
 {% endblock %}
 
 {% block content %}
-<section class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
-  <div class="rt-kpi"><div id="kpi-overlay-count" class="rt-kpi-v mono">--</div><div class="rt-kpi-l">确认/取消</div></div>
-  <div class="rt-kpi"><div id="kpi-quote-count" class="rt-kpi-v mono">--</div><div class="rt-kpi-l">个股快照</div></div>
-  <div class="rt-kpi"><div id="kpi-sector-count" class="rt-kpi-v mono">--</div><div class="rt-kpi-l">板块行情</div></div>
-  <div class="rt-kpi"><div id="kpi-quote-source" class="rt-kpi-v mono text-sm">--</div><div class="rt-kpi-l">个股源</div></div>
-  <div class="rt-kpi"><div id="kpi-sector-source" class="rt-kpi-v mono text-sm">--</div><div class="rt-kpi-l">板块源</div></div>
+<section class="grid grid-cols-3 gap-3 mb-4">
+  <div class="rt-kpi"><div id="kpi-confirmed" class="rt-kpi-v mono text-emerald-300">--</div><div class="rt-kpi-l">确认</div></div>
+  <div class="rt-kpi"><div id="kpi-observe" class="rt-kpi-v mono text-amber-300">--</div><div class="rt-kpi-l">观察</div></div>
+  <div class="rt-kpi"><div id="kpi-cancelled" class="rt-kpi-v mono text-rose-300">--</div><div class="rt-kpi-l">取消</div></div>
 </section>
 
-<section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
-  <div class="space-y-4 min-w-0">
-    <section class="card border border-slate-800 rounded-xl p-4">
-      <div class="flex flex-wrap items-center gap-2 mb-3">
-        <h2 class="font-bold mr-auto">实时确认 Overlay</h2>
-        <span id="overlay-source" class="rt-pill">--</span>
-        <button id="load-overlay" title="刷新确认状态"
-                class="inline-flex items-center gap-1 border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-md px-3 py-1.5">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-5"/><circle cx="12" cy="12" r="9"/></svg>
-          <span>确认</span>
-        </button>
-      </div>
-      <div class="overflow-x-auto border border-slate-800 rounded-lg">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-900/70 text-slate-400 text-xs">
-            <tr class="text-left">
-              <th class="px-3 py-2">标的</th>
-              <th class="px-3 py-2">状态</th>
-              <th class="px-3 py-2 text-right">开盘</th>
-              <th class="px-3 py-2 text-right">现价/涨幅</th>
-              <th class="px-3 py-2 text-right">筛选分</th>
-              <th class="px-3 py-2">原因</th>
-              <th class="px-3 py-2 text-right">时间</th>
-            </tr>
-          </thead>
-          <tbody id="overlay-rows"></tbody>
-        </table>
-        <div id="overlay-empty" class="hidden text-sm text-slate-500 py-10 text-center">暂无实时确认候选</div>
-      </div>
-    </section>
-
-    <section class="card border border-slate-800 rounded-xl p-4">
-      <div class="flex flex-wrap items-center gap-2 mb-3">
-        <h2 class="font-bold mr-auto">个股实时</h2>
-        <input id="quote-codes" value="{{ default_codes|join(',') }}"
-               class="mono bg-slate-950 border border-slate-700 rounded-md px-3 py-1.5 text-sm w-full sm:w-80 focus:outline-none focus:border-emerald-500"
-               placeholder="000001,600000" />
-        <button id="load-quotes" title="刷新个股行情"
-                class="inline-flex items-center gap-1 border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-md px-3 py-1.5">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-          <span>个股</span>
-        </button>
-      </div>
-      <div class="overflow-x-auto border border-slate-800 rounded-lg">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-900/70 text-slate-400 text-xs">
-            <tr class="text-left">
-              <th class="px-3 py-2">标的</th>
-              <th class="px-3 py-2 text-right">现价</th>
-              <th class="px-3 py-2 text-right">涨跌幅</th>
-              <th class="px-3 py-2 text-right">今开/昨收</th>
-              <th class="px-3 py-2 text-right">高/低</th>
-              <th class="px-3 py-2 text-right">成交额</th>
-              <th class="px-3 py-2 text-right">时间</th>
-            </tr>
-          </thead>
-          <tbody id="quote-rows"></tbody>
-        </table>
-        <div id="quote-empty" class="hidden text-sm text-slate-500 py-10 text-center">暂无个股实时行情</div>
-      </div>
-    </section>
-
-    <section class="card border border-slate-800 rounded-xl p-4">
-      <div class="flex flex-wrap items-center gap-2 mb-3">
-        <h2 class="font-bold mr-auto">板块实时</h2>
-        <select id="sector-source"
-                class="bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-emerald-500">
-          <option value="ths">同花顺</option>
-          <option value="east">东财</option>
-        </select>
-        <input id="sector-codes" value="886109,886108,886107"
-               class="mono bg-slate-950 border border-slate-700 rounded-md px-3 py-1.5 text-sm w-full sm:w-64 focus:outline-none focus:border-emerald-500"
-               placeholder="886109,886108" />
-        <button id="load-sectors" title="刷新板块行情"
-                class="inline-flex items-center gap-1 border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-md px-3 py-1.5">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>
-          <span>板块</span>
-        </button>
-      </div>
-      <div class="overflow-x-auto border border-slate-800 rounded-lg">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-900/70 text-slate-400 text-xs">
-            <tr class="text-left">
-              <th class="px-3 py-2">板块</th>
-              <th class="px-3 py-2 text-right">指数</th>
-              <th class="px-3 py-2 text-right">涨跌幅</th>
-              <th class="px-3 py-2 text-right">成交额</th>
-              <th class="px-3 py-2 text-right">高/低</th>
-              <th class="px-3 py-2 text-right">时间</th>
-            </tr>
-          </thead>
-          <tbody id="sector-rows"></tbody>
-        </table>
-        <div id="sector-empty" class="hidden text-sm text-slate-500 py-10 text-center">暂无板块实时行情</div>
-      </div>
-    </section>
-  </div>
+<section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4">
+  <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
+    <div class="flex flex-wrap items-center gap-2 mb-4">
+      <h2 class="font-bold mr-auto">ETL候选确认</h2>
+      <span id="overlay-source" class="rt-pill">--</span>
+      <span id="overlay-updated" class="text-xs text-slate-500 mono">--</span>
+    </div>
+    <div id="overlay-cards" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
+    <div id="overlay-empty" class="hidden text-sm text-slate-500 py-12 text-center">暂无候选确认数据</div>
+  </section>
 
   <aside class="space-y-4">
     <section class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <h2 class="font-bold mr-auto">板块行情</h2>
+        <select id="sector-source"
+                class="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-xs focus:outline-none focus:border-emerald-500">
+          <option value="ths">同花顺</option>
+          <option value="east">东财</option>
+        </select>
+      </div>
+      <div id="sector-list" class="space-y-2"></div>
+      <div id="sector-empty" class="hidden text-sm text-slate-500 py-8 text-center">暂无板块行情</div>
+    </section>
+
+    <section class="card border border-slate-800 rounded-xl p-4">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="font-bold">行情源</h2>
+        <h2 class="font-bold">数据源</h2>
         <span id="health-pill" class="rt-pill">检查中</span>
       </div>
       <div class="space-y-2 text-sm">
         <div class="rt-health-row"><span>个股</span><strong id="health-quotes">--</strong></div>
         <div class="rt-health-row"><span>板块</span><strong id="health-sectors">--</strong></div>
-        <div class="rt-health-row"><span>缓存</span><strong id="health-cache">--</strong></div>
-        <div class="rt-health-row"><span>最后错误</span><strong id="health-error">--</strong></div>
+        <div class="rt-health-row"><span>提示</span><strong id="health-error">--</strong></div>
       </div>
-    </section>
-
-    <section class="card border border-slate-800 rounded-xl p-4">
-      <h2 class="font-bold mb-3">监控池</h2>
-      <div id="watch-list" class="flex flex-wrap gap-2"></div>
     </section>
   </aside>
 </section>
 
 <style>
-  .rt-kpi { background:rgba(15,23,42,.52); border:1px solid rgba(51,65,85,.7); border-radius:.75rem; padding:.75rem .9rem; min-height:78px; }
-  .rt-kpi-v { font-size:1.45rem; font-weight:800; line-height:1.15; overflow-wrap:anywhere; }
-  .rt-kpi-l { font-size:.68rem; color:#64748b; margin-top:.32rem; }
-  .rt-pill { font-size:.68rem; font-weight:700; border-radius:.45rem; padding:.12rem .48rem; background:rgba(100,116,139,.18); color:#cbd5e1; border:1px solid rgba(100,116,139,.42); }
+  .rt-kpi { background:rgba(15,23,42,.52); border:1px solid rgba(51,65,85,.7); border-radius:.75rem; padding:.85rem .95rem; min-height:78px; }
+  .rt-kpi-v { font-size:1.7rem; font-weight:900; line-height:1.1; overflow-wrap:anywhere; }
+  .rt-kpi-l { font-size:.72rem; color:#64748b; margin-top:.3rem; }
+  .rt-pill { font-size:.68rem; font-weight:800; border-radius:.45rem; padding:.12rem .5rem; background:rgba(100,116,139,.18); color:#cbd5e1; border:1px solid rgba(100,116,139,.42); }
   .rt-pill.ok { background:rgba(16,185,129,.16); color:#6ee7b7; border-color:rgba(16,185,129,.42); }
   .rt-pill.err { background:rgba(244,63,94,.16); color:#fda4af; border-color:rgba(244,63,94,.42); }
-  .rt-health-row { display:flex; align-items:flex-start; justify-content:space-between; gap:.9rem; border-bottom:1px solid rgba(51,65,85,.42); padding:.5rem 0; }
-  .rt-health-row span { color:#64748b; flex:0 0 auto; }
-  .rt-health-row strong { color:#e2e8f0; text-align:right; font-weight:600; overflow-wrap:anywhere; }
-  .rt-chip { font-size:.72rem; border:1px solid rgba(51,65,85,.8); color:#cbd5e1; border-radius:.45rem; padding:.18rem .5rem; background:rgba(15,23,42,.62); }
-  .rt-status { display:inline-flex; align-items:center; border-radius:.45rem; padding:.14rem .48rem; font-size:.72rem; font-weight:800; }
+  .rt-card { border:1px solid rgba(51,65,85,.72); background:rgba(15,23,42,.48); border-radius:.75rem; padding:.9rem; min-width:0; }
+  .rt-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; }
+  .rt-name { font-size:1rem; font-weight:800; color:#f1f5f9; line-height:1.25; }
+  .rt-code { font-size:.72rem; color:#64748b; margin-top:.1rem; }
+  .rt-status { flex:0 0 auto; display:inline-flex; align-items:center; border-radius:.5rem; padding:.18rem .55rem; font-size:.72rem; font-weight:900; }
   .rt-status.confirmed { color:#042f2e; background:#5eead4; }
   .rt-status.cancelled { color:#fff1f2; background:#e11d48; }
   .rt-status.observe { color:#fde68a; background:rgba(245,158,11,.18); border:1px solid rgba(245,158,11,.36); }
-  .rt-up { color:#ff6b6b; }
-  .rt-down { color:#34d399; }
-  .rt-muted { color:#64748b; }
+  .rt-metrics { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.5rem; margin-top:.85rem; }
+  .rt-metric { background:rgba(2,6,23,.42); border:1px solid rgba(51,65,85,.55); border-radius:.55rem; padding:.55rem .6rem; min-width:0; }
+  .rt-metric span { display:block; font-size:.66rem; color:#64748b; margin-bottom:.22rem; }
+  .rt-metric strong { display:block; font-size:.85rem; color:#e2e8f0; font-weight:800; overflow-wrap:anywhere; }
+  .rt-reason { margin-top:.75rem; color:#cbd5e1; font-size:.82rem; line-height:1.45; }
+  .rt-health-row { display:flex; align-items:flex-start; justify-content:space-between; gap:.9rem; border-bottom:1px solid rgba(51,65,85,.42); padding:.5rem 0; }
+  .rt-health-row:last-child { border-bottom:0; }
+  .rt-health-row span { color:#64748b; flex:0 0 auto; }
+  .rt-health-row strong { color:#e2e8f0; text-align:right; font-weight:600; overflow-wrap:anywhere; }
+  .rt-sector { display:flex; align-items:center; justify-content:space-between; gap:.7rem; border:1px solid rgba(51,65,85,.62); border-radius:.6rem; padding:.65rem .75rem; background:rgba(15,23,42,.42); }
+  .rt-sector-name { min-width:0; }
+  .rt-sector-name strong { display:block; color:#e2e8f0; font-size:.88rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rt-sector-name span { display:block; color:#64748b; font-size:.68rem; margin-top:.08rem; }
+  .rt-up { color:#ff6b6b !important; }
+  .rt-down { color:#34d399 !important; }
+  .rt-muted { color:#64748b !important; }
   .rt-toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(20px); padding:.6rem 1.1rem; border-radius:.6rem; font-size:.85rem; font-weight:600; opacity:0; pointer-events:none; transition:all .25s; z-index:60; }
   .rt-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   .rt-toast.ok { background:rgba(16,185,129,.95); color:#04241a; }
   .rt-toast.err { background:rgba(244,63,94,.95); color:#fff; }
+  @media (max-width: 640px) {
+    .rt-metrics { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  }
 </style>
 
 <div id="rt-toast" class="rt-toast"></div>
 
 <script>
-  const defaultCodes = {{ default_codes|tojson }};
   const tradeDate = {{ (date or '')|tojson }};
+  const defaultSectorCodes = [];
   const els = {
-    overlayRows: document.getElementById('overlay-rows'),
+    overlayCards: document.getElementById('overlay-cards'),
     overlayEmpty: document.getElementById('overlay-empty'),
-    quoteRows: document.getElementById('quote-rows'),
-    quoteEmpty: document.getElementById('quote-empty'),
-    sectorRows: document.getElementById('sector-rows'),
+    sectorList: document.getElementById('sector-list'),
     sectorEmpty: document.getElementById('sector-empty'),
     refreshAll: document.getElementById('refresh-all'),
     refreshSpin: document.getElementById('refresh-spin')
@@ -192,8 +124,8 @@
     const n = Number(v);
     return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
   }
-  function px(v) {
-    const n = Number(v || 0);
+  function px(v, fallback) {
+    const n = Number(v || fallback || 0);
     return n ? n.toFixed(2) : '--';
   }
   function money(v) {
@@ -215,43 +147,38 @@
     const t = document.getElementById('rt-toast');
     t.textContent = text;
     t.className = 'rt-toast show ' + (ok ? 'ok' : 'err');
-    setTimeout(() => { t.className = 'rt-toast'; }, 2400);
+    setTimeout(() => { t.className = 'rt-toast'; }, 2200);
   }
   function setClock() {
     const d = new Date();
     document.getElementById('rt-clock').textContent = d.toLocaleTimeString('zh-CN', { hour12:false });
   }
-
-  function parseCodes(value) {
-    return String(value || '').replace(/，/g, ',').split(',').map(x => x.trim()).filter(Boolean);
+  function stockName(row) {
+    const name = String(row.display_name || row.name || '').trim();
+    return name || String(row.code || '--');
   }
-
-  function renderWatchList(codes) {
-    const wrap = document.getElementById('watch-list');
-    wrap.innerHTML = codes.map(c => `<button class="rt-chip mono" data-code="${esc(c)}">${esc(c)}</button>`).join('');
-    wrap.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.getElementById('quote-codes').value = btn.dataset.code;
-        loadQuotes();
-      });
-    });
+  async function fetchJson(url, timeoutMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 6000);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      return await r.json();
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function loadHealth() {
     const pill = document.getElementById('health-pill');
     try {
-      const r = await fetch('/api/realtime/health');
-      const j = await r.json();
+      const j = await fetchJson('/api/realtime/health', 5000);
       const q = j.quotes || {};
       const s = j.sectors || {};
-      document.getElementById('health-quotes').textContent = q.available ? (q.provider || 'available') : '不可用';
-      document.getElementById('health-sectors').textContent = s.available ? (s.provider || 'available') : '不可用';
-      document.getElementById('health-cache').textContent = `${q.cache_size || 0} / ${s.cache_size || 0}`;
+      document.getElementById('health-quotes').textContent = q.available ? (q.provider || '可用') : '不可用';
+      document.getElementById('health-sectors').textContent = s.available ? (s.provider || '可用') : '不可用';
       document.getElementById('health-error').textContent = s.last_error || q.last_error || '--';
       pill.textContent = q.available || s.available ? '可用' : '异常';
       pill.className = 'rt-pill ' + (q.available || s.available ? 'ok' : 'err');
-      document.getElementById('kpi-quote-source').textContent = q.provider || '--';
-      document.getElementById('kpi-sector-source').textContent = s.provider || '--';
     } catch (e) {
       pill.textContent = '异常';
       pill.className = 'rt-pill err';
@@ -260,110 +187,73 @@
   }
 
   async function loadOverlay() {
-    els.overlayRows.innerHTML = '<tr><td colspan="7" class="px-3 py-8 text-center text-slate-500">加载中...</td></tr>';
+    els.overlayCards.innerHTML = '<div class="text-sm text-slate-500 py-10 text-center lg:col-span-2">加载中...</div>';
     els.overlayEmpty.classList.add('hidden');
     try {
       const params = new URLSearchParams({ limit: '20' });
       if (tradeDate) params.set('date', tradeDate);
-      const r = await fetch('/api/realtime/overlay?' + params.toString());
-      const j = await r.json();
+      const j = await fetchJson('/api/realtime/overlay?' + params.toString(), 8000);
       const rows = j.rows || [];
       const counts = j.counts || {};
-      document.getElementById('kpi-overlay-count').textContent = `${counts.confirmed || 0}/${counts.cancelled || 0}`;
+      document.getElementById('kpi-confirmed').textContent = counts.confirmed || 0;
+      document.getElementById('kpi-observe').textContent = counts.observe || 0;
+      document.getElementById('kpi-cancelled').textContent = counts.cancelled || 0;
       document.getElementById('overlay-source').textContent = j.source || '--';
+      document.getElementById('overlay-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
       if (!rows.length) {
-        els.overlayRows.innerHTML = '';
+        els.overlayCards.innerHTML = '';
         els.overlayEmpty.classList.remove('hidden');
         return;
       }
-      els.overlayRows.innerHTML = rows.map(r => `
-        <tr class="border-t border-slate-800/70 hover:bg-slate-800/30">
-          <td class="px-3 py-2">
-            <a class="hover:text-emerald-300" href="/stock/${esc(r.code)}">
-              <div class="font-medium">${esc(r.name || '--')}</div>
-              <div class="mono text-xs text-slate-500">${esc(r.code)}</div>
+      els.overlayCards.innerHTML = rows.map(r => `
+        <article class="rt-card">
+          <div class="rt-card-head">
+            <a href="/stock/${esc(r.code)}" class="min-w-0 hover:text-emerald-300">
+              <div class="rt-name">${esc(stockName(r))}</div>
+              <div class="rt-code mono">${esc(r.code || '--')}</div>
             </a>
-          </td>
-          <td class="px-3 py-2"><span class="rt-status ${esc(r.confirm_status || 'observe')}">${statusText(r.confirm_status)}</span></td>
-          <td class="px-3 py-2 text-right mono"><div>${px(r.open_price)}</div><div class="text-xs ${clsPct(r.open_gap_pct)}">${gap(r.open_gap_pct)}</div></td>
-          <td class="px-3 py-2 text-right mono"><div>${px(r.last_price)}</div><div class="text-xs ${clsPct(r.pct_chg)}">${pct(r.pct_chg)}</div></td>
-          <td class="px-3 py-2 text-right mono">${Number(r.screening_score || 0).toFixed(1)}</td>
-          <td class="px-3 py-2 text-slate-300">${esc(r.reason || '--')}</td>
-          <td class="px-3 py-2 text-right mono text-xs ${r.is_stale ? 'text-amber-300' : 'text-slate-500'}">${esc(r.received_at || '--')}</td>
-        </tr>`).join('');
+            <span class="rt-status ${esc(r.confirm_status || 'observe')}">${statusText(r.confirm_status)}</span>
+          </div>
+          <div class="rt-metrics">
+            <div class="rt-metric"><span>开盘</span><strong class="${clsPct(r.open_gap_pct)}">${gap(r.open_gap_pct)}</strong></div>
+            <div class="rt-metric"><span>现价</span><strong class="mono">${px(r.last_price, r.pre_close)}</strong></div>
+            <div class="rt-metric"><span>涨幅</span><strong class="${clsPct(r.pct_chg)}">${pct(r.pct_chg)}</strong></div>
+            <div class="rt-metric"><span>分数</span><strong class="mono">${Number(r.screening_score || 0).toFixed(1)}</strong></div>
+          </div>
+          <div class="rt-reason">${esc(r.reason || '--')}</div>
+        </article>`).join('');
     } catch (e) {
-      els.overlayRows.innerHTML = `<tr><td colspan="7" class="px-3 py-8 text-center text-rose-300">${esc(e)}</td></tr>`;
-    }
-  }
-
-  async function loadQuotes() {
-    const codes = parseCodes(document.getElementById('quote-codes').value);
-    renderWatchList(codes);
-    if (!codes.length) return;
-    els.quoteRows.innerHTML = '<tr><td colspan="7" class="px-3 py-8 text-center text-slate-500">加载中...</td></tr>';
-    els.quoteEmpty.classList.add('hidden');
-    try {
-      const r = await fetch('/api/realtime/quotes?codes=' + encodeURIComponent(codes.join(',')));
-      const j = await r.json();
-      const rows = j.quotes || [];
-      document.getElementById('kpi-quote-count').textContent = rows.length;
-      if (!rows.length) {
-        els.quoteRows.innerHTML = '';
-        els.quoteEmpty.classList.remove('hidden');
-        toast(j.message || '未获取到个股行情', false);
-        return;
-      }
-      els.quoteRows.innerHTML = rows.map(q => `
-        <tr class="border-t border-slate-800/70 hover:bg-slate-800/30">
-          <td class="px-3 py-2">
-            <a class="hover:text-emerald-300" href="/stock/${esc(q.code)}">
-              <div class="font-medium">${esc(q.name || '--')}</div>
-              <div class="mono text-xs text-slate-500">${esc(q.code)}</div>
-            </a>
-          </td>
-          <td class="px-3 py-2 text-right mono">${px(q.last_price)}</td>
-          <td class="px-3 py-2 text-right mono ${clsPct(q.change_pct)}">${pct(q.change_pct)}</td>
-          <td class="px-3 py-2 text-right mono"><div>${px(q.open_price)}</div><div class="text-xs text-slate-500">${px(q.pre_close)}</div></td>
-          <td class="px-3 py-2 text-right mono"><div>${px(q.high_price)}</div><div class="text-xs text-slate-500">${px(q.low_price)}</div></td>
-          <td class="px-3 py-2 text-right mono">${money(q.amount_yuan)}</td>
-          <td class="px-3 py-2 text-right mono text-xs ${q.is_stale ? 'text-amber-300' : 'text-slate-500'}">${esc(q.time || '--')}</td>
-        </tr>`).join('');
-    } catch (e) {
-      els.quoteRows.innerHTML = `<tr><td colspan="7" class="px-3 py-8 text-center text-rose-300">${esc(e)}</td></tr>`;
-      toast('个股行情加载失败', false);
+      els.overlayCards.innerHTML = `<div class="text-sm text-rose-300 py-10 text-center lg:col-span-2">${esc(e)}</div>`;
     }
   }
 
   async function loadSectors() {
-    const codes = parseCodes(document.getElementById('sector-codes').value);
     const source = document.getElementById('sector-source').value || 'east';
-    els.sectorRows.innerHTML = '<tr><td colspan="6" class="px-3 py-8 text-center text-slate-500">加载中...</td></tr>';
+    els.sectorList.innerHTML = '<div class="text-sm text-slate-500 py-8 text-center">加载中...</div>';
     els.sectorEmpty.classList.add('hidden');
-    const params = new URLSearchParams({ source, limit: '3' });
-    if (codes.length) params.set('codes', codes.join(','));
     try {
-      const r = await fetch('/api/realtime/sectors?' + params.toString());
-      const j = await r.json();
+      const params = new URLSearchParams({ source, limit: '5' });
+      if (defaultSectorCodes.length) params.set('codes', defaultSectorCodes.join(','));
+      const j = await fetchJson('/api/realtime/sectors?' + params.toString(), 15000);
       const rows = j.sectors || [];
-      document.getElementById('kpi-sector-count').textContent = rows.length;
       if (!rows.length) {
-        els.sectorRows.innerHTML = '';
+        els.sectorList.innerHTML = '';
         els.sectorEmpty.classList.remove('hidden');
-        toast(j.message || '未获取到板块行情', false);
         return;
       }
-      els.sectorRows.innerHTML = rows.map(s => `
-        <tr class="border-t border-slate-800/70 hover:bg-slate-800/30">
-          <td class="px-3 py-2"><div class="font-medium">${esc(s.name || '--')}</div><div class="mono text-xs text-slate-500">${esc(s.code || '--')}</div></td>
-          <td class="px-3 py-2 text-right mono">${px(s.last_price)}</td>
-          <td class="px-3 py-2 text-right mono ${clsPct(s.change_pct)}">${pct(s.change_pct)}</td>
-          <td class="px-3 py-2 text-right mono">${money(s.amount_yuan)}</td>
-          <td class="px-3 py-2 text-right mono"><div>${px(s.high_price)}</div><div class="text-xs text-slate-500">${px(s.low_price)}</div></td>
-          <td class="px-3 py-2 text-right mono text-xs text-slate-500">${esc(s.time || s.date || '--')}</td>
-        </tr>`).join('');
+      els.sectorList.innerHTML = rows.map(s => `
+        <div class="rt-sector">
+          <div class="rt-sector-name">
+            <strong>${esc(s.name || s.code || '--')}</strong>
+            <span class="mono">${esc(s.code || '--')}${s.sector_type ? ' · ' + esc(s.sector_type) : ''}</span>
+          </div>
+          <div class="text-right">
+            <div class="mono font-bold ${clsPct(s.change_pct)}">${pct(s.change_pct)}</div>
+            <div class="mono text-[11px] text-slate-500">${money(s.amount_yuan)}</div>
+          </div>
+        </div>`).join('');
     } catch (e) {
-      els.sectorRows.innerHTML = `<tr><td colspan="6" class="px-3 py-8 text-center text-rose-300">${esc(e)}</td></tr>`;
-      toast('板块行情加载失败', false);
+      els.sectorList.innerHTML = `<div class="text-sm text-rose-300 py-8 text-center">${esc(e)}</div>`;
     }
   }
 
@@ -371,8 +261,8 @@
     els.refreshAll.disabled = true;
     els.refreshSpin.classList.remove('hidden');
     try {
-      await Promise.all([loadHealth(), loadOverlay(), loadQuotes(), loadSectors()]);
-      toast('实时行情已刷新', true);
+      await Promise.all([loadHealth(), loadOverlay(), loadSectors()]);
+      toast('已刷新', true);
     } finally {
       els.refreshSpin.classList.add('hidden');
       els.refreshAll.disabled = false;
@@ -380,15 +270,10 @@
     }
   }
 
-  document.getElementById('load-quotes').addEventListener('click', loadQuotes);
-  document.getElementById('load-sectors').addEventListener('click', loadSectors);
-  document.getElementById('load-overlay').addEventListener('click', loadOverlay);
   document.getElementById('refresh-all').addEventListener('click', refreshAll);
-  document.getElementById('quote-codes').addEventListener('keydown', e => { if (e.key === 'Enter') loadQuotes(); });
-  document.getElementById('sector-codes').addEventListener('keydown', e => { if (e.key === 'Enter') loadSectors(); });
+  document.getElementById('sector-source').addEventListener('change', loadSectors);
 
   setClock();
-  renderWatchList(defaultCodes);
   refreshAll();
 </script>
 {% endblock %}

@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional
 
 # 因子大类中文标签（与 FactorCategory.value 对应）
@@ -84,6 +85,16 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
 
     total = sum(len(g["factors"]) for g in factor_groups)
     enabled = sum(1 for g in factor_groups for x in g["factors"] if x["enabled"])
+    enabled_factor_list = [
+        {
+            **x,
+            "category": g["category"],
+            "category_label": g["label"],
+        }
+        for g in factor_groups
+        for x in g["factors"]
+        if x["enabled"]
+    ]
 
     # ---- 各策略置信度模式 ----
     strategies: List[Dict[str, Any]] = []
@@ -113,17 +124,22 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
 
     # ---- 生命周期 / 仲裁等可调参数组（Phase 6：暴露标量参数，经 patterns 覆盖即时生效）----
     param_groups = _build_tunable_param_groups(pat_store)
+    latest_factor_data = _latest_factor_data()
 
     return {
         "factor_groups": factor_groups,
         "factor_total": total,
         "factor_enabled": enabled,
+        "enabled_factor_list": enabled_factor_list,
         "strategies": strategies,
         "confidence_modes": CONFIDENCE_MODES,
         "profiles": profiles,
         "profile_names": [p["name"] for p in profiles],
         "forced_profile": forced_profile,
         "active_profile": active_profile or "",
+        "snapshot_enabled_factors": latest_factor_data.get("snapshot_enabled_factors", []),
+        "latest_factor_trade_date": latest_factor_data.get("trade_date", ""),
+        "latest_factor_summary": latest_factor_data.get("rows", []),
         "param_groups": param_groups,
         "override_count": _count(yaml_store) + _count(pat_store) + _count(settings_store),
     }
@@ -174,3 +190,78 @@ def _build_tunable_param_groups(pat_store: Dict[str, Any]) -> List[Dict[str, Any
 
 def _count(d: Any) -> int:
     return len(d) if isinstance(d, dict) else 0
+
+
+def _latest_factor_data(limit: int = 120) -> Dict[str, Any]:
+    try:
+        import duckdb  # type: ignore
+
+        from pathlib import Path
+
+        from config.settings import FACTOR_DB_PATH, SNAPSHOT_DIR
+        from snapshot.reader import SnapshotReader
+
+        reader = SnapshotReader(SNAPSHOT_DIR)
+        latest = reader.latest()
+        snap = reader.load(latest) if latest else None
+        meta = (snap or {}).get("meta", {}) or {}
+        enabled = list(meta.get("enabled_factors") or [])
+        db_path = Path(FACTOR_DB_PATH)
+        if not db_path.exists():
+            return {"trade_date": latest or "", "snapshot_enabled_factors": enabled, "rows": []}
+
+        with duckdb.connect(str(db_path), read_only=True) as con:
+            exists = con.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_value_long'"
+            ).fetchone()[0]
+            if not exists:
+                return {"trade_date": latest or "", "snapshot_enabled_factors": enabled, "rows": []}
+            trade_date = str(latest or "")
+            if not trade_date or not con.execute(
+                "SELECT COUNT(*) FROM factor_value_long WHERE trade_date = ?",
+                [trade_date],
+            ).fetchone()[0]:
+                trade_date = str(con.execute("SELECT MAX(trade_date) FROM factor_value_long").fetchone()[0] or "")
+            if not trade_date:
+                return {"trade_date": "", "snapshot_enabled_factors": enabled, "rows": []}
+            df = con.execute(
+                """
+                SELECT
+                    entity_type,
+                    factor_id,
+                    COUNT(*) AS entity_count,
+                    ROUND(AVG(raw_value), 4) AS avg_raw_value,
+                    ROUND(AVG(score), 2) AS avg_score,
+                    ROUND(MIN(score), 2) AS min_score,
+                    ROUND(MAX(score), 2) AS max_score
+                FROM factor_value_long
+                WHERE trade_date = ?
+                GROUP BY entity_type, factor_id
+                ORDER BY
+                    CASE entity_type
+                        WHEN 'market' THEN 1
+                        WHEN 'sector' THEN 2
+                        WHEN 'stock' THEN 3
+                        ELSE 9
+                    END,
+                    factor_id
+                LIMIT ?
+                """,
+                [trade_date, int(limit)],
+            ).fetchdf()
+        raw_rows = df.to_dict(orient="records") if df is not None and not df.empty else []
+        rows = [{k: _json_scalar(v) for k, v in row.items()} for row in raw_rows]
+        return {"trade_date": trade_date, "snapshot_enabled_factors": enabled, "rows": rows}
+    except Exception:
+        return {"trade_date": "", "snapshot_enabled_factors": [], "rows": []}
+
+
+def _json_scalar(value: Any) -> Any:
+    try:
+        if hasattr(value, "item"):
+            value = value.item()
+        if isinstance(value, float) and math.isnan(value):
+            return None
+    except Exception:
+        pass
+    return value

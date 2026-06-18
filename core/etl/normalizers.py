@@ -175,7 +175,7 @@ def standardize_stock_daily_frame(
             "low": to_float(pick(row, ("low", "最低价"))),
             "close": to_float(pick(row, ("close", "收盘价", "last_price", "最新价"))),
             "pre_close": to_float(pick(row, ("pre_close", "昨收", "prev_close"))),
-            "pct_chg": normalize_pct(pick(row, ("pct_chg", "change_pct", "涨跌幅"), 0)),
+            "pct_chg": normalize_pct(pick(row, ("pct_chg", "pct_change", "change_pct", "涨跌幅"), 0)),
             "vol_hand": to_float(pick(row, ("vol_hand", "vol", "成交量(手)", "volume_hand"), 0)),
             "amount_yuan": to_float(amount) if "amount_yuan" in row else normalize_amount_yuan(amount, unit=amount_unit),
             "source": str(pick(row, ("source", "数据源"), source) or source),
@@ -204,6 +204,13 @@ def standardize_sector_daily_frame(
             continue
         td = normalize_trade_date(pick(row, ("trade_date", "date", "日期"), trade_date), trade_date)
         amount = pick(row, ("amount_yuan", "amount", "成交额"), 0)
+        close = to_float(pick(row, ("close", "price", "last_price", "收盘价", "最新价")))
+        avg_price = to_float(pick(row, ("avg_price", "均价"), close))
+        vol = to_float(pick(row, ("vol_hand", "vol", "volume", "成交量"), 0))
+        amount_yuan = to_float(amount) if "amount_yuan" in row else normalize_amount_yuan(amount, unit=amount_unit)
+        if amount_yuan <= 0 and vol > 0 and avg_price > 0:
+            # ths_daily does not expose amount; use price*volume as a stable cross-sector liquidity proxy.
+            amount_yuan = vol * avg_price
         rows.append({
             "trade_date": td,
             "sector_code": sector_code,
@@ -212,11 +219,11 @@ def standardize_sector_daily_frame(
             "open": to_float(pick(row, ("open", "开盘价", "今开"))),
             "high": to_float(pick(row, ("high", "最高价"))),
             "low": to_float(pick(row, ("low", "最低价"))),
-            "close": to_float(pick(row, ("close", "price", "last_price", "收盘价", "最新价"))),
+            "close": close,
             "pre_close": to_float(pick(row, ("pre_close", "昨收", "prev_close"))),
-            "pct_chg": normalize_pct(pick(row, ("pct_chg", "change_pct", "涨跌幅"), 0)),
-            "vol_hand": to_float(pick(row, ("vol_hand", "vol", "volume", "成交量"), 0)),
-            "amount_yuan": to_float(amount) if "amount_yuan" in row else normalize_amount_yuan(amount, unit=amount_unit),
+            "pct_chg": normalize_pct(pick(row, ("pct_chg", "pct_change", "change_pct", "涨跌幅"), 0)),
+            "vol_hand": vol,
+            "amount_yuan": amount_yuan,
             "member_count": to_float(pick(row, ("member_count", "成分股数"), 0)),
             "source": str(pick(row, ("source", "数据源"), source) or source),
             "as_of_date": normalize_trade_date(as_of_date or td, td),
