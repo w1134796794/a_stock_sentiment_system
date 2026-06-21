@@ -5,9 +5,28 @@
 
 {% block content %}
 <section class="m-card p-4 mb-4">
-  <label class="block text-xs text-slate-500 mb-1">分析日期（留空=今日/最近交易日）</label>
-  <input id="run-date" type="text" inputmode="numeric" placeholder="YYYYMMDD"
-         class="mono w-full bg-slate-950/70 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+  <label class="block text-xs text-slate-500 mb-1">运行模式</label>
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <button id="run-mode-single" type="button" class="m-btn run-mode active">单日生成</button>
+    <button id="run-mode-batch" type="button" class="m-btn run-mode">历史批量</button>
+  </div>
+  <div id="run-single-fields">
+    <label class="block text-xs text-slate-500 mb-1">分析日期（留空=今日/最近交易日）</label>
+    <input id="run-date" type="text" inputmode="numeric" placeholder="YYYYMMDD"
+           class="mono w-full bg-slate-950/70 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+  </div>
+  <div id="run-batch-fields" class="grid grid-cols-2 gap-2" style="display:none">
+    <div>
+      <label class="block text-xs text-slate-500 mb-1">开始日期</label>
+      <input id="run-start-date" type="text" inputmode="numeric" placeholder="YYYYMMDD"
+             class="mono w-full bg-slate-950/70 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+    </div>
+    <div>
+      <label class="block text-xs text-slate-500 mb-1">结束日期</label>
+      <input id="run-end-date" type="text" inputmode="numeric" placeholder="YYYYMMDD"
+             class="mono w-full bg-slate-950/70 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+    </div>
+  </div>
   <button id="run-btn" class="m-btn m-btn-primary w-full mt-3 disabled:opacity-40">开始生成</button>
   <div class="flex items-center gap-2 mt-3">
     <span class="text-xs text-slate-500">状态</span>
@@ -15,7 +34,7 @@
   </div>
   <div id="run-meta" class="text-[11px] text-slate-500 mt-2 break-all"></div>
   <div class="text-[11px] text-slate-500 mt-3 leading-relaxed">
-    等价于命令行 python main.py --mode analysis --date ...。生成快照后，可在交易计划、指标筛选和实时确认页查看。
+    单日生成等价于 python main.py --mode analysis --date ...；历史批量会按交易日顺序逐日生成。
   </div>
 </section>
 
@@ -40,26 +59,65 @@
   <pre id="run-log" class="mono text-[11px] leading-relaxed text-slate-200 p-3 h-[48dvh] overflow-auto whitespace-pre-wrap"></pre>
 </section>
 
+<style>
+  .run-mode { border:1px solid rgba(51,65,85,.85); background:rgba(15,23,42,.72); color:#94a3b8; }
+  .run-mode.active { border-color:rgba(16,185,129,.62); background:rgba(16,185,129,.16); color:#6ee7b7; }
+</style>
+
 <script>
 (function () {
   const initial = {{ run|tojson }};
   let artifacts = {{ artifacts|tojson }};
   let since = initial.next || 0;
   let polling = false;
+  let runMode = initial.mode === 'batch' ? 'batch' : 'single';
 
   const logEl = document.getElementById('run-log');
   const stateEl = document.getElementById('run-state');
   const metaEl = document.getElementById('run-meta');
   const btn = document.getElementById('run-btn');
   const dateEl = document.getElementById('run-date');
+  const startDateEl = document.getElementById('run-start-date');
+  const endDateEl = document.getElementById('run-end-date');
+  const singleFields = document.getElementById('run-single-fields');
+  const batchFields = document.getElementById('run-batch-fields');
+  const modeSingleBtn = document.getElementById('run-mode-single');
+  const modeBatchBtn = document.getElementById('run-mode-batch');
   const autoscroll = document.getElementById('run-autoscroll');
 
   const STATE = {
     idle:    { t: '空闲',   c: 'bg-slate-700 text-slate-200' },
     running: { t: '运行中', c: 'bg-sky-600 text-white' },
     done:    { t: '已完成', c: 'bg-emerald-600 text-white' },
+    partial: { t: '部分完成', c: 'bg-amber-600 text-white' },
     error:   { t: '失败',   c: 'bg-rose-600 text-white' },
   };
+
+  function setMode(next) {
+    runMode = next === 'batch' ? 'batch' : 'single';
+    singleFields.classList.toggle('hidden', runMode === 'batch');
+    batchFields.style.display = runMode === 'batch' ? 'grid' : 'none';
+    modeSingleBtn.classList.toggle('active', runMode === 'single');
+    modeBatchBtn.classList.toggle('active', runMode === 'batch');
+  }
+
+  function buildMeta(d) {
+    const parts = [];
+    if (d.mode === 'batch') {
+      const range = [d.start_date, d.end_date].filter(Boolean).join(' ~ ');
+      if (range) parts.push(range);
+      if (Number(d.total || 0) > 0) parts.push(`进度 ${Number(d.completed || 0)}/${Number(d.total || 0)}`);
+      if ((d.failed || []).length) parts.push(`失败 ${d.failed.length} 个`);
+    } else if (d.date) {
+      parts.push('日期 ' + d.date);
+    }
+    if (d.finished_at) {
+      parts.push('完成于 ' + d.finished_at);
+    } else if (d.started_at) {
+      parts.push('开始于 ' + d.started_at);
+    }
+    return parts.join(' · ');
+  }
 
   function setState(s, meta) {
     const m = STATE[s] || STATE.idle;
@@ -109,9 +167,7 @@
       since = d.next;
       appendLines(d.lines);
       if (d.artifacts) renderArtifacts(d.artifacts);
-      const meta = (d.date ? ('日期 ' + d.date + ' · ') : '') +
-                   (d.finished_at ? ('完成于 ' + d.finished_at) : (d.started_at ? ('开始于 ' + d.started_at) : ''));
-      setState(d.state, meta);
+      setState(d.state, buildMeta(d));
       if (d.state === 'running') {
         setTimeout(() => { polling = false; poll(); }, 900);
       } else {
@@ -125,20 +181,28 @@
 
   appendLines(initial.lines);
   renderArtifacts(artifacts);
-  setState(initial.state,
-    (initial.date ? ('日期 ' + initial.date + ' · ') : '') +
-    (initial.finished_at ? ('完成于 ' + initial.finished_at) : (initial.started_at ? ('开始于 ' + initial.started_at) : '')));
+  if (initial.date && initial.mode !== 'batch') dateEl.value = initial.date;
+  if (initial.start_date) startDateEl.value = initial.start_date;
+  if (initial.end_date) endDateEl.value = initial.end_date;
+  setMode(runMode);
+  setState(initial.state, buildMeta(initial));
   if (initial.state === 'running') poll();
+
+  modeSingleBtn.addEventListener('click', () => setMode('single'));
+  modeBatchBtn.addEventListener('click', () => setMode('batch'));
 
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     logEl.textContent = '';
     since = 0;
+    const payload = runMode === 'batch'
+      ? { mode: 'batch', start_date: startDateEl.value.trim(), end_date: endDateEl.value.trim() }
+      : { mode: 'single', date: dateEl.value.trim() };
     try {
       const r = await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: dateEl.value.trim() })
+        body: JSON.stringify(payload)
       });
       const d = await r.json();
       if (!d.started) {
@@ -156,7 +220,8 @@
 
   document.getElementById('run-clear').addEventListener('click', () => { logEl.textContent = ''; });
   document.getElementById('artifact-refresh').addEventListener('click', async () => {
-    const params = dateEl.value.trim() ? ('?date=' + encodeURIComponent(dateEl.value.trim())) : '';
+    const artifactDate = runMode === 'batch' ? endDateEl.value.trim() : dateEl.value.trim();
+    const params = artifactDate ? ('?date=' + encodeURIComponent(artifactDate)) : '';
     const r = await fetch('/api/etl/artifacts' + params);
     renderArtifacts(await r.json());
   });

@@ -1,7 +1,7 @@
 {
   "meta": {
     "date": "20260514",
-    "generated_at": "2026-06-18T19:33:57",
+    "generated_at": "2026-06-21T19:46:17",
     "schema_version": 1,
     "engine": "etl",
     "factor_profile": "default",
@@ -1689,7 +1689,7 @@
         "amount_ratio_5d": 1.0,
         "limit_up_count": 81,
         "limit_down_count": 37,
-        "computed_at": "2026-06-18T19:33:54"
+        "computed_at": "2026-06-21T19:46:12"
       },
       "top_sectors": [
         {
@@ -1703,7 +1703,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.49008059975466,
           "rank": 1,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1716,7 +1716,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.46377290744697,
           "rank": 2,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1729,7 +1729,7 @@
           "persistence_score": 100.0,
           "mainline_score": 66.34358552549557,
           "rank": 4,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1742,7 +1742,7 @@
           "persistence_score": 100.0,
           "mainline_score": 62.51250595228559,
           "rank": 5,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1755,7 +1755,7 @@
           "persistence_score": 100.0,
           "mainline_score": 61.25271991699806,
           "rank": 6,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1768,7 +1768,7 @@
           "persistence_score": 100.0,
           "mainline_score": 60.65968960184942,
           "rank": 7,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1781,7 +1781,7 @@
           "persistence_score": 75.0,
           "mainline_score": 59.88082259339062,
           "rank": 8,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1794,7 +1794,7 @@
           "persistence_score": 75.0,
           "mainline_score": 59.813114873740346,
           "rank": 9,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1807,7 +1807,7 @@
           "persistence_score": 100.0,
           "mainline_score": 59.75425597825193,
           "rank": 10,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -1820,135 +1820,28 @@
           "persistence_score": 100.0,
           "mainline_score": 58.959474268228796,
           "rank": 11,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         }
       ],
       "top_stocks": [
-        {
-          "trade_date": "20260514",
-          "code": "001267",
-          "ts_code": "001267.SZ",
-          "name": "汇绿生态",
-          "tech_score": 94.68855735294119,
-          "volume_score": 20.0,
-          "liquidity_score": 97.61514655015475,
-          "sector_resonance_score": 50.0,
-          "total_score": 69.89845225120743,
-          "rank": 1,
-          "pct_chg": 9.9937,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 4140747730.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
         {
           "trade_date": "20260514",
           "code": "002506",
           "ts_code": "002506.SZ",
           "name": "协鑫集成",
           "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
+          "volume_score": 94.47649190759303,
           "liquidity_score": 97.23284179865284,
           "sector_resonance_score": 50.0,
-          "total_score": 69.82892130090704,
-          "rank": 2,
+          "total_score": 88.72367926691129,
+          "rank": 1,
           "pct_chg": 10.1124,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
+          "vol_ratio": 1.889158523923027,
+          "amount_ratio": 2.068960828684415,
           "new_high_ratio": 1.0,
           "amount_yuan": 3842047200.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "688146",
-          "ts_code": "688146.SH",
-          "name": "中船特气",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 97.17822683415255,
-          "sector_resonance_score": 50.0,
-          "total_score": 69.81799830800699,
-          "rank": 3,
-          "pct_chg": 20.0,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 3767654583.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "002617",
-          "ts_code": "002617.SZ",
-          "name": "露笑科技",
-          "tech_score": 94.64345735294117,
-          "volume_score": 20.0,
-          "liquidity_score": 96.54105224831603,
-          "sector_resonance_score": 50.0,
-          "total_score": 69.66559339083967,
-          "rank": 4,
-          "pct_chg": 9.9773,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 3204554189.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "003031",
-          "ts_code": "003031.SZ",
-          "name": "中瓷电子",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 95.53977789914437,
-          "sector_resonance_score": 50.0,
-          "total_score": 69.49030852100535,
-          "rank": 5,
-          "pct_chg": 10.0007,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 2729871793.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "600481",
-          "ts_code": "600481.SH",
-          "name": "双良节能",
-          "tech_score": 94.57553235294118,
-          "volume_score": 20.0,
-          "liquidity_score": 94.37465865647188,
-          "sector_resonance_score": 50.0,
-          "total_score": 69.20514467247085,
-          "rank": 6,
-          "pct_chg": 9.9526,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 2299910067.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "688596",
-          "ts_code": "688596.SH",
-          "name": "正帆科技",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 93.33697433096668,
-          "sector_resonance_score": 50.0,
-          "total_score": 69.04974780736981,
-          "rank": 7,
-          "pct_chg": 19.9948,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1997779798.0,
-          "computed_at": "2026-06-18T19:33:55"
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 7942359.4
         },
         {
           "trade_date": "20260514",
@@ -1956,215 +1849,18 @@
           "ts_code": "688143.SH",
           "name": "长盈通",
           "tech_score": 94.59034071943923,
-          "volume_score": 20.0,
+          "volume_score": 91.74804453547193,
           "liquidity_score": 93.3733843073002,
           "sector_resonance_score": 50.0,
-          "total_score": 69.01081314923573,
-          "rank": 8,
+          "total_score": 87.11035826028655,
+          "rank": 2,
           "pct_chg": 19.9424,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
+          "vol_ratio": 1.6870725836804348,
+          "amount_ratio": 2.05277097915732,
           "new_high_ratio": 0.9995635093845482,
           "amount_yuan": 2006391113.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "002208",
-          "ts_code": "002208.SZ",
-          "name": "合肥城建",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 93.0274895321318,
-          "sector_resonance_score": 50.0,
-          "total_score": 68.98785084760284,
-          "rank": 9,
-          "pct_chg": 10.0,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1888266181.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "603118",
-          "ts_code": "603118.SH",
-          "name": "共进股份",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 92.13544511196068,
-          "sector_resonance_score": 50.0,
-          "total_score": 68.80944196356862,
-          "rank": 10,
-          "pct_chg": 10.0062,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1689806208.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "003022",
-          "ts_code": "003022.SZ",
-          "name": "联泓新科",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 91.42545057345713,
-          "sector_resonance_score": 50.0,
-          "total_score": 68.6674430558679,
-          "rank": 11,
-          "pct_chg": 10.004,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1571410989.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "002990",
-          "ts_code": "002990.SZ",
-          "name": "盛视科技",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 91.38904059712361,
-          "sector_resonance_score": 50.0,
-          "total_score": 68.6601610606012,
-          "rank": 12,
-          "pct_chg": 10.0,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1563452860.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "002782",
-          "ts_code": "002782.SZ",
-          "name": "可立克",
-          "tech_score": 94.67205735294118,
-          "volume_score": 20.0,
-          "liquidity_score": 91.06135081012198,
-          "sector_resonance_score": 50.0,
-          "total_score": 68.58109310320087,
-          "rank": 13,
-          "pct_chg": 9.9877,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1526095354.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "002980",
-          "ts_code": "002980.SZ",
-          "name": "华盛昌",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 90.4059712361187,
-          "sector_resonance_score": 50.0,
-          "total_score": 68.46354718840021,
-          "rank": 14,
-          "pct_chg": 10.0046,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1452483311.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "600578",
-          "ts_code": "600578.SH",
-          "name": "京能电力",
-          "tech_score": 94.70588235294119,
-          "volume_score": 20.0,
-          "liquidity_score": 89.75059166211543,
-          "sector_resonance_score": 50.0,
-          "total_score": 68.33247127359957,
-          "rank": 15,
-          "pct_chg": 10.0173,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1382157249.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "002940",
-          "ts_code": "002940.SZ",
-          "name": "昂利康",
-          "tech_score": 94.68333235294116,
-          "volume_score": 20.0,
-          "liquidity_score": 88.22137265610777,
-          "sector_resonance_score": 50.0,
-          "total_score": 68.01760747239803,
-          "rank": 16,
-          "pct_chg": 9.9918,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1191548347.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "002165",
-          "ts_code": "002165.SZ",
-          "name": "红宝丽",
-          "tech_score": 94.57718235294118,
-          "volume_score": 20.0,
-          "liquidity_score": 88.33060258510832,
-          "sector_resonance_score": 50.0,
-          "total_score": 67.99699345819813,
-          "rank": 17,
-          "pct_chg": 9.9532,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1200123783.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "603093",
-          "ts_code": "603093.SH",
-          "name": "南华期货",
-          "tech_score": 94.65913235294117,
-          "volume_score": 20.0,
-          "liquidity_score": 87.60240305843801,
-          "sector_resonance_score": 50.0,
-          "total_score": 67.88413355286407,
-          "rank": 18,
-          "pct_chg": 9.983,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 1.0,
-          "amount_yuan": 1124945271.0,
-          "computed_at": "2026-06-18T19:33:55"
-        },
-        {
-          "trade_date": "20260514",
-          "code": "605020",
-          "ts_code": "605020.SH",
-          "name": "永和股份",
-          "tech_score": 92.03888384657938,
-          "volume_score": 20.0,
-          "liquidity_score": 92.51774986346258,
-          "sector_resonance_score": 50.0,
-          "total_score": 67.81910351132427,
-          "rank": 19,
-          "pct_chg": 9.4828,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
-          "new_high_ratio": 0.9952978056426333,
-          "amount_yuan": 1772023356.0,
-          "computed_at": "2026-06-18T19:33:55"
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 226892.04
         },
         {
           "trade_date": "20260514",
@@ -2172,17 +1868,341 @@
           "ts_code": "002245.SZ",
           "name": "蔚蓝锂芯",
           "tech_score": 89.24278564129435,
-          "volume_score": 20.0,
+          "volume_score": 95.29948631948348,
           "liquidity_score": 97.8882213726561,
           "sector_resonance_score": 50.0,
-          "total_score": 67.77475853104897,
-          "rank": 20,
+          "total_score": 86.8585036162371,
+          "rank": 3,
           "pct_chg": 8.9424,
-          "vol_ratio": 1.0,
-          "amount_ratio": 1.0,
+          "vol_ratio": 2.022490037219875,
+          "amount_ratio": 2.3588249053289574,
           "new_high_ratio": 0.9903489235337787,
           "amount_yuan": 4418577290.0,
-          "computed_at": "2026-06-18T19:33:55"
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 1659286.39
+        },
+        {
+          "trade_date": "20260514",
+          "code": "688146",
+          "ts_code": "688146.SH",
+          "name": "中船特气",
+          "tech_score": 94.70588235294119,
+          "volume_score": 80.10512824183837,
+          "liquidity_score": 97.17822683415255,
+          "sector_resonance_score": 50.0,
+          "total_score": 86.551590227698,
+          "rank": 4,
+          "pct_chg": 20.0,
+          "vol_ratio": 1.1132514061220529,
+          "amount_ratio": 1.6951588532250166,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 3767654583.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 269662.14
+        },
+        {
+          "trade_date": "20260514",
+          "code": "003022",
+          "ts_code": "003022.SZ",
+          "name": "联泓新科",
+          "tech_score": 94.70588235294119,
+          "volume_score": 90.02107863650775,
+          "liquidity_score": 91.42545057345713,
+          "sector_resonance_score": 50.0,
+          "total_score": 86.31314990868978,
+          "rank": 5,
+          "pct_chg": 10.004,
+          "vol_ratio": 1.7443737660763128,
+          "amount_ratio": 1.8573125248443068,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 1571410989.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 590990.87
+        },
+        {
+          "trade_date": "20260514",
+          "code": "300782",
+          "ts_code": "300782.SZ",
+          "name": "卓胜微",
+          "tech_score": 87.36207526488855,
+          "volume_score": 93.64852813405673,
+          "liquidity_score": 99.38103040233024,
+          "sector_resonance_score": 50.0,
+          "total_score": 86.30641844676299,
+          "rank": 6,
+          "pct_chg": 10.9903,
+          "vol_ratio": 1.9578049571508178,
+          "amount_ratio": 2.412738165141024,
+          "new_high_ratio": 0.9722567287784678,
+          "amount_yuan": 8694200438.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 641143.33
+        },
+        {
+          "trade_date": "20260514",
+          "code": "002208",
+          "ts_code": "002208.SZ",
+          "name": "合肥城建",
+          "tech_score": 94.70588235294119,
+          "volume_score": 83.73137391214284,
+          "liquidity_score": 93.0274895321318,
+          "sector_resonance_score": 50.0,
+          "total_score": 85.85030588763745,
+          "rank": 7,
+          "pct_chg": 10.0,
+          "vol_ratio": 1.38097708628226,
+          "amount_ratio": 1.7175328266891678,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 1888266181.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 966667.06
+        },
+        {
+          "trade_date": "20260514",
+          "code": "001267",
+          "ts_code": "001267.SZ",
+          "name": "汇绿生态",
+          "tech_score": 94.68855735294119,
+          "volume_score": 74.36390030073946,
+          "liquidity_score": 97.61514655015475,
+          "sector_resonance_score": 50.0,
+          "total_score": 85.81455195133381,
+          "rank": 8,
+          "pct_chg": 9.9937,
+          "vol_ratio": 1.1228160072924853,
+          "amount_ratio": 1.2262960167666714,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 4140747730.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 626005.56
+        },
+        {
+          "trade_date": "20260514",
+          "code": "003031",
+          "ts_code": "003031.SZ",
+          "name": "中瓷电子",
+          "tech_score": 94.70588235294119,
+          "volume_score": 73.5919221849379,
+          "liquidity_score": 95.53977789914437,
+          "sector_resonance_score": 50.0,
+          "total_score": 85.08307463866046,
+          "rank": 9,
+          "pct_chg": 10.0007,
+          "vol_ratio": 1.0772166331933903,
+          "amount_ratio": 1.2101371416016415,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 2729871793.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 168166.01
+        },
+        {
+          "trade_date": "20260514",
+          "code": "002254",
+          "ts_code": "002254.SZ",
+          "name": "泰和新材",
+          "tech_score": 94.62475735294117,
+          "volume_score": 88.1820223323308,
+          "liquidity_score": 87.03804842526853,
+          "sector_resonance_score": 50.0,
+          "total_score": 84.68862081860665,
+          "rank": 10,
+          "pct_chg": 9.9705,
+          "vol_ratio": 1.587073419574159,
+          "amount_ratio": 1.8674883670123044,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 1088481186.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 735378.69
+        },
+        {
+          "trade_date": "20260514",
+          "code": "002990",
+          "ts_code": "002990.SZ",
+          "name": "盛视科技",
+          "tech_score": 94.70588235294119,
+          "volume_score": 79.07358398140622,
+          "liquidity_score": 91.38904059712361,
+          "sector_resonance_score": 50.0,
+          "total_score": 84.6601027175245,
+          "rank": 11,
+          "pct_chg": 10.0,
+          "vol_ratio": 1.309679493285716,
+          "amount_ratio": 1.4162072252267819,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 1563452860.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 233401.0
+        },
+        {
+          "trade_date": "20260514",
+          "code": "002940",
+          "ts_code": "002940.SZ",
+          "name": "昂利康",
+          "tech_score": 94.68333235294116,
+          "volume_score": 85.22545568137556,
+          "liquidity_score": 88.22137265610777,
+          "sector_resonance_score": 50.0,
+          "total_score": 84.62356309021513,
+          "rank": 12,
+          "pct_chg": 9.9918,
+          "vol_ratio": 1.4760227456754391,
+          "amount_ratio": 1.7420137088346053,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 1191548347.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 298679.21
+        },
+        {
+          "trade_date": "20260514",
+          "code": "688234",
+          "ts_code": "688234.SH",
+          "name": "天岳先进",
+          "tech_score": 84.23558830215423,
+          "volume_score": 91.90629519414104,
+          "liquidity_score": 98.45257600582559,
+          "sector_resonance_score": 50.0,
+          "total_score": 84.51595240173052,
+          "rank": 13,
+          "pct_chg": 15.2561,
+          "vol_ratio": 1.7517334986280562,
+          "amount_ratio": 2.3593839064774187,
+          "new_high_ratio": 0.9604455558081382,
+          "amount_yuan": 5366794925.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 320014.73
+        },
+        {
+          "trade_date": "20260514",
+          "code": "002165",
+          "ts_code": "002165.SZ",
+          "name": "红宝丽",
+          "tech_score": 94.57718235294118,
+          "volume_score": 84.39616945117997,
+          "liquidity_score": 88.33060258510832,
+          "sector_resonance_score": 50.0,
+          "total_score": 84.48947913438596,
+          "rank": 14,
+          "pct_chg": 9.9532,
+          "vol_ratio": 2.6389305136307106,
+          "amount_ratio": 2.7597146414937717,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 1200123783.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 1303623.91
+        },
+        {
+          "trade_date": "20260514",
+          "code": "002124",
+          "ts_code": "002124.SZ",
+          "name": "天邦食品",
+          "tech_score": 94.70588235294119,
+          "volume_score": 91.32579467075988,
+          "liquidity_score": 84.5075550700892,
+          "sector_resonance_score": 50.0,
+          "total_score": 84.43348866281723,
+          "rank": 15,
+          "pct_chg": 10.0358,
+          "vol_ratio": 1.7771376769334473,
+          "amount_ratio": 1.9289258967273426,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 909577223.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 3049037.22
+        },
+        {
+          "trade_date": "20260514",
+          "code": "002617",
+          "ts_code": "002617.SZ",
+          "name": "露笑科技",
+          "tech_score": 94.64345735294117,
+          "volume_score": 65.20446354017031,
+          "liquidity_score": 96.54105224831603,
+          "sector_resonance_score": 50.0,
+          "total_score": 84.10036814669682,
+          "rank": 16,
+          "pct_chg": 9.9773,
+          "vol_ratio": 3.2479041656451386,
+          "amount_ratio": 3.6228101863397226,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 3204554189.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 3435666.22
+        },
+        {
+          "trade_date": "20260514",
+          "code": "300001",
+          "ts_code": "300001.SZ",
+          "name": "特锐德",
+          "tech_score": 84.80852473515475,
+          "volume_score": 91.04474836883941,
+          "liquidity_score": 95.97669761514655,
+          "sector_resonance_score": 50.0,
+          "total_score": 83.87313143393177,
+          "rank": 17,
+          "pct_chg": 8.1497,
+          "vol_ratio": 1.714613372739906,
+          "amount_ratio": 1.9689664967672467,
+          "new_high_ratio": 0.9818325434439179,
+          "amount_yuan": 2940758581.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 790611.82
+        },
+        {
+          "trade_date": "20260514",
+          "code": "600353",
+          "ts_code": "600353.SH",
+          "name": "旭光电子",
+          "tech_score": 83.14695555464526,
+          "volume_score": 96.82025709193056,
+          "liquidity_score": 94.93901328964137,
+          "sector_resonance_score": 50.0,
+          "total_score": 83.7635247725401,
+          "rank": 18,
+          "pct_chg": 7.763,
+          "vol_ratio": 2.127028401495395,
+          "amount_ratio": 2.34512626731276,
+          "new_high_ratio": 0.9795728876508821,
+          "amount_yuan": 2444525302.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 1168793.59
+        },
+        {
+          "trade_date": "20260514",
+          "code": "600509",
+          "ts_code": "600509.SH",
+          "name": "天富能源",
+          "tech_score": 94.70588235294119,
+          "volume_score": 85.08971626642625,
+          "liquidity_score": 85.38139450209357,
+          "sector_resonance_score": 50.0,
+          "total_score": 83.76022873176848,
+          "rank": 19,
+          "pct_chg": 10.0106,
+          "vol_ratio": 1.504353729771089,
+          "amount_ratio": 1.7028235715430105,
+          "new_high_ratio": 1.0,
+          "amount_yuan": 970402666.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 954044.75
+        },
+        {
+          "trade_date": "20260514",
+          "code": "688172",
+          "ts_code": "688172.SH",
+          "name": "燕东微",
+          "tech_score": 88.18177941709487,
+          "volume_score": 86.95340470889992,
+          "liquidity_score": 92.62697979246313,
+          "sector_resonance_score": 50.0,
+          "total_score": 83.60381641091188,
+          "rank": 20,
+          "pct_chg": 10.3095,
+          "vol_ratio": 1.6007322946162779,
+          "amount_ratio": 1.755540082095716,
+          "new_high_ratio": 0.975353388909025,
+          "amount_yuan": 1794627840.0,
+          "computed_at": "2026-06-21T19:46:14",
+          "vol_hand": 341983.46
         }
       ],
       "screening": {
@@ -3845,7 +3865,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.49008059975466,
           "rank": 1,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3858,7 +3878,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.46377290744697,
           "rank": 2,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3871,7 +3891,7 @@
           "persistence_score": 100.0,
           "mainline_score": 66.34358552549557,
           "rank": 4,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3884,7 +3904,7 @@
           "persistence_score": 100.0,
           "mainline_score": 62.51250595228559,
           "rank": 5,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3897,7 +3917,7 @@
           "persistence_score": 100.0,
           "mainline_score": 61.25271991699806,
           "rank": 6,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3910,7 +3930,7 @@
           "persistence_score": 100.0,
           "mainline_score": 60.65968960184942,
           "rank": 7,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3923,7 +3943,7 @@
           "persistence_score": 75.0,
           "mainline_score": 59.88082259339062,
           "rank": 8,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3936,7 +3956,7 @@
           "persistence_score": 75.0,
           "mainline_score": 59.813114873740346,
           "rank": 9,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3949,7 +3969,7 @@
           "persistence_score": 100.0,
           "mainline_score": 59.75425597825193,
           "rank": 10,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -3962,7 +3982,7 @@
           "persistence_score": 100.0,
           "mainline_score": 58.959474268228796,
           "rank": 11,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         }
       ]
     },
@@ -3994,7 +4014,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.49008059975466,
           "rank": 1,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4007,7 +4027,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.46377290744697,
           "rank": 2,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4020,7 +4040,7 @@
           "persistence_score": 100.0,
           "mainline_score": 66.34358552549557,
           "rank": 4,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4033,7 +4053,7 @@
           "persistence_score": 100.0,
           "mainline_score": 62.51250595228559,
           "rank": 5,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4046,7 +4066,7 @@
           "persistence_score": 100.0,
           "mainline_score": 61.25271991699806,
           "rank": 6,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4059,7 +4079,7 @@
           "persistence_score": 100.0,
           "mainline_score": 60.65968960184942,
           "rank": 7,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4072,7 +4092,7 @@
           "persistence_score": 75.0,
           "mainline_score": 59.88082259339062,
           "rank": 8,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4085,7 +4105,7 @@
           "persistence_score": 75.0,
           "mainline_score": 59.813114873740346,
           "rank": 9,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4098,7 +4118,7 @@
           "persistence_score": 100.0,
           "mainline_score": 59.75425597825193,
           "rank": 10,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         },
         {
           "trade_date": "20260514",
@@ -4111,7 +4131,7 @@
           "persistence_score": 100.0,
           "mainline_score": 58.959474268228796,
           "rank": 11,
-          "computed_at": "2026-06-18T19:33:54"
+          "computed_at": "2026-06-21T19:46:13"
         }
       ]
     }

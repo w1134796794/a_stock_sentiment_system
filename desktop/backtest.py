@@ -108,6 +108,28 @@ def load_trades(run: str) -> List[Dict[str, Any]]:
     return out
 
 
+def load_table(kind: str, run: str) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for r in _read_csv(_path(kind, run)):
+        out.append({k: _num(v) for k, v in r.items()})
+    return out
+
+
+def _fmt_money(value: Any) -> str:
+    try:
+        return f"{float(value):+,.0f}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _fmt_pct(value: Any, signed: bool = False) -> str:
+    try:
+        fmt = "{:+.1f}%" if signed else "{:.1f}%"
+        return fmt.format(float(value) * 100)
+    except (TypeError, ValueError):
+        return ""
+
+
 def runs_meta() -> List[Dict[str, Any]]:
     """供下拉选择：每个 run 的标签（时间 + 总收益）。"""
     meta: List[Dict[str, Any]] = []
@@ -273,6 +295,42 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
     for r in pattern_rows:
         r.pop("_pnl", None)
 
+    factor_feedback_rows = []
+    for r in load_table("factor_feedback", run):
+        factor_feedback_rows.append({
+            "因子": r.get("factor_name") or r.get("factor_id") or "",
+            "样本": r.get("sample_count", 0),
+            "总体胜率": _fmt_pct(r.get("win_rate")),
+            "强项样本": r.get("strong_count", 0),
+            "强项盈亏": _fmt_money(r.get("strong_total_pnl")),
+            "强项胜率": _fmt_pct(r.get("strong_win_rate")),
+            "弱项样本": r.get("weak_count", 0),
+            "弱项盈亏": _fmt_money(r.get("weak_total_pnl")),
+            "弱项止损率": _fmt_pct(r.get("weak_stop_loss_rate")),
+            "强弱差": _fmt_money(r.get("strong_minus_weak_pnl")),
+            "均分": f"{float(r.get('avg_score') or 0):.1f}",
+            "结论": r.get("feedback") or "",
+            "_weak_pnl": float(r.get("weak_total_pnl") or 0),
+            "_strong_pnl": float(r.get("strong_total_pnl") or 0),
+        })
+    factor_feedback_rows.sort(key=lambda r: (r["_weak_pnl"], -r["_strong_pnl"]))
+    for r in factor_feedback_rows:
+        r.pop("_weak_pnl", None)
+        r.pop("_strong_pnl", None)
+
+    rank_feedback_rows = []
+    for r in load_table("rank_feedback", run):
+        rank_feedback_rows.append({
+            "排名": r.get("plan_rank", ""),
+            "样本": r.get("sample_count", 0),
+            "胜率": _fmt_pct(r.get("win_rate")),
+            "总盈亏": _fmt_money(r.get("total_pnl")),
+            "平均收益": _fmt_pct(r.get("avg_pnl_pct"), signed=True),
+            "止损率": _fmt_pct(r.get("stop_loss_rate")),
+            "止盈率": _fmt_pct(r.get("take_profit_rate")),
+            "均分": f"{float(r.get('avg_score') or 0):.1f}",
+        })
+
     # 交易明细（倒序，最近在前）
     trade_rows = []
     for t in reversed(trades):
@@ -292,6 +350,10 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "持仓天数": t.get("holding_days", ""),
             "止损": "是" if t.get("stop_loss_triggered") else "",
             "止盈": "是" if t.get("take_profit_triggered") else "",
+            "排名": t.get("plan_rank", ""),
+            "评分": (f"{float(t.get('plan_score')):.2f}"
+                   if isinstance(t.get("plan_score"), (int, float)) else ""),
+            "退出": t.get("exit_reason", ""),
         })
 
     base.update({
@@ -313,9 +375,11 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "nav_days": len(nav),
         "equity_chart": _chart([r["total_value"] for r in nav], fill="bottom") if nav else None,
         "pattern_rows": pattern_rows,
+        "factor_feedback_rows": factor_feedback_rows,
+        "rank_feedback_rows": rank_feedback_rows,
         "trade_rows": trade_rows,
         "trade_columns": ["日期", "名称", "代码", "模式", "动作", "买入价", "卖出价",
-                          "股数", "盈亏", "盈亏%", "持仓天数", "止损", "止盈"],
+                          "股数", "盈亏", "盈亏%", "持仓天数", "止损", "止盈", "排名", "评分", "退出"],
     })
     return base
 
