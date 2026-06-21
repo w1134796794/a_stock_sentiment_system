@@ -286,7 +286,7 @@ COLUMN_LABELS: Dict[str, str] = {
     "mf_E2_retail_net_ratio": "E2散户净占比",
     "mf_E3_large_buy_ratio": "E3大单买入占比",
     "mf_E4_moneyflow_trend": "E4资金趋势",
-    # 置信度扣分制因子（confidence_rules.yaml 的 breakdown.factor）
+    # 候选解释与实时确认相关字段
     "seal_ratio": "封单强度",
     "gap_ratio": "次日高开",
     "gap_pct": "竞价高开",
@@ -909,7 +909,7 @@ def _prepare_snapshot(snapshot: Optional[Dict[str, Any]], date: str) -> Optional
 # ----------------------------------------------------------------------
 # 数据浏览分类：优先展示指标筛选和板块强度结果。
 # signals=True 仅作为旧快照兼容读取，不再是默认主路径。
-# 注：龙头池 / 走弱池 由专门的「龙头池」页（/dragon）承载，这里不重复。
+# 注：候选池、板块热度与涨停数据分别由数据浏览页承载。
 # ----------------------------------------------------------------------
 DATA_CATEGORIES: List[Dict[str, Any]] = [
     {"key": "strategy", "label": "指标筛选", "signals": True, "names": ["ETL指标筛选", "指标筛选", "交易计划"]},
@@ -920,7 +920,7 @@ DATA_CATEGORIES: List[Dict[str, Any]] = [
     {"key": "capital", "label": "龙虎榜资金", "signals": False,
      "names": ["龙虎榜", "资金流向", "筹码结构"]},
     {"key": "review", "label": "数据产物", "signals": False,
-     "names": ["ETL指标筛选", "指标筛选", "交易计划", "因子原始数据", "风控闸门"]},
+     "names": ["指标筛选", "交易计划", "因子原始数据", "风控闸门"]},
 ]
 _CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
 
@@ -946,23 +946,6 @@ def index(request: Request) -> Any:
 def report_index() -> Any:
     latest = reader.latest()
     return RedirectResponse(url=f"/report/{latest}" if latest else "/")
-
-
-@app.get("/dragon", response_class=HTMLResponse)
-def dragon_page(request: Request) -> Any:
-    """龙头池 / 走弱池浏览（直读 dragon_pools.json）。"""
-    from desktop.status import dragon_pools
-
-    return templates.TemplateResponse(request, "dragon.html", {"dp": dragon_pools()})
-
-
-@app.get("/intraday", response_class=HTMLResponse)
-def intraday_page(request: Request) -> Any:
-    """盘中转强：实时观测走弱池个股是否盘中涨幅转强（手动跑一轮）。"""
-    from core.execution.intraday_recovery import IntradayRecoveryMonitor
-
-    view = IntradayRecoveryMonitor().view()
-    return templates.TemplateResponse(request, "intraday.html", {"rt": view})
 
 
 @app.get("/realtime", response_class=HTMLResponse)
@@ -992,28 +975,6 @@ def _default_realtime_codes(snapshot: Optional[Dict], limit: int = 8) -> List[st
             if len(codes) >= limit:
                 break
     return codes or ["000001", "600000", "300750", "002594"]
-
-
-@app.post("/api/intraday/run")
-def api_intraday_run(payload: dict = Body(default={})) -> Any:
-    """手动跑一轮盘中转强观测，合并落盘后返回最新结果。"""
-    from core.execution.intraday_recovery import IntradayRecoveryMonitor
-
-    date = (payload or {}).get("date") or None
-    threshold = (payload or {}).get("threshold")
-    monitor = IntradayRecoveryMonitor()
-    try:
-        monitor.run_once(date_str=date, threshold=threshold)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "message": f"{e}"}, status_code=500)
-    return JSONResponse({"ok": True, "view": monitor.view(date)})
-
-
-@app.get("/api/intraday/status")
-def api_intraday_status(date: Optional[str] = None) -> Any:
-    from core.execution.intraday_recovery import IntradayRecoveryMonitor
-
-    return JSONResponse(IntradayRecoveryMonitor().view(date))
 
 
 @app.get("/run", response_class=HTMLResponse)
@@ -1613,24 +1574,6 @@ def mobile_data_browse(request: Request, cat: str, date: str) -> Any:
             "sections": (snapshot or {}).get("sections", []),
             "snapshot": snapshot,
         },
-    )
-
-
-@app.get("/m/dragon", response_class=HTMLResponse)
-def mobile_dragon_page(request: Request) -> Any:
-    """手机龙头池：单列卡片浏览。"""
-    from desktop.status import dragon_pools
-
-    return templates.TemplateResponse(request, "mobile/dragon.html", {"dp": dragon_pools()})
-
-
-@app.get("/m/intraday", response_class=HTMLResponse)
-def mobile_intraday_page(request: Request) -> Any:
-    """手机盘中转强：单列展示走弱池实时转强信号。"""
-    from core.execution.intraday_recovery import IntradayRecoveryMonitor
-
-    return templates.TemplateResponse(
-        request, "mobile/intraday.html", {"rt": IntradayRecoveryMonitor().view()}
     )
 
 

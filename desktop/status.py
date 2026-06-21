@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import csv
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -19,7 +18,6 @@ from config.settings import (
 )
 from snapshot.reader import SnapshotReader
 
-DRAGON_POOL_PATH = Path(BASE_DIR) / "dragon_pools.json"
 LOG_PATH = Path(BASE_DIR) / "logs" / "system.log"
 INDEX_LABELS = {
     "000001.SH": "上证",
@@ -34,24 +32,11 @@ def _ok(passed: bool) -> str:
     return "ok" if passed else "warn"
 
 
-def _read_dragon_pools() -> Dict[str, Any]:
-    try:
-        if DRAGON_POOL_PATH.exists():
-            return json.loads(DRAGON_POOL_PATH.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        pass
-    return {}
-
-
 def health_items() -> List[Dict[str, Any]]:
     """返回若干健康检查项，供概览页渲染（状态 ok / warn）。"""
     reader = SnapshotReader(SNAPSHOT_DIR)
     dates = reader.list_dates()
     latest = reader.latest()
-
-    pools = _read_dragon_pools()
-    dragon_n = len(pools.get("dragon_pool", {}) or {})
-    weak_n = len(pools.get("weakening_pool", {}) or {})
 
     token_ok = bool((TUSHARE_TOKEN or "").strip())
     ai_key = (LLM_CONFIG.get("api_key") or "").strip()
@@ -85,17 +70,6 @@ def health_items() -> List[Dict[str, Any]]:
             "value": str(FACTOR_DB_PATH),
             "detail": "行情、指标和筛选结果依赖此 DuckDB 文件。",
             "badge": "已就绪" if Path(FACTOR_DB_PATH).exists() else "缺失",
-        },
-        {
-            "title": "龙头池",
-            "status": _ok(DRAGON_POOL_PATH.exists()),
-            "value": (
-                f"龙头 {dragon_n} 只 · 走弱 {weak_n} 只"
-                if DRAGON_POOL_PATH.exists()
-                else "暂无 dragon_pools.json"
-            ),
-            "detail": f"更新时间：{pools.get('update_time', '—')}",
-            "badge": "已就绪" if DRAGON_POOL_PATH.exists() else "缺失",
         },
         {
             "title": "数据目录",
@@ -494,6 +468,9 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
     phase = m.get("phase") or {}
     phase_model = m.get("phase_model") or {}
     is_etl = ((snap.get("meta") or {}).get("engine") == "etl") or env.get("engine") == "etl_gold"
+    trade_plans = ((snap.get("trade_plans") or {}).get("rows") or [])
+    screening_final = (((snap.get("etl") or {}).get("screening") or {}).get("final") or [])
+    plan_count = len(trade_plans) or len(screening_final)
     width = env.get("width") or {}
     volume = env.get("volume") or {}
     trend = env.get("trend") or {}
@@ -561,6 +538,7 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
             "suggested_position": position,
             "analysis_summary": "，".join(p for p in summary_parts if p) + "。",
             "cross_judgment": "盘中买入只由实时行情确认；低开候选直接取消。",
+            "plan_count": plan_count,
         }
 
     # —— 各指数涨跌幅 ——
@@ -640,6 +618,7 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
         "suggested_position": env.get("suggested_position"),
         "analysis_summary": env.get("analysis_summary"),
         "cross_judgment": env.get("cross_judgment"),
+        "plan_count": plan_count,
     }
 
 
@@ -647,14 +626,10 @@ def overview() -> Dict[str, Any]:
     from desktop.runner import CONTROLLER
 
     reader = SnapshotReader(SNAPSHOT_DIR)
-    pools = _read_dragon_pools()
     return {
         "checks": health_items(),
         "latest": reader.latest(),
         "snapshot_count": len(reader.list_dates()),
-        "dragon_count": len(pools.get("dragon_pool", {}) or {}),
-        "weak_count": len(pools.get("weakening_pool", {}) or {}),
-        "pool_update_time": pools.get("update_time", ""),
         "market": market_overview(reader),
         "run": {
             "state": CONTROLLER.state,
@@ -687,71 +662,3 @@ def tail_log(lines: int = 500) -> str:
         return f"[读取日志失败] {exc!r}"
 
 
-def dragon_pools() -> Dict[str, Any]:
-    """返回龙头池/走弱池的精简表格（供龙头池页面渲染）。"""
-
-    # 枚举名 → 中文展示（dragon_pools.json 里存的是 "DragonType.TREND" / "TREND" 形式）
-    _ENUM_ZH = {
-        "CONTINUOUS": "连板龙头", "TREND": "趋势龙头", "SPACE": "空间龙头",
-        "MONITORING": "观察中", "WEAKENING": "已走弱", "RECOVERING": "转强中", "EXPIRED": "已过期",
-    }
-
-    def _clean(v: Any) -> Any:
-        if isinstance(v, str) and "." in v and v.split(".")[0] in ("DragonType", "DragonStatus"):
-            v = v.split(".", 1)[1]
-        if isinstance(v, str):
-            return _ENUM_ZH.get(v, v)
-        return v
-
-    def _stat_interval(entry_date: Any) -> str:
-        """统计区间：与「10日涨幅/涨停数」同口径——截至入池日的最近 10 个交易日。
-
-        返回 ``MM-DD~MM-DD``；交易日历不可用或日期非法时返回空串。
-        """
-        d = str(entry_date or "")[:8]
-        if len(d) != 8 or not d.isdigit():
-            return ""
-        try:
-            from core.utils.date_utils import get_last_n_trade_dates
-
-            dates = get_last_n_trade_dates(10, d)  # 倒序，最新在前
-            if not dates:
-                return ""
-            end, start = dates[0], dates[-1]
-            return f"{start[4:6]}-{start[6:8]}~{end[4:6]}-{end[6:8]}"
-        except Exception:
-            return ""
-
-    pools = _read_dragon_pools()
-
-    def _rows(section: str) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        for code, item in (pools.get(section, {}) or {}).items():
-            out.append(
-                {
-                    "代码": code,
-                    "名称": item.get("stock_name", ""),
-                    "类型": _clean(item.get("dragon_type", "")),
-                    "板块": item.get("sector_name", ""),
-                    "涨停数": item.get("limit_up_count", ""),
-                    "10日涨幅": (
-                        f"{round(float(item.get('total_rise_10d', 0)) * 100, 1)}%"
-                        if item.get("total_rise_10d") is not None
-                        else ""
-                    ),
-                    "状态": _clean(item.get("status", "")),
-                    "入池日": item.get("entry_date", ""),
-                    "统计区间": _stat_interval(item.get("entry_date", "")),
-                    "走弱类型": item.get("weakening_type", ""),
-                    "走弱日": item.get("weakening_date", ""),
-                }
-            )
-        return out
-
-    return {
-        "update_time": pools.get("update_time", ""),
-        "dragon_rows": _rows("dragon_pool"),
-        "weak_rows": _rows("weakening_pool"),
-        "exists": DRAGON_POOL_PATH.exists(),
-        "path": str(DRAGON_POOL_PATH),
-    }

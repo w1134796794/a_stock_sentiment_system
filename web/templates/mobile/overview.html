@@ -19,15 +19,15 @@
     </div>
     <div class="text-[11px] text-slate-500 mt-1 truncate">{{ ov.run.finished_at or ov.run.started_at or '尚未运行' }}</div>
   </a>
-  <a href="/m/dragon" class="m-card p-4">
-    <div class="text-xs text-slate-400">龙头池</div>
-    <div class="mono text-2xl font-extrabold mt-1">{{ ov.dragon_count }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">监控中标的</div>
+  <a href="/m/data/strategy" class="m-card p-4">
+    <div class="text-xs text-slate-400">指标筛选</div>
+    <div class="mono text-2xl font-extrabold mt-1">{{ ov.market.plan_count if ov.market and ov.market.plan_count is not none else '--' }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">候选标的</div>
   </a>
-  <a href="/m/dragon" class="m-card p-4">
-    <div class="text-xs text-slate-400">走弱池</div>
-    <div class="mono text-2xl font-extrabold text-amber-300 mt-1">{{ ov.weak_count }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">待转强观察</div>
+  <a href="/realtime" class="m-card p-4">
+    <div class="text-xs text-slate-400">实时确认</div>
+    <div class="text-2xl font-extrabold text-emerald-300 mt-1">行情</div>
+    <div class="text-[11px] text-slate-500 mt-1">个股 / 板块</div>
   </a>
 </section>
 

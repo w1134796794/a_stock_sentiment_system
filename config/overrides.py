@@ -1,11 +1,10 @@
 """运行期配置覆盖中心（单一事实来源：webdata/config_overrides.json）。
 
-把"网页上改的参数"统一落到一个 JSON 文件，并在各配置入口处套用。四个作用域：
+把"网页上改的参数"统一落到一个 JSON 文件，并在各配置入口处套用。三个作用域：
 
   settings  -> config.settings 模块属性（在 settings.py 末尾、所有默认定义之后套用）
   yaml      -> config_loader 管理的 YAML 配置（加载/重载后套用）
   risk      -> RiskConfig 字段（RiskConfig.load 套用）
-  patterns  -> 各策略/打分类硬编码参数（config.pattern_params.get_params 套用）
 
 设计要点：
   - 本模块只依赖标准库，可被 settings.py 安全 import（绝无循环依赖）。
@@ -23,7 +22,7 @@ from typing import Any, Dict, List
 _BASE = Path(__file__).resolve().parent.parent
 OVERRIDES_PATH = _BASE / "webdata" / "config_overrides.json"
 
-SCOPES: tuple = ("settings", "yaml", "risk", "patterns")
+SCOPES: tuple = ("settings", "yaml", "risk")
 _lock = threading.RLock()
 
 # settings 作用域默认值快照（进程级，首次套用时填充）
@@ -195,16 +194,12 @@ def apply_risk_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
 # 通用：设置/清除单个覆盖项
 # ---------------------------------------------------------------------------
 def set_override(scope: str, path: str, value: Any) -> None:
-    """写入一个覆盖项并落盘。patterns 作用域 path 形如 '<group>.<leaf...>'。"""
+    """写入一个覆盖项并落盘。"""
     if scope not in SCOPES:
         raise ValueError(f"未知作用域: {scope}")
     with _lock:
         data = load_overrides()
-        if scope == "patterns":
-            # patterns 用嵌套结构存：{group: {leaf: value}}
-            set_dotted(data["patterns"], path, value)
-        else:
-            data[scope][path] = value
+        data[scope][path] = value
         save_overrides(data)
 
 
@@ -214,10 +209,7 @@ def clear_override(scope: str, path: str) -> None:
         raise ValueError(f"未知作用域: {scope}")
     with _lock:
         data = load_overrides()
-        if scope == "patterns":
-            del_dotted(data["patterns"], path)
-        else:
-            data[scope].pop(path, None)
+        data[scope].pop(path, None)
         save_overrides(data)
 
 

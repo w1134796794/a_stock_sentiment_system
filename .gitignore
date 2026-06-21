@@ -1,4 +1,12 @@
 /output/
+/webdata/backtest_trade_plans/
+/webdata/factors.duckdb
+/webdata/factors.duckdb.*
+/webdata/app.sqlite
+/webdata/app.sqlite.*
+/webdata/kb.sqlite
+/webdata/kb.sqlite.*
+/webdata/warehouse/
 /logs
 /data/
 # 忽略 Python 缓存

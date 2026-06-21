@@ -1,4 +1,5 @@
-"""批量重跑历史交易日数据 (20260501 - 20260612)"""
+"""批量重跑历史交易日数据。"""
+import argparse
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -10,10 +11,6 @@ from main import SentimentSystem, setup_logging
 from core.utils import DateUtils
 
 logger = loguru.logger
-
-START_DATE = "20260501"
-END_DATE = "20260612"
-
 
 def get_trade_dates(start: str, end: str) -> list:
     """获取区间内的所有交易日"""
@@ -37,15 +34,20 @@ def get_trade_dates(start: str, end: str) -> list:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="批量重跑历史交易日数据")
+    parser.add_argument("--start-date", default="20260506", help="开始日期 YYYYMMDD")
+    parser.add_argument("--end-date", default="20260618", help="结束日期 YYYYMMDD")
+    args = parser.parse_args()
+
     setup_logging()
 
-    trade_dates = get_trade_dates(START_DATE, END_DATE)
+    trade_dates = get_trade_dates(args.start_date, args.end_date)
     total = len(trade_dates)
 
-    logger.info(f"批量重跑开始: {START_DATE} ~ {END_DATE}")
+    logger.info(f"批量重跑开始: {args.start_date} ~ {args.end_date}")
     logger.info(f"共 {total} 个交易日")
     print("=" * 60)
-    print(f"批量重跑: {START_DATE} ~ {END_DATE} ({total}个交易日)")
+    print(f"批量重跑: {args.start_date} ~ {args.end_date} ({total}个交易日)")
     print("=" * 60)
 
     system = SentimentSystem()

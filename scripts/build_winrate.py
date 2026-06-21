@@ -1,13 +1,9 @@
 """
-计算并固化「周期 × 模式」历史 T+1 胜率矩阵，并灌入知识库。
+构建筛选表现矩阵占位文件，并清理旧胜率知识块。
 
     python scripts/build_winrate.py [--lookback 60] [--end 20260529]
 
-产物：
-- webdata/winrate_matrix.json   （供 Web / 每日解读 / KBTools 读取）
-- kb.sqlite 内 kind=winrate 的知识块（供问答检索）
-
-需要 Tushare（拉 T+1 行情，缓存命中很快）。
+产物：webdata/winrate_matrix.json。
 """
 import argparse
 import sys
@@ -21,7 +17,7 @@ from kb.store import KBStore  # noqa: E402
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="构建周期×模式胜率矩阵")
+    ap = argparse.ArgumentParser(description="构建筛选表现矩阵占位文件")
     ap.add_argument("--lookback", type=int, default=60, help="回看交易日数（默认 60）")
     ap.add_argument("--end", default=None, help="截止日期 YYYYMMDD（默认全部）")
     ap.add_argument("--win-threshold", type=float, default=0.0, help="盈利阈值%（默认 >0）")

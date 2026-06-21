@@ -40,7 +40,7 @@ def main() -> int:
     proc = subprocess.run(cmd, cwd=str(ROOT))
     if proc.returncode == 0:
         print("\n[OK] 打包完成 -> dist/A股情绪系统管理工具/")
-        print("将该目录放到项目根目录旁（与 webdata/ logs/ output/ dragon_pools.json 同级）后运行其中的 exe。")
+        print("将该目录放到项目根目录旁（与 webdata/ logs/ output/ 同级）后运行其中的 exe。")
     return proc.returncode
 
 

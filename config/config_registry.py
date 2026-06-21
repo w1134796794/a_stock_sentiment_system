@@ -1,9 +1,8 @@
-"""可编辑参数注册表 —— 把分散在四处的"参数赋值配置"统一抽象成网页可渲染、可校验、
+"""可编辑参数注册表 —— 把分散在几处的"参数赋值配置"统一抽象成网页可渲染、可校验、
 可保存的字段集合。
 
 作用域（scope）：
   settings  -> config.settings 模块的大写常量（标量 + 嵌套 dict），排除路径/密钥
-  patterns  -> config.pattern_params.PATTERN_DEFAULTS（策略/打分/大盘类的硬编码参数）
   yaml      -> config_loader 管理的全部 YAML（情绪周期 / 板块 / 因子等）
   risk      -> risk.risk_config.RiskConfig 字段
 
@@ -123,14 +122,13 @@ def _flatten(prefix: str, value: Any, drop_secret: bool = False) -> List[Tuple[s
 
 def _field(scope: str, group: str, group_label: str, path: str, leaf: str,
            value: Any, default: Any, overridden: bool) -> Dict[str, Any]:
-    from config import param_docs
     return {
         "scope": scope,
         "group": group,
         "group_label": group_label,
         "path": path,                     # 作用域内的 dotted 路径（即覆盖键）
         "key": leaf,
-        "desc": param_docs.describe(scope, group, path, leaf),
+        "desc": "",
         "type": _infer_type(value) or "str",
         "value": value,
         "default": default,
@@ -195,28 +193,6 @@ def _build_settings() -> List[Dict[str, Any]]:
     return ordered
 
 
-def _build_patterns() -> List[Dict[str, Any]]:
-    from config import pattern_params as pp
-
-    store = ov.load_overrides().get("patterns", {})
-    out: List[Dict[str, Any]] = []
-    for group, defaults in pp.all_groups().items():
-        eff = pp.get_params(group)
-        fields: List[Dict[str, Any]] = []
-        for dotted, default_val in _flatten("", defaults):
-            eff_val = ov.get_dotted(eff, dotted, default_val)
-            overridden = ov.get_dotted(store.get(group, {}), dotted) is not None
-            fields.append(_field("patterns", group,
-                                 pp.PATTERN_GROUP_LABELS.get(group, group),
-                                 f"{group}.{dotted}", dotted, eff_val,
-                                 default_val, overridden))
-        if fields:
-            out.append({"key": group,
-                        "label": pp.PATTERN_GROUP_LABELS.get(group, group),
-                        "fields": fields})
-    return out
-
-
 def _build_yaml() -> List[Dict[str, Any]]:
     from config.config_loader import get_config_loader
 
@@ -266,7 +242,6 @@ def _build_risk() -> List[Dict[str, Any]]:
 # 对外 API
 # ---------------------------------------------------------------------------
 _SECTION_META = [
-    ("patterns", "策略 / 打分 / 大盘参数", _build_patterns),
     ("settings", "系统设置 (settings.py)", _build_settings),
     ("yaml", "YAML 配置 (情绪/板块/因子)", _build_yaml),
     ("risk", "风控参数 (risk_control)", _build_risk),

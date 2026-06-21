@@ -114,7 +114,7 @@ class EltdxProvider:
 
         相比逐只 ``get_quote_snapshot``（每只都新建 TCP 连接），批量接口
         ``client.quotes.get_snapshots`` 在单条连接里一次拉多只，数十只仅需
-        百毫秒级，适合走弱池/候选池盘中轮询。
+        百毫秒级，适合候选池盘中轮询。
 
         Returns:
             dict: ``{6位代码: {open_price, open_amount, pre_close, last_price,

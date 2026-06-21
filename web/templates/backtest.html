@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}模拟交易结果{% endblock %}
 {% block page_title %}模拟交易结果{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">回测净值 · 逐笔交易 · 模式表现</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">回测净值 · 逐笔交易 · 方案表现</div>{% endblock %}
 
 {% block header_extra %}
   {% if bt.runs %}
@@ -91,10 +91,10 @@
   {% endif %}
 </section>
 
-{# ===== 模式表现 ===== #}
+{# ===== 方案表现 ===== #}
 {% if bt.pattern_rows %}
 <section class="card border border-slate-800 rounded-xl p-4 mb-6">
-  <h2 class="text-base font-bold mb-3">模式表现</h2>
+  <h2 class="text-base font-bold mb-3">方案表现</h2>
   <div class="overflow-x-auto">
     <table class="w-full text-sm border-collapse">
       <thead><tr class="text-slate-400">

@@ -16,6 +16,13 @@
       "rank": 1,
       "gold_rank": 1,
       "reasons": [
+        "综合评分 60.9，候选排名第 1",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 100.0，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -28,6 +35,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.23529411764706,
         "stk_liquidity_percentile": 100.0
+      },
+      "context": {
+        "pct_chg": 10.0008,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 100.0,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -38,6 +53,13 @@
       "rank": 2,
       "gold_rank": 2,
       "reasons": [
+        "综合评分 60.8，候选排名第 2",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 99.6，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -50,6 +72,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.23529411764706,
         "stk_liquidity_percentile": 99.56434924668723
+      },
+      "context": {
+        "pct_chg": 10.0,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 99.56434924668723,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -60,6 +90,13 @@
       "rank": 3,
       "gold_rank": 3,
       "reasons": [
+        "综合评分 60.8，候选排名第 3",
+        "当日涨幅 +20.00%，短线强度已确认",
+        "流动性分位 99.4，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -72,6 +109,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.23529411764706,
         "stk_liquidity_percentile": 99.43728444363768
+      },
+      "context": {
+        "pct_chg": 19.999,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 99.43728444363768,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -82,6 +127,13 @@
       "rank": 4,
       "gold_rank": 4,
       "reasons": [
+        "综合评分 60.8，候选排名第 4",
+        "当日涨幅 +10.11%，短线强度已确认",
+        "流动性分位 99.4，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -94,6 +146,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.23529411764706,
         "stk_liquidity_percentile": 99.38282809947358
+      },
+      "context": {
+        "pct_chg": 10.1075,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 99.38282809947358,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -104,6 +164,13 @@
       "rank": 5,
       "gold_rank": 5,
       "reasons": [
+        "综合评分 60.7，候选排名第 5",
+        "当日涨幅 +12.42%，短线强度已确认",
+        "流动性分位 99.2，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -116,6 +183,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.2132628332232,
         "stk_liquidity_percentile": 99.18315483753858
+      },
+      "context": {
+        "pct_chg": 12.4168,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 0.9999625468164794,
+        "liquidity_score": 99.18315483753858,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -126,6 +201,13 @@
       "rank": 6,
       "gold_rank": 6,
       "reasons": [
+        "综合评分 60.7，候选排名第 6",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 98.9，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -138,6 +220,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.23529411764706,
         "stk_liquidity_percentile": 98.91087311671811
+      },
+      "context": {
+        "pct_chg": 10.0009,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 98.91087311671811,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -148,6 +238,13 @@
       "rank": 7,
       "gold_rank": 7,
       "reasons": [
+        "综合评分 60.7，候选排名第 7",
+        "当日涨幅 +9.99%，短线强度已确认",
+        "流动性分位 98.9，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -160,6 +257,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.23529411764706,
         "stk_liquidity_percentile": 98.87456888727537
+      },
+      "context": {
+        "pct_chg": 9.9919,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 98.87456888727537,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -170,6 +275,13 @@
       "rank": 8,
       "gold_rank": 8,
       "reasons": [
+        "综合评分 60.7，候选排名第 8",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 98.8，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -182,6 +294,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.23529411764706,
         "stk_liquidity_percentile": 98.82011254311126
+      },
+      "context": {
+        "pct_chg": 10.0,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 98.82011254311126,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -192,6 +312,13 @@
       "rank": 9,
       "gold_rank": 9,
       "reasons": [
+        "综合评分 60.7，候选排名第 9",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 98.8，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -204,6 +331,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.23529411764706,
         "stk_liquidity_percentile": 98.76565619894718
+      },
+      "context": {
+        "pct_chg": 9.9973,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 98.76565619894718,
+        "sector_resonance_score": 50.0
       }
     },
     {
@@ -214,6 +349,13 @@
       "rank": 10,
       "gold_rank": 10,
       "reasons": [
+        "综合评分 60.6，候选排名第 10",
+        "当日涨幅 +9.99%，短线强度已确认",
+        "流动性分位 98.6，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -226,6 +368,14 @@
         "stk_vol_ratio_5d": 20.0,
         "stk_new_high_20d": 88.17923967757488,
         "stk_liquidity_percentile": 98.62043928117626
+      },
+      "context": {
+        "pct_chg": 9.9895,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 0.9999047074518773,
+        "liquidity_score": 98.62043928117626,
+        "sector_resonance_score": 50.0
       }
     }
   ],

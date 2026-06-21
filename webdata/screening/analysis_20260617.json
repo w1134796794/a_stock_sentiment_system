@@ -16,138 +16,138 @@
     "amount_ratio_5d": 1.0,
     "limit_up_count": 152,
     "limit_down_count": 4,
-    "computed_at": "2026-06-18T12:46:18"
+    "computed_at": "2026-06-18T19:42:59"
   },
   "top_sectors": [
     {
       "trade_date": "20260617",
-      "sector_code": "886054.TI",
-      "sector_name": "光刻机",
-      "sector_type": "概念",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
-    },
-    {
-      "trade_date": "20260617",
-      "sector_code": "884117.TI",
-      "sector_name": "彩电",
-      "sector_type": "行业",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
-    },
-    {
-      "trade_date": "20260617",
-      "sector_code": "883921.TI",
-      "sector_name": "减持计划",
+      "sector_code": "883997.TI",
+      "sector_name": "昨日非ST二板表现",
       "sector_type": "特色",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
+      "momentum_score": 76.47923076923077,
+      "amount_score": 72.80844155844156,
+      "amount_ratio_score": 100.0,
+      "persistence_score": 75.0,
+      "mainline_score": 78.86776423576424,
+      "rank": 2,
+      "computed_at": "2026-06-18T19:43:00"
     },
     {
       "trade_date": "20260617",
-      "sector_code": "884188.TI",
-      "sector_name": "白酒Ⅲ",
+      "sector_code": "883988.TI",
+      "sector_name": "昨日非ST连板",
+      "sector_type": "特色",
+      "momentum_score": 73.03076923076924,
+      "amount_score": 74.7564935064935,
+      "amount_ratio_score": 100.0,
+      "persistence_score": 75.0,
+      "mainline_score": 77.80296953046954,
+      "rank": 4,
+      "computed_at": "2026-06-18T19:43:00"
+    },
+    {
+      "trade_date": "20260617",
+      "sector_code": "883958.TI",
+      "sector_name": "昨日连板",
+      "sector_type": "特色",
+      "momentum_score": 69.21615384615384,
+      "amount_score": 74.91883116883116,
+      "amount_ratio_score": 100.0,
+      "persistence_score": 75.0,
+      "mainline_score": 76.12697702297702,
+      "rank": 5,
+      "computed_at": "2026-06-18T19:43:00"
+    },
+    {
+      "trade_date": "20260617",
+      "sector_code": "884059.TI",
+      "sector_name": "玻璃玻纤",
       "sector_type": "行业",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
+      "momentum_score": 95.60615384615384,
+      "amount_score": 60.79545454545454,
+      "amount_ratio_score": 38.75201363356674,
+      "persistence_score": 75.0,
+      "mainline_score": 75.28443491216787,
+      "rank": 6,
+      "computed_at": "2026-06-18T19:43:00"
     },
     {
       "trade_date": "20260617",
-      "sector_code": "885505.TI",
-      "sector_name": "生态农业",
-      "sector_type": "概念",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
-    },
-    {
-      "trade_date": "20260617",
-      "sector_code": "884215.TI",
-      "sector_name": "稀土",
+      "sector_code": "884092.TI",
+      "sector_name": "印制电路板",
       "sector_type": "行业",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
+      "momentum_score": 72.25384615384615,
+      "amount_score": 83.76623376623377,
+      "amount_ratio_score": 42.81264151177905,
+      "persistence_score": 100.0,
+      "mainline_score": 74.87768543755607,
+      "rank": 7,
+      "computed_at": "2026-06-18T19:43:00"
     },
     {
       "trade_date": "20260617",
-      "sector_code": "885900.TI",
-      "sector_name": "NMN概念",
+      "sector_code": "883911.TI",
+      "sector_name": "创历史新高",
+      "sector_type": "特色",
+      "momentum_score": 59.98461538461538,
+      "amount_score": 93.66883116883116,
+      "amount_ratio_score": 84.51707634550986,
+      "persistence_score": 75.0,
+      "mainline_score": 74.3378461671112,
+      "rank": 9,
+      "computed_at": "2026-06-18T19:43:00"
+    },
+    {
+      "trade_date": "20260617",
+      "sector_code": "883995.TI",
+      "sector_name": "昨日打首板以上表现",
+      "sector_type": "特色",
+      "momentum_score": 60.03384615384615,
+      "amount_score": 80.84415584415584,
+      "amount_ratio_score": 100.0,
+      "persistence_score": 75.0,
+      "mainline_score": 73.47626973026973,
+      "rank": 10,
+      "computed_at": "2026-06-18T19:43:00"
+    },
+    {
+      "trade_date": "20260617",
+      "sector_code": "885893.TI",
+      "sector_name": "国家大基金持股",
       "sector_type": "概念",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
+      "momentum_score": 77.44384615384615,
+      "amount_score": 86.60714285714286,
+      "amount_ratio_score": 37.21657207504067,
+      "persistence_score": 75.0,
+      "mainline_score": 73.33400229477257,
+      "rank": 11,
+      "computed_at": "2026-06-18T19:43:00"
     },
     {
       "trade_date": "20260617",
-      "sector_code": "885782.TI",
-      "sector_name": "水泥概念",
-      "sector_type": "概念",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
-    },
-    {
-      "trade_date": "20260617",
-      "sector_code": "881101.TI",
-      "sector_name": "种植业与林业",
+      "sector_code": "884227.TI",
+      "sector_name": "集成电路制造",
       "sector_type": "行业",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
+      "momentum_score": 83.41999999999999,
+      "amount_score": 59.00974025974026,
+      "amount_ratio_score": 39.99399098059181,
+      "persistence_score": 100.0,
+      "mainline_score": 73.29053371202383,
+      "rank": 12,
+      "computed_at": "2026-06-18T19:43:00"
     },
     {
       "trade_date": "20260617",
-      "sector_code": "882013.TI",
-      "sector_name": "河南",
-      "sector_type": "地域",
-      "momentum_score": 38.46153846153847,
-      "amount_score": 50.04058441558441,
-      "amount_ratio_score": 25.0,
-      "persistence_score": 0.0,
-      "mainline_score": 33.56783841158841,
-      "rank": 1,
-      "computed_at": "2026-06-18T12:46:18"
+      "sector_code": "884229.TI",
+      "sector_name": "半导体设备",
+      "sector_type": "行业",
+      "momentum_score": 85.51461538461538,
+      "amount_score": 71.75324675324676,
+      "amount_ratio_score": 31.910297371938157,
+      "persistence_score": 75.0,
+      "mainline_score": 72.45643321717934,
+      "rank": 14,
+      "computed_at": "2026-06-18T19:43:00"
     }
   ],
   "top_stocks": [
@@ -167,7 +167,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 31598894526.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -185,7 +185,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 12134264342.1,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -203,7 +203,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 11599691817.9,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -221,7 +221,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 10656098123.7,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -239,7 +239,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 0.9999625468164794,
       "amount_yuan": 9183938922.87,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -257,7 +257,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 7448793106.2300005,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -275,7 +275,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 7036662812.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -293,7 +293,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 6959652993.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -311,7 +311,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 6698619785.08,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -329,7 +329,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 0.9999047074518773,
       "amount_yuan": 6259376657.04,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -347,7 +347,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 5586810806.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -365,7 +365,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 0.9988122233020192,
       "amount_yuan": 8178007543.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -383,7 +383,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 5194632556.200001,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -401,7 +401,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 5178287809.27,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -419,7 +419,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 5115895083.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -437,7 +437,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 0.9974991474366262,
       "amount_yuan": 10444151404.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -455,7 +455,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 4322246745.38,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -473,7 +473,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 3953468337.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -491,7 +491,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 3603072153.0,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     },
     {
       "trade_date": "20260617",
@@ -509,7 +509,7 @@
       "amount_ratio": 1.0,
       "new_high_ratio": 1.0,
       "amount_yuan": 2997421604.23,
-      "computed_at": "2026-06-18T12:46:19"
+      "computed_at": "2026-06-18T19:43:01"
     }
   ],
   "screening": {
@@ -530,6 +530,13 @@
         "rank": 1,
         "gold_rank": 1,
         "reasons": [
+          "综合评分 60.9，候选排名第 1",
+          "当日涨幅 +10.00%，短线强度已确认",
+          "流动性分位 100.0，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -542,6 +549,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.23529411764706,
           "stk_liquidity_percentile": 100.0
+        },
+        "context": {
+          "pct_chg": 10.0008,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 100.0,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -552,6 +567,13 @@
         "rank": 2,
         "gold_rank": 2,
         "reasons": [
+          "综合评分 60.8，候选排名第 2",
+          "当日涨幅 +10.00%，短线强度已确认",
+          "流动性分位 99.6，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -564,6 +586,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.23529411764706,
           "stk_liquidity_percentile": 99.56434924668723
+        },
+        "context": {
+          "pct_chg": 10.0,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 99.56434924668723,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -574,6 +604,13 @@
         "rank": 3,
         "gold_rank": 3,
         "reasons": [
+          "综合评分 60.8，候选排名第 3",
+          "当日涨幅 +20.00%，短线强度已确认",
+          "流动性分位 99.4，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -586,6 +623,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.23529411764706,
           "stk_liquidity_percentile": 99.43728444363768
+        },
+        "context": {
+          "pct_chg": 19.999,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 99.43728444363768,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -596,6 +641,13 @@
         "rank": 4,
         "gold_rank": 4,
         "reasons": [
+          "综合评分 60.8，候选排名第 4",
+          "当日涨幅 +10.11%，短线强度已确认",
+          "流动性分位 99.4，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -608,6 +660,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.23529411764706,
           "stk_liquidity_percentile": 99.38282809947358
+        },
+        "context": {
+          "pct_chg": 10.1075,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 99.38282809947358,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -618,6 +678,13 @@
         "rank": 5,
         "gold_rank": 5,
         "reasons": [
+          "综合评分 60.7，候选排名第 5",
+          "当日涨幅 +12.42%，短线强度已确认",
+          "流动性分位 99.2，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -630,6 +697,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.2132628332232,
           "stk_liquidity_percentile": 99.18315483753858
+        },
+        "context": {
+          "pct_chg": 12.4168,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 0.9999625468164794,
+          "liquidity_score": 99.18315483753858,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -640,6 +715,13 @@
         "rank": 6,
         "gold_rank": 6,
         "reasons": [
+          "综合评分 60.7，候选排名第 6",
+          "当日涨幅 +10.00%，短线强度已确认",
+          "流动性分位 98.9，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -652,6 +734,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.23529411764706,
           "stk_liquidity_percentile": 98.91087311671811
+        },
+        "context": {
+          "pct_chg": 10.0009,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 98.91087311671811,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -662,6 +752,13 @@
         "rank": 7,
         "gold_rank": 7,
         "reasons": [
+          "综合评分 60.7，候选排名第 7",
+          "当日涨幅 +9.99%，短线强度已确认",
+          "流动性分位 98.9，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -674,6 +771,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.23529411764706,
           "stk_liquidity_percentile": 98.87456888727537
+        },
+        "context": {
+          "pct_chg": 9.9919,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 98.87456888727537,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -684,6 +789,13 @@
         "rank": 8,
         "gold_rank": 8,
         "reasons": [
+          "综合评分 60.7，候选排名第 8",
+          "当日涨幅 +10.00%，短线强度已确认",
+          "流动性分位 98.8，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -696,6 +808,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.23529411764706,
           "stk_liquidity_percentile": 98.82011254311126
+        },
+        "context": {
+          "pct_chg": 10.0,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 98.82011254311126,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -706,6 +826,13 @@
         "rank": 9,
         "gold_rank": 9,
         "reasons": [
+          "综合评分 60.7，候选排名第 9",
+          "当日涨幅 +10.00%，短线强度已确认",
+          "流动性分位 98.8，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -718,6 +845,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.23529411764706,
           "stk_liquidity_percentile": 98.76565619894718
+        },
+        "context": {
+          "pct_chg": 9.9973,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 98.76565619894718,
+          "sector_resonance_score": 50.0
         }
       },
       {
@@ -728,6 +863,13 @@
         "rank": 10,
         "gold_rank": 10,
         "reasons": [
+          "综合评分 60.6，候选排名第 10",
+          "当日涨幅 +9.99%，短线强度已确认",
+          "流动性分位 98.6，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
           "市场综合分不低于防守线",
           "成交额分位达到基础流动性要求",
           "个股综合分进入可观察区",
@@ -740,6 +882,14 @@
           "stk_vol_ratio_5d": 20.0,
           "stk_new_high_20d": 88.17923967757488,
           "stk_liquidity_percentile": 98.62043928117626
+        },
+        "context": {
+          "pct_chg": 9.9895,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 0.9999047074518773,
+          "liquidity_score": 98.62043928117626,
+          "sector_resonance_score": 50.0
         }
       }
     ],

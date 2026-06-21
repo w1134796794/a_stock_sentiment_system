@@ -23,12 +23,11 @@
   <dl class="text-sm space-y-2">
     <div class="flex gap-3"><dt class="w-28 text-slate-400 shrink-0">程序根目录</dt><dd class="mono text-slate-200 break-all">{{ ov.base_dir }}</dd></div>
     <div class="flex gap-3"><dt class="w-28 text-slate-400 shrink-0">最新快照</dt><dd class="mono text-slate-200">{{ ov.latest or '—' }}（共 {{ ov.snapshot_count }} 天）</dd></div>
-    <div class="flex gap-3"><dt class="w-28 text-slate-400 shrink-0">龙头池</dt><dd class="mono text-slate-200">龙头 {{ ov.dragon_count }} · 走弱 {{ ov.weak_count }} · {{ ov.pool_update_time or '—' }}</dd></div>
   </dl>
   <div class="text-xs text-slate-500 mt-4 leading-relaxed">
     指标仓库在 <span class="mono">webdata/factors.duckdb</span>；筛选结果在 <span class="mono">webdata/screening/</span>；
     每日快照在 <span class="mono">webdata/snapshots/</span>；
-    日志在 <span class="mono">logs/system.log</span>；龙头池状态持久化在 <span class="mono">dragon_pools.json</span>。
+    日志在 <span class="mono">logs/system.log</span>。
   </div>
 </section>
 

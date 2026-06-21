@@ -1,13 +1,4 @@
-"""
-核心模块 - A股短线情绪量化系统
-
-目录结构:
-- data/: 数据获取层
-- analysis/: 分析引擎层
-- pattern/: 策略模式层
-- execution/: 执行层
-- report/: 报告层
-"""
+"""核心模块 - A股短线情绪量化系统。"""
 
 # 数据层
 from core.data import (
@@ -17,20 +8,11 @@ from core.data import (
 
 # 分析层
 from core.analysis import (
-    PatternRecognition,
     EmotionCycleEngine,
     EmotionCycle,
     SectorRotationTracker,
     SectorStage,
 )
-
-# 执行层
-from core.execution import (
-    RetailTraderSupportV2,
-)
-
-# 报告层
-from core.report import ReportGeneratorV2
 
 # 工具层 - 导出工具类和函数
 from core.utils import (
@@ -67,15 +49,10 @@ __all__ = [
     'DataManager',
     'IndustryMapper',
     # 分析层
-    'PatternRecognition',
     'EmotionCycleEngine',
     'EmotionCycle',
     'SectorRotationTracker',
     'SectorStage',
-    # 执行层
-    'RetailTraderSupportV2',
-    # 报告层
-    'ReportGeneratorV2',
     # 工具层 - 工具类
     'DateUtils',
     'StockCodeUtils',

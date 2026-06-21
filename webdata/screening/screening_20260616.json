@@ -5,17 +5,24 @@
   "message": "筛选完成，输入 5513，最终 10",
   "input_count": 5513,
   "after_hard_filter": 3584,
-  "after_priority_filter": 297,
+  "after_priority_filter": 325,
   "final_count": 10,
   "final": [
     {
-      "code": "688484",
-      "ts_code": "688484.SH",
-      "name": "",
-      "score": 93.9982,
+      "code": "002436",
+      "ts_code": "002436.SZ",
+      "name": "兴森科技",
+      "score": 60.7626,
       "rank": 1,
       "gold_rank": 1,
       "reasons": [
+        "综合评分 60.8，候选排名第 1",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 99.2，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -23,43 +30,36 @@
         "价格位置接近阶段强势区"
       ],
       "metrics": {
-        "stk_total_score": 90.22395082398464,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 91.92039309650255,
-        "stk_new_high_20d": 100.0,
-        "stk_liquidity_percentile": 93.6695084346091
+        "stk_total_score": 70.22998580894358,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 99.23816433883547
+      },
+      "context": {
+        "pct_chg": 10.0025,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 99.23816433883547,
+        "sector_resonance_score": 50.0
       }
     },
     {
-      "code": "601696",
-      "ts_code": "601696.SH",
-      "name": "",
-      "score": 93.4478,
+      "code": "600703",
+      "ts_code": "600703.SH",
+      "name": "三安光电",
+      "score": 60.7249,
       "rank": 2,
-      "gold_rank": 6,
-      "reasons": [
-        "市场综合分不低于防守线",
-        "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
-        "价格位置接近阶段强势区"
-      ],
-      "metrics": {
-        "stk_total_score": 86.14909916016688,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 100.0,
-        "stk_new_high_20d": 100.0,
-        "stk_liquidity_percentile": 96.80754580083439
-      }
-    },
-    {
-      "code": "000510",
-      "ts_code": "000510.SZ",
-      "name": "",
-      "score": 93.2891,
-      "rank": 3,
       "gold_rank": 2,
       "reasons": [
+        "综合评分 60.7，候选排名第 2",
+        "当日涨幅 +9.99%，短线强度已确认",
+        "流动性分位 99.1，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -67,21 +67,36 @@
         "价格位置接近阶段强势区"
       ],
       "metrics": {
-        "stk_total_score": 88.14335671949085,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 91.92393139786402,
-        "stk_new_high_20d": 100.0,
-        "stk_liquidity_percentile": 95.93687647378923
+        "stk_total_score": 70.18655792031669,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 99.05677489570107
+      },
+      "context": {
+        "pct_chg": 9.9935,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 99.05677489570107,
+        "sector_resonance_score": 50.0
       }
     },
     {
-      "code": "601958",
-      "ts_code": "601958.SH",
-      "name": "",
-      "score": 92.9448,
-      "rank": 4,
-      "gold_rank": 8,
+      "code": "600105",
+      "ts_code": "600105.SH",
+      "name": "永鼎股份",
+      "score": 60.7219,
+      "rank": 3,
+      "gold_rank": 4,
       "reasons": [
+        "综合评分 60.7，候选排名第 3",
+        "当日涨幅 +9.99%，短线强度已确认",
+        "流动性分位 99.0，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -89,21 +104,73 @@
         "价格位置接近阶段强势区"
       ],
       "metrics": {
-        "stk_total_score": 84.50728171231634,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 100.0,
-        "stk_new_high_20d": 100.0,
-        "stk_liquidity_percentile": 99.16560856158172
+        "stk_total_score": 70.183920131454,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 99.03863595138763
+      },
+      "context": {
+        "pct_chg": 9.9944,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 99.03863595138763,
+        "sector_resonance_score": 50.0
       }
     },
     {
-      "code": "002972",
-      "ts_code": "002972.SZ",
-      "name": "",
-      "score": 92.0666,
+      "code": "002008",
+      "ts_code": "002008.SZ",
+      "name": "大族激光",
+      "score": 60.7212,
+      "rank": 4,
+      "gold_rank": 3,
+      "reasons": [
+        "综合评分 60.7，候选排名第 4",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 99.0，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 70.18645234259132,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 99.0204970070742
+      },
+      "context": {
+        "pct_chg": 10.0,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 99.0204970070742,
+        "sector_resonance_score": 50.0
+      }
+    },
+    {
+      "code": "300570",
+      "ts_code": "300570.SZ",
+      "name": "太辰光",
+      "score": 60.6442,
       "rank": 5,
       "gold_rank": 5,
       "reasons": [
+        "综合评分 60.6，候选排名第 5",
+        "当日涨幅 +18.55%，短线强度已确认",
+        "流动性分位 99.5，承接能力较好",
+        "阶段强势位置 87.5，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -111,21 +178,36 @@
         "价格位置接近阶段强势区"
       ],
       "metrics": {
-        "stk_total_score": 86.92924079629967,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 100.0,
-        "stk_new_high_20d": 100.0,
-        "stk_liquidity_percentile": 79.48485398149828
+        "stk_total_score": 70.14899905749702,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 87.54351512987591,
+        "stk_liquidity_percentile": 99.45583167059678
+      },
+      "context": {
+        "pct_chg": 18.5457,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 0.9988239757207891,
+        "liquidity_score": 99.45583167059678,
+        "sector_resonance_score": 50.0
       }
     },
     {
-      "code": "605198",
-      "ts_code": "605198.SH",
-      "name": "",
-      "score": 91.1398,
+      "code": "600392",
+      "ts_code": "600392.SH",
+      "name": "盛和资源",
+      "score": 60.6041,
       "rank": 6,
-      "gold_rank": 3,
+      "gold_rank": 6,
       "reasons": [
+        "综合评分 60.6，候选排名第 6",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 98.4，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -133,43 +215,36 @@
         "价格位置接近阶段强势区"
       ],
       "metrics": {
-        "stk_total_score": 87.78129742082868,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 82.56599699768327,
-        "stk_new_high_20d": 100.0,
-        "stk_liquidity_percentile": 87.30273898059133
+        "stk_total_score": 70.06310752125992,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 98.4037729004172
+      },
+      "context": {
+        "pct_chg": 10.0038,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 98.4037729004172,
+        "sector_resonance_score": 50.0
       }
     },
     {
-      "code": "301176",
-      "ts_code": "301176.SZ",
-      "name": "",
-      "score": 90.4841,
+      "code": "002851",
+      "ts_code": "002851.SZ",
+      "name": "麦格米特",
+      "score": 60.5455,
       "rank": 7,
-      "gold_rank": 4,
-      "reasons": [
-        "市场综合分不低于防守线",
-        "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
-        "价格位置接近阶段强势区"
-      ],
-      "metrics": {
-        "stk_total_score": 87.77545963937978,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 71.25863811630796,
-        "stk_new_high_20d": 100.0,
-        "stk_liquidity_percentile": 94.34064937420642
-      }
-    },
-    {
-      "code": "002303",
-      "ts_code": "002303.SZ",
-      "name": "",
-      "score": 89.4193,
-      "rank": 8,
       "gold_rank": 7,
       "reasons": [
+        "综合评分 60.5，候选排名第 7",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 98.1，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -177,21 +252,73 @@
         "价格位置接近阶段强势区"
       ],
       "metrics": {
-        "stk_total_score": 85.22776206378506,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 100.0,
-        "stk_new_high_20d": 94.77124183006532,
-        "stk_liquidity_percentile": 68.5107926718665
+        "stk_total_score": 70.00143511059422,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 98.0954108470887
+      },
+      "context": {
+        "pct_chg": 10.0027,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 98.0954108470887,
+        "sector_resonance_score": 50.0
       }
     },
     {
-      "code": "603271",
-      "ts_code": "603271.SH",
-      "name": "",
-      "score": 87.1595,
+      "code": "600549",
+      "ts_code": "600549.SH",
+      "name": "厦门钨业",
+      "score": 60.5386,
+      "rank": 8,
+      "gold_rank": 8,
+      "reasons": [
+        "综合评分 60.5，候选排名第 8",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 98.1，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
+        "市场综合分不低于防守线",
+        "成交额分位达到基础流动性要求",
+        "个股综合分进入可观察区",
+        "成交额相对近 5 日均值有改善",
+        "价格位置接近阶段强势区"
+      ],
+      "metrics": {
+        "stk_total_score": 69.99417953286884,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 98.05913295846182
+      },
+      "context": {
+        "pct_chg": 10.0028,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 98.05913295846182,
+        "sector_resonance_score": 50.0
+      }
+    },
+    {
+      "code": "002484",
+      "ts_code": "002484.SZ",
+      "name": "江海股份",
+      "score": 60.53,
       "rank": 9,
       "gold_rank": 9,
       "reasons": [
+        "综合评分 60.5，候选排名第 9",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 98.0，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -199,21 +326,36 @@
         "价格位置接近阶段强势区"
       ],
       "metrics": {
-        "stk_total_score": 83.80511335028314,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 100.0,
-        "stk_new_high_20d": 79.91120976692554,
-        "stk_liquidity_percentile": 74.60547796118266
+        "stk_total_score": 69.98307395514345,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 98.02285506983493
+      },
+      "context": {
+        "pct_chg": 9.9965,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 98.02285506983493,
+        "sector_resonance_score": 50.0
       }
     },
     {
-      "code": "000541",
-      "ts_code": "000541.SZ",
-      "name": "",
-      "score": 86.2959,
+      "code": "601208",
+      "ts_code": "601208.SH",
+      "name": "东材科技",
+      "score": 60.5198,
       "rank": 10,
-      "gold_rank": 11,
+      "gold_rank": 10,
       "reasons": [
+        "综合评分 60.5，候选排名第 10",
+        "当日涨幅 +10.00%，短线强度已确认",
+        "流动性分位 98.0，承接能力较好",
+        "阶段强势位置 88.2，走势接近阶段强势区",
+        "成交额相对5日 20.0偏弱，需盘中确认"
+      ],
+      "rule_reasons": [
         "市场综合分不低于防守线",
         "成交额分位达到基础流动性要求",
         "个股综合分进入可观察区",
@@ -221,18 +363,26 @@
         "价格位置接近阶段强势区"
       ],
       "metrics": {
-        "stk_total_score": 82.26422909184083,
-        "stk_amount_ratio_5d": 100.0,
-        "stk_vol_ratio_5d": 100.0,
-        "stk_new_high_20d": 89.3451720310765,
-        "stk_liquidity_percentile": 58.75204063123526
+        "stk_total_score": 69.97263058855539,
+        "stk_amount_ratio_5d": 20.0,
+        "stk_vol_ratio_5d": 20.0,
+        "stk_new_high_20d": 88.23529411764706,
+        "stk_liquidity_percentile": 97.96843823689461
+      },
+      "context": {
+        "pct_chg": 9.9969,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "liquidity_score": 97.96843823689461,
+        "sector_resonance_score": 50.0
       }
     }
   ],
   "rejected": [
     {
       "code": "000008",
-      "name": "",
+      "name": "神州高铁",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 27.262833303101758,
@@ -240,7 +390,7 @@
     },
     {
       "code": "000010",
-      "name": "",
+      "name": "*ST美丽",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 23.217848721204426,
@@ -248,7 +398,7 @@
     },
     {
       "code": "000011",
-      "name": "",
+      "name": "深物业A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 12.243787411572645,
@@ -256,7 +406,7 @@
     },
     {
       "code": "000014",
-      "name": "",
+      "name": "沙河股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 16.887357155813532,
@@ -264,7 +414,7 @@
     },
     {
       "code": "000016",
-      "name": "",
+      "name": "*ST康佳A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 31.99709776890985,
@@ -272,7 +422,7 @@
     },
     {
       "code": "000017",
-      "name": "",
+      "name": "深中华A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 28.44186468347542,
@@ -280,7 +430,7 @@
     },
     {
       "code": "000019",
-      "name": "",
+      "name": "深粮控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 20.079811354979142,
@@ -288,7 +438,7 @@
     },
     {
       "code": "000020",
-      "name": "",
+      "name": "深华发A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 23.399238164338833,
@@ -296,7 +446,7 @@
     },
     {
       "code": "000028",
-      "name": "",
+      "name": "国药一致",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 14.22093234173771,
@@ -304,7 +454,7 @@
     },
     {
       "code": "000030",
-      "name": "",
+      "name": "富奥股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 33.3031017594776,
@@ -312,7 +462,7 @@
     },
     {
       "code": "000042",
-      "name": "",
+      "name": "中洲控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.88264103029204,
@@ -320,7 +470,7 @@
     },
     {
       "code": "000045",
-      "name": "",
+      "name": "深纺织A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.161073825503358,
@@ -328,7 +478,7 @@
     },
     {
       "code": "000055",
-      "name": "",
+      "name": "方大集团",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 34.30074369671685,
@@ -336,7 +486,7 @@
     },
     {
       "code": "000058",
-      "name": "",
+      "name": "深赛格",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.01197170324687,
@@ -344,7 +494,7 @@
     },
     {
       "code": "000061",
-      "name": "",
+      "name": "农产品",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 30.6910937783421,
@@ -352,7 +502,7 @@
     },
     {
       "code": "000069",
-      "name": "",
+      "name": "华侨城A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 30.600399056774897,
@@ -360,7 +510,7 @@
     },
     {
       "code": "000089",
-      "name": "",
+      "name": "深圳机场",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 25.19499365136949,
@@ -368,7 +518,7 @@
     },
     {
       "code": "000096",
-      "name": "",
+      "name": "广聚能源",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 15.90785416288772,
@@ -376,7 +526,7 @@
     },
     {
       "code": "000153",
-      "name": "",
+      "name": "丰原药业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.922002539452205,
@@ -384,7 +534,7 @@
     },
     {
       "code": "000401",
-      "name": "",
+      "name": "金隅冀东",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 5.3509885724650825,
@@ -392,7 +542,7 @@
     },
     {
       "code": "000407",
-      "name": "",
+      "name": "胜利股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.77380736441139,
@@ -400,7 +550,7 @@
     },
     {
       "code": "000409",
-      "name": "",
+      "name": "云鼎科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 20.460729185561398,
@@ -408,7 +558,7 @@
     },
     {
       "code": "000419",
-      "name": "",
+      "name": "通程控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 10.756393977870488,
@@ -416,7 +566,7 @@
     },
     {
       "code": "000421",
-      "name": "",
+      "name": "南京公用",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 7.836023943406493,
@@ -424,7 +574,7 @@
     },
     {
       "code": "000428",
-      "name": "",
+      "name": "华天酒店",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 14.78323961545438,
@@ -432,7 +582,7 @@
     },
     {
       "code": "000488",
-      "name": "",
+      "name": "ST晨鸣",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 4.335207690912389,
@@ -440,7 +590,7 @@
     },
     {
       "code": "000498",
-      "name": "",
+      "name": "山东路桥",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.26900054416833,
@@ -448,7 +598,7 @@
     },
     {
       "code": "000501",
-      "name": "",
+      "name": "武商集团",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 20.0616724106657,
@@ -456,7 +606,7 @@
     },
     {
       "code": "000504",
-      "name": "",
+      "name": "南华生物",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 27.952113187012518,
@@ -464,7 +614,7 @@
     },
     {
       "code": "000505",
-      "name": "",
+      "name": "京粮控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 12.189370578632323,
@@ -472,7 +622,7 @@
     },
     {
       "code": "000507",
-      "name": "",
+      "name": "珠海港",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 10.865227643751133,
@@ -480,7 +630,7 @@
     },
     {
       "code": "000514",
-      "name": "",
+      "name": "渝开发",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 17.77616542717214,
@@ -488,7 +638,7 @@
     },
     {
       "code": "000516",
-      "name": "",
+      "name": "国际医学",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 26.791220750952295,
@@ -496,7 +646,7 @@
     },
     {
       "code": "000521",
-      "name": "",
+      "name": "长虹美菱",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 31.162706330491563,
@@ -504,7 +654,7 @@
     },
     {
       "code": "000523",
-      "name": "",
+      "name": "红棉股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 14.293488118991474,
@@ -512,7 +662,7 @@
     },
     {
       "code": "000524",
-      "name": "",
+      "name": "岭南控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 29.312534010520586,
@@ -520,7 +670,7 @@
     },
     {
       "code": "000529",
-      "name": "",
+      "name": "广弘控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 3.138037366225286,
@@ -528,7 +678,7 @@
     },
     {
       "code": "000544",
-      "name": "",
+      "name": "中原环保",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 10.139669871213496,
@@ -536,7 +686,7 @@
     },
     {
       "code": "000548",
-      "name": "",
+      "name": "湖南投资",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 8.761110103391982,
@@ -544,7 +694,7 @@
     },
     {
       "code": "000553",
-      "name": "",
+      "name": "安道麦A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 19.84400507890441,
@@ -552,7 +702,7 @@
     },
     {
       "code": "000554",
-      "name": "",
+      "name": "泰山石油",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 33.95610375476147,
@@ -560,7 +710,7 @@
     },
     {
       "code": "000557",
-      "name": "",
+      "name": "西部创业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 10.99220025394522,
@@ -568,7 +718,7 @@
     },
     {
       "code": "000565",
-      "name": "",
+      "name": "渝三峡A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 21.385815345546888,
@@ -576,7 +726,7 @@
     },
     {
       "code": "000570",
-      "name": "",
+      "name": "苏常柴A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 27.915835298385634,
@@ -584,7 +734,7 @@
     },
     {
       "code": "000576",
-      "name": "",
+      "name": "甘化科工",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 21.89370578632324,
@@ -592,7 +742,7 @@
     },
     {
       "code": "000590",
-      "name": "",
+      "name": "古汉医药",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 7.709051333212407,
@@ -600,7 +750,7 @@
     },
     {
       "code": "000597",
-      "name": "",
+      "name": "东北制药",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 26.392163976056594,
@@ -608,7 +758,7 @@
     },
     {
       "code": "000599",
-      "name": "",
+      "name": "青岛双星",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.886631598040996,
@@ -616,7 +766,7 @@
     },
     {
       "code": "000605",
-      "name": "",
+      "name": "渤海股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 8.615998548884454,
@@ -624,7 +774,7 @@
     },
     {
       "code": "000607",
-      "name": "",
+      "name": "华媒控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 12.987484128423727,
@@ -632,7 +782,7 @@
     },
     {
       "code": "000610",
-      "name": "",
+      "name": "*ST西旅",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 20.80536912751678,
@@ -640,7 +790,7 @@
     },
     {
       "code": "000615",
-      "name": "",
+      "name": "*ST美谷",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 8.216941773988754,
@@ -648,7 +798,7 @@
     },
     {
       "code": "000619",
-      "name": "",
+      "name": "海螺新材",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 28.496281516415745,
@@ -656,7 +806,7 @@
     },
     {
       "code": "000626",
-      "name": "",
+      "name": "远大控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 29.911119172864137,
@@ -664,7 +814,7 @@
     },
     {
       "code": "000632",
-      "name": "",
+      "name": "ST三木",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 29.784146562670056,
@@ -672,7 +822,7 @@
     },
     {
       "code": "000633",
-      "name": "",
+      "name": "合金投资",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 28.84092145837112,
@@ -680,7 +830,7 @@
     },
     {
       "code": "000635",
-      "name": "",
+      "name": "英力特",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.1966261563577,
@@ -688,7 +838,7 @@
     },
     {
       "code": "000637",
-      "name": "",
+      "name": "茂化实华",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 15.871576274260837,
@@ -696,7 +846,7 @@
     },
     {
       "code": "000639",
-      "name": "",
+      "name": "ST西王",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 27.22655541447488,
@@ -704,7 +854,7 @@
     },
     {
       "code": "000650",
-      "name": "",
+      "name": "仁和药业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 23.199709776890984,
@@ -712,7 +862,7 @@
     },
     {
       "code": "000652",
-      "name": "",
+      "name": "泰达股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.39288953382913,
@@ -720,7 +870,7 @@
     },
     {
       "code": "000655",
-      "name": "",
+      "name": "金岭矿业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 17.957554870306545,
@@ -728,7 +878,7 @@
     },
     {
       "code": "000656",
-      "name": "",
+      "name": "*ST金科",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 33.91982586613459,
@@ -736,7 +886,7 @@
     },
     {
       "code": "000663",
-      "name": "",
+      "name": "永安林业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 12.86051151822964,
@@ -744,7 +894,7 @@
     },
     {
       "code": "000665",
-      "name": "",
+      "name": "湖北广电",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 20.152367132232904,
@@ -752,7 +902,7 @@
     },
     {
       "code": "000669",
-      "name": "",
+      "name": "ST金鸿",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 8.470886994376928,
@@ -760,7 +910,7 @@
     },
     {
       "code": "000692",
-      "name": "",
+      "name": "惠天热电",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.66823870850716,
@@ -768,7 +918,7 @@
     },
     {
       "code": "000698",
-      "name": "",
+      "name": "ST沈化",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 3.754761472882278,
@@ -776,7 +926,7 @@
     },
     {
       "code": "000701",
-      "name": "",
+      "name": "厦门信达",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.777072374387814,
@@ -784,7 +934,7 @@
     },
     {
       "code": "000702",
-      "name": "",
+      "name": "正虹科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 10.883366588064575,
@@ -792,7 +942,7 @@
     },
     {
       "code": "000705",
-      "name": "",
+      "name": "浙江震元",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 23.67132232904045,
@@ -800,7 +950,7 @@
     },
     {
       "code": "000707",
-      "name": "",
+      "name": "双环科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.432251042989298,
@@ -808,7 +958,7 @@
     },
     {
       "code": "000710",
-      "name": "",
+      "name": "贝瑞基因",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 20.932341737710868,
@@ -816,7 +966,7 @@
     },
     {
       "code": "000713",
-      "name": "",
+      "name": "国投丰乐",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 10.828949755124253,
@@ -824,7 +974,7 @@
     },
     {
       "code": "000715",
-      "name": "",
+      "name": "中兴商业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 19.29983674950118,
@@ -832,7 +982,7 @@
     },
     {
       "code": "000717",
-      "name": "",
+      "name": "中南股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.28713948848177,
@@ -840,7 +990,7 @@
     },
     {
       "code": "000721",
-      "name": "",
+      "name": "西安饮食",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 13.85815345546889,
@@ -848,7 +998,7 @@
     },
     {
       "code": "000726",
-      "name": "",
+      "name": "鲁泰A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 6.149102122256485,
@@ -856,7 +1006,7 @@
     },
     {
       "code": "000731",
-      "name": "",
+      "name": "四川美丰",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.06947215672048,
@@ -864,7 +1014,7 @@
     },
     {
       "code": "000752",
-      "name": "",
+      "name": "*ST西发",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.429167422456015,
@@ -872,7 +1022,7 @@
     },
     {
       "code": "000755",
-      "name": "",
+      "name": "山西高速",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 4.679847632867768,
@@ -880,7 +1030,7 @@
     },
     {
       "code": "000756",
-      "name": "",
+      "name": "新华制药",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 19.390531471068385,
@@ -888,7 +1038,7 @@
     },
     {
       "code": "000757",
-      "name": "",
+      "name": "浩物股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 29.856702339923817,
@@ -896,7 +1046,7 @@
     },
     {
       "code": "000761",
-      "name": "",
+      "name": "本钢板材",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 15.690186831126429,
@@ -904,7 +1054,7 @@
     },
     {
       "code": "000779",
-      "name": "",
+      "name": "甘咨询",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 31.05387266461092,
@@ -912,7 +1062,7 @@
     },
     {
       "code": "000789",
-      "name": "",
+      "name": "万年青",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 2.6664248140758207,
@@ -920,7 +1070,7 @@
     },
     {
       "code": "000790",
-      "name": "",
+      "name": "华神科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 26.627970252131327,
@@ -928,7 +1078,7 @@
     },
     {
       "code": "000793",
-      "name": "",
+      "name": "*ST华闻",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 34.5909668057319,
@@ -936,7 +1086,7 @@
     },
     {
       "code": "000797",
-      "name": "",
+      "name": "中国武夷",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 26.91819336114638,
@@ -944,7 +1094,7 @@
     },
     {
       "code": "000798",
-      "name": "",
+      "name": "中水渔业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 20.714674405949573,
@@ -952,7 +1102,7 @@
     },
     {
       "code": "000803",
-      "name": "",
+      "name": "山高环能",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 34.699800471612555,
@@ -960,7 +1110,7 @@
     },
     {
       "code": "000812",
-      "name": "",
+      "name": "陕西金叶",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 19.10030836205333,
@@ -968,7 +1118,7 @@
     },
     {
       "code": "000813",
-      "name": "",
+      "name": "德展健康",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 33.992381643388356,
@@ -976,7 +1126,7 @@
     },
     {
       "code": "000816",
-      "name": "",
+      "name": "智慧农业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.215490658443677,
@@ -984,7 +1134,7 @@
     },
     {
       "code": "000820",
-      "name": "",
+      "name": "*ST节能",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 3.2287320877924905,
@@ -992,7 +1142,7 @@
     },
     {
       "code": "000822",
-      "name": "",
+      "name": "山东海化",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.777797932160347,
@@ -1000,7 +1150,7 @@
     },
     {
       "code": "000826",
-      "name": "",
+      "name": "*ST启环",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 23.000181389443135,
@@ -1008,7 +1158,7 @@
     },
     {
       "code": "000828",
-      "name": "",
+      "name": "东莞控股",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 19.191003083620533,
@@ -1016,7 +1166,7 @@
     },
     {
       "code": "000838",
-      "name": "",
+      "name": "*ST发展",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 14.837656448394704,
@@ -1024,7 +1174,7 @@
     },
     {
       "code": "000850",
-      "name": "",
+      "name": "华茂股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 12.89678940685652,
@@ -1032,7 +1182,7 @@
     },
     {
       "code": "000852",
-      "name": "",
+      "name": "石化机械",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 33.08543442771631,
@@ -1040,7 +1190,7 @@
     },
     {
       "code": "000856",
-      "name": "",
+      "name": "冀东装备",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 30.509704335207694,
@@ -1048,7 +1198,7 @@
     },
     {
       "code": "000860",
-      "name": "",
+      "name": "顺鑫农业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 23.943406493742064,
@@ -1056,7 +1206,7 @@
     },
     {
       "code": "000868",
-      "name": "",
+      "name": "安凯客车",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 20.043533466352258,
@@ -1064,7 +1214,7 @@
     },
     {
       "code": "000869",
-      "name": "",
+      "name": "张裕A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 3.827317250136042,
@@ -1072,7 +1222,7 @@
     },
     {
       "code": "000877",
-      "name": "",
+      "name": "天山股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.9551968075458,
@@ -1080,7 +1230,7 @@
     },
     {
       "code": "000885",
-      "name": "",
+      "name": "城发环境",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 19.952838744785055,
@@ -1088,7 +1238,7 @@
     },
     {
       "code": "000886",
-      "name": "",
+      "name": "海南高速",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 23.70760021766733,
@@ -1096,7 +1246,7 @@
     },
     {
       "code": "000888",
-      "name": "",
+      "name": "峨眉山A",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 21.04117540359151,
@@ -1104,7 +1254,7 @@
     },
     {
       "code": "000897",
-      "name": "",
+      "name": "津滨发展",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 13.65862506802104,
@@ -1112,7 +1262,7 @@
     },
     {
       "code": "000900",
-      "name": "",
+      "name": "现代投资",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 7.128605115182296,
@@ -1120,7 +1270,7 @@
     },
     {
       "code": "000906",
-      "name": "",
+      "name": "浙商中拓",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 21.168148013785597,
@@ -1128,7 +1278,7 @@
     },
     {
       "code": "000909",
-      "name": "",
+      "name": "*ST数源",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 3.065481588971522,
@@ -1136,7 +1286,7 @@
     },
     {
       "code": "000910",
-      "name": "",
+      "name": "大亚圣象",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 2.956647923090876,
@@ -1144,7 +1294,7 @@
     },
     {
       "code": "000911",
-      "name": "",
+      "name": "*ST广糖",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 30.781788499909307,
@@ -1152,7 +1302,7 @@
     },
     {
       "code": "000915",
-      "name": "",
+      "name": "华特达因",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 14.801378559767823,
@@ -1160,7 +1310,7 @@
     },
     {
       "code": "000919",
-      "name": "",
+      "name": "金陵药业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 17.485942318157083,
@@ -1168,7 +1318,7 @@
     },
     {
       "code": "000930",
-      "name": "",
+      "name": "中粮科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 26.954471249773267,
@@ -1176,7 +1326,7 @@
     },
     {
       "code": "000931",
-      "name": "",
+      "name": "中关村",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 5.242154906584437,
@@ -1184,7 +1334,7 @@
     },
     {
       "code": "000948",
-      "name": "",
+      "name": "南天信息",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 22.601124614547434,
@@ -1192,7 +1342,7 @@
     },
     {
       "code": "000952",
-      "name": "",
+      "name": "广济药业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 13.694902956647923,
@@ -1200,7 +1350,7 @@
     },
     {
       "code": "000953",
-      "name": "",
+      "name": "中哲精化",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.53800108833666,
@@ -1208,7 +1358,7 @@
     },
     {
       "code": "000965",
-      "name": "",
+      "name": "天保基建",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 26.029385089787777,
@@ -1216,7 +1366,7 @@
     },
     {
       "code": "000972",
-      "name": "",
+      "name": "*ST中基",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 5.1151822963903495,
@@ -1224,7 +1374,7 @@
     },
     {
       "code": "000978",
-      "name": "",
+      "name": "桂林旅游",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 27.734445855251224,
@@ -1232,7 +1382,7 @@
     },
     {
       "code": "000985",
-      "name": "",
+      "name": "大庆华科",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 5.29657173952476,
@@ -1240,7 +1390,7 @@
     },
     {
       "code": "000989",
-      "name": "",
+      "name": "九芝堂",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 27.970252131325957,
@@ -1248,7 +1398,7 @@
     },
     {
       "code": "001201",
-      "name": "",
+      "name": "东瑞股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 4.317068746598948,
@@ -1256,7 +1406,7 @@
     },
     {
       "code": "001202",
-      "name": "",
+      "name": "炬申股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 5.205877017957555,
@@ -1264,7 +1414,7 @@
     },
     {
       "code": "001207",
-      "name": "",
+      "name": "联科科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 34.971884636314165,
@@ -1272,7 +1422,7 @@
     },
     {
       "code": "001209",
-      "name": "",
+      "name": "洪兴股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 16.379466715037186,
@@ -1280,7 +1430,7 @@
     },
     {
       "code": "001213",
-      "name": "",
+      "name": "中铁特货",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 21.077453292218394,
@@ -1288,7 +1438,7 @@
     },
     {
       "code": "001216",
-      "name": "",
+      "name": "华瓷股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.74079448576093,
@@ -1296,7 +1446,7 @@
     },
     {
       "code": "001217",
-      "name": "",
+      "name": "华尔泰",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 10.248503537094141,
@@ -1304,7 +1454,7 @@
     },
     {
       "code": "001218",
-      "name": "",
+      "name": "丽臣实业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.05224015962271,
@@ -1312,7 +1462,7 @@
     },
     {
       "code": "001219",
-      "name": "",
+      "name": "青岛食品",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 8.869943769272629,
@@ -1320,7 +1470,7 @@
     },
     {
       "code": "001220",
-      "name": "",
+      "name": "世盟股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.64991837475059,
@@ -1328,7 +1478,7 @@
     },
     {
       "code": "001221",
-      "name": "",
+      "name": "悍高集团",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 28.26047524034101,
@@ -1336,7 +1486,7 @@
     },
     {
       "code": "001222",
-      "name": "",
+      "name": "源飞宠物",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 5.822601124614548,
@@ -1344,7 +1494,7 @@
     },
     {
       "code": "001225",
-      "name": "",
+      "name": "和泰机电",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.56013060039906,
@@ -1352,7 +1502,7 @@
     },
     {
       "code": "001226",
-      "name": "",
+      "name": "拓山重工",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.30545982223835,
@@ -1360,7 +1510,7 @@
     },
     {
       "code": "001228",
-      "name": "",
+      "name": "永泰运",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.501723199709776,
@@ -1368,7 +1518,7 @@
     },
     {
       "code": "001231",
-      "name": "",
+      "name": "农心科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 14.093959731543624,
@@ -1376,7 +1526,7 @@
     },
     {
       "code": "001234",
-      "name": "",
+      "name": "泰慕士",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 28.387447850535096,
@@ -1384,7 +1534,7 @@
     },
     {
       "code": "001238",
-      "name": "",
+      "name": "浙江正特",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.359695265735535,
@@ -1392,7 +1542,7 @@
     },
     {
       "code": "001255",
-      "name": "",
+      "name": "博菲电气",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 11.590785416288773,
@@ -1400,7 +1550,7 @@
     },
     {
       "code": "001260",
-      "name": "",
+      "name": "坤泰股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 6.965354616361327,
@@ -1408,7 +1558,7 @@
     },
     {
       "code": "001277",
-      "name": "",
+      "name": "速达股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 5.840740068927988,
@@ -1416,7 +1566,7 @@
     },
     {
       "code": "001278",
-      "name": "",
+      "name": "一彬科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 19.499365136949027,
@@ -1424,7 +1574,7 @@
     },
     {
       "code": "001279",
-      "name": "",
+      "name": "强邦新材",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 4.988209686196264,
@@ -1432,7 +1582,7 @@
     },
     {
       "code": "001285",
-      "name": "",
+      "name": "瑞立科密",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 16.071104661708688,
@@ -1440,7 +1590,7 @@
     },
     {
       "code": "001296",
-      "name": "",
+      "name": "长江材料",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 12.769816796662434,
@@ -1448,7 +1598,7 @@
     },
     {
       "code": "001299",
-      "name": "",
+      "name": "美能能源",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 31.362234717939412,
@@ -1456,7 +1606,7 @@
     },
     {
       "code": "001306",
-      "name": "",
+      "name": "夏厦精密",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 19.934699800471613,
@@ -1464,7 +1614,7 @@
     },
     {
       "code": "001312",
-      "name": "",
+      "name": "福恩股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 31.18084527480501,
@@ -1472,7 +1622,7 @@
     },
     {
       "code": "001318",
-      "name": "",
+      "name": "阳光乳业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 4.008706693270452,
@@ -1480,7 +1630,7 @@
     },
     {
       "code": "001319",
-      "name": "",
+      "name": "铭科精技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 27.879557409758753,
@@ -1488,7 +1638,7 @@
     },
     {
       "code": "001322",
-      "name": "",
+      "name": "箭牌家居",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 17.594775984037728,
@@ -1496,7 +1646,7 @@
     },
     {
       "code": "001323",
-      "name": "",
+      "name": "慕思股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 3.446399419553782,
@@ -1504,7 +1654,7 @@
     },
     {
       "code": "001324",
-      "name": "",
+      "name": "长青科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.469435878831852,
@@ -1512,7 +1662,7 @@
     },
     {
       "code": "001325",
-      "name": "",
+      "name": "元创股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 33.049156539089424,
@@ -1520,7 +1670,7 @@
     },
     {
       "code": "001328",
-      "name": "",
+      "name": "登康口腔",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.63268637765282,
@@ -1528,7 +1678,7 @@
     },
     {
       "code": "001333",
-      "name": "",
+      "name": "光华股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 24.541991656085614,
@@ -1536,7 +1686,7 @@
     },
     {
       "code": "001336",
-      "name": "",
+      "name": "楚环科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 23.12715399963722,
@@ -1544,7 +1694,7 @@
     },
     {
       "code": "001356",
-      "name": "",
+      "name": "富岭股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 6.130963177943044,
@@ -1552,7 +1702,7 @@
     },
     {
       "code": "001358",
-      "name": "",
+      "name": "兴欣新材",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.846363141665154,
@@ -1560,7 +1710,7 @@
     },
     {
       "code": "001366",
-      "name": "",
+      "name": "播恩集团",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 25.267549428623255,
@@ -1568,7 +1718,7 @@
     },
     {
       "code": "001367",
-      "name": "",
+      "name": "海森药业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 13.676764012334482,
@@ -1576,7 +1726,7 @@
     },
     {
       "code": "001368",
-      "name": "",
+      "name": "通达创智",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 12.425176854707056,
@@ -1584,7 +1734,7 @@
     },
     {
       "code": "001373",
-      "name": "",
+      "name": "翔腾新材",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 28.02466896426628,
@@ -1592,7 +1742,7 @@
     },
     {
       "code": "001379",
-      "name": "",
+      "name": "腾达科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 8.815526936332306,
@@ -1600,7 +1750,7 @@
     },
     {
       "code": "001380",
-      "name": "",
+      "name": "华纬科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 8.706693270451659,
@@ -1608,7 +1758,7 @@
     },
     {
       "code": "001382",
-      "name": "",
+      "name": "新亚电缆",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 28.93161617993833,
@@ -1616,7 +1766,7 @@
     },
     {
       "code": "001386",
-      "name": "",
+      "name": "马可波罗",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 31.561763105387264,
@@ -1624,7 +1774,7 @@
     },
     {
       "code": "001388",
-      "name": "",
+      "name": "信通电子",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.704335207690912,
@@ -1632,7 +1782,7 @@
     },
     {
       "code": "001390",
-      "name": "",
+      "name": "古麒绒材",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 21.60348267730818,
@@ -1640,7 +1790,7 @@
     },
     {
       "code": "001391",
-      "name": "",
+      "name": "国货航",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.46871032105931,
@@ -1648,7 +1798,7 @@
     },
     {
       "code": "001395",
-      "name": "",
+      "name": "亚联机械",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 18.592417921276983,
@@ -1656,7 +1806,7 @@
     },
     {
       "code": "001396",
-      "name": "",
+      "name": "誉帆科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 16.034826773081807,
@@ -1664,7 +1814,7 @@
     },
     {
       "code": "002005",
-      "name": "",
+      "name": "ST德豪",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 11.844730636676944,
@@ -1672,7 +1822,7 @@
     },
     {
       "code": "002014",
-      "name": "",
+      "name": "永新股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 9.08761110103392,
@@ -1680,7 +1830,7 @@
     },
     {
       "code": "002016",
-      "name": "",
+      "name": "世荣兆业",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 13.313985126065663,
@@ -1688,7 +1838,7 @@
     },
     {
       "code": "002019",
-      "name": "",
+      "name": "亿帆医药",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.287320877924905,
@@ -1696,7 +1846,7 @@
     },
     {
       "code": "002022",
-      "name": "",
+      "name": "科华生物",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 7.436967168510793,
@@ -1704,7 +1854,7 @@
     },
     {
       "code": "002024",
-      "name": "",
+      "name": "ST易购",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 21.422093234173772,
@@ -1712,7 +1862,7 @@
     },
     {
       "code": "002032",
-      "name": "",
+      "name": "苏泊尔",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 34.409577362597496,
@@ -1720,7 +1870,7 @@
     },
     {
       "code": "002035",
-      "name": "",
+      "name": "华帝股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 7.76346816615273,
@@ -1728,7 +1878,7 @@
     },
     {
       "code": "002037",
-      "name": "",
+      "name": "保利联合",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 10.085253038273173,
@@ -1736,7 +1886,7 @@
     },
     {
       "code": "002047",
-      "name": "",
+      "name": "宝鹰股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 31.942680935969527,
@@ -1744,7 +1894,7 @@
     },
     {
       "code": "002053",
-      "name": "",
+      "name": "云南能投",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.86776709595502,
@@ -1752,7 +1902,7 @@
     },
     {
       "code": "002054",
-      "name": "",
+      "name": "德美化工",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 28.804643569744243,
@@ -1760,7 +1910,7 @@
     },
     {
       "code": "002059",
-      "name": "",
+      "name": "云南旅游",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 14.892073281335028,
@@ -1768,7 +1918,7 @@
     },
     {
       "code": "002060",
-      "name": "",
+      "name": "广东建工",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 17.866860148739345,
@@ -1776,7 +1926,7 @@
     },
     {
       "code": "002061",
-      "name": "",
+      "name": "浙江交科",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 29.276256121893706,
@@ -1784,7 +1934,7 @@
     },
     {
       "code": "002069",
-      "name": "",
+      "name": "獐子岛",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 6.112824233629603,
@@ -1792,7 +1942,7 @@
     },
     {
       "code": "002073",
-      "name": "",
+      "name": "软控股份",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 33.3937964810448,
@@ -1800,7 +1950,7 @@
     },
     {
       "code": "002086",
-      "name": "",
+      "name": "东方海洋",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 21.36767640123345,
@@ -1808,7 +1958,7 @@
     },
     {
       "code": "002088",
-      "name": "",
+      "name": "鲁阳节能",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 30.799927444222746,
@@ -1816,7 +1966,7 @@
     },
     {
       "code": "002090",
-      "name": "",
+      "name": "金智科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 30.54598222383457,
@@ -1824,7 +1974,7 @@
     },
     {
       "code": "002093",
-      "name": "",
+      "name": "国脉科技",
       "stage": "hard_filter",
       "factor": "stk_liquidity_percentile",
       "value": 32.359876655178674,
@@ -1863,8 +2013,8 @@
       "op": ">=",
       "value": 55,
       "before_count": 3584,
-      "passed_count": 1063,
-      "kept_count": 1063,
+      "passed_count": 1083,
+      "kept_count": 1083,
       "relaxed": false,
       "message": ""
     },
@@ -1874,9 +2024,9 @@
       "factor": "stk_amount_ratio_5d",
       "op": ">=",
       "value": 45,
-      "before_count": 1063,
-      "passed_count": 84,
-      "kept_count": 319,
+      "before_count": 1083,
+      "passed_count": 0,
+      "kept_count": 325,
       "relaxed": true,
       "message": "触发 min_keep/max_drop_ratio，按综合分保留"
     },
@@ -1886,9 +2036,9 @@
       "factor": "stk_new_high_20d",
       "op": ">=",
       "value": 45,
-      "before_count": 319,
-      "passed_count": 297,
-      "kept_count": 297,
+      "before_count": 325,
+      "passed_count": 325,
+      "kept_count": 325,
       "relaxed": false,
       "message": ""
     }

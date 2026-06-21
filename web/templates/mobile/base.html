@@ -64,18 +64,12 @@
 
     {% set path = request.url.path if request is defined and request else '' %}
     <nav class="m-bottom">
-      <div class="grid grid-cols-6 gap-1">
+      <div class="grid grid-cols-5 gap-1">
         <a class="m-tab {% if path == '/m' %}active{% endif %}" href="/m">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>概览</span>
         </a>
         <a class="m-tab {% if path.startswith('/m/data') %}active{% endif %}" href="/m/data">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V9m4 8V5m4 12v-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg><span>数据</span>
-        </a>
-        <a class="m-tab {% if path.startswith('/m/dragon') %}active{% endif %}" href="/m/dragon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/></svg><span>龙头</span>
-        </a>
-        <a class="m-tab {% if path.startswith('/m/intraday') %}active{% endif %}" href="/m/intraday">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>盘中</span>
         </a>
         <a class="m-tab {% if path.startswith('/m/recap') or path.startswith('/m/content') %}active{% endif %}" href="/m/recap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><polygon points="10 8 16 10.5 10 13 10 8" fill="currentColor" stroke="none"/><path d="M8 21h8"/></svg><span>复盘</span>

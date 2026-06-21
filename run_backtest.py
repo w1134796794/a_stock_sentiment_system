@@ -1,7 +1,4 @@
-"""
-回测运行脚本
-演示如何使用风控回测框架
-"""
+"""回测运行脚本。"""
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -13,6 +10,7 @@ from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR
 from core.data.data_manager_main import DataManager
 from backtest import BacktestEngine
 from backtest.performance_analyzer import PerformanceAnalyzer
+from backtest.plan_source import build_backtest_plan_dir
 from risk import RiskManager, PositionSizer, RiskAnalyzer
 import loguru
 
@@ -20,9 +18,9 @@ logger = loguru.logger
 
 
 def run_backtest_demo():
-    """运行回测演示"""
+    """运行快照驱动回测演示。"""
     logger.info("=" * 60)
-    logger.info("开始运行策略回测")
+    logger.info("开始运行快照驱动回测")
     logger.info("=" * 60)
 
     # 1. 初始化数据管理器
@@ -51,14 +49,8 @@ def run_backtest_demo():
 
     backtest = BacktestEngine(dm, config)
 
-    # 4. 运行回测
-    trade_plans_dir = Path(OUTPUT_DIR) / "trade_plans"
-
-    if not trade_plans_dir.exists():
-        logger.warning(f"交易计划目录不存在: {trade_plans_dir}")
-        logger.info("请先运行每日分析生成交易计划")
-        return
-
+    # 4. 从 webdata/snapshots 或 webdata/screening 派生回测交易计划
+    trade_plans_dir = build_backtest_plan_dir(start_date, end_date)
     result = backtest.run_backtest(
         start_date=start_date,
         end_date=end_date,
@@ -241,7 +233,7 @@ def run_position_sizing_demo():
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='策略回测与风控分析工具')
+    parser = argparse.ArgumentParser(description='回测与风控分析工具')
     parser.add_argument('--mode', choices=['backtest', 'risk', 'position', 'all'],
                        default='all', help='运行模式')
 

@@ -92,8 +92,13 @@ class ScreeningEngine:
             return result
         result.input_count = int(len(candidates))
         if candidates.empty:
-            result.ok = False
-            result.message = "未读取到个股指标数据，请先生成指标数据"
+            result.after_hard_filter = 0
+            result.after_priority_filter = 0
+            result.final = []
+            result.rejected = []
+            result.message = "未读取到个股指标数据，输出空筛选结果"
+            if persist:
+                result.output_path = str(self.persist_result(result))
             return result
 
         neutral_score = _to_float((cfg.get("missing") or {}).get("neutral_score"), 50.0)
