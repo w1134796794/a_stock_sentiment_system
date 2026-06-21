@@ -1009,9 +1009,14 @@ def about_page(request: Request) -> Any:
 def api_run(payload: dict = Body(default={})) -> Any:
     from desktop.runner import CONTROLLER
 
-    date = (payload or {}).get("date")
-    ok, msg = CONTROLLER.start(date)
-    return JSONResponse({"started": ok, "message": msg})
+    data = payload or {}
+    mode = (data.get("mode") or "single").strip().lower()
+    if mode == "batch":
+        ok, msg = CONTROLLER.start_batch(data.get("start_date"), data.get("end_date"))
+    else:
+        mode = "single"
+        ok, msg = CONTROLLER.start(data.get("date"))
+    return JSONResponse({"started": ok, "message": msg, "mode": mode})
 
 
 @app.get("/api/run/status")

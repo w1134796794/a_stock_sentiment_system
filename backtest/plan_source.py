@@ -9,6 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
+DEFAULT_MAX_BACKTEST_RANK = 3
+
 
 def _code6(value: Any) -> str:
     text = str(value or "").strip().upper()
@@ -39,6 +41,31 @@ def _score_to_confidence(value: Any) -> float:
     return round(max(min(score / 100.0, 1.0), 0.0), 4)
 
 
+def _to_number(value: Any, default: float = 0.0) -> float:
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _rank_value(row: Dict[str, Any]) -> Optional[int]:
+    value = row.get("优先级") if row.get("优先级") not in (None, "") else row.get("rank")
+    try:
+        if value is None or pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _snapshot_date(path: Path, payload: Dict[str, Any]) -> str:
     date = ((payload.get("meta") or {}).get("date") or payload.get("date") or path.stem)
     return str(date).replace("-", "")[:8]
@@ -56,7 +83,9 @@ def _rows_from_screening(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     screening = ((payload.get("etl") or {}).get("screening") or {})
     rows = []
     for item in screening.get("final") or []:
-        rows.append({
+        metrics = dict(item.get("metrics") or {})
+        context = dict(item.get("context") or {})
+        row = {
             "股票代码": item.get("code") or item.get("ts_code"),
             "股票名称": item.get("name"),
             "模式类型": f"指标筛选/{screening.get('profile') or 'default'}",
@@ -67,7 +96,13 @@ def _rows_from_screening(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "竞价条件": "高开才买入，低开直接放弃",
             "风险提示": "实时行情为取消/观察时不主动买入",
             "筛选理由": "；".join(str(x) for x in (item.get("reasons") or [])[:5]),
-        })
+            "惩罚理由": "；".join(str(x) for x in (item.get("penalty_reasons") or [])[:5]),
+        }
+        for factor, value in metrics.items():
+            row[f"因子_{factor}"] = value
+        for key, value in context.items():
+            row[f"原始_{key}"] = value
+        rows.append(row)
     return rows
 
 
@@ -84,8 +119,18 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     condition = str(row.get("竞价条件") or "高开才买入，低开直接放弃")
     cancel = str(row.get("风险提示") or "低开/平开直接放弃")
     position = _position(row.get("建议仓位") or row.get("position"))
+    factor_metrics = {
+        key.replace("因子_", "", 1): _to_number(value)
+        for key, value in row.items()
+        if str(key).startswith("因子_")
+    }
+    raw_context = {
+        key.replace("原始_", "", 1): _to_number(value)
+        for key, value in row.items()
+        if str(key).startswith("原始_")
+    }
 
-    return {
+    out = {
         "模式": mode,
         "代码": code,
         "名称": name,
@@ -105,7 +150,13 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "综合评分": score or 0,
         "优先级": row.get("优先级") or row.get("rank") or "",
         "所属板块": "",
+        "惩罚理由": row.get("惩罚理由") or "",
+        "因子指标": json.dumps(factor_metrics, ensure_ascii=False, sort_keys=True),
+        "原始指标": json.dumps(raw_context, ensure_ascii=False, sort_keys=True),
     }
+    for factor, value in factor_metrics.items():
+        out[f"因子_{factor}"] = value
+    return out
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
@@ -122,6 +173,7 @@ def build_backtest_plan_dir(
     screening_dir: Optional[Path] = None,
     start_date: str = "",
     end_date: str = "",
+    max_rank: int = DEFAULT_MAX_BACKTEST_RANK,
 ) -> Tuple[Path, int, int]:
     """Create a clean plan directory for BacktestEngine from current artifacts.
 
@@ -148,19 +200,35 @@ def build_backtest_plan_dir(
         if end and date > end:
             continue
 
-        rows = _rows_from_screening(payload) or _rows_from_snapshot(payload)
+        rows: List[Dict[str, Any]] = []
+        if screening_dir:
+            screening_path = Path(screening_dir) / f"screening_{date}.json"
+            screening = _load_json(screening_path)
+            rows = _rows_from_screening({"etl": {"screening": screening}})
+        if not rows:
+            rows = _rows_from_screening(payload)
+        if not rows:
+            rows = _rows_from_snapshot(payload)
+        if max_rank and max_rank > 0:
+            rows = [row for row in rows if (_rank_value(row) or 999999) <= max_rank]
         bt_rows = [x for x in (_to_backtest_row(row) for row in rows) if x]
 
         if not bt_rows and screening_dir:
             screening_path = Path(screening_dir) / f"screening_{date}.json"
             screening = _load_json(screening_path)
             fallback_payload = {"etl": {"screening": screening}}
-            bt_rows = [x for x in (_to_backtest_row(row) for row in _rows_from_screening(fallback_payload)) if x]
+            rows = _rows_from_screening(fallback_payload)
+            if max_rank and max_rank > 0:
+                rows = [row for row in rows if (_rank_value(row) or 999999) <= max_rank]
+            bt_rows = [x for x in (_to_backtest_row(row) for row in rows) if x]
 
         if not bt_rows:
             continue
 
         df = pd.DataFrame(bt_rows)
+        if "优先级" in df.columns:
+            df["_rank"] = pd.to_numeric(df["优先级"], errors="coerce").fillna(999999)
+            df = df.sort_values(["_rank", "综合评分"], ascending=[True, False]).drop(columns=["_rank"])
         df.to_csv(plan_dir / f"交易计划_{date}.csv", index=False, encoding="utf-8-sig")
         file_count += 1
         row_count += len(bt_rows)

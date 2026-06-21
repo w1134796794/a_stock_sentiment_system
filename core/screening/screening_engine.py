@@ -363,6 +363,7 @@ class ScreeningEngine:
             }
             score = round(_to_float(row.get("_screening_score"), 0.0), 4)
             base_reasons = reasons.get(code, [])[:8]
+            penalty_reasons = self._penalty_reasons(row, cfg, neutral_score)
             final.append({
                 "code": code,
                 "ts_code": str(row.get("ts_code") or ""),
@@ -378,6 +379,7 @@ class ScreeningEngine:
                     base_reasons=base_reasons,
                 ),
                 "rule_reasons": base_reasons,
+                "penalty_reasons": penalty_reasons,
                 "metrics": metrics,
                 "context": context,
             })
@@ -393,7 +395,50 @@ class ScreeningEngine:
             weight = max(float(weight), 0.0)
             values = pd.to_numeric(df.get(factor, neutral_score), errors="coerce").fillna(neutral_score)
             score += values * weight
-        return score / total_weight
+        score = score / total_weight
+        penalty = self._ranking_penalty(df, cfg, neutral_score)
+        return (score - penalty).clip(lower=0, upper=100)
+
+    def _ranking_penalty(self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float) -> pd.Series:
+        penalty = pd.Series([0.0] * len(df), index=df.index, dtype=float)
+        for rule in ((cfg.get("ranking") or {}).get("penalties") or []):
+            factor = str(rule.get("factor") or "")
+            max_penalty = _to_float(rule.get("max_penalty"), 0.0)
+            if not factor or max_penalty <= 0:
+                continue
+            values = pd.to_numeric(df.get(factor, neutral_score), errors="coerce").fillna(neutral_score)
+            if "below" in rule:
+                below = _to_float(rule.get("below"), neutral_score)
+                floor = _to_float(rule.get("floor"), 0.0)
+                if below <= floor:
+                    floor = 0.0
+                shortfall = ((below - values) / max(below - floor, 1e-9)).clip(lower=0, upper=1)
+                penalty += shortfall * max_penalty
+            if "above" in rule:
+                above = _to_float(rule.get("above"), neutral_score)
+                ceiling = _to_float(rule.get("ceiling"), 100.0)
+                if ceiling <= above:
+                    ceiling = above + 1.0
+                excess = ((values - above) / max(ceiling - above, 1e-9)).clip(lower=0, upper=1)
+                penalty += excess * max_penalty
+        return penalty
+
+    def _penalty_reasons(self, row: Any, cfg: Dict[str, Any], neutral_score: float) -> List[str]:
+        out: List[str] = []
+        for rule in ((cfg.get("ranking") or {}).get("penalties") or []):
+            factor = str(rule.get("factor") or "")
+            if not factor:
+                continue
+            value = _to_float(row.get(factor) if hasattr(row, "get") else getattr(row, factor, None), neutral_score)
+            below = _to_float(rule.get("below"), neutral_score) if "below" in rule else None
+            above = _to_float(rule.get("above"), neutral_score) if "above" in rule else None
+            if below is not None and value < below:
+                reason = str(rule.get("reason") or rule.get("name") or f"{factor} 低于 {below}")
+                out.append(f"{reason}（{factor}={value:.1f}）")
+            if above is not None and value > above:
+                reason = str(rule.get("reason") or rule.get("name") or f"{factor} 高于 {above}")
+                out.append(f"{reason}（{factor}={value:.1f}）")
+        return out
 
     def _mask(self, df: pd.DataFrame, rule: Dict[str, Any], neutral_score: float) -> pd.Series:
         factor = str(rule.get("factor") or "")

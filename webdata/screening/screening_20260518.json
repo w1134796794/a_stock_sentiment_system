@@ -5,41 +5,39 @@
   "message": "筛选完成，输入 5499，最终 10",
   "input_count": 5499,
   "after_hard_filter": 3575,
-  "after_priority_filter": 269,
+  "after_priority_filter": 795,
   "final_count": 10,
   "final": [
     {
       "code": "000988",
       "ts_code": "000988.SZ",
       "name": "华工科技",
-      "score": 60.821,
+      "score": 94.8636,
       "rank": 1,
-      "gold_rank": 1,
+      "gold_rank": 49,
       "reasons": [
-        "综合评分 60.8，候选排名第 1",
+        "综合评分 94.9，候选排名第 1",
         "当日涨幅 +10.00%，短线强度已确认",
+        "量能未明显放大，成交额/成交量约为5日均值 0.72/0.70 倍",
         "流动性分位 99.5，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 70.29142731833596,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 99.54537188579742
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 99.54537188579742,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 10.0015,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 0.703150856438299,
+        "amount_ratio": 0.715313061636739,
         "new_high_ratio": 1.0,
         "liquidity_score": 99.54537188579742,
         "sector_resonance_score": 50.0
@@ -49,34 +47,32 @@
       "code": "600183",
       "ts_code": "600183.SH",
       "name": "生益科技",
-      "score": 60.7795,
+      "score": 94.7981,
       "rank": 2,
-      "gold_rank": 2,
+      "gold_rank": 6,
       "reasons": [
-        "综合评分 60.8，候选排名第 2",
+        "综合评分 94.8，候选排名第 2",
         "当日涨幅 +10.01%，短线强度已确认",
+        "量价活跃，成交额/成交量约为5日均值 1.24/1.16 倍",
         "流动性分位 99.3，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 70.24778301937252,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 99.32715039098018
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 99.32715039098018,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 10.0056,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 1.1631652251641722,
+        "amount_ratio": 1.2438133656320083,
         "new_high_ratio": 1.0,
         "liquidity_score": 99.32715039098018,
         "sector_resonance_score": 50.0
@@ -86,34 +82,32 @@
       "code": "301666",
       "ts_code": "301666.SZ",
       "name": "大普微",
-      "score": 60.6517,
+      "score": 94.5963,
       "rank": 3,
-      "gold_rank": 3,
+      "gold_rank": 21,
       "reasons": [
-        "综合评分 60.7，候选排名第 3",
+        "综合评分 94.6，候选排名第 3",
         "当日涨幅 +20.00%，短线强度已确认",
+        "量能未明显放大，成交额/成交量约为5日均值 1.08/0.82 倍",
         "流动性分位 98.7，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 70.11321309756855,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 98.65430078196036
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 98.65430078196036,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 20.0,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 0.8192648993443705,
+        "amount_ratio": 1.079562421191796,
         "new_high_ratio": 1.0,
         "liquidity_score": 98.65430078196036,
         "sector_resonance_score": 50.0
@@ -123,34 +117,32 @@
       "code": "603601",
       "ts_code": "603601.SH",
       "name": "再升科技",
-      "score": 60.5549,
+      "score": 94.4435,
       "rank": 4,
-      "gold_rank": 4,
+      "gold_rank": 10,
       "reasons": [
-        "综合评分 60.6，候选排名第 4",
+        "综合评分 94.4，候选排名第 4",
         "当日涨幅 +10.02%，短线强度已确认",
         "流动性分位 98.1，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 70.01137639998717,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 98.14511729405346
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 98.14511729405346,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 10.0178,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 1.0405460255252208,
+        "amount_ratio": 1.0869675646674606,
         "new_high_ratio": 1.0,
         "liquidity_score": 98.14511729405346,
         "sector_resonance_score": 50.0
@@ -160,34 +152,32 @@
       "code": "688143",
       "ts_code": "688143.SH",
       "name": "长盈通",
-      "score": 60.4789,
+      "score": 94.3235,
       "rank": 5,
-      "gold_rank": 5,
+      "gold_rank": 1,
       "reasons": [
-        "综合评分 60.5，候选排名第 5",
+        "综合评分 94.3，候选排名第 5",
         "当日涨幅 +20.00%，短线强度已确认",
+        "量价活跃，成交额/成交量约为5日均值 2.07/1.50 倍",
         "流动性分位 97.7，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 69.93136185188752,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 97.74504455355519
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 97.74504455355519,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 20.0,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 1.50478964163931,
+        "amount_ratio": 2.074107946961296,
         "new_high_ratio": 1.0,
         "liquidity_score": 97.74504455355519,
         "sector_resonance_score": 50.0
@@ -197,34 +187,32 @@
       "code": "000021",
       "ts_code": "000021.SZ",
       "name": "深科技",
-      "score": 60.4651,
+      "score": 94.3017,
       "rank": 6,
-      "gold_rank": 6,
+      "gold_rank": 72,
       "reasons": [
-        "综合评分 60.5，候选排名第 6",
+        "综合评分 94.3，候选排名第 6",
         "当日涨幅 +10.01%，短线强度已确认",
+        "量能未明显放大，成交额/成交量约为5日均值 0.67/0.62 倍",
         "流动性分位 97.7，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 69.91681375223304,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 97.67230405528278
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 97.67230405528278,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 10.0119,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 0.6187499780778364,
+        "amount_ratio": 0.6717896934195657,
         "new_high_ratio": 1.0,
         "liquidity_score": 97.67230405528278,
         "sector_resonance_score": 50.0
@@ -234,34 +222,32 @@
       "code": "300302",
       "ts_code": "300302.SZ",
       "name": "同有科技",
-      "score": 60.3027,
+      "score": 94.0453,
       "rank": 7,
-      "gold_rank": 7,
+      "gold_rank": 75,
       "reasons": [
-        "综合评分 60.3，候选排名第 7",
+        "综合评分 94.0，候选排名第 7",
         "当日涨幅 +20.00%，短线强度已确认",
+        "量能未明显放大，成交额/成交量约为5日均值 0.71/0.61 倍",
         "流动性分位 96.8，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 69.74587358129287,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 96.81760320058193
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 96.81760320058193,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 19.9955,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 0.6127885211142841,
+        "amount_ratio": 0.7051438035076443,
         "new_high_ratio": 1.0,
         "liquidity_score": 96.81760320058193,
         "sector_resonance_score": 50.0
@@ -271,34 +257,32 @@
       "code": "601126",
       "ts_code": "601126.SH",
       "name": "四方股份",
-      "score": 60.1915,
+      "score": 93.8689,
       "rank": 8,
-      "gold_rank": 8,
+      "gold_rank": 27,
       "reasons": [
-        "综合评分 60.2，候选排名第 8",
+        "综合评分 93.9，候选排名第 8",
         "当日涨幅 +10.00%，短线强度已确认",
         "流动性分位 96.2，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 69.628058784057,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 96.23567921440261
+        "tech_score": 94.70230735294118,
+        "stk_liquidity_percentile": 96.23567921440261,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 9.9987,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 0.9155311512865095,
+        "amount_ratio": 0.9923853813228547,
         "new_high_ratio": 1.0,
         "liquidity_score": 96.23567921440261,
         "sector_resonance_score": 50.0
@@ -308,34 +292,32 @@
       "code": "301531",
       "ts_code": "301531.SZ",
       "name": "春光集团",
-      "score": 60.1507,
+      "score": 93.8052,
       "rank": 9,
-      "gold_rank": 9,
+      "gold_rank": 42,
       "reasons": [
-        "综合评分 60.2，候选排名第 9",
+        "综合评分 93.8，候选排名第 9",
         "当日涨幅 +20.00%，短线强度已确认",
+        "量能未明显放大，成交额/成交量约为5日均值 0.83/0.86 倍",
         "流动性分位 96.0，承接能力较好",
-        "阶段强势位置 88.2，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.7，指标表现靠前"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 69.58584448509356,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 88.23529411764706,
-        "stk_liquidity_percentile": 96.01745771958538
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 96.01745771958538,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 20.0,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 0.8556052446830111,
+        "amount_ratio": 0.8291337810413839,
         "new_high_ratio": 1.0,
         "liquidity_score": 96.01745771958538,
         "sector_resonance_score": 50.0
@@ -345,34 +327,32 @@
       "code": "688668",
       "ts_code": "688668.SH",
       "name": "鼎通科技",
-      "score": 59.934,
+      "score": 93.4381,
       "rank": 10,
-      "gold_rank": 10,
+      "gold_rank": 11,
       "reasons": [
-        "综合评分 59.9，候选排名第 10",
+        "综合评分 93.4，候选排名第 10",
         "当日涨幅 +15.29%，短线强度已确认",
+        "量价活跃，成交额/成交量约为5日均值 1.32/1.18 倍",
         "流动性分位 95.4，承接能力较好",
-        "阶段强势位置 87.8，走势接近阶段强势区",
-        "成交额相对5日 20.0偏弱，需盘中确认"
+        "tech_score 94.5，指标表现靠前"
       ],
       "rule_reasons": [
-        "市场综合分不低于防守线",
+        "市场综合分未进入极端风险区",
         "成交额分位达到基础流动性要求",
-        "个股综合分进入可观察区",
-        "成交额相对近 5 日均值有改善",
+        "当日接近涨停或强涨幅确认",
         "价格位置接近阶段强势区"
       ],
+      "penalty_reasons": [],
       "metrics": {
-        "stk_total_score": 69.38393102823933,
-        "stk_amount_ratio_5d": 20.0,
-        "stk_vol_ratio_5d": 20.0,
-        "stk_new_high_20d": 87.82075197943871,
-        "stk_liquidity_percentile": 95.38097835970176
+        "tech_score": 94.51933839074744,
+        "stk_liquidity_percentile": 95.38097835970176,
+        "stk_new_high_20d": 87.82075197943871
       },
       "context": {
         "pct_chg": 15.2939,
-        "vol_ratio": 1.0,
-        "amount_ratio": 1.0,
+        "vol_ratio": 1.1810045399050233,
+        "amount_ratio": 1.3167488636377995,
         "new_high_ratio": 0.9992952783650458,
         "liquidity_score": 95.38097835970176,
         "sector_resonance_score": 50.0
@@ -1987,7 +1967,7 @@
       "name": "市场环境不弱",
       "factor": "mkt_market_score",
       "op": ">=",
-      "value": 35,
+      "value": 10,
       "before_count": 5499,
       "passed_count": 5499,
       "kept_count": 5499,
@@ -2008,25 +1988,13 @@
     },
     {
       "stage": "priority_filter",
-      "name": "综合强度优先",
-      "factor": "stk_total_score",
+      "name": "涨停强度确认",
+      "factor": "pct_chg",
       "op": ">=",
-      "value": 55,
+      "value": 9.5,
       "before_count": 3575,
-      "passed_count": 812,
+      "passed_count": 129,
       "kept_count": 894,
-      "relaxed": true,
-      "message": "触发 min_keep/max_drop_ratio，按综合分保留"
-    },
-    {
-      "stage": "priority_filter",
-      "name": "量能放大优先",
-      "factor": "stk_amount_ratio_5d",
-      "op": ">=",
-      "value": 45,
-      "before_count": 894,
-      "passed_count": 0,
-      "kept_count": 269,
       "relaxed": true,
       "message": "触发 min_keep/max_drop_ratio，按综合分保留"
     },
@@ -2035,10 +2003,10 @@
       "name": "趋势位置优先",
       "factor": "stk_new_high_20d",
       "op": ">=",
-      "value": 45,
-      "before_count": 269,
-      "passed_count": 269,
-      "kept_count": 269,
+      "value": 70,
+      "before_count": 894,
+      "passed_count": 795,
+      "kept_count": 795,
       "relaxed": false,
       "message": ""
     }

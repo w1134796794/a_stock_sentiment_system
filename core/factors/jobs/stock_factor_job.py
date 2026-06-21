@@ -17,6 +17,24 @@ from core.factors.jobs.gold_utils import (
 )
 
 
+def _activity_ratio_score(value: float) -> float:
+    """Score turnover/volume expansion: moderate confirmation beats exhaustion."""
+    v = to_float(value, 1.0)
+    if v <= 0:
+        return 0.0
+    if v < 0.6:
+        return max(20.0, 20.0 + (v / 0.6) * 20.0)
+    if v < 1.0:
+        return 40.0 + ((v - 0.6) / 0.4) * 30.0
+    if v < 2.2:
+        return 70.0 + ((v - 1.0) / 1.2) * 30.0
+    if v < 3.0:
+        return 100.0 - ((v - 2.2) / 0.8) * 25.0
+    if v < 5.0:
+        return 75.0 - ((v - 3.0) / 2.0) * 45.0
+    return 20.0
+
+
 class StockFactorJob:
     name = "stock_factor_job"
 
@@ -39,8 +57,34 @@ class StockFactorJob:
             return result
 
         hist = stock[stock["trade_date"] < str(trade_date)].copy()
-        avg_vol_5 = hist.groupby("code").tail(5).groupby("code")["vol_hand"].mean()
-        avg_amount_5 = hist.groupby("code").tail(5).groupby("code")["amount_yuan"].mean()
+        existing_wide = read_table(con, "factor_stock_wide", where="trade_date < ?", params=[str(trade_date)])
+        amount_hist = hist[["trade_date", "code", "amount_yuan"]].copy() if not hist.empty else pd.DataFrame()
+        vol_hist = hist[["trade_date", "code", "vol_hand"]].copy() if not hist.empty else pd.DataFrame()
+        if not existing_wide.empty and {"trade_date", "code", "amount_yuan"}.issubset(existing_wide.columns):
+            prev_amount = existing_wide[["trade_date", "code", "amount_yuan"]].copy()
+            amount_hist = pd.concat([amount_hist, prev_amount], ignore_index=True)
+        if not existing_wide.empty and {"trade_date", "code", "vol_hand"}.issubset(existing_wide.columns):
+            prev_vol = existing_wide[["trade_date", "code", "vol_hand"]].copy()
+            vol_hist = pd.concat([vol_hist, prev_vol], ignore_index=True)
+        if not amount_hist.empty:
+            amount_hist["trade_date"] = amount_hist["trade_date"].astype(str)
+            amount_hist["amount_yuan"] = pd.to_numeric(amount_hist["amount_yuan"], errors="coerce").fillna(0)
+            amount_hist = amount_hist.drop_duplicates(["trade_date", "code"], keep="last")
+            amount_hist = amount_hist.sort_values(["code", "trade_date"])
+        if not vol_hist.empty:
+            vol_hist["trade_date"] = vol_hist["trade_date"].astype(str)
+            vol_hist["vol_hand"] = pd.to_numeric(vol_hist["vol_hand"], errors="coerce").fillna(0)
+            vol_hist = vol_hist.drop_duplicates(["trade_date", "code"], keep="last")
+            vol_hist = vol_hist.sort_values(["code", "trade_date"])
+
+        avg_vol_5 = (
+            vol_hist.groupby("code").tail(5).groupby("code")["vol_hand"].mean()
+            if not vol_hist.empty else pd.Series(dtype=float)
+        )
+        avg_amount_5 = (
+            amount_hist.groupby("code").tail(5).groupby("code")["amount_yuan"].mean()
+            if not amount_hist.empty else pd.Series(dtype=float)
+        )
         high_20 = hist.groupby("code").tail(20).groupby("code")["high"].max()
 
         vol_ratio = []
@@ -59,8 +103,8 @@ class StockFactorJob:
         today["vol_ratio"] = vol_ratio
         today["amount_ratio"] = amount_ratio
         today["new_high_ratio"] = new_high_ratio
-        today["vol_ratio_score"] = today["vol_ratio"].map(lambda v: score_between(v, 0.5, 3.0))
-        today["amount_ratio_score"] = today["amount_ratio"].map(lambda v: score_between(v, 0.5, 3.0))
+        today["vol_ratio_score"] = today["vol_ratio"].map(_activity_ratio_score)
+        today["amount_ratio_score"] = today["amount_ratio"].map(_activity_ratio_score)
         today["new_high_score"] = today["new_high_ratio"].map(lambda v: score_between(v, 0.85, 1.02))
         today["liquidity_score"] = percentile_score(today["amount_yuan"], higher_better=True)
         today["tech_score"] = [
@@ -75,8 +119,8 @@ class StockFactorJob:
         today["total_score"] = [
             safe_weighted_score([
                 (row.tech_score, 0.40),
-                (row.volume_score, 0.25),
-                (row.liquidity_score, 0.20),
+                (row.volume_score, 0.15),
+                (row.liquidity_score, 0.30),
                 (row.sector_resonance_score, 0.15),
             ])
             for row in today.itertuples()
@@ -98,6 +142,7 @@ class StockFactorJob:
             "vol_ratio",
             "amount_ratio",
             "new_high_ratio",
+            "vol_hand",
             "amount_yuan",
         ]].copy()
         wide["computed_at"] = now_iso()
@@ -114,12 +159,12 @@ class StockFactorJob:
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_vol_ratio_5d", raw_value=row["vol_ratio"], score=row["vol_ratio_score"],
-                    direction="higher_better",
+                    direction="target_range",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_amount_ratio_5d", raw_value=row["amount_ratio"], score=row["amount_ratio_score"],
-                    direction="higher_better",
+                    direction="target_range",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,

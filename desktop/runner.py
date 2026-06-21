@@ -103,14 +103,31 @@ def _ensure_file_sink() -> None:
     _FILE_SINK_READY = True
 
 
+def _normalize_date(value: Optional[str]) -> Optional[str]:
+    text = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if len(text) != 8:
+        return None
+    try:
+        datetime.strptime(text, "%Y%m%d")
+    except ValueError:
+        return None
+    return text
+
+
 class RunController:
     """单例分析控制器。"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self.buffer = LogBuffer()
-        self.state: str = "idle"  # idle / running / done / error
+        self.state: str = "idle"  # idle / running / done / partial / error
+        self.mode: str = "single"
         self.date: Optional[str] = None
+        self.start_date: Optional[str] = None
+        self.end_date: Optional[str] = None
+        self.total: int = 0
+        self.completed: int = 0
+        self.failed: List[str] = []
         self.started_at: Optional[str] = None
         self.finished_at: Optional[str] = None
         self.error: Optional[str] = None
@@ -124,8 +141,14 @@ class RunController:
                 return False, "已有分析任务在运行中，请等待完成。"
             self.buffer.clear()
             self.state = "running"
+            self.mode = "single"
             self.error = None
             self.date = date
+            self.start_date = None
+            self.end_date = None
+            self.total = 1
+            self.completed = 0
+            self.failed = []
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
@@ -134,11 +157,46 @@ class RunController:
             self._thread.start()
         return True, "已启动分析任务。"
 
+    def start_batch(self, start_date: Optional[str], end_date: Optional[str]) -> Tuple[bool, str]:
+        start = _normalize_date(start_date)
+        end = _normalize_date(end_date)
+        if not start or not end:
+            return False, "请填写完整的开始日期和结束日期，格式为 YYYYMMDD。"
+        if end < start:
+            return False, "结束日期不能早于开始日期。"
+
+        with self._lock:
+            if self.state == "running":
+                return False, "已有分析任务在运行中，请等待完成。"
+            self.buffer.clear()
+            self.state = "running"
+            self.mode = "batch"
+            self.error = None
+            self.date = end
+            self.start_date = start
+            self.end_date = end
+            self.total = 0
+            self.completed = 0
+            self.failed = []
+            self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.finished_at = None
+            self._thread = threading.Thread(
+                target=self._batch_worker, args=(start, end), daemon=True, name="analysis-batch-run"
+            )
+            self._thread.start()
+        return True, f"已启动历史批量生成：{start} ~ {end}。"
+
     def status(self, since: int = 0) -> Dict:
         lines, nxt = self.buffer.read_from(since)
         return {
             "state": self.state,
+            "mode": self.mode,
             "date": self.date,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "total": self.total,
+            "completed": self.completed,
+            "failed": list(self.failed),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
@@ -180,6 +238,71 @@ class RunController:
                 loguru.logger.remove(sink_id)
             except Exception:  # noqa: BLE001
                 pass
+            self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _batch_worker(self, start_date: str, end_date: str) -> None:
+        import loguru
+
+        _ensure_file_sink()
+
+        sink_id = loguru.logger.add(
+            self._loguru_sink,
+            level="INFO",
+            format="{time:HH:mm:ss} | {level: <7} | {message}",
+            enqueue=False,
+        )
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = _StreamTee(old_out, self.buffer)
+        sys.stderr = _StreamTee(old_err, self.buffer)
+        failures: List[str] = []
+        try:
+            from backtest.trade_calendar import TradeCalendar
+            from main import SentimentSystem
+
+            trade_dates = TradeCalendar().get_trade_dates(start_date, end_date)
+            self.total = len(trade_dates)
+            self.buffer.append_line(
+                f"=== 开始历史批量生成 · {start_date} ~ {end_date} · 交易日 {len(trade_dates)} 个 ==="
+            )
+            if not trade_dates:
+                raise RuntimeError("区间内没有可运行的交易日，请检查日期范围。")
+
+            system = SentimentSystem()
+            for idx, trade_date in enumerate(trade_dates, 1):
+                self.buffer.append_line("")
+                self.buffer.append_line(f"--- [{idx}/{len(trade_dates)}] {trade_date} 开始 ---")
+                try:
+                    system.run_daily_analysis(trade_date)
+                    self.completed = idx
+                    self.date = trade_date
+                    self.buffer.append_line(f"--- [{idx}/{len(trade_dates)}] {trade_date} 完成 ---")
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(trade_date)
+                    self.failed = list(failures)
+                    self.completed = idx
+                    self.date = trade_date
+                    self.buffer.append_line(f"!!! [{idx}/{len(trade_dates)}] {trade_date} 失败: {exc!r}")
+                    self.buffer.append_text(traceback.format_exc())
+
+            if failures:
+                self.error = f"批量生成完成，失败 {len(failures)} 个交易日: {', '.join(failures)}"
+                self.buffer.append_line(f"=== 历史批量生成结束：成功 {len(trade_dates) - len(failures)}，失败 {len(failures)} ===")
+                self.state = "partial"
+            else:
+                self.buffer.append_line(f"=== 历史批量生成完成：{len(trade_dates)} 个交易日全部成功 ===")
+                self.state = "done"
+        except Exception as exc:  # noqa: BLE001
+            self.error = repr(exc)
+            self.buffer.append_line(f"!!! 批量生成失败: {exc!r}")
+            self.buffer.append_text(traceback.format_exc())
+            self.state = "error"
+        finally:
+            sys.stdout, sys.stderr = old_out, old_err
+            try:
+                loguru.logger.remove(sink_id)
+            except Exception:  # noqa: BLE001
+                pass
+            self.failed = list(failures)
             self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def _loguru_sink(self, message) -> None:
@@ -307,7 +430,7 @@ class BacktestController:
                 self.state = "error"
                 return
             self.buffer.append_line(
-                f"已从当前数据快照生成回测计划：{file_count} 个交易日，{row_count} 条候选，目录 {trade_plans_dir}"
+                f"已从当前数据快照生成回测计划：{file_count} 个交易日，{row_count} 条候选（仅执行每日前3名），目录 {trade_plans_dir}"
             )
 
             dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)

@@ -1,6 +1,6 @@
 screening_profiles:
   default:
-    description: "ETL Gold 默认筛选：先过滤市场与流动性，再按强度、量能、形态逐层收敛。"
+    description: "Gold 默认筛选：先过滤市场与流动性，再按涨停强度、流动性、强势位置逐层收敛。"
     candidate_source: factor_stock_wide
     missing:
       neutral_score: 50
@@ -8,8 +8,8 @@ screening_profiles:
       - name: "市场环境不弱"
         factor: mkt_market_score
         op: ">="
-        value: 35
-        reason: "市场综合分不低于防守线"
+        value: 10
+        reason: "市场综合分未进入极端风险区"
       - name: "个股流动性合格"
         factor: stk_liquidity_percentile
         op: ">="
@@ -17,36 +17,33 @@ screening_profiles:
         reason: "成交额分位达到基础流动性要求"
     priority_filters:
       - priority: 1
-        name: "综合强度优先"
-        factor: stk_total_score
+        name: "涨停强度确认"
+        factor: pct_chg
         op: ">="
-        value: 55
+        value: 9.5
         min_keep: 30
         max_drop_ratio: 0.75
-        reason: "个股综合分进入可观察区"
+        reason: "当日接近涨停或强涨幅确认"
       - priority: 2
-        name: "量能放大优先"
-        factor: stk_amount_ratio_5d
-        op: ">="
-        value: 45
-        min_keep: 15
-        max_drop_ratio: 0.70
-        reason: "成交额相对近 5 日均值有改善"
-      - priority: 3
         name: "趋势位置优先"
         factor: stk_new_high_20d
         op: ">="
-        value: 45
+        value: 70
         min_keep: 8
         max_drop_ratio: 0.70
         reason: "价格位置接近阶段强势区"
     ranking:
       weights:
-        stk_total_score: 0.45
-        stk_amount_ratio_5d: 0.18
-        stk_vol_ratio_5d: 0.12
-        stk_new_high_20d: 0.15
-        stk_liquidity_percentile: 0.10
+        tech_score: 0.50
+        stk_liquidity_percentile: 0.30
+        stk_new_high_20d: 0.20
+      penalties:
+        - name: "成交额极弱扣分"
+          factor: stk_amount_ratio_5d
+          below: 35
+          floor: 20
+          max_penalty: 2
+          reason: "涨停但成交额相对5日偏弱，次日承接风险升高"
       top_n: 10
 
   momentum_repair:
@@ -93,8 +90,21 @@ screening_profiles:
     ranking:
       weights:
         stk_pct_chg_1d: 0.25
-        stk_vol_ratio_5d: 0.20
-        stk_amount_ratio_5d: 0.20
-        stk_new_high_20d: 0.20
-        stk_liquidity_percentile: 0.15
+        stk_vol_ratio_5d: 0.10
+        stk_amount_ratio_5d: 0.10
+        stk_new_high_20d: 0.25
+        stk_liquidity_percentile: 0.30
+      penalties:
+        - name: "成交额极弱扣分"
+          factor: stk_amount_ratio_5d
+          below: 35
+          floor: 20
+          max_penalty: 4
+          reason: "量价修复缺少成交额确认，次日承接风险升高"
+        - name: "成交额过热扣分"
+          factor: amount_ratio
+          above: 3.2
+          ceiling: 5.0
+          max_penalty: 10
+          reason: "成交额相对5日过热，次日兑现压力升高"
       top_n: 8

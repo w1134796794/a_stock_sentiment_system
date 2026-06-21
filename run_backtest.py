@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR
+from config.settings import TUSHARE_TOKEN, CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, WEB_DATA_DIR
 from core.data.data_manager_main import DataManager
 from backtest import BacktestEngine
 from backtest.performance_analyzer import PerformanceAnalyzer
@@ -50,7 +50,13 @@ def run_backtest_demo():
     backtest = BacktestEngine(dm, config)
 
     # 4. 从 webdata/snapshots 或 webdata/screening 派生回测交易计划
-    trade_plans_dir = build_backtest_plan_dir(start_date, end_date)
+    trade_plans_dir, _, _ = build_backtest_plan_dir(
+        snapshot_dir=Path(SNAPSHOT_DIR),
+        output_dir=Path(WEB_DATA_DIR),
+        screening_dir=Path(WEB_DATA_DIR) / "screening",
+        start_date=start_date,
+        end_date=end_date,
+    )
     result = backtest.run_backtest(
         start_date=start_date,
         end_date=end_date,
@@ -96,18 +102,24 @@ def save_backtest_results(result: dict, output_dir: str):
             'hot_resonance': t.hot_resonance,
             'resonance_sectors': t.resonance_sectors,
             'stop_loss_triggered': t.stop_loss_triggered,
-            'take_profit_triggered': t.take_profit_triggered
+            'take_profit_triggered': t.take_profit_triggered,
+            'entry_date': getattr(t, 'entry_date', ''),
+            'exit_reason': getattr(t, 'exit_reason', ''),
+            'plan_rank': getattr(t, 'plan_rank', 0),
+            'plan_score': getattr(t, 'plan_score', 0),
+            'plan_reason': getattr(t, 'plan_reason', ''),
+            'factor_metrics_json': getattr(t, 'factor_metrics_json', ''),
         } for t in result['trade_history']])
 
         trades_file = output_path / f"backtest_trades_{timestamp}.csv"
-        trades_df.to_csv(trades_file, index=False)
+        trades_df.to_csv(trades_file, index=False, encoding="utf-8-sig")
         logger.info(f"交易记录已保存: {trades_file}")
 
     # 保存净值曲线
     if result.get('daily_nav'):
         nav_df = pd.DataFrame(result['daily_nav'])
         nav_file = output_path / f"backtest_nav_{timestamp}.csv"
-        nav_df.to_csv(nav_file, index=False)
+        nav_df.to_csv(nav_file, index=False, encoding="utf-8-sig")
         logger.info(f"净值曲线已保存: {nav_file}")
 
     # 保存汇总报告
@@ -119,14 +131,29 @@ def save_backtest_results(result: dict, output_dir: str):
         'win_rate': result.get('win_rate', 0),
         'profit_loss_ratio': result.get('profit_loss_ratio', 0),
         'total_trades': result.get('total_trades', 0),
+        'buy_trades': result.get('buy_trades', 0),
+        'closed_trades': result.get('closed_trades', result.get('total_trades', 0)),
         'initial_capital': result.get('initial_capital', 0),
         'final_capital': result.get('final_capital', 0)
     }
 
     summary_df = pd.DataFrame([summary])
     summary_file = output_path / f"backtest_summary_{timestamp}.csv"
-    summary_df.to_csv(summary_file, index=False)
+    summary_df.to_csv(summary_file, index=False, encoding="utf-8-sig")
     logger.info(f"汇总报告已保存: {summary_file}")
+
+    try:
+        from backtest.attribution import build_attribution_frames
+
+        frames = build_attribution_frames(result)
+        for name, frame in frames.items():
+            if frame is None or frame.empty:
+                continue
+            path = output_path / f"backtest_{name}_{timestamp}.csv"
+            frame.to_csv(path, index=False, encoding="utf-8-sig")
+            logger.info(f"回测归因已保存: {path}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"回测归因报表生成失败: {exc}")
 
 
 def run_risk_analysis_demo():

@@ -118,6 +118,79 @@
 </section>
 {% endif %}
 
+{# ===== 排名 / 因子反哺 ===== #}
+{% if bt.rank_feedback_rows or bt.factor_feedback_rows %}
+<section class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
+  {% if bt.rank_feedback_rows %}
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <h2 class="text-base font-bold mb-3">排名反哺</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead><tr class="text-slate-400">
+          <th class="text-left font-medium px-3 py-2">排名</th>
+          <th class="text-right font-medium px-3 py-2">样本</th>
+          <th class="text-right font-medium px-3 py-2">胜率</th>
+          <th class="text-right font-medium px-3 py-2">总盈亏</th>
+          <th class="text-right font-medium px-3 py-2">止损率</th>
+          <th class="text-right font-medium px-3 py-2">止盈率</th>
+        </tr></thead>
+        <tbody>
+          {% for r in bt.rank_feedback_rows %}
+          <tr class="border-t border-slate-800">
+            <td class="px-3 py-1.5 mono">{{ r['排名'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['样本'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['胜率'] }}</td>
+            <td class="px-3 py-1.5 text-right mono {% if r['总盈亏'].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}">{{ r['总盈亏'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['止损率'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['止盈率'] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if bt.factor_feedback_rows %}
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <h2 class="text-base font-bold mb-3">因子反哺</h2>
+    <div class="overflow-x-auto max-h-80">
+      <table class="w-full text-sm border-collapse">
+        <thead class="sticky top-0 bg-slate-900"><tr class="text-slate-400">
+          <th class="text-left font-medium px-3 py-2">因子</th>
+          <th class="text-right font-medium px-3 py-2">样本</th>
+          <th class="text-right font-medium px-3 py-2">强项样本</th>
+          <th class="text-right font-medium px-3 py-2">强项盈亏</th>
+          <th class="text-right font-medium px-3 py-2">强项胜率</th>
+          <th class="text-right font-medium px-3 py-2">弱项样本</th>
+          <th class="text-right font-medium px-3 py-2">弱项盈亏</th>
+          <th class="text-right font-medium px-3 py-2">弱项止损</th>
+          <th class="text-right font-medium px-3 py-2">强弱差</th>
+          <th class="text-left font-medium px-3 py-2">结论</th>
+        </tr></thead>
+        <tbody>
+          {% for r in bt.factor_feedback_rows %}
+          <tr class="border-t border-slate-800">
+            <td class="px-3 py-1.5 text-slate-200 whitespace-nowrap">{{ r['因子'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['样本'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['强项样本'] }}</td>
+            <td class="px-3 py-1.5 text-right mono {% if r['强项盈亏'].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}">{{ r['强项盈亏'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['强项胜率'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['弱项样本'] }}</td>
+            <td class="px-3 py-1.5 text-right mono {% if r['弱项盈亏'].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}">{{ r['弱项盈亏'] }}</td>
+            <td class="px-3 py-1.5 text-right mono">{{ r['弱项止损率'] }}</td>
+            <td class="px-3 py-1.5 text-right mono {% if r['强弱差'].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}">{{ r['强弱差'] }}</td>
+            <td class="px-3 py-1.5 text-slate-300 whitespace-nowrap">{{ r['结论'] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
 {# ===== 逐笔交易 ===== #}
 <section class="card border border-slate-800 rounded-xl p-4">
   <div class="flex items-center justify-between mb-3">

@@ -77,6 +77,20 @@ def read_table(con, table: str, *, where: str = "", params: Optional[List[Any]] 
     return con.execute(sql, params or []).fetchdf()
 
 
+def _quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _duckdb_type(series: pd.Series) -> str:
+    if pd.api.types.is_bool_dtype(series):
+        return "BOOLEAN"
+    if pd.api.types.is_integer_dtype(series):
+        return "BIGINT"
+    if pd.api.types.is_float_dtype(series):
+        return "DOUBLE"
+    return "VARCHAR"
+
+
 def write_replace_partition(
     con,
     table: str,
@@ -87,11 +101,32 @@ def write_replace_partition(
 ) -> int:
     df = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
     con.register("_gold_df", df)
-    con.execute(f"CREATE TABLE IF NOT EXISTS {table} AS SELECT * FROM _gold_df WHERE 1=0")
-    con.execute(f"DELETE FROM {table} WHERE {where}", params)
-    if not df.empty:
-        con.execute(f"INSERT INTO {table} SELECT * FROM _gold_df")
-    con.unregister("_gold_df")
+    try:
+        con.execute(f"CREATE TABLE IF NOT EXISTS {table} AS SELECT * FROM _gold_df WHERE 1=0")
+    finally:
+        con.unregister("_gold_df")
+
+    table_cols = [
+        str(row[0])
+        for row in con.execute(f"DESCRIBE {table}").fetchall()
+    ]
+    for col in df.columns:
+        if str(col) not in table_cols:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {_quote_ident(col)} {_duckdb_type(df[col])}")
+            table_cols.append(str(col))
+    for col in table_cols:
+        if col not in df.columns:
+            df[col] = None
+    df = df[table_cols]
+
+    con.register("_gold_df", df)
+    try:
+        con.execute(f"DELETE FROM {table} WHERE {where}", params)
+        if not df.empty:
+            cols = ", ".join(_quote_ident(col) for col in table_cols)
+            con.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM _gold_df")
+    finally:
+        con.unregister("_gold_df")
     return int(len(df))
 
 
