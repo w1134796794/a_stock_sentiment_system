@@ -293,15 +293,11 @@ def _scene_capital(sections: List[Dict[str, Any]], accent: str) -> Optional[Dict
 
 _POS_LABEL = {"heavy": "重仓", "medium": "中等", "light": "轻仓", "watch": "观察"}
 
-# 策略一句话释义（上镜字幕用）；未收录的走通用文案
+# 指标候选一句话释义（上镜字幕用）；未收录的走通用文案
 STRATEGY_DESC = {
-    "弱转强": "弱势股放量转强，低吸博反包",
-    "二板定龙": "首板次日抢二板，锁定梯队龙头",
-    "首板突破": "首次涨停突破关键位，趋势启动",
-    "龙二波": "龙头分歧调整后的第二波机会",
-    "接力": "强势板块内高位接力",
-    "中军": "板块中军跟随补涨",
-    "低吸": "回调企稳处低吸",
+    "指标筛选": "多因子综合排序后的候选",
+    "交易计划": "收盘后形成、次日竞价确认",
+    "实时确认": "盘中行情确认或取消",
 }
 
 
@@ -322,7 +318,7 @@ def _strategy_pick_item(rank: int, r: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_strategy_scenes(snapshot: Dict[str, Any], accent: str) -> List[Dict[str, Any]]:
-    """策略选股：1 幕总览（各策略选股数）+ 每个策略 1 幕（该策略选出的个股）。"""
+    """兼容旧快照的候选分组场景。"""
     patterns = snapshot.get("patterns") or {}
     groups: List[tuple] = []   # (策略名, 按置信度降序的选股)
     for name, blk in patterns.items():
@@ -378,7 +374,7 @@ def _build_strategy_scenes(snapshot: Dict[str, Any], accent: str) -> List[Dict[s
 
 
 def _top_winrate_pattern(cycle: str) -> Optional[Dict[str, Any]]:
-    """当前情绪周期下历史胜率最高的模式（缺失则 None）。"""
+    """兼容旧复盘接口：当前不再注入旧策略胜率。"""
     try:
         from config.settings import WINRATE_PATH
         from kb.winrate import load_matrix, winrate_for_cycle

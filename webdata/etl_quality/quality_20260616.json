@@ -3,7 +3,7 @@
   "ok": true,
   "tables": {
     "stock_daily_silver": {
-      "rows": 22927,
+      "rows": 5513,
       "columns": [
         "trade_date",
         "code",

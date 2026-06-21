@@ -1,17 +1,4 @@
-"""
-重演引擎的交易计划来源（B-2c）
-
-两种 ``plan_provider`` 实现，均为可调用对象 ``(making_date) -> List[ReplayPlan]``：
-
-- ``CsvPlanProvider``：读取已落盘的 ``交易计划_{date}.csv``（Layer4 产出、且已过
-  L4.5 风控闸门）。轻量、离线，适合对历史已跑过的日子做执行级回放。
-
-- ``PipelinePlanProvider``：以历史某日为"今天"重新跑整条 ``ReviewPipeline``（含
-  L4.5 风控闸门），从 ``trade_plan_result`` 取**风控后仓位 > 0** 的计划——这是真正的
-  "历史重演"。它依赖数据/Tushare token，按交易日 point-in-time 取数（pipeline 本身
-  就是按 trade_date 驱动的），因此天然规避未来函数；本类不做单测（需实数据），但保证
-  import 安全、逻辑可读。
-"""
+"""重演引擎的交易计划来源。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -93,54 +80,4 @@ class CsvPlanProvider:
         return plans
 
 
-class PipelinePlanProvider:
-    """历史重演：以 making_date 为"今天"重跑流水线，取风控后仓位>0 的计划。"""
-
-    def __init__(self, data_manager, industry_mapper=None, config=None):
-        self.dm = data_manager
-        self.mapper = industry_mapper
-        self.config = config
-        self._pipeline = None
-
-    def _get_pipeline(self):
-        if self._pipeline is None:
-            from core.pipeline.review_pipeline import ReviewPipeline
-
-            self._pipeline = ReviewPipeline(self.dm, self.mapper)
-        return self._pipeline
-
-    def __call__(self, making_date: str) -> List[ReplayPlan]:
-        try:
-            ctx = self._get_pipeline().execute(making_date)
-        except Exception as e:
-            logger.warning(f"[PipelinePlanProvider] {making_date} 流水线执行失败: {e}")
-            return []
-
-        result = getattr(ctx, "trade_plan_result", None)
-        if result is None or not getattr(result, "plans", None):
-            return []
-
-        plans: List[ReplayPlan] = []
-        for p in result.plans:
-            pct = float(getattr(p, "position_pct", 0.0) or 0.0)
-            if pct <= 0:
-                continue  # 已被风控闸门拒绝 / 观察
-            entry = float(getattr(p, "entry_price", 0.0) or 0.0)
-            stop_pct = float(getattr(p, "stop_loss_pct", 0.0) or 0.0)
-            tp_pct = float(getattr(p, "take_profit_pct", 0.0) or 0.0)
-            sectors = list(getattr(p, "resonance_sectors", []) or [])
-            plans.append(ReplayPlan(
-                code=str(getattr(p, "stock_code", "")),
-                name=str(getattr(p, "stock_name", "")),
-                pattern=str(getattr(p, "pattern_type", "")),
-                target_price=entry,
-                stop_price=entry * (1 + stop_pct / 100) if entry > 0 else 0.0,
-                take_profit_price=entry * (1 + tp_pct / 100) if entry > 0 else 0.0,
-                position_pct=pct,
-                sectors=sectors,
-                hot_resonance=bool(getattr(p, "hot_resonance", False)),
-            ))
-        return plans
-
-
-__all__ = ["CsvPlanProvider", "PipelinePlanProvider"]
+__all__ = ["CsvPlanProvider"]

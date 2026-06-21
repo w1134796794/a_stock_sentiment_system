@@ -1,4 +1,4 @@
-"""在管理工具进程内执行「ETL分析」，并把日志实时缓冲给前端轮询。
+"""在管理工具进程内执行「数据生成」，并把日志实时缓冲给前端轮询。
 
 设计要点：
   - 单例 ``CONTROLLER``：同一时刻只允许一个分析在跑。
@@ -162,12 +162,12 @@ class RunController:
         sys.stdout = _StreamTee(old_out, self.buffer)
         sys.stderr = _StreamTee(old_err, self.buffer)
         try:
-            self.buffer.append_line(f"=== 开始ETL指标分析 · 日期={date or '今日(自动取最近交易日)'} ===")
+            self.buffer.append_line(f"=== 开始指标数据生成 · 日期={date or '今日(自动取最近交易日)'} ===")
             from main import SentimentSystem  # 惰性导入重依赖
 
             system = SentimentSystem()
             system.run_daily_analysis(date)
-            self.buffer.append_line("=== ETL分析完成，Silver/Gold/Screening/快照已生成 ===")
+            self.buffer.append_line("=== 指标数据生成完成，数据仓库、候选池和快照已生成 ===")
             self.state = "done"
         except Exception as exc:  # noqa: BLE001
             self.error = repr(exc)
@@ -193,7 +193,7 @@ class RunController:
 class BacktestController:
     """单例回测控制器：在进程内重跑回测（生成净值/交易/回撤），并实时缓冲日志。
 
-    复用 output/trade_plans 下历史交易计划，回测结果通过 run_backtest.save_backtest_results
+    基于 webdata/snapshots 当前交易计划生成回测输入，回测结果通过 run_backtest.save_backtest_results
     落到 output/backtest_results，「模拟交易」「回撤分析」两页直接读取最新批次。
     """
 
@@ -284,7 +284,8 @@ class BacktestController:
             self.buffer.append_line(
                 f"=== 开始回测 · {start} ~ {end} · 初始资金 {capital:,.0f} · {mode_txt} ===")
 
-            from config.settings import CACHE_DIR, OUTPUT_DIR, TUSHARE_TOKEN
+            from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
+            from backtest.plan_source import build_backtest_plan_dir
             from core.data.data_manager_main import DataManager
             from backtest.backtest_engine import BacktestConfig, BacktestEngine
             from backtest.performance_analyzer import PerformanceAnalyzer
@@ -292,13 +293,22 @@ class BacktestController:
             if not (TUSHARE_TOKEN or "").strip():
                 self.buffer.append_line("[提示] 未配置 TUSHARE_TOKEN，将仅依赖本地缓存数据，缺数据的票会被跳过。")
 
-            trade_plans_dir = Path(OUTPUT_DIR) / "trade_plans"
-            if not trade_plans_dir.exists():
-                self.buffer.append_line(f"!!! 交易计划目录不存在：{trade_plans_dir}")
-                self.buffer.append_line("请先到「运行ETL」生成每日交易计划后再回测。")
-                self.error = "trade_plans 目录不存在"
+            trade_plans_dir, file_count, row_count = build_backtest_plan_dir(
+                snapshot_dir=Path(SNAPSHOT_DIR),
+                output_dir=Path(WEB_DATA_DIR),
+                screening_dir=Path(WEB_DATA_DIR) / "screening",
+                start_date=start,
+                end_date=end,
+            )
+            if file_count <= 0:
+                self.buffer.append_line(f"!!! 当前数据快照中没有可回测的交易计划：{SNAPSHOT_DIR}")
+                self.buffer.append_line("请先到「生成数据」生成每日交易计划后再回测。")
+                self.error = "当前交易计划为空"
                 self.state = "error"
                 return
+            self.buffer.append_line(
+                f"已从当前数据快照生成回测计划：{file_count} 个交易日，{row_count} 条候选，目录 {trade_plans_dir}"
+            )
 
             dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
             config = BacktestConfig(initial_capital=capital, risk_control=risk_control)

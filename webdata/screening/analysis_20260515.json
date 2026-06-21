@@ -1,0 +1,2563 @@
+{
+  "trade_date": "20260515",
+  "ok": true,
+  "duckdb_path": "G:\\a_stock_sentiment_system\\webdata\\factors.duckdb",
+  "market": {
+    "trade_date": "20260515",
+    "market_score": 45.353647688766834,
+    "trend_score": 43.43423839854413,
+    "volume_score": 38.46153846153846,
+    "width_score": 33.04822565969063,
+    "emotion_score": 66.47058823529412,
+    "up_ratio": 0.3304822565969063,
+    "down_ratio": 0.6522292993630573,
+    "avg_pct_chg": -0.39394569608735214,
+    "amount_yuan": 3370232295625.0,
+    "amount_ratio_5d": 1.0,
+    "limit_up_count": 93,
+    "limit_down_count": 30,
+    "computed_at": "2026-06-18T20:06:43"
+  },
+  "top_sectors": [
+    {
+      "trade_date": "20260515",
+      "sector_code": "884229.TI",
+      "sector_name": "半导体设备",
+      "sector_type": "行业",
+      "momentum_score": 73.78153846153846,
+      "amount_score": 73.09562398703403,
+      "amount_ratio_score": 57.72660101541831,
+      "persistence_score": 75.0,
+      "mainline_score": 71.38458845676357,
+      "rank": 3,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "884036.TI",
+      "sector_name": "氟化工",
+      "sector_type": "行业",
+      "momentum_score": 81.68846153846154,
+      "amount_score": 46.51539708265802,
+      "amount_ratio_score": 69.824740838957,
+      "persistence_score": 50.0,
+      "mainline_score": 66.36236808881574,
+      "rank": 4,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "883999.TI",
+      "sector_name": "昨日非ST三板以上表现",
+      "sector_type": "特色",
+      "momentum_score": 100.0,
+      "amount_score": 7.050243111831442,
+      "amount_ratio_score": 0.0,
+      "persistence_score": 100.0,
+      "mainline_score": 61.76256077795786,
+      "rank": 5,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "885897.TI",
+      "sector_name": "中芯国际概念",
+      "sector_type": "概念",
+      "momentum_score": 49.26461538461538,
+      "amount_score": 87.84440842787681,
+      "amount_ratio_score": 42.54536347903721,
+      "persistence_score": 75.0,
+      "mainline_score": 61.76198355190171,
+      "rank": 6,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "886008.TI",
+      "sector_name": "减速器",
+      "sector_type": "概念",
+      "momentum_score": 61.873846153846145,
+      "amount_score": 78.11993517017828,
+      "amount_ratio_score": 43.18092543131683,
+      "persistence_score": 50.0,
+      "mainline_score": 61.35035337647286,
+      "rank": 7,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "884218.TI",
+      "sector_name": "机器人",
+      "sector_type": "行业",
+      "momentum_score": 80.19538461538461,
+      "amount_score": 46.596434359805514,
+      "amount_ratio_score": 58.34081508889002,
+      "persistence_score": 25.0,
+      "mainline_score": 60.23815393020796,
+      "rank": 8,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "886054.TI",
+      "sector_name": "光刻机",
+      "sector_type": "概念",
+      "momentum_score": 48.27923076923077,
+      "amount_score": 71.55591572123177,
+      "amount_ratio_score": 35.8724423402896,
+      "persistence_score": 100.0,
+      "mainline_score": 59.99549912750523,
+      "rank": 9,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "884085.TI",
+      "sector_name": "电机Ⅲ",
+      "sector_type": "行业",
+      "momentum_score": 75.13076923076922,
+      "amount_score": 43.96272285251215,
+      "amount_ratio_score": 47.435771195354114,
+      "persistence_score": 50.0,
+      "mainline_score": 59.4148925462773,
+      "rank": 10,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "883996.TI",
+      "sector_name": "昨日打二板以上表现",
+      "sector_type": "特色",
+      "momentum_score": 62.17384615384615,
+      "amount_score": 48.379254457050244,
+      "amount_ratio_score": 26.40477440175267,
+      "persistence_score": 100.0,
+      "mainline_score": 59.03376054375622,
+      "rank": 12,
+      "computed_at": "2026-06-18T20:06:44"
+    },
+    {
+      "trade_date": "20260515",
+      "sector_code": "886069.TI",
+      "sector_name": "人形机器人",
+      "sector_type": "概念",
+      "momentum_score": 51.6623076923077,
+      "amount_score": 93.354943273906,
+      "amount_ratio_score": 32.56293734925945,
+      "persistence_score": 50.0,
+      "mainline_score": 58.971214882403885,
+      "rank": 13,
+      "computed_at": "2026-06-18T20:06:44"
+    }
+  ],
+  "top_stocks": [
+    {
+      "trade_date": "20260515",
+      "code": "601991",
+      "ts_code": "601991.SH",
+      "name": "大唐发电",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 99.50864422202001,
+      "sector_resonance_score": 50.0,
+      "total_score": 70.28408178558048,
+      "rank": 1,
+      "pct_chg": 10.0,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 11149294936.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "002407",
+      "ts_code": "002407.SZ",
+      "name": "多氟多",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 98.6533212010919,
+      "sector_resonance_score": 50.0,
+      "total_score": 70.11301718139487,
+      "rank": 2,
+      "pct_chg": 10.0151,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 5604165251.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "002031",
+      "ts_code": "002031.SZ",
+      "name": "巨轮智能",
+      "tech_score": 94.56178235294118,
+      "volume_score": 20.0,
+      "liquidity_score": 97.67060964513193,
+      "sector_resonance_score": 50.0,
+      "total_score": 69.85883487020286,
+      "rank": 3,
+      "pct_chg": 9.9476,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 3874956188.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "300263",
+      "ts_code": "300263.SZ",
+      "name": "隆华科技",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 96.4877161055505,
+      "sector_resonance_score": 50.0,
+      "total_score": 69.67989616228658,
+      "rank": 4,
+      "pct_chg": 20.0,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 3139883461.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "688820",
+      "ts_code": "688820.SH",
+      "name": "盛合晶微",
+      "tech_score": 93.04610492845788,
+      "volume_score": 20.0,
+      "liquidity_score": 99.39945404913558,
+      "sector_resonance_score": 50.0,
+      "total_score": 69.59833278121027,
+      "rank": 5,
+      "pct_chg": 18.7597,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 0.9937297297297297,
+      "amount_yuan": 9497922017.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "603667",
+      "ts_code": "603667.SH",
+      "name": "五洲新春",
+      "tech_score": 93.2495784944929,
+      "volume_score": 20.0,
+      "liquidity_score": 98.9080982711556,
+      "sector_resonance_score": 50.0,
+      "total_score": 69.58145105202829,
+      "rank": 6,
+      "pct_chg": 9.7206,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 0.9974010632014176,
+      "amount_yuan": 6573526534.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "600578",
+      "ts_code": "600578.SH",
+      "name": "京能电力",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 95.97816196542311,
+      "sector_resonance_score": 50.0,
+      "total_score": 69.5779853342611,
+      "rank": 7,
+      "pct_chg": 10.0471,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 2911358528.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "300567",
+      "ts_code": "300567.SZ",
+      "name": "精测电子",
+      "tech_score": 93.80142034034573,
+      "volume_score": 20.0,
+      "liquidity_score": 95.46860782529572,
+      "sector_resonance_score": 50.0,
+      "total_score": 69.11428970119744,
+      "rank": 8,
+      "pct_chg": 10.0629,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 0.9965831435079727,
+      "amount_yuan": 2620203168.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "002181",
+      "ts_code": "002181.SZ",
+      "name": "粤传媒",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 93.21201091901729,
+      "sector_resonance_score": 50.0,
+      "total_score": 69.02475512497993,
+      "rank": 9,
+      "pct_chg": 10.0,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 1945481717.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "002196",
+      "ts_code": "002196.SZ",
+      "name": "方正电机",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 91.24658780709736,
+      "sector_resonance_score": 50.0,
+      "total_score": 68.63167050259595,
+      "rank": 10,
+      "pct_chg": 10.0287,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 1600254997.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "603078",
+      "ts_code": "603078.SH",
+      "name": "江化微",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 90.48225659690627,
+      "sector_resonance_score": 50.0,
+      "total_score": 68.47880426055774,
+      "rank": 11,
+      "pct_chg": 10.0,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 1477704697.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "301696",
+      "ts_code": "301696.SZ",
+      "name": "三瑞智能",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 90.35486806187443,
+      "sector_resonance_score": 50.0,
+      "total_score": 68.45332655355136,
+      "rank": 12,
+      "pct_chg": 20.0034,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 1448386594.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "300274",
+      "ts_code": "300274.SZ",
+      "name": "阳光电源",
+      "tech_score": 89.54718062620904,
+      "volume_score": 20.0,
+      "liquidity_score": 99.94540491355778,
+      "sector_resonance_score": 50.0,
+      "total_score": 68.30795323319518,
+      "rank": 13,
+      "pct_chg": 13.2711,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 0.9805115712545674,
+      "amount_yuan": 25268870998.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "688143",
+      "ts_code": "688143.SH",
+      "name": "长盈通",
+      "tech_score": 90.56383251990755,
+      "volume_score": 20.0,
+      "liquidity_score": 97.0336669699727,
+      "sector_resonance_score": 50.0,
+      "total_score": 68.13226640195757,
+      "rank": 14,
+      "pct_chg": 18.1223,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 0.9843522561863174,
+      "amount_yuan": 3405587086.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "603278",
+      "ts_code": "603278.SH",
+      "name": "大业股份",
+      "tech_score": 94.67013235294118,
+      "volume_score": 20.0,
+      "liquidity_score": 88.6624203821656,
+      "sector_resonance_score": 50.0,
+      "total_score": 68.1005370176096,
+      "rank": 15,
+      "pct_chg": 9.987,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 1242023628.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "002971",
+      "ts_code": "002971.SZ",
+      "name": "和远气体",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 88.15286624203821,
+      "sector_resonance_score": 50.0,
+      "total_score": 68.01292618958412,
+      "rank": 16,
+      "pct_chg": 10.0107,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 1201785499.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "688549",
+      "ts_code": "688549.SH",
+      "name": "中巨芯",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 88.0800727934486,
+      "sector_resonance_score": 50.0,
+      "total_score": 67.99836749986619,
+      "rank": 17,
+      "pct_chg": 20.0143,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 1196280396.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "002979",
+      "ts_code": "002979.SZ",
+      "name": "雷赛智能",
+      "tech_score": 94.70588235294119,
+      "volume_score": 20.0,
+      "liquidity_score": 88.04367606915378,
+      "sector_resonance_score": 50.0,
+      "total_score": 67.99108815500723,
+      "rank": 18,
+      "pct_chg": 10.0074,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 1189944563.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "002445",
+      "ts_code": "002445.SZ",
+      "name": "中南文化",
+      "tech_score": 92.19031715456677,
+      "volume_score": 20.0,
+      "liquidity_score": 92.04731574158326,
+      "sector_resonance_score": 50.0,
+      "total_score": 67.78559001014337,
+      "rank": 19,
+      "pct_chg": 9.5361,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 0.9953161592505856,
+      "amount_yuan": 1748565213.0,
+      "computed_at": "2026-06-18T20:06:45"
+    },
+    {
+      "trade_date": "20260515",
+      "code": "603505",
+      "ts_code": "603505.SH",
+      "name": "金石资源",
+      "tech_score": 94.67618235294117,
+      "volume_score": 20.0,
+      "liquidity_score": 85.85987261146497,
+      "sector_resonance_score": 50.0,
+      "total_score": 67.54244746346946,
+      "rank": 20,
+      "pct_chg": 9.9892,
+      "vol_ratio": 1.0,
+      "amount_ratio": 1.0,
+      "new_high_ratio": 1.0,
+      "amount_yuan": 970005286.0,
+      "computed_at": "2026-06-18T20:06:45"
+    }
+  ],
+  "screening": {
+    "trade_date": "20260515",
+    "profile": "default",
+    "ok": true,
+    "message": "筛选完成，输入 5495，最终 10",
+    "input_count": 5495,
+    "after_hard_filter": 3572,
+    "after_priority_filter": 268,
+    "final_count": 10,
+    "final": [
+      {
+        "code": "601991",
+        "ts_code": "601991.SH",
+        "name": "大唐发电",
+        "score": 60.814,
+        "rank": 1,
+        "gold_rank": 1,
+        "reasons": [
+          "综合评分 60.8，候选排名第 1",
+          "当日涨幅 +10.00%，短线强度已确认",
+          "流动性分位 99.5，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 70.28408178558048,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 88.23529411764706,
+          "stk_liquidity_percentile": 99.50864422202001
+        },
+        "context": {
+          "pct_chg": 10.0,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 99.50864422202001,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "002407",
+        "ts_code": "002407.SZ",
+        "name": "多氟多",
+        "score": 60.6515,
+        "rank": 2,
+        "gold_rank": 2,
+        "reasons": [
+          "综合评分 60.7，候选排名第 2",
+          "当日涨幅 +10.02%，短线强度已确认",
+          "流动性分位 98.7，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 70.11301718139487,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 88.23529411764706,
+          "stk_liquidity_percentile": 98.6533212010919
+        },
+        "context": {
+          "pct_chg": 10.0151,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 98.6533212010919,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "002031",
+        "ts_code": "002031.SZ",
+        "name": "巨轮智能",
+        "score": 60.4388,
+        "rank": 3,
+        "gold_rank": 3,
+        "reasons": [
+          "综合评分 60.4，候选排名第 3",
+          "当日涨幅 +9.95%，短线强度已确认",
+          "流动性分位 97.7，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 69.85883487020286,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 88.23529411764706,
+          "stk_liquidity_percentile": 97.67060964513193
+        },
+        "context": {
+          "pct_chg": 9.9476,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 97.67060964513193,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "300263",
+        "ts_code": "300263.SZ",
+        "name": "隆华科技",
+        "score": 60.24,
+        "rank": 4,
+        "gold_rank": 4,
+        "reasons": [
+          "综合评分 60.2，候选排名第 4",
+          "当日涨幅 +20.00%，短线强度已确认",
+          "流动性分位 96.5，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 69.67989616228658,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 88.23529411764706,
+          "stk_liquidity_percentile": 96.4877161055505
+        },
+        "context": {
+          "pct_chg": 20.0,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 96.4877161055505,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "603667",
+        "ts_code": "603667.SH",
+        "name": "五洲新春",
+        "score": 60.2084,
+        "rank": 5,
+        "gold_rank": 6,
+        "reasons": [
+          "综合评分 60.2，候选排名第 5",
+          "当日涨幅 +9.72%，短线强度已确认",
+          "流动性分位 98.9，承接能力较好",
+          "阶段强势位置 86.7，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 69.58145105202829,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 86.70650776553977,
+          "stk_liquidity_percentile": 98.9080982711556
+        },
+        "context": {
+          "pct_chg": 9.7206,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 0.9974010632014176,
+          "liquidity_score": 98.9080982711556,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "600578",
+        "ts_code": "600578.SH",
+        "name": "京能电力",
+        "score": 60.1432,
+        "rank": 6,
+        "gold_rank": 7,
+        "reasons": [
+          "综合评分 60.1，候选排名第 6",
+          "当日涨幅 +10.05%，短线强度已确认",
+          "流动性分位 96.0，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 69.5779853342611,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 88.23529411764706,
+          "stk_liquidity_percentile": 95.97816196542311
+        },
+        "context": {
+          "pct_chg": 10.0471,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 95.97816196542311,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "688820",
+        "ts_code": "688820.SH",
+        "name": "盛合晶微",
+        "score": 59.9412,
+        "rank": 7,
+        "gold_rank": 5,
+        "reasons": [
+          "综合评分 59.9，候选排名第 7",
+          "当日涨幅 +18.76%，短线强度已确认",
+          "流动性分位 99.4，承接能力较好",
+          "阶段强势位置 84.5，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 69.59833278121027,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 84.54689984101748,
+          "stk_liquidity_percentile": 99.39945404913558
+        },
+        "context": {
+          "pct_chg": 18.7597,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 0.9937297297297297,
+          "liquidity_score": 99.39945404913558,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "002181",
+        "ts_code": "002181.SZ",
+        "name": "粤传媒",
+        "score": 59.6176,
+        "rank": 8,
+        "gold_rank": 9,
+        "reasons": [
+          "综合评分 59.6，候选排名第 8",
+          "当日涨幅 +10.00%，短线强度已确认",
+          "流动性分位 93.2，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 69.02475512497993,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 88.23529411764706,
+          "stk_liquidity_percentile": 93.21201091901729
+        },
+        "context": {
+          "pct_chg": 10.0,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 93.21201091901729,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "300567",
+        "ts_code": "300567.SZ",
+        "name": "精测电子",
+        "score": 59.5821,
+        "rank": 9,
+        "gold_rank": 8,
+        "reasons": [
+          "综合评分 59.6，候选排名第 9",
+          "当日涨幅 +10.06%，短线强度已确认",
+          "流动性分位 95.5，承接能力较好",
+          "阶段强势位置 86.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 69.11428970119744,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 86.2253785341016,
+          "stk_liquidity_percentile": 95.46860782529572
+        },
+        "context": {
+          "pct_chg": 10.0629,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 0.9965831435079727,
+          "liquidity_score": 95.46860782529572,
+          "sector_resonance_score": 50.0
+        }
+      },
+      {
+        "code": "301666",
+        "ts_code": "301666.SZ",
+        "name": "大普微",
+        "score": 59.4278,
+        "rank": 10,
+        "gold_rank": 21,
+        "reasons": [
+          "综合评分 59.4，候选排名第 10",
+          "当日涨幅 +7.77%，短线强度已确认",
+          "流动性分位 98.0，承接能力较好",
+          "阶段强势位置 88.2，走势接近阶段强势区",
+          "成交额相对5日 20.0偏弱，需盘中确认"
+        ],
+        "rule_reasons": [
+          "市场综合分不低于防守线",
+          "成交额分位达到基础流动性要求",
+          "个股综合分进入可观察区",
+          "成交额相对近 5 日均值有改善",
+          "价格位置接近阶段强势区"
+        ],
+        "metrics": {
+          "stk_total_score": 67.53131831879249,
+          "stk_amount_ratio_5d": 20.0,
+          "stk_vol_ratio_5d": 20.0,
+          "stk_new_high_20d": 88.23529411764706,
+          "stk_liquidity_percentile": 98.03457688808007
+        },
+        "context": {
+          "pct_chg": 7.7655,
+          "vol_ratio": 1.0,
+          "amount_ratio": 1.0,
+          "new_high_ratio": 1.0,
+          "liquidity_score": 98.03457688808007,
+          "sector_resonance_score": 50.0
+        }
+      }
+    ],
+    "rejected": [
+      {
+        "code": "000011",
+        "name": "深物业A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 11.774340309372157,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000012",
+        "name": "南玻A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 33.7761601455869,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000014",
+        "name": "沙河股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 26.78798908098271,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000016",
+        "name": "*ST康佳A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 34.10373066424022,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000017",
+        "name": "深中华A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 9.772520473157416,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000019",
+        "name": "深粮控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 33.97634212920837,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000020",
+        "name": "深华发A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.9936305732484,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000025",
+        "name": "特力A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 20.218380345768878,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000028",
+        "name": "国药一致",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.03275705186533,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000030",
+        "name": "富奥股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 29.808917197452228,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000031",
+        "name": "大悦城",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 29.62693357597816,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000042",
+        "name": "中洲控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 22.40218380345769,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000045",
+        "name": "深纺织A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.13830755232029,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000055",
+        "name": "方大集团",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 10.172884440400363,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000056",
+        "name": "*ST皇庭",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 29.717925386715194,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000058",
+        "name": "深赛格",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 26.260236578707918,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000068",
+        "name": "华控赛格",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 23.748862602365787,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000069",
+        "name": "华侨城A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 34.5950864422202,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000078",
+        "name": "ST海王",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 0.1637852593266606,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000089",
+        "name": "深圳机场",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 30.24567788898999,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000090",
+        "name": "天健集团",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 20.163785259326662,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000096",
+        "name": "广聚能源",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 19.090081892629662,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000153",
+        "name": "丰原药业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 7.388535031847134,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000156",
+        "name": "华数传媒",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 28.480436760691536,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000401",
+        "name": "金隅冀东",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 15.741583257506825,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000403",
+        "name": "派林生物",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 29.372156505914464,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000407",
+        "name": "胜利股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.494995450409462,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000409",
+        "name": "云鼎科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.167424931756145,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000419",
+        "name": "通程控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 14.868061874431302,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000421",
+        "name": "南京公用",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.979071883530484,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000428",
+        "name": "华天酒店",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 21.292083712465878,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000429",
+        "name": "粤高速A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 29.608735213830755,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000488",
+        "name": "ST晨鸣",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 5.714285714285714,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000498",
+        "name": "山东路桥",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 25.550500454959053,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000501",
+        "name": "武商集团",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 25.33212010919017,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000504",
+        "name": "南华生物",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 3.4576888080072794,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000507",
+        "name": "珠海港",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.076433121019107,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000514",
+        "name": "渝开发",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 14.26751592356688,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000517",
+        "name": "荣安地产",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 7.24294813466788,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000520",
+        "name": "凤凰航运",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 22.83894449499545,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000521",
+        "name": "长虹美菱",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 7.534121929026387,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000524",
+        "name": "岭南控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.840764331210192,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000526",
+        "name": "学大教育",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 17.634212920837125,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000529",
+        "name": "广弘控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 6.260236578707916,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000532",
+        "name": "华金资本",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 26.64240218380346,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000541",
+        "name": "佛山照明",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 20.036396724294814,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000544",
+        "name": "中原环保",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.066424021838035,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000548",
+        "name": "湖南投资",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.4877161055505,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000550",
+        "name": "江铃汽车",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 27.224749772520475,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000553",
+        "name": "安道麦A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 34.77707006369427,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000557",
+        "name": "西部创业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 11.191992720655142,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000558",
+        "name": "天府文旅",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.22929936305732,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000561",
+        "name": "烽火电子",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.88444040036397,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000590",
+        "name": "古汉医药",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.466787989080983,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000597",
+        "name": "东北制药",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 21.856232939035486,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000599",
+        "name": "青岛双星",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 26.2056414922657,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000605",
+        "name": "渤海股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.03002729754322,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000607",
+        "name": "华媒控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 18.653321201091902,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000610",
+        "name": "*ST西旅",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 8.989990900818928,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000615",
+        "name": "*ST美谷",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 28.207461328480438,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000619",
+        "name": "海螺新材",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.121019108280255,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000633",
+        "name": "合金投资",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 23.603275705186533,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000635",
+        "name": "英力特",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 21.237488626023655,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000637",
+        "name": "茂化实华",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.742493175614197,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000650",
+        "name": "仁和药业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.877161055505002,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000655",
+        "name": "金岭矿业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 27.825295723384897,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000663",
+        "name": "永安林业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 9.699727024567789,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000665",
+        "name": "湖北广电",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 31.11919927206551,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000668",
+        "name": "荣丰控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 8.735213830755233,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000669",
+        "name": "ST金鸿",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.724294813466788,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000677",
+        "name": "ST海龙",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 2.1838034576888083,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000679",
+        "name": "大连友谊",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 14.631483166515014,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000691",
+        "name": "亚太实业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 28.498635122838945,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000698",
+        "name": "ST沈化",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 3.002729754322111,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000701",
+        "name": "厦门信达",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 30.209281164695177,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000702",
+        "name": "正虹科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 30.336669699727025,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000705",
+        "name": "浙江震元",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 10.35486806187443,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000707",
+        "name": "双环科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 12.029117379435851,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000711",
+        "name": "ST京蓝",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.64786169244768,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000713",
+        "name": "国投丰乐",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 15.777979981801638,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000715",
+        "name": "中兴商业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 31.59235668789809,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000717",
+        "name": "中南股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 20.01819836214741,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000718",
+        "name": "苏宁环球",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 30.063694267515924,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000719",
+        "name": "中原传媒",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 28.007279344858965,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000721",
+        "name": "西安饮食",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.70609645131938,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000726",
+        "name": "鲁泰A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.81528662420382,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000731",
+        "name": "四川美丰",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 22.311191992720655,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000736",
+        "name": "中交发展",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 5.805277525022748,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000752",
+        "name": "*ST西发",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 6.24203821656051,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000755",
+        "name": "山西高速",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 18.453139217470426,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000756",
+        "name": "新华制药",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 31.26478616924477,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000757",
+        "name": "浩物股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 17.015468607825294,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000761",
+        "name": "本钢板材",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 9.226569608735213,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000779",
+        "name": "甘咨询",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 15.232029117379437,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000789",
+        "name": "万年青",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 2.802547770700637,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000797",
+        "name": "中国武夷",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 25.24112829845314,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000798",
+        "name": "中水渔业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 22.32939035486806,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000809",
+        "name": "和展能源",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 27.46132848043676,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000812",
+        "name": "陕西金叶",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 11.86533212010919,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000820",
+        "name": "*ST节能",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 5.441310282074614,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000828",
+        "name": "东莞控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 14.067333939945406,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000850",
+        "name": "华茂股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 18.234758871701548,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000856",
+        "name": "冀东装备",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 18.1073703366697,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000868",
+        "name": "安凯客车",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 12.211101000909919,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000869",
+        "name": "张裕A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 6.569608735213831,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000877",
+        "name": "天山股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 29.1901728844404,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000882",
+        "name": "华联股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.640582347588715,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000886",
+        "name": "海南高速",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 26.73339399454049,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000888",
+        "name": "峨眉山A",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.658780709736124,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000897",
+        "name": "津滨发展",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 14.576888080072795,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000900",
+        "name": "现代投资",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 26.13284804367607,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000903",
+        "name": "ST云动",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 31.683348498635123,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000906",
+        "name": "浙商中拓",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 34.049135577798,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000909",
+        "name": "*ST数源",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 9.335759781619654,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000911",
+        "name": "*ST广糖",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 10.536851683348498,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000913",
+        "name": "钱江摩托",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 23.876251137397634,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000915",
+        "name": "华特达因",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 23.093721565059145,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000920",
+        "name": "沃顿科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.62238398544131,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000926",
+        "name": "福星股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 21.8926296633303,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000929",
+        "name": "兰州黄河",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 5.750682438580528,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000931",
+        "name": "中关村",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 10.427661510464057,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000948",
+        "name": "南天信息",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.058234758871702,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000952",
+        "name": "广济药业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 17.888989990900818,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000953",
+        "name": "中哲精化",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 22.092811646951773,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000955",
+        "name": "欣龙控股",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 23.29390354868062,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000965",
+        "name": "天保基建",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 19.563239308462236,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000972",
+        "name": "*ST中基",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 3.9308462238398545,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000985",
+        "name": "大庆华科",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 6.6424021838034575,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "000989",
+        "name": "九芝堂",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 28.862602365787076,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001201",
+        "name": "东瑞股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 25.987261146496817,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001202",
+        "name": "炬申股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 7.825295723384896,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001205",
+        "name": "盛航股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 15.505004549590536,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001206",
+        "name": "依依股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 11.59235668789809,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001209",
+        "name": "洪兴股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 33.86715195632393,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001213",
+        "name": "中铁特货",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.048225659690626,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001216",
+        "name": "华瓷股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 19.417652411282983,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001217",
+        "name": "华尔泰",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 27.37033666969973,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001218",
+        "name": "丽臣实业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 19.49044585987261,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001219",
+        "name": "青岛食品",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 21.05550500454959,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001220",
+        "name": "世盟股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 22.51137397634213,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001221",
+        "name": "悍高集团",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 33.30300272975432,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001222",
+        "name": "源飞宠物",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 3.130118289353958,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001225",
+        "name": "和泰机电",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 14.849863512283894,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001226",
+        "name": "拓山重工",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 29.69972702456779,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001228",
+        "name": "永泰运",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 15.796178343949045,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001229",
+        "name": "魅视科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 15.32302092811647,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001231",
+        "name": "农心科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.65150136487716,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001238",
+        "name": "浙江正特",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 1.9290263876251137,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001239",
+        "name": "永达股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 6.46041856232939,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001255",
+        "name": "博菲电气",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 11.519563239308463,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001259",
+        "name": "利仁科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 6.897179253867152,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001260",
+        "name": "坤泰股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 4.604185623293904,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001269",
+        "name": "欧晶科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 25.969062784349404,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001277",
+        "name": "速达股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 7.752502274795268,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001278",
+        "name": "一彬科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 25.677888989990898,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001279",
+        "name": "强邦新材",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 29.062784349408556,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001282",
+        "name": "三联锻造",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 31.99272065514104,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001285",
+        "name": "瑞立科密",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.50227479526843,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001296",
+        "name": "长江材料",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 10.91901728844404,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001300",
+        "name": "三柏硕",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.739763421292084,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001308",
+        "name": "康冠科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.10282074613285,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001318",
+        "name": "阳光乳业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 10.97361237488626,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001319",
+        "name": "铭科精技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 28.26205641492266,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001322",
+        "name": "箭牌家居",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 8.9171974522293,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001323",
+        "name": "慕思股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 0.9281164695177434,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001324",
+        "name": "长青科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 28.171064604185624,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001325",
+        "name": "元创股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.84804367606915,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001326",
+        "name": "联域股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 26.58780709736124,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001328",
+        "name": "登康口腔",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 6.314831665150137,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001335",
+        "name": "信凯科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 25.313921747042766,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001336",
+        "name": "楚环科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 23.694267515923567,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001338",
+        "name": "永顺泰",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 33.57597816196542,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001358",
+        "name": "兴欣新材",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 17.797998180163784,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001360",
+        "name": "南矿集团",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 20.05459508644222,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001366",
+        "name": "播恩集团",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 33.84895359417652,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001367",
+        "name": "海森药业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 16.050955414012737,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001368",
+        "name": "通达创智",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.776160145586896,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001373",
+        "name": "翔腾新材",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 24.713375796178344,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001378",
+        "name": "德冠新材",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.720655141037305,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001379",
+        "name": "腾达科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 7.952684258416742,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001387",
+        "name": "雪祺电气",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 19.21747042766151,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001388",
+        "name": "信通电子",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 7.916287534121929,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001390",
+        "name": "古麒绒材",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 4.2220200181983625,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001395",
+        "name": "亚联机械",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 4.476797088262057,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001396",
+        "name": "誉帆科技",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.611464968152866,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001872",
+        "name": "招商港口",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 31.51956323930846,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "001914",
+        "name": "招商积余",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 28.44404003639672,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002003",
+        "name": "伟星股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 26.296633303002732,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002005",
+        "name": "ST德豪",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 4.840764331210192,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002014",
+        "name": "永新股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 5.259326660600546,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002016",
+        "name": "世荣兆业",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 19.454049135577797,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002022",
+        "name": "科华生物",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 14.940855323020926,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002024",
+        "name": "ST易购",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 13.939945404913558,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002037",
+        "name": "保利联合",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 25.932666060054594,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002043",
+        "name": "兔宝宝",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 31.355777979981802,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002047",
+        "name": "宝鹰股份",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 32.53867151956324,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002055",
+        "name": "ST得润",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 34.52229299363057,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002058",
+        "name": "威尔泰",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 27.861692447679708,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002059",
+        "name": "云南旅游",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 9.590536851683348,
+        "reason": "未通过硬过滤：个股流动性合格"
+      },
+      {
+        "code": "002061",
+        "name": "浙江交科",
+        "stage": "hard_filter",
+        "factor": "stk_liquidity_percentile",
+        "value": 23.148316651501368,
+        "reason": "未通过硬过滤：个股流动性合格"
+      }
+    ],
+    "traces": [
+      {
+        "stage": "hard_filter",
+        "name": "市场环境不弱",
+        "factor": "mkt_market_score",
+        "op": ">=",
+        "value": 35,
+        "before_count": 5495,
+        "passed_count": 5495,
+        "kept_count": 5495,
+        "relaxed": false,
+        "message": ""
+      },
+      {
+        "stage": "hard_filter",
+        "name": "个股流动性合格",
+        "factor": "stk_liquidity_percentile",
+        "op": ">=",
+        "value": 35,
+        "before_count": 5495,
+        "passed_count": 3572,
+        "kept_count": 3572,
+        "relaxed": false,
+        "message": ""
+      },
+      {
+        "stage": "priority_filter",
+        "name": "综合强度优先",
+        "factor": "stk_total_score",
+        "op": ">=",
+        "value": 55,
+        "before_count": 3572,
+        "passed_count": 499,
+        "kept_count": 893,
+        "relaxed": true,
+        "message": "触发 min_keep/max_drop_ratio，按综合分保留"
+      },
+      {
+        "stage": "priority_filter",
+        "name": "量能放大优先",
+        "factor": "stk_amount_ratio_5d",
+        "op": ">=",
+        "value": 45,
+        "before_count": 893,
+        "passed_count": 0,
+        "kept_count": 268,
+        "relaxed": true,
+        "message": "触发 min_keep/max_drop_ratio，按综合分保留"
+      },
+      {
+        "stage": "priority_filter",
+        "name": "趋势位置优先",
+        "factor": "stk_new_high_20d",
+        "op": ">=",
+        "value": 45,
+        "before_count": 268,
+        "passed_count": 268,
+        "kept_count": 268,
+        "relaxed": false,
+        "message": ""
+      }
+    ],
+    "output_path": ""
+  },
+  "messages": []
+}

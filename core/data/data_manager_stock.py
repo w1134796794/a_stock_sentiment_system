@@ -456,7 +456,7 @@ class StockDataManager(DataManagerBase):
         仅含 ``last_price`` / ``open_price`` / ``pre_close`` 等盘中实时字段，**不落盘**
         （快照随行情变化）。优先 pqquotation/easyquotation，失败再回退 eltdx。
 
-        主要服务盘中实时观测（如弱转强走弱池的盘中转强监控）。
+        主要服务盘中实时观测（如候选池的实时确认）。
         """
         provider = self._get_quotation_provider()
         if provider is not None:
@@ -480,7 +480,7 @@ class StockDataManager(DataManagerBase):
         """**批量**获取多只实时行情快照。
 
         返回 ``{6位代码: 快照dict}``。优先 pqquotation/easyquotation 批量 HTTP，
-        失败再回退 eltdx，适合走弱池/候选池盘中轮询。
+        失败再回退 eltdx，适合候选池盘中轮询。
         """
         provider = self._get_quotation_provider()
         if provider is not None:

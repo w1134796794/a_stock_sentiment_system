@@ -11,7 +11,7 @@ from pathlib import Path
 # ============================================
 # 打包成 exe（PyInstaller，sys.frozen）后，源码被收进归档，工作数据应落在
 # exe 所在目录；否则按源码项目根目录解析。这样 webdata / logs / output /
-# dragon_pools.json / .env 始终位于用户可见的程序目录旁边。
+# .env 始终位于用户可见的程序目录旁边。
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
 else:

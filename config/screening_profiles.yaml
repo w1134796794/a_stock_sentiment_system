@@ -49,8 +49,8 @@ screening_profiles:
         stk_liquidity_percentile: 0.10
       top_n: 10
 
-  weak_to_strong:
-    description: "弱转强候选筛选：强调市场可进攻、量价修复和阶段新高位置。"
+  momentum_repair:
+    description: "量价修复候选筛选：强调市场可进攻、量价修复和阶段新高位置。"
     candidate_source: factor_stock_wide
     missing:
       neutral_score: 50
@@ -64,7 +64,7 @@ screening_profiles:
         factor: stk_liquidity_percentile
         op: ">="
         value: 40
-        reason: "弱转强需要足够承接"
+        reason: "量价修复需要足够承接"
     priority_filters:
       - priority: 1
         name: "当日强度修复"

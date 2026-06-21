@@ -64,7 +64,7 @@
 </section>
 {% endif %}
 
-{# ===== 涨跌停 / 涨跌家数 / 量能 / 龙头池 ===== #}
+{# ===== 涨跌停 / 涨跌家数 / 量能 / 指标候选 ===== #}
 <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">涨停 / 跌停</div>
@@ -81,10 +81,10 @@
     <div class="text-xl font-bold {% if mk.vol_word == '放量' %}text-rose-400{% elif mk.vol_word == '缩量' %}text-emerald-400{% else %}text-slate-300{% endif %}">{{ mk.vol_word or '--' }}</div>
     <div class="text-[11px] text-slate-500 mt-1">{% if mk.vol_pct is not none %}较昨日 {{ '%+.1f'|format(mk.vol_pct) }}%{% else %}—{% endif %}</div>
   </div>
-  <a href="/dragon" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
-    <div class="text-xs text-slate-400 mb-1">龙头 / 走弱池</div>
-    <div class="text-xl font-bold mono">{{ ov.dragon_count }}<span class="text-slate-500"> / </span><span class="text-amber-300">{{ ov.weak_count }}</span></div>
-    <div class="text-[11px] text-slate-500 mt-1">监控中 / 待转强</div>
+  <a href="/data/strategy" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
+    <div class="text-xs text-slate-400 mb-1">指标候选</div>
+    <div class="text-xl font-bold mono text-emerald-300">{{ mk.plan_count if mk.plan_count is not none else '--' }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">交易计划 / 筛选结果</div>
   </a>
 </section>
 
@@ -144,15 +144,15 @@
 {% else %}
 {# ===== 无快照市场数据时的降级 ===== #}
 <section class="grid grid-cols-2 md:grid-cols-2 gap-3 mb-4">
-  <a href="/dragon" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
-    <div class="text-xs text-slate-400 mb-1">龙头池</div>
-    <div class="text-xl font-bold mono">{{ ov.dragon_count }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">监控中标的</div>
+  <a href="/data/strategy" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
+    <div class="text-xs text-slate-400 mb-1">指标筛选</div>
+    <div class="text-xl font-bold mono">{{ ov.latest or '--' }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">最新快照</div>
   </a>
-  <a href="/dragon" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
-    <div class="text-xs text-slate-400 mb-1">走弱池</div>
-    <div class="text-xl font-bold mono text-amber-300">{{ ov.weak_count }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">待转强观察</div>
+  <a href="/realtime" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
+    <div class="text-xs text-slate-400 mb-1">实时确认</div>
+    <div class="text-xl font-bold text-emerald-300">行情</div>
+    <div class="text-[11px] text-slate-500 mt-1">个股 / 板块</div>
   </a>
 </section>
 <div class="text-sm text-slate-400 mb-6">暂无最新快照的大盘数据，请先生成数据。</div>
