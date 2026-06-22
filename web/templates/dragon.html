@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}龙头池 · 管理控制台{% endblock %}
+{% block page_title %}龙头池{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 因子候选池</div>{% endblock %}
+
+{% block header_extra %}
+  {% if dates %}
+  <label class="text-sm text-slate-400">交易日</label>
+  <select id="date-select" class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    {% for d in dates %}
+      <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+  <select id="lookback-select" class="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    <option value="3">近3日</option>
+    <option value="5" selected>近5日</option>
+    <option value="10">近10日</option>
+  </select>
+  <button id="refresh-btn" title="刷新"
+          class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-semibold rounded-lg px-4 py-1.5">
+    <svg id="refresh-spin" class="hidden animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+    <span>刷新</span>
+  </button>
+{% endblock %}
+
+{% block content %}
+<section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+  <div class="lp-kpi"><div id="kpi-total" class="lp-kpi-v mono">--</div><div class="lp-kpi-l">入池</div></div>
+  <div class="lp-kpi"><div id="kpi-core" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">核心</div></div>
+  <div class="lp-kpi"><div id="kpi-watch" class="lp-kpi-v mono text-emerald-300">--</div><div class="lp-kpi-l">观察</div></div>
+  <div class="lp-kpi"><div id="kpi-cool" class="lp-kpi-v mono text-slate-400">--</div><div class="lp-kpi-l">冷却</div></div>
+</section>
+
+<section class="card border border-slate-800 rounded-xl p-4 min-w-0">
+  <div class="flex items-center gap-2 mb-4">
+    <h2 class="font-bold mr-auto">因子龙头池</h2>
+    <span id="pool-date" class="lp-pill mono">--</span>
+    <span id="pool-updated" class="text-xs text-slate-500 mono">--</span>
+  </div>
+  <div id="pool-grid" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+  <div id="pool-empty" class="hidden text-sm text-slate-500 py-12 text-center">暂无入池候选</div>
+</section>
+
+<style>
+  .lp-kpi { background:rgba(15,23,42,.52); border:1px solid rgba(51,65,85,.7); border-radius:.75rem; padding:.85rem .95rem; min-height:78px; }
+  .lp-kpi-v { font-size:1.65rem; font-weight:900; line-height:1.1; overflow-wrap:anywhere; }
+  .lp-kpi-l { font-size:.72rem; color:#64748b; margin-top:.3rem; }
+  .lp-pill { font-size:.68rem; font-weight:800; border-radius:.45rem; padding:.12rem .5rem; background:rgba(100,116,139,.18); color:#cbd5e1; border:1px solid rgba(100,116,139,.42); }
+  .lp-card { border:1px solid rgba(51,65,85,.72); background:rgba(15,23,42,.48); border-radius:.75rem; padding:.9rem; min-width:0; }
+  .lp-card.core { border-color:rgba(244,63,94,.48); }
+  .lp-card.strong { border-color:rgba(16,185,129,.42); }
+  .lp-head { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; }
+  .lp-name { font-size:1rem; font-weight:900; color:#f1f5f9; line-height:1.25; }
+  .lp-code { font-size:.72rem; color:#64748b; margin-top:.1rem; }
+  .lp-type { flex:0 0 auto; display:inline-flex; align-items:center; border-radius:.5rem; padding:.18rem .55rem; font-size:.72rem; font-weight:900; color:#e2e8f0; background:rgba(100,116,139,.18); border:1px solid rgba(100,116,139,.4); }
+  .lp-type.core { color:#fecdd3; background:rgba(244,63,94,.14); border-color:rgba(244,63,94,.38); }
+  .lp-type.strong { color:#6ee7b7; background:rgba(16,185,129,.14); border-color:rgba(16,185,129,.38); }
+  .lp-metrics { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.5rem; margin-top:.85rem; }
+  .lp-metric { background:rgba(2,6,23,.42); border:1px solid rgba(51,65,85,.55); border-radius:.55rem; padding:.55rem .6rem; min-width:0; }
+  .lp-metric span { display:block; font-size:.66rem; color:#64748b; margin-bottom:.22rem; }
+  .lp-metric strong { display:block; font-size:.85rem; color:#e2e8f0; font-weight:800; overflow-wrap:anywhere; }
+  .lp-reasons { margin-top:.75rem; display:grid; gap:.35rem; }
+  .lp-reason { color:#cbd5e1; font-size:.78rem; line-height:1.35; border-left:2px solid rgba(16,185,129,.42); padding-left:.5rem; }
+  .lp-action { margin-top:.75rem; color:#fbbf24; font-size:.78rem; line-height:1.4; }
+  .lp-up { color:#ff6b6b !important; }
+  .lp-down { color:#34d399 !important; }
+  .lp-muted { color:#64748b !important; }
+  @media (max-width: 640px) { .lp-metrics { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+</style>
+
+<script>
+  const initialDate = {{ (date or '')|tojson }};
+  const els = {
+    date: document.getElementById('date-select'),
+    lookback: document.getElementById('lookback-select'),
+    refresh: document.getElementById('refresh-btn'),
+    spin: document.getElementById('refresh-spin'),
+    grid: document.getElementById('pool-grid'),
+    empty: document.getElementById('pool-empty')
+  };
+
+  function esc(v) {
+    return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+  function clsPct(v) {
+    const n = Number(v || 0);
+    return n > 0 ? 'lp-up' : (n < 0 ? 'lp-down' : 'lp-muted');
+  }
+  function pct(v) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '--';
+    const n = Number(v);
+    return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+  }
+  function num(v, digits=1) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '--';
+    return Number(v).toFixed(digits);
+  }
+  function nameOf(r) {
+    return String(r.display_name || r.name || r.code || '--');
+  }
+  function typeClass(type) {
+    if (type === '核心龙头') return 'core';
+    if (type === '强势观察') return 'strong';
+    return '';
+  }
+
+  async function loadPool() {
+    els.refresh.disabled = true;
+    els.spin.classList.remove('hidden');
+    els.grid.innerHTML = '<div class="text-sm text-slate-500 py-10 text-center lg:col-span-2 xl:col-span-3">加载中...</div>';
+    els.empty.classList.add('hidden');
+    const params = new URLSearchParams({ limit: '30', lookback: els.lookback.value || '5' });
+    if (els.date && els.date.value) params.set('date', els.date.value);
+    try {
+      const r = await fetch('/api/leader-pool?' + params.toString());
+      const j = await r.json();
+      renderPool(j);
+    } catch (e) {
+      els.grid.innerHTML = `<div class="text-sm text-rose-300 py-10 text-center lg:col-span-2 xl:col-span-3">${esc(e)}</div>`;
+    } finally {
+      els.refresh.disabled = false;
+      els.spin.classList.add('hidden');
+    }
+  }
+
+  function renderPool(j) {
+    const rows = j.rows || [];
+    const counts = j.counts || {};
+    document.getElementById('kpi-total').textContent = rows.length || 0;
+    document.getElementById('kpi-core').textContent = counts['核心龙头'] || 0;
+    document.getElementById('kpi-watch').textContent = (counts['强势观察'] || 0) + (counts['候选观察'] || 0);
+    document.getElementById('kpi-cool').textContent = counts['冷却观察'] || 0;
+    document.getElementById('pool-date').textContent = j.trade_date || '--';
+    document.getElementById('pool-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
+    if (!rows.length) {
+      els.grid.innerHTML = '';
+      els.empty.classList.remove('hidden');
+      return;
+    }
+    els.grid.innerHTML = rows.map(row => {
+      const tcls = typeClass(row.pool_type);
+      const reasons = (row.reasons || []).slice(0, 4).map(x => `<div class="lp-reason">${esc(x)}</div>`).join('');
+      return `
+      <article class="lp-card ${tcls}">
+        <div class="lp-head">
+          <a href="/stock/${esc(row.code)}?date=${esc(j.trade_date || initialDate)}" class="min-w-0 hover:text-emerald-300">
+            <div class="lp-name">${esc(nameOf(row))}</div>
+            <div class="lp-code mono">${esc(row.code || '--')}</div>
+          </a>
+          <span class="lp-type ${tcls}">${esc(row.pool_type || '候选')}</span>
+        </div>
+        <div class="lp-metrics">
+          <div class="lp-metric"><span>池排名</span><strong class="mono">#${esc(row.pool_rank || '--')}</strong></div>
+          <div class="lp-metric"><span>评分</span><strong class="mono">${num(row.leader_score)}</strong></div>
+          <div class="lp-metric"><span>筛选名次</span><strong class="mono">${row.latest_rank ? '#' + row.latest_rank : '--'}</strong></div>
+          <div class="lp-metric"><span>当日涨幅</span><strong class="${clsPct(row.pct_chg)}">${pct(row.pct_chg)}</strong></div>
+          <div class="lp-metric"><span>入选次数</span><strong class="mono">${esc(row.appearances || 0)}</strong></div>
+          <div class="lp-metric"><span>成交额</span><strong class="mono">${num(row.amount_ratio, 2)}x</strong></div>
+          <div class="lp-metric"><span>技术</span><strong class="mono">${num(row.tech_score)}</strong></div>
+          <div class="lp-metric"><span>流动性</span><strong class="mono">${num(row.liquidity_score)}</strong></div>
+        </div>
+        <div class="lp-reasons">${reasons || '<div class="lp-reason">通过当前因子筛选</div>'}</div>
+        <div class="lp-action">${esc(row.action || '')}</div>
+      </article>`;
+    }).join('');
+  }
+
+  els.refresh.addEventListener('click', loadPool);
+  if (els.date) els.date.addEventListener('change', loadPool);
+  els.lookback.addEventListener('change', loadPool);
+  loadPool();
+</script>
+{% endblock %}

@@ -1,7 +1,7 @@
 {
   "meta": {
     "date": "20260618",
-    "generated_at": "2026-06-21T22:02:48",
+    "generated_at": "2026-06-21T22:57:06",
     "schema_version": 1,
     "engine": "etl",
     "factor_profile": "default",
@@ -2245,7 +2245,7 @@
         "amount_ratio_5d": 1.0,
         "limit_up_count": 136,
         "limit_down_count": 24,
-        "computed_at": "2026-06-21T22:02:44"
+        "computed_at": "2026-06-21T22:57:02"
       },
       "top_sectors": [
         {
@@ -2259,7 +2259,7 @@
           "persistence_score": 100.0,
           "mainline_score": 76.52606704766933,
           "rank": 1,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2272,7 +2272,7 @@
           "persistence_score": 100.0,
           "mainline_score": 75.95154555183862,
           "rank": 2,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2285,7 +2285,7 @@
           "persistence_score": 100.0,
           "mainline_score": 75.62008734522387,
           "rank": 3,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2298,7 +2298,7 @@
           "persistence_score": 75.0,
           "mainline_score": 72.2841766288667,
           "rank": 7,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2311,7 +2311,7 @@
           "persistence_score": 100.0,
           "mainline_score": 71.25326584750528,
           "rank": 8,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2324,7 +2324,7 @@
           "persistence_score": 100.0,
           "mainline_score": 70.13277797351165,
           "rank": 10,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2337,7 +2337,7 @@
           "persistence_score": 100.0,
           "mainline_score": 69.84446559552848,
           "rank": 11,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2350,7 +2350,7 @@
           "persistence_score": 100.0,
           "mainline_score": 69.06574025352424,
           "rank": 13,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2363,7 +2363,7 @@
           "persistence_score": 100.0,
           "mainline_score": 68.35529642333937,
           "rank": 14,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -2376,7 +2376,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.94185935342483,
           "rank": 16,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         }
       ],
       "top_stocks": [
@@ -2396,7 +2396,7 @@
           "amount_ratio": 1.94256981863286,
           "new_high_ratio": 1.0,
           "amount_yuan": 6580530569.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 1246057.25
         },
         {
@@ -2415,7 +2415,7 @@
           "amount_ratio": 2.0386578859100775,
           "new_high_ratio": 1.0,
           "amount_yuan": 2956050656.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 1537511.55
         },
         {
@@ -2434,7 +2434,7 @@
           "amount_ratio": 1.6258756162858323,
           "new_high_ratio": 1.0,
           "amount_yuan": 8311378475.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 2669646.03
         },
         {
@@ -2453,7 +2453,7 @@
           "amount_ratio": 2.0531738581874928,
           "new_high_ratio": 0.9929577464788734,
           "amount_yuan": 2245481383.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 341200.46
         },
         {
@@ -2472,7 +2472,7 @@
           "amount_ratio": 1.8447271882215213,
           "new_high_ratio": 0.9912056236948146,
           "amount_yuan": 4442229398.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 136555.41
         },
         {
@@ -2491,7 +2491,7 @@
           "amount_ratio": 1.9471695092589552,
           "new_high_ratio": 0.9788701298701299,
           "amount_yuan": 32153278755.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 221694.16
         },
         {
@@ -2510,7 +2510,7 @@
           "amount_ratio": 1.549761538235286,
           "new_high_ratio": 1.0,
           "amount_yuan": 3815954808.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 334292.72
         },
         {
@@ -2529,7 +2529,7 @@
           "amount_ratio": 1.959673519610303,
           "new_high_ratio": 1.0,
           "amount_yuan": 1615257698.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 70702.94
         },
         {
@@ -2548,7 +2548,7 @@
           "amount_ratio": 1.2097581397020993,
           "new_high_ratio": 1.0,
           "amount_yuan": 7410143554.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 3695765.49
         },
         {
@@ -2567,7 +2567,7 @@
           "amount_ratio": 1.2840716349739187,
           "new_high_ratio": 1.0,
           "amount_yuan": 4580026079.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 1803893.04
         },
         {
@@ -2586,7 +2586,7 @@
           "amount_ratio": 1.716149964576794,
           "new_high_ratio": 1.0,
           "amount_yuan": 1615779707.5,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 382824.5
         },
         {
@@ -2605,7 +2605,7 @@
           "amount_ratio": 3.5459182871294925,
           "new_high_ratio": 1.0,
           "amount_yuan": 3341674159.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 321408.13
         },
         {
@@ -2624,7 +2624,7 @@
           "amount_ratio": 3.356358573442164,
           "new_high_ratio": 1.0,
           "amount_yuan": 3487301555.66,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 1972748.75
         },
         {
@@ -2643,7 +2643,7 @@
           "amount_ratio": 2.5726710386555376,
           "new_high_ratio": 1.0,
           "amount_yuan": 1145972359.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 291974.44
         },
         {
@@ -2662,7 +2662,7 @@
           "amount_ratio": 1.721098607044686,
           "new_high_ratio": 1.0,
           "amount_yuan": 1774749784.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 305204.37
         },
         {
@@ -2681,7 +2681,7 @@
           "amount_ratio": 1.1038319640245087,
           "new_high_ratio": 1.0,
           "amount_yuan": 3870358327.7,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 876459.54
         },
         {
@@ -2700,7 +2700,7 @@
           "amount_ratio": 2.756961686479162,
           "new_high_ratio": 1.0,
           "amount_yuan": 1057526741.4599999,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 447007.08
         },
         {
@@ -2719,7 +2719,7 @@
           "amount_ratio": 1.6266305407573916,
           "new_high_ratio": 0.9941441441441442,
           "amount_yuan": 2972617032.22,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 350029.47
         },
         {
@@ -2738,7 +2738,7 @@
           "amount_ratio": 2.1488394093939283,
           "new_high_ratio": 1.0,
           "amount_yuan": 835967303.0,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 131170.5
         },
         {
@@ -2757,7 +2757,7 @@
           "amount_ratio": 1.1846311698200678,
           "new_high_ratio": 1.0,
           "amount_yuan": 2693468293.51,
-          "computed_at": "2026-06-21T22:02:46",
+          "computed_at": "2026-06-21T22:57:04",
           "vol_hand": 158477.66
         }
       ],
@@ -4808,7 +4808,7 @@
           "persistence_score": 100.0,
           "mainline_score": 76.52606704766933,
           "rank": 1,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4821,7 +4821,7 @@
           "persistence_score": 100.0,
           "mainline_score": 75.95154555183862,
           "rank": 2,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4834,7 +4834,7 @@
           "persistence_score": 100.0,
           "mainline_score": 75.62008734522387,
           "rank": 3,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4847,7 +4847,7 @@
           "persistence_score": 75.0,
           "mainline_score": 72.2841766288667,
           "rank": 7,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4860,7 +4860,7 @@
           "persistence_score": 100.0,
           "mainline_score": 71.25326584750528,
           "rank": 8,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4873,7 +4873,7 @@
           "persistence_score": 100.0,
           "mainline_score": 70.13277797351165,
           "rank": 10,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4886,7 +4886,7 @@
           "persistence_score": 100.0,
           "mainline_score": 69.84446559552848,
           "rank": 11,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4899,7 +4899,7 @@
           "persistence_score": 100.0,
           "mainline_score": 69.06574025352424,
           "rank": 13,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4912,7 +4912,7 @@
           "persistence_score": 100.0,
           "mainline_score": 68.35529642333937,
           "rank": 14,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4925,7 +4925,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.94185935342483,
           "rank": 16,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         }
       ]
     },
@@ -4957,7 +4957,7 @@
           "persistence_score": 100.0,
           "mainline_score": 76.52606704766933,
           "rank": 1,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4970,7 +4970,7 @@
           "persistence_score": 100.0,
           "mainline_score": 75.95154555183862,
           "rank": 2,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4983,7 +4983,7 @@
           "persistence_score": 100.0,
           "mainline_score": 75.62008734522387,
           "rank": 3,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -4996,7 +4996,7 @@
           "persistence_score": 75.0,
           "mainline_score": 72.2841766288667,
           "rank": 7,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -5009,7 +5009,7 @@
           "persistence_score": 100.0,
           "mainline_score": 71.25326584750528,
           "rank": 8,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -5022,7 +5022,7 @@
           "persistence_score": 100.0,
           "mainline_score": 70.13277797351165,
           "rank": 10,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -5035,7 +5035,7 @@
           "persistence_score": 100.0,
           "mainline_score": 69.84446559552848,
           "rank": 11,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -5048,7 +5048,7 @@
           "persistence_score": 100.0,
           "mainline_score": 69.06574025352424,
           "rank": 13,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -5061,7 +5061,7 @@
           "persistence_score": 100.0,
           "mainline_score": 68.35529642333937,
           "rank": 14,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         },
         {
           "trade_date": "20260618",
@@ -5074,7 +5074,7 @@
           "persistence_score": 100.0,
           "mainline_score": 67.94185935342483,
           "rank": 16,
-          "computed_at": "2026-06-21T22:02:44"
+          "computed_at": "2026-06-21T22:57:03"
         }
       ]
     },
