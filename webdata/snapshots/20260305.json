@@ -1,0 +1,89 @@
+{
+  "meta": {
+    "date": "20260305",
+    "generated_at": "2026-06-22T22:25:32",
+    "schema_version": 1,
+    "engine": "etl",
+    "factor_profile": "default",
+    "enabled_factors": [],
+    "screening_profile": "default"
+  },
+  "market": {
+    "cycle_name": "系统性风险",
+    "position": "空仓/观察",
+    "strategy": "暂停新开仓",
+    "scores": {
+      "etl_market_score": 0.0
+    },
+    "metrics": {
+      "up_ratio": null,
+      "down_ratio": null,
+      "avg_pct_chg": null,
+      "amount_ratio_5d": null,
+      "limit_up_count": null,
+      "limit_down_count": null
+    },
+    "phase_model": null,
+    "env": {
+      "engine": "etl_gold",
+      "market_score": 0.0,
+      "trend_score": 0.0,
+      "volume_score": 0.0,
+      "width_score": 0.0,
+      "emotion_score": 0.0,
+      "warnings": [
+        "因子任务失败: ['market_factor_job', 'sector_factor_job', 'stock_factor_job']"
+      ]
+    },
+    "phase": null,
+    "similar_days": null
+  },
+  "trade_plans": {
+    "columns": [],
+    "rows": []
+  },
+  "risk_gate": null,
+  "patterns": {},
+  "etl": {
+    "screening": {
+      "trade_date": "20260305",
+      "profile": "default",
+      "ok": true,
+      "message": "未读取到个股指标数据，输出空筛选结果",
+      "input_count": 0,
+      "after_hard_filter": 0,
+      "after_priority_filter": 0,
+      "final_count": 0,
+      "final": [],
+      "rejected": [],
+      "traces": [],
+      "output_path": "G:\\a_stock_sentiment_system\\webdata\\screening\\screening_20260305.json"
+    },
+    "gold_summary": {
+      "trade_date": "20260305",
+      "ok": false,
+      "duckdb_path": "G:\\a_stock_sentiment_system\\webdata\\factors.duckdb",
+      "market": {},
+      "top_sectors": [],
+      "top_stocks": [],
+      "screening": {
+        "trade_date": "20260305",
+        "profile": "default",
+        "ok": true,
+        "message": "未读取到个股指标数据，输出空筛选结果",
+        "input_count": 0,
+        "after_hard_filter": 0,
+        "after_priority_filter": 0,
+        "final_count": 0,
+        "final": [],
+        "rejected": [],
+        "traces": [],
+        "output_path": ""
+      },
+      "messages": [
+        "Gold 表无 20260305 数据"
+      ]
+    }
+  },
+  "sections": []
+}

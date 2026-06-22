@@ -12,6 +12,7 @@ FACTOR_LABELS: Dict[str, str] = {
     "stk_new_high_20d": "阶段强势位置",
     "stk_liquidity_percentile": "流动性分位",
     "stk_pct_chg_1d": "当日涨跌幅强度",
+    "stk_limit_progress": "涨停进度",
     "stk_sector_resonance_score": "板块共振",
 }
 
@@ -23,6 +24,7 @@ FACTOR_NOTE: Dict[str, str] = {
     "stk_new_high_20d": "走势接近阶段强势区",
     "stk_liquidity_percentile": "承接能力较好",
     "stk_pct_chg_1d": "当日修复力度较强",
+    "stk_limit_progress": "涨幅接近对应板块涨停幅度",
     "stk_sector_resonance_score": "板块联动较强",
 }
 
@@ -85,7 +87,17 @@ def build_screening_reasons(
     context = context or {}
     pct_chg = _to_float(context.get("pct_chg"))
     if pct_chg is not None:
-        parts.append(f"当日涨幅 {pct_chg:+.2f}%，短线强度已确认")
+        limit_pct = _to_float(context.get("limit_pct"))
+        progress = _to_float(context.get("limit_progress"))
+        if limit_pct and progress is not None:
+            if progress >= 0.95:
+                parts.append(f"当日接近{limit_pct:.0f}cm涨停，涨幅 {pct_chg:+.2f}%")
+            elif progress >= 0.60:
+                parts.append(f"当日强涨幅 {pct_chg:+.2f}%，约为{limit_pct:.0f}cm涨停进度 {progress * 100:.0f}%")
+            else:
+                parts.append(f"当日涨幅 {pct_chg:+.2f}%，{limit_pct:.0f}cm涨停进度 {progress * 100:.0f}%")
+        else:
+            parts.append(f"当日涨幅 {pct_chg:+.2f}%")
 
     amount_ratio = _to_float(context.get("amount_ratio"))
     vol_ratio = _to_float(context.get("vol_ratio"))

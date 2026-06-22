@@ -18,12 +18,12 @@ screening_profiles:
     priority_filters:
       - priority: 1
         name: "涨停强度确认"
-        factor: pct_chg
+        factor: limit_progress
         op: ">="
-        value: 9.5
+        value: 0.95
         min_keep: 30
         max_drop_ratio: 0.75
-        reason: "当日接近涨停或强涨幅确认"
+        reason: "当日涨幅接近对应板块涨停幅度"
       - priority: 2
         name: "趋势位置优先"
         factor: stk_new_high_20d

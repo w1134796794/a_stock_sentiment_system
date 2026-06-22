@@ -158,6 +158,8 @@
           <div class="is-metric"><span>池分</span><strong class="mono">${num(row.leader_score)}</strong></div>
           <div class="is-metric"><span>开盘</span><strong class="${clsPct(row.open_gap_pct)}">${pct(row.open_gap_pct)}</strong></div>
           <div class="is-metric"><span>实时涨幅</span><strong class="${clsPct(row.change_pct)}">${pct(row.change_pct)}</strong></div>
+          <div class="is-metric"><span>涨停幅度</span><strong class="mono">${row.limit_pct == null ? '--' : num(row.limit_pct, 0) + 'cm'}</strong></div>
+          <div class="is-metric"><span>涨停进度</span><strong class="mono">${row.limit_progress == null ? '--' : Math.round(Number(row.limit_progress) * 100) + '%'}</strong></div>
           <div class="is-metric"><span>现价</span><strong class="mono">${px(row.last_price)}</strong></div>
           <div class="is-metric"><span>开盘后</span><strong class="${clsPct(row.intraday_lift_pct)}">${pct(row.intraday_lift_pct)}</strong></div>
           <div class="is-metric"><span>池排名</span><strong class="mono">#${esc(row.pool_rank || '--')}</strong></div>

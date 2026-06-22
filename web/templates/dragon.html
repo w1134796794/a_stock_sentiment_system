@@ -155,6 +155,8 @@
           <div class="lp-metric"><span>评分</span><strong class="mono">${num(row.leader_score)}</strong></div>
           <div class="lp-metric"><span>筛选名次</span><strong class="mono">${row.latest_rank ? '#' + row.latest_rank : '--'}</strong></div>
           <div class="lp-metric"><span>当日涨幅</span><strong class="${clsPct(row.pct_chg)}">${pct(row.pct_chg)}</strong></div>
+          <div class="lp-metric"><span>涨停幅度</span><strong class="mono">${row.limit_pct == null ? '--' : num(row.limit_pct, 0) + 'cm'}</strong></div>
+          <div class="lp-metric"><span>涨停进度</span><strong class="mono">${row.limit_progress == null ? '--' : Math.round(Number(row.limit_progress) * 100) + '%'}</strong></div>
           <div class="lp-metric"><span>入选次数</span><strong class="mono">${esc(row.appearances || 0)}</strong></div>
           <div class="lp-metric"><span>成交额</span><strong class="mono">${num(row.amount_ratio, 2)}x</strong></div>
           <div class="lp-metric"><span>技术</span><strong class="mono">${num(row.tech_score)}</strong></div>

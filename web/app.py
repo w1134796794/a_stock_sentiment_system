@@ -31,6 +31,7 @@ from config.settings import (
     WEB_DATA_DIR,
     FACTOR_DB_PATH,
 )
+from core.utils.price_limit import near_limit_up_threshold_pct
 from snapshot.reader import SnapshotReader
 
 BASE = Path(__file__).parent
@@ -601,15 +602,7 @@ def _mainline_theme_rows(date: str, limit: int = 10, lookback: int = 10) -> List
 
 
 def _limit_up_threshold(code: Any, name: Any = "") -> float:
-    code6 = _normalize_stock_code(str(code or ""))
-    label = str(name or "")
-    if "ST" in label.upper():
-        return 4.8
-    if code6.startswith(("300", "301", "688", "689")):
-        return 19.5
-    if code6.startswith(("8", "4", "920")):
-        return 29.5
-    return 9.5
+    return near_limit_up_threshold_pct(code, name) or 9.5
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:

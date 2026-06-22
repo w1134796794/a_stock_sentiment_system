@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import loguru
 
+from core.utils.price_limit import is_near_limit_down_pct, near_limit_down_threshold_pct, near_limit_up_threshold_pct
 from .factor_registry import FactorRegistry, FactorDefinition, FactorCategory
 
 logger = loguru.logger
@@ -341,12 +342,17 @@ class FactorComputer:
         """A5: 跌停家数"""
         if self.dm is None:
             return None
-        threshold = params.get('limit_down_threshold', -9.5)
         try:
             df = self.dm.get_all_stocks_daily(trade_date=trade_date)
             if df is not None and not df.empty and 'pct_chg' in df.columns:
-                pct = pd.to_numeric(df['pct_chg'], errors='coerce')
-                return float((pct <= threshold).sum())
+                return float(df.apply(
+                    lambda row: is_near_limit_down_pct(
+                        row.get('pct_chg'),
+                        row.get('code') or row.get('ts_code') or row.get('代码'),
+                        row.get('name') or row.get('名称') or row.get('股票名称'),
+                    ),
+                    axis=1,
+                ).sum())
         except Exception:
             pass
         return None
@@ -480,7 +486,6 @@ class FactorComputer:
         """B4: 地天板/天地板数量"""
         if self.dm is None:
             return None
-        threshold = params.get('limit_threshold', 0.095)
         try:
             df = self.dm.get_all_stocks_daily(trade_date=trade_date)
             if df is None or df.empty:
@@ -490,17 +495,23 @@ class FactorComputer:
             if not all(c in df.columns for c in required_cols):
                 return None
 
-            open_vals = pd.to_numeric(df['open'], errors='coerce')
-            close_vals = pd.to_numeric(df['close'], errors='coerce')
-            pre_close_vals = pd.to_numeric(df['pre_close'], errors='coerce')
+            count = 0
+            for _, row in df.iterrows():
+                pre_close = float(row.get('pre_close') or 0)
+                if pre_close <= 0:
+                    continue
+                open_pct = (float(row.get('open') or 0) - pre_close) / pre_close
+                close_pct = (float(row.get('close') or 0) - pre_close) / pre_close
+                code = row.get('code') or row.get('ts_code') or row.get('代码')
+                name = row.get('name') or row.get('名称') or row.get('股票名称')
+                up_threshold = (near_limit_up_threshold_pct(code, name, pre_close) or 9.5) / 100.0
+                down_threshold = (near_limit_down_threshold_pct(code, name, pre_close) or -9.5) / 100.0
+                heaven_to_hell = open_pct >= up_threshold and close_pct <= down_threshold
+                hell_to_heaven = open_pct <= down_threshold and close_pct >= up_threshold
+                if heaven_to_hell or hell_to_heaven:
+                    count += 1
 
-            open_pct = (open_vals - pre_close_vals) / pre_close_vals
-            close_pct = (close_vals - pre_close_vals) / pre_close_vals
-
-            heaven_to_hell = (open_pct >= threshold) & (close_pct <= -threshold)
-            hell_to_heaven = (open_pct <= -threshold) & (close_pct >= threshold)
-
-            return float((heaven_to_hell | hell_to_heaven).sum())
+            return float(count)
         except Exception:
             pass
         return None

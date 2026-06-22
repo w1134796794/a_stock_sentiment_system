@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from core.realtime.models import normalize_stock_code
+from core.utils.price_limit import (
+    get_price_limit_pct_points,
+    is_near_limit_up_pct,
+    limit_progress,
+)
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -126,7 +131,11 @@ class LeaderPoolService:
         vol_ratio = _to_float(context.get("vol_ratio"), 1.0)
         volume_score = (_score_between(amount_ratio, 0.7, 2.2) + _score_between(vol_ratio, 0.7, 2.2)) / 2.0
         pct_chg = _to_float(context.get("pct_chg"), 0.0)
-        limit_bonus = 5.0 if pct_chg >= 9.5 else 0.0
+        code = raw.get("code") or ""
+        name = raw.get("name") or source.get("name") or ""
+        limit_pct = get_price_limit_pct_points(code, name) or 10.0
+        limit_ratio = limit_progress(pct_chg, code, name)
+        limit_bonus = 5.0 if is_near_limit_up_pct(pct_chg, code, name) else 0.0
         leader_score = (
             latest_score * 0.35
             + appearance_score * 0.16
@@ -152,10 +161,10 @@ class LeaderPoolService:
             pool_type = "冷却观察"
             order = 3
 
-        reasons = self._reasons(pool_type, latest_rank, leader_score, raw, context, metrics)
+        reasons = self._reasons(pool_type, latest_rank, leader_score, raw, context, metrics, code, name)
         return {
-            "code": raw.get("code") or "",
-            "name": raw.get("name") or source.get("name") or "",
+            "code": code,
+            "name": name,
             "pool_type": pool_type,
             "pool_type_order": order,
             "leader_score": round(leader_score, 2),
@@ -166,6 +175,8 @@ class LeaderPoolService:
             "active_dates": raw.get("dates") or [],
             "latest_score": round(latest_score, 2),
             "pct_chg": round(pct_chg, 2),
+            "limit_pct": round(limit_pct, 2),
+            "limit_progress": round(limit_ratio, 4),
             "amount_ratio": round(amount_ratio, 2),
             "vol_ratio": round(vol_ratio, 2),
             "tech_score": round(tech_score, 2),
@@ -184,6 +195,8 @@ class LeaderPoolService:
         raw: Dict[str, Any],
         context: Dict[str, Any],
         metrics: Dict[str, Any],
+        code: Any,
+        name: Any,
     ) -> List[str]:
         reasons: List[str] = []
         if latest_rank:
@@ -192,8 +205,12 @@ class LeaderPoolService:
         if raw.get("appearances", 0) >= 2:
             reasons.append(f"近 {len(raw.get('dates') or [])} 次进入候选，具备持续关注价值")
         pct_chg = _to_float(context.get("pct_chg"))
-        if pct_chg >= 9.5:
-            reasons.append(f"当日接近涨停或涨停，涨幅 {_pct_text(pct_chg)}")
+        limit_pct = get_price_limit_pct_points(code, name) or 10.0
+        progress = limit_progress(pct_chg, code, name)
+        if is_near_limit_up_pct(pct_chg, code, name):
+            reasons.append(f"当日接近{limit_pct:.0f}cm涨停或涨停，涨幅 {_pct_text(pct_chg)}")
+        elif progress >= 0.60:
+            reasons.append(f"当日强涨幅 {_pct_text(pct_chg)}，{limit_pct:.0f}cm涨停进度 {progress * 100:.0f}%")
         amount_ratio = _to_float(context.get("amount_ratio"), 1.0)
         if amount_ratio >= 1.2:
             reasons.append(f"成交额相对5日放大 {amount_ratio:.2f} 倍")

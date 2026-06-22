@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import loguru
 
-from backtest.matching_rules import open_gap_pct
+from backtest.matching_rules import limit_up_price, open_gap_pct
 from backtest.trade_calendar import TradeCalendar
 
 logger = loguru.logger
@@ -268,15 +268,15 @@ class BacktestEngine:
             logger.warning(f"{stock_name} 买入价格无效，跳过")
             return
 
-        # 确保买入价格不超过涨停价（A股涨停为10%，ST为5%）
+        # 确保买入价格不超过对应板块涨停价。
         # 从DataManager获取昨日收盘价计算涨停价
         try:
             prev_close = self._get_prev_close(stock_code, date)
             if prev_close and prev_close > 0:
-                limit_up_price = prev_close * 1.1  # 10%涨停限制
-                if entry_price > limit_up_price:
-                    logger.warning(f"{stock_name} 买入价{entry_price:.2f}超过涨停价{limit_up_price:.2f}，调整为涨停价")
-                    entry_price = limit_up_price
+                lu_price = limit_up_price(prev_close, stock_code, stock_name)
+                if lu_price is not None and entry_price > lu_price:
+                    logger.warning(f"{stock_name} 买入价{entry_price:.2f}超过涨停价{lu_price:.2f}，调整为涨停价")
+                    entry_price = lu_price
         except Exception as e:
             logger.debug(f"获取昨日收盘价失败 {stock_code}: {e}")
 
@@ -394,8 +394,8 @@ class BacktestEngine:
 
         # 检查是否涨停开盘（无法买入）
         if prev_close and prev_close > 0:
-            limit_up_price = prev_close * 1.1
-            if open_price >= limit_up_price * 0.998:  # 考虑浮点误差
+            lu_price = limit_up_price(prev_close, stock_code, stock_name)
+            if lu_price is not None and open_price >= lu_price * 0.998:  # 考虑浮点误差
                 logger.info(f"{stock_name} 涨停开盘，无法买入")
                 return False, 0
         

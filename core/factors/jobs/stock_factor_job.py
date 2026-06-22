@@ -15,6 +15,7 @@ from core.factors.jobs.gold_utils import (
     write_replace_partition,
     now_iso,
 )
+from core.utils.price_limit import get_price_limit_pct_points, limit_progress
 
 
 def _activity_ratio_score(value: float) -> float:
@@ -47,7 +48,7 @@ class StockFactorJob:
             return result
 
         stock["trade_date"] = stock["trade_date"].astype(str)
-        for col in ("pct_chg", "vol_hand", "amount_yuan", "high", "close"):
+        for col in ("pct_chg", "vol_hand", "amount_yuan", "high", "close", "pre_close"):
             stock[col] = pd.to_numeric(stock.get(col), errors="coerce").fillna(0)
         stock = stock.sort_values(["code", "trade_date"])
         today = stock[stock["trade_date"] == str(trade_date)].copy()
@@ -99,7 +100,19 @@ class StockFactorJob:
             amount_ratio.append(to_float(row.get("amount_yuan")) / amount_base if amount_base > 0 else 1.0)
             new_high_ratio.append(to_float(row.get("close")) / high_base if high_base > 0 else 1.0)
 
-        today["pct_score"] = today["pct_chg"].map(lambda v: score_between(v, -10.0, 10.0))
+        today["limit_pct"] = [
+            get_price_limit_pct_points(row.get("code"), row.get("name"), row.get("pre_close")) or 10.0
+            for _, row in today.iterrows()
+        ]
+        today["limit_progress"] = [
+            limit_progress(row.get("pct_chg"), row.get("code"), row.get("name"), row.get("pre_close"))
+            for _, row in today.iterrows()
+        ]
+        today["limit_progress_score"] = today["limit_progress"].map(lambda v: score_between(v, -1.0, 1.0))
+        today["pct_score"] = [
+            score_between(row.get("pct_chg"), -float(row.get("limit_pct") or 10.0), float(row.get("limit_pct") or 10.0))
+            for _, row in today.iterrows()
+        ]
         today["vol_ratio"] = vol_ratio
         today["amount_ratio"] = amount_ratio
         today["new_high_ratio"] = new_high_ratio
@@ -142,6 +155,9 @@ class StockFactorJob:
             "vol_ratio",
             "amount_ratio",
             "new_high_ratio",
+            "limit_pct",
+            "limit_progress",
+            "limit_progress_score",
             "vol_hand",
             "amount_yuan",
         ]].copy()
@@ -154,6 +170,11 @@ class StockFactorJob:
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_pct_chg_1d", raw_value=row["pct_chg"], score=row["pct_score"],
+                    direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_limit_progress", raw_value=row["limit_progress"], score=row["limit_progress_score"],
                     direction="higher_better",
                 ),
                 make_long_record(
