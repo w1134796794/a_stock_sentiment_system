@@ -948,6 +948,28 @@ def report_index() -> Any:
     return RedirectResponse(url=f"/report/{latest}" if latest else "/")
 
 
+@app.get("/dragon", response_class=HTMLResponse)
+def dragon_page(request: Request, date: Optional[str] = None) -> Any:
+    """因子体系龙头池：从近几日筛选结果派生，不使用旧策略池。"""
+    latest = date or reader.latest()
+    return templates.TemplateResponse(
+        request,
+        "dragon.html",
+        {"date": latest, "dates": reader.list_dates()},
+    )
+
+
+@app.get("/intraday", response_class=HTMLResponse)
+def intraday_page(request: Request, date: Optional[str] = None) -> Any:
+    """盘中转强：因子龙头池叠加实时行情确认。"""
+    latest = date or reader.latest()
+    return templates.TemplateResponse(
+        request,
+        "intraday.html",
+        {"date": latest, "dates": reader.list_dates()},
+    )
+
+
 @app.get("/realtime", response_class=HTMLResponse)
 def realtime_page(request: Request) -> Any:
     """实时行情面板：个股批量行情、板块行情、行情源健康。"""
@@ -1314,6 +1336,48 @@ def api_realtime_overlay(
         profile=profile,
         limit=max(1, min(int(limit or 20), 100)),
         persist=bool(persist),
+    )
+    snapshot = reader.load(trade_date) if trade_date else None
+    _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    return JSONResponse(payload)
+
+
+@app.get("/api/leader-pool")
+def api_leader_pool(
+    date: Optional[str] = None,
+    lookback: int = 5,
+    limit: int = 30,
+) -> Any:
+    from core.realtime.leader_pool_service import LeaderPoolService
+
+    trade_date = date or reader.latest()
+    payload = LeaderPoolService().build_pool(
+        trade_date,
+        lookback=max(1, min(int(lookback or 5), 20)),
+        limit=max(1, min(int(limit or 30), 100)),
+    )
+    snapshot = reader.load(trade_date) if trade_date else None
+    _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    return JSONResponse(payload)
+
+
+@app.get("/api/intraday-strength")
+def api_intraday_strength(
+    date: Optional[str] = None,
+    lookback: int = 5,
+    limit: int = 30,
+    stale_after_seconds: int = 90,
+) -> Any:
+    from core.realtime.leader_pool_service import IntradayStrengthService
+
+    trade_date = date or reader.latest()
+    service = IntradayStrengthService(
+        quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
+    )
+    payload = service.build(
+        trade_date,
+        lookback=max(1, min(int(lookback or 5), 20)),
+        limit=max(1, min(int(limit or 30), 100)),
     )
     snapshot = reader.load(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
