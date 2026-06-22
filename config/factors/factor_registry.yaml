@@ -150,14 +150,14 @@ factors:
     name: "跌停家数"
     category: "market_env"
     sub_category: "width"
-    description: "全市场pct_chg <= -9.5%的数量，恐慌程度度量"
+    description: "按个股所属板块涨跌停幅度动态识别的跌停/接近跌停数量，恐慌程度度量"
     data_source: "all_stocks_daily"
     output_type: "int"
     value_range: [0.0, 500.0]
     default_weight: 0.25
     enabled: true
     params:
-      limit_down_threshold: -9.5
+      dynamic_price_limit: true
 
   up_count:
     id: "up_count"
@@ -444,14 +444,14 @@ factors:
     name: "地天板/天地板数量"
     category: "emotion"
     sub_category: "extreme"
-    description: "当日open≈跌停价&close≈涨停价或反之的数量，反映极端波动"
+    description: "按个股所属板块涨跌停幅度识别的地天板/天地板数量，反映极端波动"
     data_source: "all_stocks_daily"
     output_type: "int"
     value_range: [0.0, 50.0]
     default_weight: 0.05
     enabled: true
     params:
-      limit_threshold: 0.095
+      dynamic_price_limit: true
 
   B5_avg_seal_ratio:
     id: "B5"

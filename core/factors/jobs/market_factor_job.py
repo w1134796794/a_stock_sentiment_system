@@ -13,6 +13,7 @@ from core.factors.jobs.gold_utils import (
     write_replace_partition,
     now_iso,
 )
+from core.utils.price_limit import is_near_limit_down_pct, is_near_limit_up_pct
 
 
 class MarketFactorJob:
@@ -39,8 +40,14 @@ class MarketFactorJob:
         up_ratio = float((today["pct_chg"] > 0).sum() / total_count)
         down_ratio = float((today["pct_chg"] < 0).sum() / total_count)
         avg_pct = float(today["pct_chg"].mean())
-        limit_up_count = int((today["pct_chg"] >= 9.5).sum())
-        limit_down_count = int((today["pct_chg"] <= -9.5).sum())
+        limit_up_count = int(today.apply(
+            lambda row: is_near_limit_up_pct(row.get("pct_chg"), row.get("code"), row.get("name")),
+            axis=1,
+        ).sum())
+        limit_down_count = int(today.apply(
+            lambda row: is_near_limit_down_pct(row.get("pct_chg"), row.get("code"), row.get("name")),
+            axis=1,
+        ).sum())
         amount_today = float(today["amount_yuan"].sum())
 
         by_day = stock.groupby("trade_date", as_index=False)["amount_yuan"].sum().sort_values("trade_date")

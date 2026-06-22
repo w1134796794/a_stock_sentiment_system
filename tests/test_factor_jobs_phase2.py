@@ -28,6 +28,7 @@ def _seed_silver_tables(db_path):
         {"trade_date": "20260614", "code": "600000", "ts_code": "600000.SH", "name": "浦发银行", "open": 8.0, "high": 8.1, "low": 7.8, "close": 7.9, "pre_close": 8.0, "pct_chg": -1.2, "vol_hand": 900, "amount_yuan": 800000, "source": "test", "as_of_date": "20260614", "ingested_at": "now"},
         {"trade_date": "20260615", "code": "600000", "ts_code": "600000.SH", "name": "浦发银行", "open": 7.9, "high": 8.0, "low": 7.7, "close": 7.8, "pre_close": 7.9, "pct_chg": -1.3, "vol_hand": 950, "amount_yuan": 820000, "source": "test", "as_of_date": "20260615", "ingested_at": "now"},
         {"trade_date": "20260616", "code": "600000", "ts_code": "600000.SH", "name": "浦发银行", "open": 7.8, "high": 8.2, "low": 7.8, "close": 8.1, "pre_close": 7.8, "pct_chg": 3.8, "vol_hand": 1500, "amount_yuan": 1600000, "source": "test", "as_of_date": "20260616", "ingested_at": "now"},
+        {"trade_date": "20260616", "code": "300059", "ts_code": "300059.SZ", "name": "东方财富", "open": 10.0, "high": 11.5, "low": 9.9, "close": 11.27, "pre_close": 10.0, "pct_chg": 12.74, "vol_hand": 5000, "amount_yuan": 5000000, "source": "test", "as_of_date": "20260616", "ingested_at": "now"},
     ])
     sector = pd.DataFrame([
         {"trade_date": "20260615", "sector_code": "886001", "sector_name": "AI应用", "sector_type": "概念", "open": 100, "high": 105, "low": 98, "close": 104, "pre_close": 100, "pct_chg": 4.0, "vol_hand": 1000, "amount_yuan": 10000000, "member_count": 20, "source": "test", "as_of_date": "20260615", "ingested_at": "now"},
@@ -65,10 +66,18 @@ def test_phase2_factor_jobs_write_gold_tables(tmp_path):
     stock_rows = con.execute("SELECT COUNT(*) FROM factor_stock_wide").fetchone()[0]
     long_types = set(row[0] for row in con.execute("SELECT DISTINCT entity_type FROM factor_value_long").fetchall())
     top_stock = con.execute("SELECT code FROM factor_stock_wide ORDER BY rank LIMIT 1").fetchone()[0]
+    growth = con.execute(
+        "SELECT limit_pct, limit_progress, pct_score FROM factor_stock_wide WHERE code = '300059'"
+    ).fetchone()
+    limit_up_count = con.execute("SELECT limit_up_count FROM factor_market_wide").fetchone()[0]
     con.close()
 
     assert market_rows == 1
     assert sector_rows == 2
-    assert stock_rows == 2
+    assert stock_rows == 3
     assert {"market", "sector", "stock"} <= long_types
-    assert top_stock in {"000001", "600000"}
+    assert top_stock in {"000001", "600000", "300059"}
+    assert growth[0] == 20.0
+    assert 0.63 < growth[1] < 0.64
+    assert growth[2] < 90
+    assert limit_up_count == 0

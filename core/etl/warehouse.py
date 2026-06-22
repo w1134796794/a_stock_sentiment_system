@@ -1,6 +1,8 @@
 """Silver storage for Phase 1 ETL outputs."""
 from __future__ import annotations
 
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -33,28 +35,14 @@ class SilverWarehouse:
         }
 
         if self.duckdb_path is not None:
-            try:
-                self.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
-                import duckdb  # type: ignore
-
-                with duckdb.connect(str(self.duckdb_path)) as con:
-                    con.register("_etl_df", df)
-                    if mode == "append":
-                        con.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM _etl_df WHERE 1=0")
-                        con.execute(f"INSERT INTO {table_name} SELECT * FROM _etl_df")
-                    else:
-                        con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _etl_df")
-                    con.unregister("_etl_df")
-                result["duckdb"] = True
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[SilverWarehouse] DuckDB 写入失败，降级文件落盘 {table_name}: {e}")
+            result["duckdb"] = self._write_duckdb_with_retry(table_name, df, mode=mode)
 
         if self.silver_dir is not None:
             self.silver_dir.mkdir(parents=True, exist_ok=True)
             base = self.silver_dir / table_name
             try:
                 path = base.with_suffix(".parquet")
-                df.to_parquet(path, index=False)
+                self._write_parquet_file(df, path)
                 result["file"] = str(path)
             except Exception as e:  # noqa: BLE001
                 path = base.with_suffix(".csv")
@@ -63,6 +51,64 @@ class SilverWarehouse:
                 logger.debug(f"[SilverWarehouse] parquet 写入失败，已降级 CSV {table_name}: {e}")
 
         return result
+
+    def _write_duckdb_with_retry(self, table_name: str, df: pd.DataFrame, *, mode: str) -> bool:
+        if self.duckdb_path is None:
+            return False
+
+        self.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
+        last_error: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                self._write_duckdb_table(table_name, df, mode=mode)
+                return True
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                if attempt < 2 and _looks_like_duckdb_lock(e):
+                    time.sleep(0.3 * (attempt + 1))
+                    continue
+                break
+
+        logger.warning(f"[SilverWarehouse] DuckDB 写入失败，降级文件落盘 {table_name}: {last_error}")
+        return False
+
+    def _write_duckdb_table(self, table_name: str, df: pd.DataFrame, *, mode: str) -> None:
+        if self.duckdb_path is None:
+            return
+        import duckdb  # type: ignore
+
+        with duckdb.connect(str(self.duckdb_path)) as con:
+            con.register("_etl_df", df)
+            if mode == "append":
+                con.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM _etl_df WHERE 1=0")
+                con.execute(f"INSERT INTO {table_name} SELECT * FROM _etl_df")
+            else:
+                con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _etl_df")
+            con.unregister("_etl_df")
+
+    def _write_parquet_file(self, df: pd.DataFrame, path: Path) -> None:
+        """Write parquet without pandas.to_parquet to avoid pyarrow extension re-registration in long-lived apps."""
+        try:
+            import duckdb  # type: ignore
+        except ImportError:
+            df.to_parquet(path, index=False)
+            return
+
+        tmp_path = path.with_name(f"{path.stem}.{uuid.uuid4().hex}.tmp{path.suffix}")
+        try:
+            with duckdb.connect(":memory:") as con:
+                con.register("_etl_df", df)
+                con.execute("COPY (SELECT * FROM _etl_df) TO ? (FORMAT PARQUET)", [str(tmp_path)])
+                con.unregister("_etl_df")
+            tmp_path.replace(path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+
+
+def _looks_like_duckdb_lock(error: Exception) -> bool:
+    text = str(error).lower()
+    return any(token in text for token in ("cannot open file", "正在使用", "being used", "locked", "lock"))
 
 
 def _normalize_stock_tables(ds: MarketDataset) -> pd.DataFrame:

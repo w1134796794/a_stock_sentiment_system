@@ -12,6 +12,7 @@ from loguru import logger
 
 from core.screening.explanations import build_screening_reasons
 from core.screening.screening_models import FilterTrace, ScreeningResult
+from core.utils.price_limit import get_price_limit_pct_points, limit_progress
 
 
 def _json_default(value: Any) -> Any:
@@ -179,12 +180,29 @@ class ScreeningEngine:
             "stk_vol_ratio_5d": "vol_ratio_score",
             "stk_new_high_20d": "new_high_score",
             "stk_pct_chg_1d": "pct_score",
+            "stk_limit_progress": "limit_progress_score",
         }
         for factor, wide_col in alias_map.items():
             if factor not in base.columns and wide_col in base.columns:
                 base[factor] = base[wide_col]
             elif factor in base.columns and wide_col in base.columns:
                 base[factor] = pd.to_numeric(base[factor], errors="coerce").fillna(base[wide_col])
+
+        if "limit_pct" not in base.columns:
+            base["limit_pct"] = base.apply(
+                lambda row: get_price_limit_pct_points(row.get("code"), row.get("name"), row.get("pre_close")) or 10.0,
+                axis=1,
+            )
+        if "limit_progress" not in base.columns:
+            base["limit_progress"] = base.apply(
+                lambda row: limit_progress(row.get("pct_chg"), row.get("code"), row.get("name"), row.get("pre_close")),
+                axis=1,
+            )
+        if "limit_progress_score" not in base.columns:
+            progress = pd.to_numeric(base.get("limit_progress"), errors="coerce").fillna(0.0)
+            base["limit_progress_score"] = ((progress + 1.0) / 2.0 * 100.0).clip(lower=0, upper=100)
+        if "stk_limit_progress" not in base.columns:
+            base["stk_limit_progress"] = base["limit_progress_score"]
 
         if candidate_codes:
             code_set = {_normalize_code(c) for c in candidate_codes if _normalize_code(c)}
@@ -307,11 +325,18 @@ class ScreeningEngine:
             relaxed = False
             if target_keep and len(passed) < target_keep:
                 relaxed = True
+                condition_codes = set(working.loc[mask, "code"].astype(str)) if "code" in working.columns else set()
                 passed = working.sort_values("_screening_score", ascending=False).head(target_keep).copy()
                 failed = working[~working["code"].isin(set(passed["code"]))]
+            else:
+                condition_codes = set(passed["code"].astype(str)) if "code" in passed.columns else set()
 
             for row in passed.itertuples():
-                reasons.setdefault(str(row.code), []).append(str(rule.get("reason") or f"通过优先过滤：{name}"))
+                code = str(row.code)
+                if code in condition_codes:
+                    reasons.setdefault(code, []).append(str(rule.get("reason") or f"通过优先过滤：{name}"))
+                elif relaxed:
+                    reasons.setdefault(code, []).append(f"未完全满足{name}，按综合评分保留观察")
             for row in failed.itertuples():
                 rejected.append(self._reject_row(row, "priority_filter", rule, f"未通过优先过滤：{name}"))
             result.traces.append(FilterTrace(
@@ -350,6 +375,9 @@ class ScreeningEngine:
             "vol_ratio",
             "amount_ratio",
             "new_high_ratio",
+            "limit_pct",
+            "limit_progress",
+            "limit_progress_score",
             "liquidity_score",
             "sector_resonance_score",
         ]

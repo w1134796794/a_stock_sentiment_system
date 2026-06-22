@@ -43,8 +43,8 @@ def get_price_limit_pct(code, name: str = "", pre_close: Optional[float] = None)
 
     code6 = normalize_code(code)
 
-    # 科创板(688) / 创业板(300,301)：±20%（含其风险警示股）
-    if code6.startswith("688") or code6.startswith(("300", "301")):
+    # 科创板(688,689) / 创业板(300,301)：±20%（含其风险警示股）
+    if code6.startswith(("688", "689", "300", "301")):
         return 0.20
     # 北交所：±30%
     if code6.startswith(("43", "83", "87", "88", "920")):
