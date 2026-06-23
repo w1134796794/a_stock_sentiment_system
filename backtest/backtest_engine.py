@@ -11,7 +11,7 @@ import numpy as np
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 import loguru
 
@@ -109,6 +109,50 @@ class BacktestEngine:
         self.cash: float = self.config.initial_capital
         self.total_capital: float = self.config.initial_capital
 
+    def export_state(self) -> Dict[str, Any]:
+        """导出可落盘的账户状态，用于单日接力回测。"""
+        return {
+            "version": 1,
+            "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_date": str(self.daily_nav[-1].get("date") if self.daily_nav else ""),
+            "initial_capital": self.config.initial_capital,
+            "cash": self.cash,
+            "total_capital": self.total_capital,
+            "current_positions": json.loads(json.dumps(self.current_positions, ensure_ascii=False)),
+            "daily_nav": json.loads(json.dumps(self.daily_nav, ensure_ascii=False)),
+            "trade_history": [asdict(t) for t in self.trade_history],
+        }
+
+    def import_state(self, state: Dict[str, Any]) -> None:
+        """恢复账户状态；调用后可继续处理下一个交易日。"""
+        state = dict(state or {})
+        initial = self._float(state.get("initial_capital"), self.config.initial_capital)
+        self.config.initial_capital = initial
+        self.cash = self._float(state.get("cash"), initial)
+        self.total_capital = self._float(state.get("total_capital"), self.cash)
+        self.current_positions = {
+            str(code).zfill(6): dict(pos or {})
+            for code, pos in (state.get("current_positions") or {}).items()
+        }
+        self.daily_nav = [dict(row or {}) for row in (state.get("daily_nav") or [])]
+        allowed = set(TradeRecord.__dataclass_fields__.keys())
+        self.trade_history = []
+        for row in state.get("trade_history") or []:
+            if isinstance(row, TradeRecord):
+                self.trade_history.append(row)
+                continue
+            if not isinstance(row, dict):
+                continue
+            data = {k: row.get(k) for k in allowed}
+            defaults = {
+                "date": "", "stock_code": "", "stock_name": "", "pattern_type": "",
+                "action": "", "entry_price": 0.0, "exit_price": 0.0, "shares": 0,
+                "position_size": 0.0, "pnl": 0.0, "pnl_pct": 0.0,
+                "holding_days": 0, "hot_resonance": False, "resonance_sectors": "",
+            }
+            defaults.update({k: v for k, v in data.items() if v is not None})
+            self.trade_history.append(TradeRecord(**defaults))
+
     def run_backtest(self,
                      start_date: str,
                      end_date: str,
@@ -139,6 +183,18 @@ class BacktestEngine:
         logger.info(f"回测完成: 最终资金 {self.total_capital:,.2f}")
         logger.info(f"总收益率: {report['total_return']:.2%}")
 
+        return report
+
+    def run_one_day(self, trade_date: str, trade_plans_dir: str) -> Dict:
+        """只处理一个交易日，账户状态由调用方提前 import_state。"""
+        logger.info(f"开始单日接力回测: {trade_date}")
+        trade_dates = self._get_trade_dates(trade_date, trade_date)
+        if not trade_dates:
+            logger.warning(f"{trade_date} 不是交易日或交易日历无数据，跳过")
+            return self._generate_backtest_report()
+        self._process_date(trade_dates[0], trade_plans_dir)
+        report = self._generate_backtest_report()
+        logger.info(f"单日接力完成: {trade_date}，当前资金 {self.total_capital:,.2f}")
         return report
 
     def _get_trade_dates(self, start_date: str, end_date: str) -> List[str]:
@@ -814,14 +870,28 @@ class BacktestEngine:
     def _generate_backtest_report(self) -> Dict:
         """生成回测报告"""
         if not self.trade_history:
+            nav_series = pd.DataFrame(self.daily_nav)
+            max_drawdown = 0
+            if not nav_series.empty and 'total_value' in nav_series.columns:
+                nav_series['cummax'] = nav_series['total_value'].cummax()
+                nav_series['drawdown'] = (nav_series['total_value'] - nav_series['cummax']) / nav_series['cummax']
+                max_drawdown = nav_series['drawdown'].min()
             return {
                 'total_return': 0,
                 'annualized_return': 0,
                 'sharpe_ratio': 0,
-                'max_drawdown': 0,
+                'max_drawdown': max_drawdown,
                 'win_rate': 0,
                 'profit_loss_ratio': 0,
-                'total_trades': 0
+                'total_trades': 0,
+                'buy_trades': 0,
+                'closed_trades': 0,
+                'initial_capital': self.config.initial_capital,
+                'final_capital': self.total_capital,
+                'pattern_stats': pd.DataFrame(),
+                'resonance_stats': pd.DataFrame(),
+                'daily_nav': self.daily_nav,
+                'trade_history': self.trade_history,
             }
 
         # 计算收益率

@@ -137,6 +137,13 @@ def runs_meta() -> List[Dict[str, Any]]:
         s = load_summary(run)
         ret = s.get("total_return")
         label = run.replace("_", " ")
+        mode = str(s.get("run_mode") or "")
+        if mode == "daily":
+            label += f" · 接力 {s.get('trade_date') or ''}".rstrip()
+        elif mode == "range":
+            start = s.get("start_date") or ""
+            end = s.get("end_date") or ""
+            label += f" · 区间 {start}~{end}".rstrip("~")
         if isinstance(ret, (int, float)):
             label += f" · 收益 {ret * 100:+.1f}%"
         meta.append({"run": run, "label": label})

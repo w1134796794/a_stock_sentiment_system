@@ -40,7 +40,6 @@ except ImportError:  # pragma: no cover
 # ============================================
 WEB_DATA_DIR = BASE_DIR / "webdata"
 SNAPSHOT_DIR = WEB_DATA_DIR / "snapshots"        # 每日整页 JSON 快照
-RECAP_DIR = WEB_DATA_DIR / "recaps"              # 复盘短视频分镜脚本（storyboard JSON）
 APP_DB_PATH = WEB_DATA_DIR / "app.sqlite"        # 结构化索引（计划/信号/快照）
 FACTOR_DB_PATH = WEB_DATA_DIR / "factors.duckdb"  # 因子大表（定量查询，可选）
 KB_DB_PATH = WEB_DATA_DIR / "kb.sqlite"          # 知识库块存储（向量 + 词法）

@@ -1,5 +1,8 @@
 {# 可复用的「运行回测」面板：模拟交易 / 回撤分析 两页共用。
    需要在包含前设置 runner_redirect（完成后跳转的目标，如 '/backtest' 或 '/drawdown'）。 #}
+{% set current_user = request.state.user %}
+{% set is_admin = current_user and current_user.get('role') == 'admin' %}
+{% if is_admin %}
 <section class="card border border-emerald-600/20 bg-emerald-500/[0.03] rounded-xl p-4 mb-6"
          id="bt-runner" data-redirect="{{ runner_redirect or '/backtest' }}">
   <div class="flex items-center justify-between flex-wrap gap-3">
@@ -10,14 +13,33 @@
       <div id="bt-run-state" class="text-xs text-slate-500 mt-1">空闲</div>
     </div>
     <div class="flex items-end gap-2 flex-wrap">
-      <div>
-        <label class="block text-[11px] text-slate-500 mb-0.5">开始日期</label>
-        <input id="bt-start" type="text" placeholder="YYYYMMDD"
-               class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+      <div class="self-stretch flex items-end">
+        <div class="flex h-[30px] rounded-lg border border-slate-700 bg-slate-900 overflow-hidden">
+          <label class="px-3 inline-flex items-center gap-1.5 text-sm cursor-pointer border-r border-slate-700">
+            <input type="radio" name="bt-mode" value="range" checked onchange="btModeChanged()" class="accent-emerald-500">
+            <span>区间重算</span>
+          </label>
+          <label class="px-3 inline-flex items-center gap-1.5 text-sm cursor-pointer">
+            <input type="radio" name="bt-mode" value="daily" onchange="btModeChanged()" class="accent-emerald-500">
+            <span>单日接力</span>
+          </label>
+        </div>
       </div>
-      <div>
-        <label class="block text-[11px] text-slate-500 mb-0.5">结束日期</label>
-        <input id="bt-end" type="text" placeholder="今日"
+      <div id="bt-range-fields" class="flex items-end gap-2">
+        <div>
+          <label class="block text-[11px] text-slate-500 mb-0.5">开始日期</label>
+          <input id="bt-start" type="text" placeholder="YYYYMMDD"
+                 class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-500 mb-0.5">结束日期</label>
+          <input id="bt-end" type="text" placeholder="今日"
+                 class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+        </div>
+      </div>
+      <div id="bt-daily-fields" class="hidden">
+        <label class="block text-[11px] text-slate-500 mb-0.5">交易日</label>
+        <input id="bt-day" type="text" placeholder="YYYYMMDD"
                class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
       </div>
       <div>
@@ -33,6 +55,13 @@
           <span class="text-sm text-slate-300">应用风控</span>
         </label>
       </div>
+      <div id="bt-reset-wrap" class="hidden">
+        <label class="block text-[11px] text-slate-500 mb-0.5">接力状态</label>
+        <label class="flex items-center gap-1.5 h-[30px] px-2 rounded-md border border-amber-700/60 bg-amber-500/10 cursor-pointer select-none">
+          <input id="bt-reset" type="checkbox" class="accent-amber-500 w-3.5 h-3.5">
+          <span class="text-sm text-amber-200">重置账户</span>
+        </label>
+      </div>
       <button id="bt-run-btn" onclick="btRun()"
               class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition">运行回测</button>
       <button id="bt-log-toggle" onclick="btToggleLog()"
@@ -40,8 +69,8 @@
     </div>
   </div>
   <pre id="bt-log" class="hidden mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs mono text-slate-300 max-h-72 overflow-auto whitespace-pre-wrap"></pre>
-  <div class="mt-2 text-[11px] text-slate-500">日期留空则默认回测最近约 90 天；首次使用请先在「生成数据」生成交易计划。
-    勾选「应用风控」按组合层闸门（单票/总仓/持仓数/板块集中度）约束建仓；不勾选则仅受现金限制，用于对比"无风控"结果（个股止损止盈始终生效）。</div>
+  <div id="bt-help" class="mt-2 text-[11px] text-slate-500">区间重算会从开始日重新推演到结束日，并把接力账户同步到结束日；日期留空默认最近约 90 天。</div>
+  <div class="mt-1 text-[11px] text-slate-500">勾选「应用风控」按组合层闸门（单票/总仓/持仓数/板块集中度）约束建仓；不勾选则仅受现金限制，个股止损止盈始终生效。</div>
 </section>
 
 <script>
@@ -50,10 +79,24 @@
   const logEl = document.getElementById('bt-log');
   const btn = document.getElementById('bt-run-btn');
   const redirect = document.getElementById('bt-runner').dataset.redirect;
+  const rangeFields = document.getElementById('bt-range-fields');
+  const dailyFields = document.getElementById('bt-daily-fields');
+  const resetWrap = document.getElementById('bt-reset-wrap');
+  const helpEl = document.getElementById('bt-help');
   const LABEL = { idle: '空闲', running: '运行中', done: '已完成', error: '失败' };
   let since = 0, timer = null;
 
   window.btToggleLog = () => logEl.classList.toggle('hidden');
+  function mode() { return document.querySelector('input[name="bt-mode"]:checked')?.value || 'range'; }
+  window.btModeChanged = () => {
+    const daily = mode() === 'daily';
+    rangeFields.classList.toggle('hidden', daily);
+    dailyFields.classList.toggle('hidden', !daily);
+    resetWrap.classList.toggle('hidden', !daily);
+    helpEl.textContent = daily
+      ? '单日接力只处理填写的交易日 T：先承接上一交易日账户状态，再执行 T-1 收盘后的交易计划。'
+      : '区间重算会从开始日重新推演到结束日，并把接力账户同步到结束日；日期留空默认最近约 90 天。';
+  };
 
   function val(id) { const v = document.getElementById(id).value.trim(); return v || null; }
   function busy(on) { btn.disabled = on; btn.textContent = on ? '运行中…' : '运行回测'; }
@@ -63,8 +106,14 @@
     logEl.classList.remove('hidden'); logEl.textContent = ''; since = 0;
     stateEl.textContent = '启动中…';
     const riskOn = document.getElementById('bt-risk').checked;
-    const body = { start_date: val('bt-start'), end_date: val('bt-end'),
-                   initial_capital: val('bt-cap'), risk_control: riskOn };
+    const body = { mode: mode(), initial_capital: val('bt-cap'), risk_control: riskOn };
+    if (body.mode === 'daily') {
+      body.trade_date = val('bt-day');
+      body.reset_state = document.getElementById('bt-reset').checked;
+    } else {
+      body.start_date = val('bt-start');
+      body.end_date = val('bt-end');
+    }
     try {
       const r = await fetch('/api/backtest/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
@@ -111,3 +160,14 @@
   })();
 })();
 </script>
+{% else %}
+<section class="card border border-slate-800 bg-slate-900/60 rounded-xl p-4 mb-6">
+  <div class="flex items-center justify-between gap-3">
+    <div>
+      <h2 class="text-base font-bold">回测结果</h2>
+      <div class="text-xs text-slate-500 mt-1">只读账号仅查看已有回测批次，运行回测需要超级账号。</div>
+    </div>
+    <a href="/logout" class="text-xs text-slate-400 hover:text-emerald-300">切换账号</a>
+  </div>
+</section>
+{% endif %}

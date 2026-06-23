@@ -118,6 +118,44 @@ def test_backtest_report_counts_only_closed_trades():
     assert report["win_rate"] == 0.5
 
 
+def test_backtest_engine_state_roundtrip_for_daily_continuation():
+    engine = BacktestEngine(data_manager=None)
+    engine.config.initial_capital = 100_000
+    engine.cash = 80_000
+    engine.total_capital = 101_000
+    engine.current_positions = {
+        "000001": {
+            "stock_name": "A",
+            "entry_date": "20260622",
+            "entry_price": 10,
+            "shares": 2000,
+            "cost_basis": 20_000,
+            "market_value": 21_000,
+            "pattern_type": "指标筛选/default",
+            "highest_price": 10.5,
+        }
+    }
+    engine.daily_nav = [{"date": "20260622", "cash": 80_000, "position_value": 21_000, "total_value": 101_000}]
+    engine.trade_history = [
+        TradeRecord(
+            date="20260622", stock_code="000001", stock_name="A", pattern_type="指标筛选/default",
+            action="BUY", entry_price=10, exit_price=0, shares=2000, position_size=20_000,
+            pnl=0, pnl_pct=0, holding_days=0, hot_resonance=False, resonance_sectors="",
+            entry_date="20260622", exit_reason="buy",
+        )
+    ]
+
+    state = engine.export_state()
+    restored = BacktestEngine(data_manager=None)
+    restored.import_state(state)
+
+    assert restored.cash == 80_000
+    assert restored.total_capital == 101_000
+    assert restored.daily_nav[-1]["date"] == "20260622"
+    assert restored.current_positions["000001"]["shares"] == 2000
+    assert restored.trade_history[0].stock_code == "000001"
+
+
 def test_factor_feedback_uses_strong_weak_buckets():
     result = {
         "trade_history": [
