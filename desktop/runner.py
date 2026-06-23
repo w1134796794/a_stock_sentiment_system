@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import sys
+import json
 import threading
 import traceback
 from datetime import datetime, timedelta
@@ -332,9 +333,16 @@ class BacktestController:
 
     def start(self, start_date: Optional[str], end_date: Optional[str],
               initial_capital: object = None,
-              risk_control: object = None) -> Tuple[bool, str]:
+              risk_control: object = None,
+              mode: object = "range",
+              trade_date: Optional[str] = None,
+              reset_state: object = False) -> Tuple[bool, str]:
         start_date = (str(start_date).strip() if start_date else "") or None
         end_date = (str(end_date).strip() if end_date else "") or None
+        trade_date = (str(trade_date).strip() if trade_date else "") or None
+        mode = (str(mode or "range").strip().lower() or "range")
+        if mode not in {"range", "daily"}:
+            mode = "range"
         try:
             capital = float(initial_capital) if initial_capital not in (None, "") else 100000.0
         except (TypeError, ValueError):
@@ -349,6 +357,34 @@ class BacktestController:
                 risk_on = True
         else:
             risk_on = bool(risk_control)
+
+        if mode == "daily":
+            target = trade_date or end_date or start_date or datetime.now().strftime("%Y%m%d")
+            with self._lock:
+                if self.state == "running":
+                    return False, "已有回测任务在运行中，请等待完成。"
+                self.buffer.clear()
+                self.state = "running"
+                self.error = None
+                self.params = {
+                    "mode": "daily",
+                    "trade_date": target,
+                    "initial_capital": capital,
+                    "risk_control": risk_on,
+                    "reset_state": bool(reset_state),
+                }
+                self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.finished_at = None
+                self._thread = threading.Thread(
+                    target=self._worker_daily,
+                    args=(target, capital, risk_on, bool(reset_state)),
+                    daemon=True,
+                    name="backtest-run-daily",
+                )
+                self._thread.start()
+            mode_txt = "开启风控" if risk_on else "关闭风控"
+            reset_txt = "重置接力账户" if reset_state else "承接上一交易日账户"
+            return True, f"已启动单日接力回测：{target}（{mode_txt}，{reset_txt}）"
 
         # 默认区间：结束=今日，开始=结束前 90 天（交易日历会自动剔除非交易日）
         end = end_date or datetime.now().strftime("%Y%m%d")
@@ -366,7 +402,7 @@ class BacktestController:
             self.buffer.clear()
             self.state = "running"
             self.error = None
-            self.params = {"start_date": start, "end_date": end,
+            self.params = {"mode": "range", "start_date": start, "end_date": end,
                            "initial_capital": capital, "risk_control": risk_on}
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
@@ -443,8 +479,15 @@ class BacktestController:
             self.buffer.append_text("\n" + report + "\n")
 
             from run_backtest import save_backtest_results  # 复用同一套 CSV 落盘逻辑
-            save_backtest_results(result, OUTPUT_DIR)
+            save_backtest_results(result, OUTPUT_DIR, metadata={
+                "run_mode": "range",
+                "start_date": start,
+                "end_date": end,
+                "risk_control": risk_control,
+            })
+            state_path = self._save_rolling_state(engine, "range")
 
+            self.buffer.append_line(f"接力账户状态已同步到 {state_path}，后续可用单日接力继续。")
             self.buffer.append_line("=== 回测完成，结果已保存，可在「模拟交易 / 回撤分析」查看 ===")
             self.state = "done"
         except Exception as exc:  # noqa: BLE001
@@ -459,6 +502,246 @@ class BacktestController:
             except Exception:  # noqa: BLE001
                 pass
             self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _worker_daily(self, trade_date: str, capital: float,
+                      risk_control: bool = True, reset_state: bool = False) -> None:
+        import loguru
+
+        _ensure_file_sink()
+        sink_id = loguru.logger.add(
+            self._loguru_sink, level="INFO",
+            format="{time:HH:mm:ss} | {level: <7} | {message}", enqueue=False,
+        )
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = _StreamTee(old_out, self.buffer)
+        sys.stderr = _StreamTee(old_err, self.buffer)
+        try:
+            mode_txt = "开启风控闸门" if risk_control else "关闭风控闸门（无风控）"
+            self.buffer.append_line(
+                f"=== 开始单日接力回测 · {trade_date} · 初始资金 {capital:,.0f} · {mode_txt} ===")
+
+            from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
+            from backtest.plan_source import build_backtest_plan_dir
+            from backtest.trade_calendar import TradeCalendar
+            from core.data.data_manager_main import DataManager
+            from backtest.backtest_engine import BacktestConfig, BacktestEngine
+            from backtest.performance_analyzer import PerformanceAnalyzer
+
+            calendar = TradeCalendar()
+            if not calendar.is_trade_date(trade_date):
+                self.buffer.append_line(f"!!! {trade_date} 不是交易日，单日接力已取消。")
+                self.error = f"{trade_date} 不是交易日"
+                self.state = "error"
+                return
+
+            prev_date = calendar.prev(trade_date)
+            if not (TUSHARE_TOKEN or "").strip():
+                self.buffer.append_line("[提示] 未配置 TUSHARE_TOKEN，将仅依赖本地缓存数据，缺数据的票会被跳过。")
+
+            trade_plans_dir, file_count, row_count = build_backtest_plan_dir(
+                snapshot_dir=Path(SNAPSHOT_DIR),
+                output_dir=Path(WEB_DATA_DIR),
+                screening_dir=Path(WEB_DATA_DIR) / "screening",
+                start_date=prev_date,
+                end_date=prev_date,
+            )
+            if file_count <= 0:
+                self.buffer.append_line(f"!!! 未找到上一交易日 {prev_date} 的交易计划，无法执行 {trade_date}。")
+                self.error = f"缺少 {prev_date} 交易计划"
+                self.state = "error"
+                return
+            self.buffer.append_line(
+                f"已加载上一交易日 {prev_date} 的回测计划：{row_count} 条候选（仅执行每日前3名）。")
+
+            dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+            config = BacktestConfig(initial_capital=capital, risk_control=risk_control)
+            engine = BacktestEngine(dm, config)
+            state_source = "reset"
+
+            if reset_state:
+                self.buffer.append_line("已按空账户初始化接力状态；这一天不会继承历史持仓。")
+            else:
+                state = self._load_rolling_state()
+                if state:
+                    last_date = str(state.get("last_date") or "")
+                    if last_date != prev_date:
+                        self.buffer.append_line(
+                            f"!!! 当前接力状态停在 {last_date or '空'}，而 {trade_date} 的上一交易日是 {prev_date}。")
+                        self.buffer.append_line("请先补跑缺失交易日，或用区间重算同步状态后再接力。")
+                        self.error = f"接力状态日期不匹配：{last_date} != {prev_date}"
+                        self.state = "error"
+                        return
+                    engine.import_state(state)
+                    state_source = "rolling_state"
+                    self.buffer.append_line(f"已读取接力账户状态：截至 {last_date}，持仓 {len(engine.current_positions)} 只。")
+                else:
+                    boot = self._bootstrap_state_from_latest_run(prev_date, engine)
+                    if not boot:
+                        self.buffer.append_line(f"!!! 没有找到截至 {prev_date} 的接力状态或历史回测批次。")
+                        self.buffer.append_line("请先运行区间回测到上一交易日，或勾选“重置接力账户”从空仓开始。")
+                        self.error = f"缺少截至 {prev_date} 的接力状态"
+                        self.state = "error"
+                        return
+                    state_source = f"bootstrap:{boot}"
+                    self.buffer.append_line(f"已从历史回测批次 {boot} 引导接力账户。")
+
+            result = engine.run_one_day(trade_date=trade_date, trade_plans_dir=str(trade_plans_dir))
+
+            report = PerformanceAnalyzer().generate_performance_report(result)
+            self.buffer.append_text("\n" + report + "\n")
+
+            from run_backtest import save_backtest_results
+            save_backtest_results(result, OUTPUT_DIR, metadata={
+                "run_mode": "daily",
+                "trade_date": trade_date,
+                "continued_from": prev_date,
+                "state_source": state_source,
+                "risk_control": risk_control,
+            })
+            state_path = self._save_rolling_state(engine, "daily", state_source=state_source)
+
+            self.buffer.append_line(f"接力账户状态已更新到 {trade_date}：{state_path}")
+            self.buffer.append_line("=== 单日接力回测完成，结果已保存，可在「模拟交易 / 回撤分析」查看 ===")
+            self.state = "done"
+        except Exception as exc:  # noqa: BLE001
+            self.error = repr(exc)
+            self.buffer.append_line(f"!!! 单日接力回测失败: {exc!r}")
+            self.buffer.append_text(traceback.format_exc())
+            self.state = "error"
+        finally:
+            sys.stdout, sys.stderr = old_out, old_err
+            try:
+                loguru.logger.remove(sink_id)
+            except Exception:  # noqa: BLE001
+                pass
+            self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _rolling_state_path() -> Path:
+        from config.settings import OUTPUT_DIR
+
+        return Path(OUTPUT_DIR) / "backtest_results" / "rolling_state.json"
+
+    def _load_rolling_state(self) -> Optional[Dict[str, object]]:
+        path = self._rolling_state_path()
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            self.buffer.append_line(f"[提示] 接力状态读取失败，将尝试从历史批次引导: {exc}")
+            return None
+
+    def _save_rolling_state(self, engine, mode: str, state_source: str = "") -> Path:
+        path = self._rolling_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        state = engine.export_state()
+        state["source_mode"] = mode
+        state["state_source"] = state_source
+        path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        return path
+
+    def _bootstrap_state_from_latest_run(self, prev_date: str, engine) -> Optional[str]:
+        """从已有回测 CSV 中找一个净值最后日期为 prev_date 的批次，近似恢复接力状态。"""
+        try:
+            from desktop.backtest import list_runs, load_nav, load_summary, load_trades
+        except Exception:
+            return None
+
+        for run in list_runs():
+            nav = load_nav(run)
+            if not nav or str(nav[-1].get("date") or "") != prev_date:
+                continue
+            trades = load_trades(run)
+            summary = load_summary(run)
+            state = self._state_from_result_rows(nav, trades, summary, prev_date, engine)
+            engine.import_state(state)
+            return run
+        return None
+
+    def _state_from_result_rows(self, nav: List[Dict], trades: List[Dict],
+                                summary: Dict, prev_date: str, engine) -> Dict[str, object]:
+        initial = float(summary.get("initial_capital") or (nav[0].get("total_value") if nav else 100000) or 100000)
+        cash = float(nav[-1].get("cash") or initial) if nav else initial
+        total = float(nav[-1].get("total_value") or cash) if nav else cash
+        positions: Dict[str, Dict] = {}
+        for trade in trades:
+            code = str(trade.get("stock_code") or "").zfill(6)
+            action = str(trade.get("action") or "").upper()
+            if not code:
+                continue
+            shares = int(float(trade.get("shares") or 0))
+            if action == "BUY":
+                entry_price = float(trade.get("entry_price") or 0)
+                cost_basis = float(trade.get("position_size") or (entry_price * shares))
+                positions[code] = {
+                    "stock_name": trade.get("stock_name") or "",
+                    "entry_date": str(trade.get("entry_date") or trade.get("date") or ""),
+                    "entry_price": entry_price,
+                    "shares": shares,
+                    "cost_basis": cost_basis,
+                    "market_value": entry_price * shares,
+                    "pattern_type": trade.get("pattern_type") or "",
+                    "hot_resonance": bool(trade.get("hot_resonance")),
+                    "resonance_sectors": trade.get("resonance_sectors") or "",
+                    "plan_rank": int(float(trade.get("plan_rank") or 0)),
+                    "plan_score": float(trade.get("plan_score") or 0),
+                    "plan_reason": trade.get("plan_reason") or "",
+                    "factor_metrics_json": trade.get("factor_metrics_json") or "",
+                    "stop_loss_price": entry_price * (1 - engine.config.stop_loss_pct),
+                    "take_profit_price": entry_price * (1 + engine.config.take_profit_pct),
+                    "highest_price": entry_price,
+                }
+            elif action == "SELL_PARTIAL" and code in positions:
+                pos = positions[code]
+                current_shares = int(pos.get("shares") or 0)
+                if current_shares <= 0:
+                    positions.pop(code, None)
+                    continue
+                sold = min(shares, current_shares)
+                ratio = sold / current_shares if current_shares else 0
+                pos["shares"] = current_shares - sold
+                pos["cost_basis"] = float(pos.get("cost_basis") or 0) * (1 - ratio)
+                reason = str(trade.get("exit_reason") or "")
+                if reason == "partial_first":
+                    pos["first_partial_sold"] = True
+                if reason == "partial_second":
+                    pos["second_partial_sold"] = True
+                if pos["shares"] <= 0:
+                    positions.pop(code, None)
+            elif action.startswith("SELL"):
+                positions.pop(code, None)
+
+        self._refresh_bootstrap_positions(positions, prev_date, engine)
+        return {
+            "version": 1,
+            "last_date": prev_date,
+            "initial_capital": initial,
+            "cash": cash,
+            "total_capital": total,
+            "current_positions": positions,
+            "daily_nav": nav,
+            "trade_history": trades,
+        }
+
+    @staticmethod
+    def _refresh_bootstrap_positions(positions: Dict[str, Dict], prev_date: str, engine) -> None:
+        for code, pos in positions.items():
+            entry = str(pos.get("entry_date") or "")
+            dates = engine.calendar.get_trade_dates(entry, prev_date) if entry else [prev_date]
+            for d in dates:
+                try:
+                    row = engine.dm.get_stock_daily_data(engine._standardize_stock_code(code), d)
+                except Exception:
+                    row = None
+                if not row:
+                    continue
+                close = float(row.get("close") or 0)
+                high = float(row.get("high") or close or 0)
+                if high > 0:
+                    pos["highest_price"] = max(float(pos.get("highest_price") or 0), high)
+                if d == prev_date and close > 0:
+                    pos["market_value"] = int(pos.get("shares") or 0) * close
 
     def _loguru_sink(self, message) -> None:
         try:

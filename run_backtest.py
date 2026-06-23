@@ -75,7 +75,7 @@ def run_backtest_demo():
     logger.info("回测完成！")
 
 
-def save_backtest_results(result: dict, output_dir: str):
+def save_backtest_results(result: dict, output_dir: str, metadata: dict | None = None):
     """保存回测结果到文件"""
     import pandas as pd
     from pathlib import Path
@@ -136,6 +136,8 @@ def save_backtest_results(result: dict, output_dir: str):
         'initial_capital': result.get('initial_capital', 0),
         'final_capital': result.get('final_capital', 0)
     }
+    if metadata:
+        summary.update(metadata)
 
     summary_df = pd.DataFrame([summary])
     summary_file = output_path / f"backtest_summary_{timestamp}.csv"

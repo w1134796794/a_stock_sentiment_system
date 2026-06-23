@@ -9,17 +9,34 @@ FastAPI 应用 —— 指标体系看板 + 数据浏览（只读）。
 from __future__ import annotations
 
 import csv
-from collections import Counter
+import json
+import os
+import time
+from collections import Counter, deque
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-import json
+from urllib.parse import parse_qs, quote
 
 from fastapi import Body, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from web.auth_store import (
+    SESSION_COOKIE_NAME,
+    create_user,
+    ensure_auth_db,
+    extend_user,
+    list_users,
+    login as auth_login,
+    recent_login_logs,
+    reset_password,
+    revoke_session,
+    revoke_user_sessions,
+    update_user_limits,
+    update_user_status,
+    validate_session,
+)
 
 from config.settings import (
     SNAPSHOT_DIR,
@@ -692,9 +709,16 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
                 return None
             df = con.execute(
                 """
-                SELECT trade_date, code, ts_code, name, close, pct_chg, amount_yuan
-                FROM stock_daily_silver
-                WHERE trade_date <= ?
+                WITH recent_dates AS (
+                    SELECT DISTINCT trade_date
+                    FROM stock_daily_silver
+                    WHERE trade_date <= ?
+                    ORDER BY trade_date DESC
+                    LIMIT 30
+                )
+                SELECT s.trade_date, s.code, s.ts_code, s.name, s.close, s.pct_chg, s.amount_yuan
+                FROM stock_daily_silver s
+                JOIN recent_dates d ON s.trade_date = d.trade_date
                 ORDER BY code, trade_date
                 """,
                 [str(date)],
@@ -899,6 +923,82 @@ def _prepare_snapshot(snapshot: Optional[Dict[str, Any]], date: str) -> Optional
     _enrich_screening_display_reasons(prepared)
     return _sanitize_display(prepared)
 
+
+_DATES_CACHE: Dict[str, Any] = {"expires_at": 0.0, "dates": []}
+
+
+def _snapshot_stat(date: Any) -> Optional[tuple[int, int]]:
+    text = str(date or "").strip()
+    if not text:
+        return None
+    path = SNAPSHOT_DIR / f"{text}.json"
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return int(stat.st_mtime_ns), int(stat.st_size)
+
+
+@lru_cache(maxsize=96)
+def _load_snapshot_cached(date: str, mtime_ns: int, size: int) -> Optional[Dict[str, Any]]:
+    path = SNAPSHOT_DIR / f"{date}.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=96)
+def _load_prepared_snapshot_cached(date: str, mtime_ns: int, size: int) -> Optional[Dict[str, Any]]:
+    raw = _load_snapshot_cached(date, mtime_ns, size)
+    return _prepare_snapshot(raw, date)
+
+
+def _load_snapshot(date: Any) -> Optional[Dict[str, Any]]:
+    text = str(date or "").strip()
+    stat = _snapshot_stat(text)
+    if stat is None:
+        return None
+    return _load_snapshot_cached(text, stat[0], stat[1])
+
+
+def _load_prepared_snapshot(date: Any) -> Optional[Dict[str, Any]]:
+    text = str(date or "").strip()
+    stat = _snapshot_stat(text)
+    if stat is None:
+        return None
+    return _load_prepared_snapshot_cached(text, stat[0], stat[1])
+
+
+def _list_dates() -> List[str]:
+    now = time.time()
+    cached = _DATES_CACHE.get("dates") or []
+    if cached and now < float(_DATES_CACHE.get("expires_at") or 0):
+        return list(cached)
+    dates = reader.list_dates()
+    _DATES_CACHE["dates"] = dates
+    _DATES_CACHE["expires_at"] = now + 5.0
+    return list(dates)
+
+
+def _latest_date() -> Optional[str]:
+    pointer = SNAPSHOT_DIR / "latest.txt"
+    try:
+        latest = pointer.read_text(encoding="utf-8").strip()
+        if latest and _snapshot_stat(latest):
+            return latest
+    except OSError:
+        pass
+    dates = _list_dates()
+    return dates[0] if dates else None
+
+
+def _clear_data_caches() -> None:
+    _load_snapshot_cached.cache_clear()
+    _load_prepared_snapshot_cached.cache_clear()
+    _DATES_CACHE["expires_at"] = 0.0
+    _DATES_CACHE["dates"] = []
+
 # ----------------------------------------------------------------------
 # 数据浏览分类：优先展示指标筛选和板块强度结果。
 # signals=True 仅作为旧快照兼容读取，不再是默认主路径。
@@ -925,6 +1025,217 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 # ----------------------------------------------------------------------
+# 登录、订阅与权限
+# ----------------------------------------------------------------------
+PUBLIC_PATHS = {"/login", "/logout", "/expired", "/favicon.ico"}
+ADMIN_PAGE_PREFIXES = (
+    "/admin",
+    "/run",
+    "/config",
+    "/factors",
+    "/logs",
+    "/ask",
+    "/api/docs",
+    "/openapi.json",
+)
+ADMIN_GET_API_PREFIXES = (
+    "/api/admin",
+    "/api/run",
+    "/api/logs",
+    "/api/config",
+    "/api/factors",
+    "/api/backtest/run/status",
+)
+_RATE_BUCKETS: Dict[str, deque] = {}
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    return request.client.host if request.client else ""
+
+
+def _user_agent(request: Request) -> str:
+    return request.headers.get("user-agent", "")[:500]
+
+
+def _safe_next(raw: Optional[str]) -> str:
+    if not raw or not raw.startswith("/") or raw.startswith("//"):
+        return "/"
+    return raw
+
+
+def _is_public_path(path: str) -> bool:
+    return path in PUBLIC_PATHS or path.startswith("/static/")
+
+
+def _is_api_path(path: str) -> bool:
+    return path.startswith("/api/") or path == "/openapi.json"
+
+
+def _matches_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+
+
+def _requires_admin(path: str, method: str) -> bool:
+    if _matches_prefix(path, ADMIN_PAGE_PREFIXES):
+        return True
+    if _is_api_path(path):
+        if method.upper() != "GET":
+            return True
+        return _matches_prefix(path, ADMIN_GET_API_PREFIXES)
+    return False
+
+
+def _login_redirect(request: Request) -> RedirectResponse:
+    target = request.url.path
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    return RedirectResponse(url=f"/login?next={quote(target, safe='')}", status_code=303)
+
+
+def _rate_limit_exceeded(request: Request, user: Optional[Dict[str, Any]]) -> bool:
+    if request.url.path.startswith("/static/"):
+        return False
+    try:
+        base_limit = int(os.getenv("APP_RATE_LIMIT_PER_MINUTE", "240"))
+    except ValueError:
+        base_limit = 240
+    if user and user.get("role") == "admin":
+        base_limit = max(base_limit, 600)
+    if not user and request.url.path == "/login":
+        base_limit = min(base_limit, 40)
+    key = f"user:{user.get('id')}" if user else f"ip:{_client_ip(request)}"
+    now = time.time()
+    window = 60.0
+    bucket = _RATE_BUCKETS.setdefault(key, deque())
+    while bucket and bucket[0] <= now - window:
+        bucket.popleft()
+    if len(bucket) >= base_limit:
+        return True
+    bucket.append(now)
+    return False
+
+
+def _rate_limited_response(request: Request) -> HTMLResponse | JSONResponse:
+    if _is_api_path(request.url.path):
+        return JSONResponse({"error": "rate_limited", "message": "请求过于频繁，请稍后再试"}, status_code=429)
+    return HTMLResponse(
+        '<!doctype html><meta charset="utf-8"><body style="background:#020617;color:#e2e8f0;font-family:sans-serif;padding:40px">请求过于频繁，请稍后再试。</body>',
+        status_code=429,
+    )
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    ensure_auth_db()
+    path = request.url.path
+    user, auth_error = validate_session(request.cookies.get(SESSION_COOKIE_NAME))
+    request.state.user = user
+    request.state.is_admin = bool(user and user.get("role") == "admin")
+    request.state.is_viewer = bool(user and user.get("role") == "viewer")
+
+    if _rate_limit_exceeded(request, user):
+        return _rate_limited_response(request)
+
+    if _is_public_path(path):
+        return await call_next(request)
+
+    if not user:
+        if auth_error in {"session_revoked", "session_expired", "user_disabled"}:
+            response = (
+                JSONResponse({"error": auth_error, "message": "登录状态已失效"}, status_code=401)
+                if _is_api_path(path)
+                else _login_redirect(request)
+            )
+            response.delete_cookie(SESSION_COOKIE_NAME)
+            return response
+        if _is_api_path(path):
+            return JSONResponse({"error": "not_authenticated", "message": "请先登录"}, status_code=401)
+        return _login_redirect(request)
+
+    if auth_error == "subscription_expired":
+        if _is_api_path(path):
+            return JSONResponse({"error": "subscription_expired", "message": "服务已到期"}, status_code=403)
+        return RedirectResponse(url="/expired", status_code=303)
+
+    if user.get("role") != "admin" and _requires_admin(path, request.method):
+        if _is_api_path(path):
+            return JSONResponse(
+                {"error": "readonly_forbidden", "message": "只读账号不能执行任务或修改配置"},
+                status_code=403,
+            )
+        return templates.TemplateResponse(
+            request,
+            "permission_denied.html",
+            {"user": user},
+            status_code=403,
+        )
+
+    return await call_next(request)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: Optional[str] = None) -> Any:
+    if request.state.user:
+        return RedirectResponse(url=_safe_next(next), status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"next": _safe_next(next), "error": ""},
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(request: Request) -> Any:
+    raw = (await request.body()).decode("utf-8")
+    data = {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    next_url = _safe_next(data.get("next"))
+
+    ok, message, token, user, max_age = auth_login(
+        username=username,
+        password=password,
+        ip=_client_ip(request),
+        user_agent=_user_agent(request),
+    )
+    if not ok:
+        template = "expired.html" if user and user.get("is_expired") else "login.html"
+        return templates.TemplateResponse(
+            request,
+            template,
+            {"next": next_url, "error": message, "user": user},
+            status_code=401,
+        )
+
+    response = RedirectResponse(url=next_url, status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token or "",
+        max_age=max_age,
+        httponly=True,
+        samesite="lax",
+        secure=os.getenv("APP_COOKIE_SECURE", "0") == "1",
+    )
+    return response
+
+
+@app.get("/logout")
+def logout(request: Request) -> Any:
+    revoke_session(request.cookies.get(SESSION_COOKIE_NAME))
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    return response
+
+
+@app.get("/expired", response_class=HTMLResponse)
+def expired_page(request: Request) -> Any:
+    return templates.TemplateResponse(request, "expired.html", {"user": request.state.user})
+
+
+# ----------------------------------------------------------------------
 # 页面
 # ----------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
@@ -937,37 +1248,37 @@ def index(request: Request) -> Any:
 
 @app.get("/report", response_class=HTMLResponse)
 def report_index() -> Any:
-    latest = reader.latest()
+    latest = _latest_date()
     return RedirectResponse(url=f"/report/{latest}" if latest else "/")
 
 
 @app.get("/dragon", response_class=HTMLResponse)
 def dragon_page(request: Request, date: Optional[str] = None) -> Any:
     """因子体系龙头池：从近几日筛选结果派生，不使用旧策略池。"""
-    latest = date or reader.latest()
+    latest = date or _latest_date()
     return templates.TemplateResponse(
         request,
         "dragon.html",
-        {"date": latest, "dates": reader.list_dates()},
+        {"date": latest, "dates": _list_dates()},
     )
 
 
 @app.get("/intraday", response_class=HTMLResponse)
 def intraday_page(request: Request, date: Optional[str] = None) -> Any:
     """盘中转强：因子龙头池叠加实时行情确认。"""
-    latest = date or reader.latest()
+    latest = date or _latest_date()
     return templates.TemplateResponse(
         request,
         "intraday.html",
-        {"date": latest, "dates": reader.list_dates()},
+        {"date": latest, "dates": _list_dates()},
     )
 
 
 @app.get("/realtime", response_class=HTMLResponse)
 def realtime_page(request: Request) -> Any:
     """实时行情面板：个股批量行情、板块行情、行情源健康。"""
-    latest = reader.latest()
-    snapshot = reader.load(latest) if latest else None
+    latest = _latest_date()
+    snapshot = _load_snapshot(latest) if latest else None
     return templates.TemplateResponse(
         request,
         "realtime.html",
@@ -1017,6 +1328,91 @@ def about_page(request: Request) -> Any:
     return templates.TemplateResponse(request, "about.html", {"ov": overview()})
 
 
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users_page(request: Request) -> Any:
+    return templates.TemplateResponse(
+        request,
+        "admin_users.html",
+        {"users": list_users(), "login_logs": recent_login_logs(80)},
+    )
+
+
+@app.get("/api/admin/users")
+def api_admin_users() -> Any:
+    return JSONResponse({"users": list_users(), "login_logs": recent_login_logs(80)})
+
+
+@app.post("/api/admin/users")
+def api_admin_create_user(payload: dict = Body(default={})) -> Any:
+    p = payload or {}
+    try:
+        user = create_user(
+            username=p.get("username"),
+            password=p.get("password"),
+            role=p.get("role") or "viewer",
+            display_name=p.get("display_name") or "",
+            expire_at=p.get("expire_at") or None,
+            days=int(p.get("days") or 30),
+            max_sessions=int(p.get("max_sessions") or 1),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "user": user})
+
+
+@app.post("/api/admin/users/{user_id}/extend")
+def api_admin_extend_user(user_id: int, payload: dict = Body(default={})) -> Any:
+    p = payload or {}
+    try:
+        user = extend_user(user_id, days=p.get("days"), expire_at=p.get("expire_at") or None)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "user": user})
+
+
+@app.post("/api/admin/users/{user_id}/status")
+def api_admin_status_user(request: Request, user_id: int, payload: dict = Body(default={})) -> Any:
+    p = payload or {}
+    status = "active" if p.get("status") == "active" else "disabled"
+    if request.state.user and int(request.state.user.get("id") or 0) == int(user_id) and status == "disabled":
+        return JSONResponse({"ok": False, "error": "不能禁用当前登录账号"}, status_code=400)
+    try:
+        user = update_user_status(user_id, status)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "user": user})
+
+
+@app.post("/api/admin/users/{user_id}/reset-password")
+def api_admin_reset_password(user_id: int, payload: dict = Body(default={})) -> Any:
+    password = (payload or {}).get("password") or ""
+    try:
+        user = reset_password(user_id, password)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "user": user})
+
+
+@app.post("/api/admin/users/{user_id}/revoke-sessions")
+def api_admin_revoke_sessions(user_id: int) -> Any:
+    revoke_user_sessions(user_id)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/admin/users/{user_id}/limits")
+def api_admin_user_limits(user_id: int, payload: dict = Body(default={})) -> Any:
+    p = payload or {}
+    try:
+        user = update_user_limits(
+            user_id,
+            max_sessions=int(p.get("max_sessions") or 1),
+            display_name=p.get("display_name") or "",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "user": user})
+
+
 # ----------------------------------------------------------------------
 # 管理工具 JSON API（运行 / 日志 / 概览）
 # ----------------------------------------------------------------------
@@ -1024,6 +1420,7 @@ def about_page(request: Request) -> Any:
 def api_run(payload: dict = Body(default={})) -> Any:
     from desktop.runner import CONTROLLER
 
+    _clear_data_caches()
     data = payload or {}
     mode = (data.get("mode") or "single").strip().lower()
     if mode == "batch":
@@ -1067,8 +1464,8 @@ def api_etl_artifacts(date: Optional[str] = None) -> Any:
 
 @app.get("/report/{date}", response_class=HTMLResponse)
 def report(request: Request, date: str) -> Any:
-    snapshot = reader.load(date)
-    dates = reader.list_dates()
+    snapshot = _load_prepared_snapshot(date)
+    dates = _list_dates()
     if snapshot is None:
         return templates.TemplateResponse(
             request,
@@ -1076,7 +1473,6 @@ def report(request: Request, date: str) -> Any:
             {"snapshot": None, "date": date, "dates": dates},
             status_code=404,
         )
-    snapshot = _prepare_snapshot(snapshot, date)
     market = snapshot.get("market", {}) or {}
     return templates.TemplateResponse(
         request,
@@ -1098,8 +1494,8 @@ def report(request: Request, date: str) -> Any:
 @app.get("/stock/{code}", response_class=HTMLResponse)
 def stock_detail_page(request: Request, code: str, date: Optional[str] = None) -> Any:
     """个股详情：分时、日K、竞价摘要、信号与风控上下文。"""
-    latest = date or reader.latest()
-    snapshot = reader.load(latest) if latest else None
+    latest = date or _latest_date()
+    snapshot = _load_snapshot(latest) if latest else None
     context = _find_stock_context(snapshot, code)
     return templates.TemplateResponse(
         request,
@@ -1107,7 +1503,7 @@ def stock_detail_page(request: Request, code: str, date: Optional[str] = None) -
         {
             "code": _normalize_stock_code(code),
             "date": latest,
-            "dates": reader.list_dates(),
+            "dates": _list_dates(),
             "stock_name": context.get("name") or "",
             "context": context,
         },
@@ -1120,7 +1516,7 @@ def api_stock_chart(code: str, date: Optional[str] = None, daily_count: int = 12
     from core.data.data_manager_main import DataManager
     from core.utils.stock_code_utils import StockCodeUtils
 
-    trade_date = date or reader.latest()
+    trade_date = date or _latest_date()
     if not trade_date:
         return JSONResponse({"error": "no snapshot date"}, status_code=404)
 
@@ -1130,7 +1526,7 @@ def api_stock_chart(code: str, date: Optional[str] = None, daily_count: int = 12
     daily_df = dm.get_kline(ts_code, period="day", count=max(20, min(int(daily_count or 120), 300)))
     auction = dm.get_auction_data(ts_code, trade_date)
 
-    snapshot = reader.load(trade_date)
+    snapshot = _load_snapshot(trade_date)
     context = _find_stock_context(snapshot, ts_code)
 
     return JSONResponse({
@@ -1246,8 +1642,8 @@ def api_realtime_quote(code: str, include_raw: bool = False) -> Any:
     quote = service.get_quote(code, include_raw=include_raw)
     if not quote:
         return JSONResponse({"ok": False, "message": "未获取到实时行情", "quote": {}}, status_code=502)
-    latest = reader.latest()
-    _enrich_stock_names([quote], reader.load(latest) if latest else None, latest)
+    latest = _latest_date()
+    _enrich_stock_names([quote], _load_snapshot(latest) if latest else None, latest)
     return JSONResponse({"ok": True, "quote": quote})
 
 
@@ -1262,8 +1658,8 @@ def api_realtime_quotes(
         return JSONResponse({"ok": False, "message": "codes 参数不能为空", "quotes": []}, status_code=400)
     service = _get_realtime_quote_service(stale_after_seconds=stale_after_seconds)
     payload = service.get_quotes(code_list, include_raw=include_raw)
-    latest = reader.latest()
-    _enrich_stock_names(payload.get("quotes") or [], reader.load(latest) if latest else None, latest)
+    latest = _latest_date()
+    _enrich_stock_names(payload.get("quotes") or [], _load_snapshot(latest) if latest else None, latest)
     return JSONResponse(payload)
 
 
@@ -1320,7 +1716,7 @@ def api_realtime_overlay(
 ) -> Any:
     from core.realtime.overlay_service import RealtimeOverlayService
 
-    trade_date = date or reader.latest()
+    trade_date = date or _latest_date()
     service = RealtimeOverlayService(
         quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
     )
@@ -1330,7 +1726,7 @@ def api_realtime_overlay(
         limit=max(1, min(int(limit or 20), 100)),
         persist=bool(persist),
     )
-    snapshot = reader.load(trade_date) if trade_date else None
+    snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
     return JSONResponse(payload)
 
@@ -1343,13 +1739,13 @@ def api_leader_pool(
 ) -> Any:
     from core.realtime.leader_pool_service import LeaderPoolService
 
-    trade_date = date or reader.latest()
+    trade_date = date or _latest_date()
     payload = LeaderPoolService().build_pool(
         trade_date,
         lookback=max(1, min(int(lookback or 5), 20)),
         limit=max(1, min(int(limit or 30), 100)),
     )
-    snapshot = reader.load(trade_date) if trade_date else None
+    snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
     return JSONResponse(payload)
 
@@ -1363,7 +1759,7 @@ def api_intraday_strength(
 ) -> Any:
     from core.realtime.leader_pool_service import IntradayStrengthService
 
-    trade_date = date or reader.latest()
+    trade_date = date or _latest_date()
     service = IntradayStrengthService(
         quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
     )
@@ -1372,7 +1768,7 @@ def api_intraday_strength(
         lookback=max(1, min(int(lookback or 5), 20)),
         limit=max(1, min(int(limit or 30), 100)),
     )
-    snapshot = reader.load(trade_date) if trade_date else None
+    snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
     return JSONResponse(payload)
 
@@ -1498,7 +1894,7 @@ def config_page(request: Request) -> Any:
     return templates.TemplateResponse(
         request,
         "config.html",
-        {"registry": build_registry(), "dates": reader.list_dates()},
+        {"registry": build_registry(), "dates": _list_dates()},
     )
 
 
@@ -1538,8 +1934,8 @@ def api_config_reset(payload: dict = Body(default={})) -> Any:
 def _latest_active_profile() -> str:
     """从最新快照 meta 读取实际生效的因子 profile（仅展示）。"""
     try:
-        latest = reader.latest()
-        snap = reader.load(latest) if latest else None
+        latest = _latest_date()
+        snap = _load_snapshot(latest) if latest else None
         meta = (snap or {}).get("meta", {}) or {}
         return str(meta.get("factor_profile") or "")
     except Exception:  # noqa: BLE001
@@ -1567,7 +1963,7 @@ def data_index(cat: str) -> Any:
     """数据浏览分类入口：跳转到最新交易日。"""
     if cat not in _CATEGORY_BY_KEY:
         return RedirectResponse(url="/")
-    latest = reader.latest()
+    latest = _latest_date()
     return RedirectResponse(url=f"/data/{cat}/{latest}" if latest else "/")
 
 
@@ -1577,7 +1973,7 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
     category = _CATEGORY_BY_KEY.get(cat)
     if category is None:
         return HTMLResponse('<div class="p-6 text-slate-400">无此分类</div>', status_code=404)
-    snapshot = _prepare_snapshot(reader.load(date), date)
+    snapshot = _load_prepared_snapshot(date)
     return templates.TemplateResponse(
         request,
         "data_browse.html",
@@ -1585,107 +1981,17 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
             "category": category,
             "cat": cat,
             "date": date,
-            "dates": reader.list_dates(),
+            "dates": _list_dates(),
             "sections": (snapshot or {}).get("sections", []),
             "snapshot": snapshot,
         },
-    )
-
-
-# ----------------------------------------------------------------------
-# 手机竖屏 UI（独立 /m 入口）：复用桌面数据源与 API，不影响现有横屏控制台。
-# ----------------------------------------------------------------------
-@app.get("/m", response_class=HTMLResponse)
-def mobile_index(request: Request) -> Any:
-    """手机概览页：核心状态 + 快捷入口。"""
-    from desktop.status import overview
-
-    return templates.TemplateResponse(request, "mobile/overview.html", {"ov": overview()})
-
-
-@app.get("/m/data", response_class=HTMLResponse)
-def mobile_data_home() -> Any:
-    latest = reader.latest()
-    return RedirectResponse(url=f"/m/data/strategy/{latest}" if latest else "/m")
-
-
-@app.get("/m/data/{cat}", response_class=HTMLResponse)
-def mobile_data_index(cat: str) -> Any:
-    if cat not in _CATEGORY_BY_KEY:
-        return RedirectResponse(url="/m")
-    latest = reader.latest()
-    return RedirectResponse(url=f"/m/data/{cat}/{latest}" if latest else "/m")
-
-
-@app.get("/m/data/{cat}/{date}", response_class=HTMLResponse)
-def mobile_data_browse(request: Request, cat: str, date: str) -> Any:
-    """手机数据浏览：分类 Tab + 单列 section 卡片。"""
-    category = _CATEGORY_BY_KEY.get(cat)
-    if category is None:
-        return HTMLResponse('<div class="p-6 text-slate-400">无此分类</div>', status_code=404)
-    snapshot = _prepare_snapshot(reader.load(date), date)
-    return templates.TemplateResponse(
-        request,
-        "mobile/data_browse.html",
-        {
-            "category": category,
-            "cat": cat,
-            "categories": DATA_CATEGORIES,
-            "date": date,
-            "dates": reader.list_dates(),
-            "sections": (snapshot or {}).get("sections", []),
-            "snapshot": snapshot,
-        },
-    )
-
-
-@app.get("/m/recap", response_class=HTMLResponse)
-def mobile_recap_index() -> Any:
-    latest = reader.latest()
-    return RedirectResponse(url=f"/m/recap/{latest}" if latest else "/m")
-
-
-@app.get("/m/recap/{date}", response_class=HTMLResponse)
-def mobile_recap_page(request: Request, date: str, tab: str = "show") -> Any:
-    """手机复盘统一页：演出播放器 + 图文素材（合规文案/卡片/保存）。"""
-    from recap.thermometer import build_thermometer
-
-    snapshot = reader.load(date)
-    pack = build_thermometer(snapshot) if snapshot else None
-    return templates.TemplateResponse(
-        request, "mobile/recap.html",
-        {"date": date, "dates": reader.list_dates(), "pack": pack,
-         "tab": "material" if tab == "material" else "show"},
-    )
-
-
-@app.get("/m/content", response_class=HTMLResponse)
-def mobile_content_index() -> Any:
-    return RedirectResponse(url="/m/recap")
-
-
-@app.get("/m/content/{date}", response_class=HTMLResponse)
-def mobile_content_page(date: str) -> Any:
-    return RedirectResponse(url=f"/m/recap/{date}?tab=material")
-
-
-@app.get("/m/run", response_class=HTMLResponse)
-def mobile_run_page(request: Request) -> Any:
-    """手机生成数据：复用运行控制器与状态 API。"""
-    from desktop.runner import CONTROLLER
-    from desktop.status import etl_artifacts
-
-    return templates.TemplateResponse(
-        request,
-        "mobile/run.html",
-        {"run": CONTROLLER.status(), "artifacts": etl_artifacts()},
     )
 
 
 @app.get("/ask", response_class=HTMLResponse)
 def ask_index(request: Request) -> Any:
     """问 AI 入口：默认以最新交易日为上下文。"""
-    latest = reader.latest()
+    latest = _latest_date()
     if latest:
         return RedirectResponse(url=f"/ask/{latest}")
     return templates.TemplateResponse(request, "ask.html", {"date": None, "dates": []})
@@ -1694,7 +2000,7 @@ def ask_index(request: Request) -> Any:
 @app.get("/ask/{date}", response_class=HTMLResponse)
 def ask_page(request: Request, date: str) -> Any:
     return templates.TemplateResponse(
-        request, "ask.html", {"date": date, "dates": reader.list_dates()}
+        request, "ask.html", {"date": date, "dates": _list_dates()}
     )
 
 
@@ -1729,7 +2035,9 @@ def api_backtest_runs() -> Any:
 def api_backtest_run(payload: dict = Body(default={})) -> Any:
     """启动一次回测（重新生成净值/交易/回撤）。
 
-    body: {start_date?, end_date?, initial_capital?, risk_control?}
+    body:
+      - 区间重算: {mode:'range', start_date?, end_date?, initial_capital?, risk_control?}
+      - 单日接力: {mode:'daily', trade_date, initial_capital?, risk_control?, reset_state?}
     risk_control 缺省时回退到全局 RiskConfig.enabled。
     """
     from desktop.runner import BACKTEST_CONTROLLER
@@ -1737,7 +2045,10 @@ def api_backtest_run(payload: dict = Body(default={})) -> Any:
     p = payload or {}
     ok, msg = BACKTEST_CONTROLLER.start(
         p.get("start_date"), p.get("end_date"), p.get("initial_capital"),
-        risk_control=p.get("risk_control"))
+        risk_control=p.get("risk_control"),
+        mode=p.get("mode") or "range",
+        trade_date=p.get("trade_date"),
+        reset_state=p.get("reset_state"))
     return JSONResponse({"started": ok, "message": msg})
 
 
@@ -1755,7 +2066,7 @@ def section_fragment(request: Request, date: str, idx: int, view: str = "table")
     view=detail → 折叠主从卡片（紧凑列表 + 点击展开全字段，避免横向滚动），
     用于字段很多的指标筛选 / 板块热度；其余分类默认 view=table 宽表。
     """
-    snapshot = _prepare_snapshot(reader.load(date), date)
+    snapshot = _load_prepared_snapshot(date)
     sections: List[Dict] = (snapshot or {}).get("sections", [])
     if not snapshot or idx < 0 or idx >= len(sections):
         return HTMLResponse('<div class="p-6 text-slate-400">无此数据</div>', status_code=404)
@@ -1772,7 +2083,7 @@ def section_fragment(request: Request, date: str, idx: int, view: str = "table")
 # ----------------------------------------------------------------------
 @app.get("/api/dates")
 def api_dates() -> Any:
-    return JSONResponse({"dates": reader.list_dates(), "latest": reader.latest()})
+    return JSONResponse({"dates": _list_dates(), "latest": _latest_date()})
 
 
 @app.get("/api/winrate")
@@ -1786,159 +2097,10 @@ def api_winrate() -> Any:
 
 @app.get("/api/snapshot/{date}")
 def api_snapshot(date: str) -> Any:
-    snapshot = _prepare_snapshot(reader.load(date), date)
+    snapshot = _load_prepared_snapshot(date)
     if snapshot is None:
         return JSONResponse({"error": "not found", "date": date}, status_code=404)
     return JSONResponse(snapshot)
-
-
-# ----------------------------------------------------------------------
-# 复盘短视频分镜脚本（storyboard）：供演出视图 / HyperFrames 复用
-# ----------------------------------------------------------------------
-def _recap_payload(date: Optional[str], refresh: bool) -> Any:
-    from recap.storyboard import build_and_save, load_recap
-
-    target = date or reader.latest()
-    if not target:
-        return JSONResponse({"error": "no snapshot"}, status_code=404)
-    if not refresh:
-        cached = load_recap(target)
-        if cached:
-            return JSONResponse(cached)
-    snapshot = reader.load(target)
-    if snapshot is None:
-        return JSONResponse({"error": "not found", "date": target}, status_code=404)
-    return JSONResponse(build_and_save(target, snapshot))
-
-
-@app.get("/api/recap")
-def api_recap_latest(refresh: bool = False) -> Any:
-    """最新交易日的复盘分镜脚本。"""
-    return _recap_payload(None, refresh)
-
-
-@app.get("/api/recap/{date}")
-def api_recap(date: str, refresh: bool = False) -> Any:
-    """某交易日的复盘分镜脚本（缓存优先；refresh=1 重建并覆盖落盘）。"""
-    return _recap_payload(date, refresh)
-
-
-# ----------------------------------------------------------------------
-# 复盘（统一功能）：演出视图 + 图文素材整合到 /recap，单一入口、同源驱动。
-#   /recap/{date}            统一页（演出 / 图文素材 两个选项卡）
-#   /recap/{date}/cards      统一图文导出（mode=full 全量分镜 / mode=compliant 合规4卡）
-# 旧 /show、/content 路由保留为重定向，确保历史链接不失效。
-# ----------------------------------------------------------------------
-@app.get("/recap", response_class=HTMLResponse)
-def recap_index() -> Any:
-    latest = reader.latest()
-    return RedirectResponse(url=f"/recap/{latest}" if latest else "/")
-
-
-@app.get("/recap/{date}", response_class=HTMLResponse)
-def recap_page(request: Request, date: str, tab: str = "show") -> Any:
-    """复盘统一页：演出播放器 + 合规图文素材，共享日期 / 同一快照。"""
-    from recap.thermometer import build_thermometer
-
-    snapshot = reader.load(date)
-    pack = build_thermometer(snapshot) if snapshot else None
-    return templates.TemplateResponse(
-        request, "recap.html",
-        {"date": date, "dates": reader.list_dates(), "pack": pack,
-         "tab": "material" if tab == "material" else "show"},
-    )
-
-
-@app.get("/recap/{date}/cards", response_class=HTMLResponse)
-def recap_cards(request: Request, date: str, mode: str = "full") -> Any:
-    """统一图文导出。
-
-    - ``mode=full``（默认）：全量复盘分镜逐幕成图（含个股/策略，自用复盘）。
-    - ``mode=compliant``：情绪温度计 4 张合规卡（无个股/收益/操作建议，可对外发布）。
-    """
-    snapshot = reader.load(date)
-    if snapshot is None:
-        return HTMLResponse('<div style="color:#94a3b8;padding:24px">无该日快照</div>', status_code=404)
-    if mode == "compliant":
-        from recap.thermometer import build_thermometer, render_cards_html
-        return HTMLResponse(render_cards_html(build_thermometer(snapshot)))
-    return templates.TemplateResponse(
-        request, "cards.html",
-        {"date": date, "title": f"A股复盘 {date} · 图文"},
-    )
-
-
-# ----------------------------------------------------------------------
-# 演出播放器（被 /recap 页内嵌 iframe 复用；也可独立全屏放映 / 逐帧抓取）
-# ----------------------------------------------------------------------
-@app.get("/show", response_class=HTMLResponse)
-def show_index() -> Any:
-    return RedirectResponse(url="/recap")
-
-
-@app.get("/show/{date}", response_class=HTMLResponse)
-def show_page(request: Request, date: str, autoplay: bool = True) -> Any:
-    """整片演出视图：读 /api/recap/{date}，逐幕自动播放（空格/方向键可控）。"""
-    return templates.TemplateResponse(
-        request, "show.html",
-        {"date": date, "single": None, "autoplay": autoplay, "title": f"A股复盘 {date}"},
-    )
-
-
-@app.get("/show/{date}/scene/{key}", response_class=HTMLResponse)
-def show_scene(request: Request, date: str, key: str) -> Any:
-    """单场景静帧视图：锁定某一幕、无控件/无进度条，便于截帧或嵌入。"""
-    return templates.TemplateResponse(
-        request, "show.html",
-        {"date": date, "single": key, "autoplay": False, "title": f"A股复盘 {date} · {key}"},
-    )
-
-
-@app.get("/show/{date}/cards", response_class=HTMLResponse)
-def show_cards(date: str) -> Any:
-    """兼容旧链接：跳到统一图文导出（全量分镜）。"""
-    return RedirectResponse(url=f"/recap/{date}/cards?mode=full")
-
-
-# ----------------------------------------------------------------------
-# 图文素材 · 情绪温度计：已并入 /recap 的「图文素材」选项卡，旧链接重定向。
-# ----------------------------------------------------------------------
-@app.get("/content", response_class=HTMLResponse)
-def content_index() -> Any:
-    return RedirectResponse(url="/recap")
-
-
-@app.get("/content/{date}", response_class=HTMLResponse)
-def content_page(date: str) -> Any:
-    return RedirectResponse(url=f"/recap/{date}?tab=material")
-
-
-@app.get("/content/{date}/cards", response_class=HTMLResponse)
-def content_cards(date: str) -> Any:
-    return RedirectResponse(url=f"/recap/{date}/cards?mode=compliant")
-
-
-@app.post("/api/content/{date}/save")
-def api_content_save(date: str, payload: dict = Body(default={})) -> Any:
-    """保存图文/分镜素材到 webdata/content/{date}/；with_video=true 时尝试出片。"""
-    from recap.thermometer import save
-
-    try:
-        res = save(date, with_video=bool((payload or {}).get("with_video")))
-    except FileNotFoundError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
-    out = {
-        "ok": True,
-        "date": res["date"],
-        "dir": str(res["dir"]),
-        "files": {"文案": str(res["文案"]), "卡片": str(res["卡片"]), "分镜": str(res["story"])},
-    }
-    if res.get("video"):
-        v = res["video"]
-        out["video"] = {"html": str(v.get("html")), "rendered": v.get("rendered"),
-                        "mp4": str(v.get("mp4")) if v.get("mp4") else None,
-                        "render_cmd": " ".join(v.get("render_cmd") or [])}
-    return JSONResponse(out)
 
 
 # ----------------------------------------------------------------------
@@ -1949,7 +2111,7 @@ def brief_fragment(request: Request, date: str) -> Any:
     """HTMX 片段：当日 AI 解读（缓存优先；未配置 key 时返回提示）。"""
     from kb.brief import generate_brief
 
-    snapshot = reader.load(date)
+    snapshot = _load_snapshot(date)
     if snapshot is None:
         return HTMLResponse('<div class="text-slate-500 text-sm">无快照</div>')
     result = generate_brief(snapshot, KB_DB_PATH)
@@ -1960,7 +2122,7 @@ def brief_fragment(request: Request, date: str) -> Any:
 def api_daily_brief(date: str, force: bool = False) -> Any:
     from kb.brief import generate_brief
 
-    snapshot = reader.load(date)
+    snapshot = _load_snapshot(date)
     if snapshot is None:
         return JSONResponse({"error": "not found", "date": date}, status_code=404)
     return JSONResponse(generate_brief(snapshot, KB_DB_PATH, force=force))

@@ -25,6 +25,8 @@
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100">
+  {% set current_user = request.state.user %}
+  {% set is_admin = current_user and current_user.get('role') == 'admin' %}
   <div class="flex h-screen overflow-hidden">
     {# ===== 侧边导航（Codex++ 风格） ===== #}
     <aside class="w-56 shrink-0 border-r border-slate-800 bg-slate-950/95 flex flex-col">
@@ -32,7 +34,7 @@
         <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-300 font-bold">情</span>
         <div class="leading-tight">
           <div class="font-bold tracking-tight">A股短线系统</div>
-          <div class="text-[11px] text-slate-500">管理控制台</div>
+          <div class="text-[11px] text-slate-500">{{ '管理控制台' if is_admin else '只读看板' }}</div>
         </div>
       </div>
       <nav class="flex-1 overflow-y-auto p-2 space-y-0.5" id="side-nav">
@@ -85,6 +87,11 @@
         </a>
 
         <div class="nav-group">系统</div>
+        {% if is_admin %}
+        <a class="nav-link" href="/admin/users" data-prefix="/admin/users">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+          <span>用户管理</span>
+        </a>
         <a class="nav-link" href="/run" data-prefix="/run">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
           <span>生成数据</span>
@@ -101,14 +108,18 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
           <span>日志</span>
         </a>
+        {% endif %}
         <a class="nav-link" href="/about" data-prefix="/about">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
           <span>关于</span>
         </a>
       </nav>
-      <div class="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500 flex items-center gap-2">
-        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
-        <span>本地内嵌服务 · 离线运行</span>
+      <div class="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500 space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span>{{ current_user.get('label') if current_user else '未登录' }} · {{ current_user.get('username') if current_user else '' }}</span>
+        </div>
+        <a href="/logout" class="inline-flex items-center text-slate-400 hover:text-emerald-300">退出登录</a>
       </div>
     </aside>
 
@@ -122,6 +133,10 @@
           </div>
           <div class="flex-1"></div>
           {% block header_extra %}{% endblock %}
+          <div class="hidden md:flex items-center gap-2 text-xs text-slate-500 border border-slate-800 rounded-md px-2.5 py-1.5">
+            <span class="w-1.5 h-1.5 rounded-full {{ 'bg-emerald-400' if is_admin else 'bg-sky-400' }}"></span>
+            <span>{{ current_user.get('label') if current_user else '未登录' }}</span>
+          </div>
           <button onclick="location.reload()" title="刷新"
                   class="text-slate-400 hover:text-emerald-300 border border-slate-700 hover:border-emerald-600 rounded-md p-1.5">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
@@ -133,6 +148,13 @@
       </main>
     </div>
   </div>
+
+  {% if current_user %}
+  <div class="fixed right-3 bottom-3 z-50 pointer-events-none select-none text-[11px] leading-5 text-slate-400/60 text-right">
+    <div>{{ current_user.get('username') }} · {{ current_user.get('label') }}</div>
+    <div>有效期 {{ current_user.get('expire_at_display') }}</div>
+  </div>
+  {% endif %}
 
   <script>
     (function () {
