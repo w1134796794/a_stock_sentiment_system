@@ -1,6 +1,8 @@
 import json
+import importlib.util
 
 import pandas as pd
+import pytest
 
 from core.data.market_dataset import MarketDataset, call_key
 from core.etl.normalizers import (
@@ -11,6 +13,9 @@ from core.etl.normalizers import (
     standardize_stock_daily_frame,
 )
 from core.etl.warehouse import persist_market_dataset_silver
+
+
+DUCKDB_MISSING = importlib.util.find_spec("duckdb") is None
 
 
 def test_etl_normalizes_stock_daily_schema_and_units():
@@ -123,3 +128,56 @@ def test_persist_market_dataset_silver_writes_files_and_quality(tmp_path):
     assert (tmp_path / "silver" / "stock_daily_silver.parquet").exists()
     report = json.loads((tmp_path / "quality" / "quality_20260616.json").read_text(encoding="utf-8"))
     assert report["tables"]["stock_daily_silver"]["rows"] == 1
+
+
+@pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
+def test_persist_market_dataset_silver_keeps_historical_trade_dates(tmp_path):
+    import duckdb  # type: ignore
+
+    db_path = tmp_path / "factors.duckdb"
+
+    def make_ds(trade_date: str, close: float) -> MarketDataset:
+        ds = MarketDataset(trade_date=trade_date)
+        ds.all_daily[trade_date] = pd.DataFrame([{
+            "ts_code": "000001.SZ",
+            "trade_date": trade_date,
+            "open": close - 0.1,
+            "high": close + 0.2,
+            "low": close - 0.2,
+            "close": close,
+            "pre_close": close - 0.1,
+            "pct_chg": 1.0,
+            "vol": 1000,
+            "amount": 100.0,
+        }])
+        return ds
+
+    persist_market_dataset_silver(
+        make_ds("20260617", 10.0),
+        duckdb_path=db_path,
+        silver_dir=tmp_path / "silver",
+        quality_dir=tmp_path / "quality",
+    )
+    persist_market_dataset_silver(
+        make_ds("20260618", 11.0),
+        duckdb_path=db_path,
+        silver_dir=tmp_path / "silver",
+        quality_dir=tmp_path / "quality",
+    )
+    persist_market_dataset_silver(
+        make_ds("20260618", 12.0),
+        duckdb_path=db_path,
+        silver_dir=tmp_path / "silver",
+        quality_dir=tmp_path / "quality",
+    )
+
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        rows = con.execute(
+            """
+            SELECT trade_date, close
+            FROM stock_daily_silver
+            ORDER BY trade_date
+            """
+        ).fetchall()
+
+    assert rows == [("20260617", 10.0), ("20260618", 12.0)]

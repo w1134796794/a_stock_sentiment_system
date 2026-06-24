@@ -18,6 +18,68 @@ from core.factors.jobs.gold_utils import (
 from core.utils.price_limit import get_price_limit_pct_points, limit_progress
 
 
+# ---------------------------------------------------------------------------
+# 打板身位（board）子类评分 —— 连板高度 / 封板时间 / 流通市值适配
+#
+# 设计：这些维度只对「当日涨停」的票有意义，非涨停票给中性 50 分（不污染排序）。
+# 评分均为非单调：连板高度在加速期最优、过高衰减；流通市值偏中小盘弹性更好。
+# ---------------------------------------------------------------------------
+
+# 连板高度 -> 梯队分（非单调）：首板偏强、二板加速最优，>=6 高位风险衰减
+_BOARD_HEIGHT_TABLE = {0: 50.0, 1: 70.0, 2: 90.0, 3: 85.0, 4: 70.0, 5: 55.0}
+
+
+def _board_height_score(boards: float) -> float:
+    n = int(to_float(boards, 0))
+    if n <= 0:
+        return 50.0
+    return _BOARD_HEIGHT_TABLE.get(n, 35.0)
+
+
+def _seal_time_score(first_time: str, open_times: float) -> float:
+    """封板时间质量分：首封越早越强；每次炸板扣分。非涨停（无封板时间）= 中性 50。"""
+    ft = str(first_time or "").strip()
+    if not ft or ft in ("0", "0.0", "nan", "None", "00:00:00"):
+        return 50.0
+    if ft <= "09:35:00":
+        base = 95.0
+    elif ft <= "10:00:00":
+        base = 82.0
+    elif ft <= "10:30:00":
+        base = 68.0
+    elif ft <= "11:30:00":
+        base = 52.0
+    elif ft <= "14:00:00":
+        base = 38.0
+    else:
+        base = 22.0
+    base -= min(int(to_float(open_times, 0)), 4) * 6.0
+    return max(0.0, min(100.0, base))
+
+
+def _float_mv_fit_score(float_mv_wan: float) -> float:
+    """流通市值适配分：输入按 Tushare 习惯为万元，换算亿元后做区间打分。
+
+    中小盘弹性更优（理想 ~20-80 亿）；过小有流动性风险、过大弹性差，两端衰减。
+    缺失（非涨停票无该字段）返回中性 50。
+    """
+    mv_wan = to_float(float_mv_wan, 0.0)
+    if mv_wan <= 0:
+        return 50.0
+    yi = mv_wan / 10000.0
+    if yi < 5:
+        return 45.0
+    if yi < 20:
+        return 60.0 + (yi - 5) / 15.0 * 30.0
+    if yi <= 80:
+        return 90.0
+    if yi <= 200:
+        return 90.0 - (yi - 80) / 120.0 * 35.0
+    if yi <= 500:
+        return 55.0 - (yi - 200) / 300.0 * 25.0
+    return 30.0
+
+
 def _activity_ratio_score(value: float) -> float:
     """Score turnover/volume expansion: moderate confirmation beats exhaustion."""
     v = to_float(value, 1.0)
@@ -58,6 +120,13 @@ class StockFactorJob:
             return result
 
         hist = stock[stock["trade_date"] < str(trade_date)].copy()
+
+        limit_pool = read_table(con, "limit_up_pool_silver", where="trade_date = ?", params=[str(trade_date)])
+        pool_by_code: dict = {}
+        if not limit_pool.empty and "code" in limit_pool.columns:
+            limit_pool["code"] = limit_pool["code"].astype(str)
+            pool_by_code = limit_pool.drop_duplicates("code", keep="last").set_index("code").to_dict("index")
+
         existing_wide = read_table(con, "factor_stock_wide", where="trade_date < ?", params=[str(trade_date)])
         amount_hist = hist[["trade_date", "code", "amount_yuan"]].copy() if not hist.empty else pd.DataFrame()
         vol_hist = hist[["trade_date", "code", "vol_hand"]].copy() if not hist.empty else pd.DataFrame()
@@ -129,12 +198,44 @@ class StockFactorJob:
             for row in today.itertuples()
         ]
         today["sector_resonance_score"] = 50.0
+
+        board_height = []
+        seal_time_score = []
+        float_mv_fit_score = []
+        float_mv_vals = []
+        for _, row in today.iterrows():
+            code = str(row.get("code") or "")
+            pool = pool_by_code.get(code) or {}
+            pool_boards = to_float(pool.get("limit_times"), 0) if pool else 0
+            boards = pool_boards if pool_boards > 0 else 0
+            board_height.append(boards)
+            seal_time_score.append(_seal_time_score(pool.get("first_time"), pool.get("open_times")))
+            # 流通市值（万元）：优先用全市场覆盖的 daily_basic circ_mv，缺失再回退涨停池 float_mv
+            circ_mv = to_float(row.get("circ_mv"), 0)
+            fmv = circ_mv if circ_mv > 0 else (to_float(pool.get("float_mv"), 0) if pool else 0.0)
+            float_mv_vals.append(fmv)
+            float_mv_fit_score.append(_float_mv_fit_score(fmv))
+        today["board_height"] = board_height
+        today["board_height_score"] = [_board_height_score(b) for b in board_height]
+        today["seal_time_score"] = seal_time_score
+        today["float_mv"] = float_mv_vals
+        today["float_mv_fit_score"] = float_mv_fit_score
+        today["board_score"] = [
+            safe_weighted_score([
+                (row.board_height_score, 0.50),
+                (row.seal_time_score, 0.30),
+                (row.float_mv_fit_score, 0.20),
+            ])
+            for row in today.itertuples()
+        ]
+
         today["total_score"] = [
             safe_weighted_score([
-                (row.tech_score, 0.40),
-                (row.volume_score, 0.15),
-                (row.liquidity_score, 0.30),
-                (row.sector_resonance_score, 0.15),
+                (row.tech_score, 0.35),
+                (row.volume_score, 0.12),
+                (row.liquidity_score, 0.23),
+                (row.sector_resonance_score, 0.10),
+                (row.board_score, 0.20),
             ])
             for row in today.itertuples()
         ]
@@ -149,6 +250,12 @@ class StockFactorJob:
             "volume_score",
             "liquidity_score",
             "sector_resonance_score",
+            "board_score",
+            "board_height",
+            "board_height_score",
+            "seal_time_score",
+            "float_mv",
+            "float_mv_fit_score",
             "total_score",
             "rank",
             "pct_chg",
@@ -196,6 +303,26 @@ class StockFactorJob:
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_liquidity_percentile", raw_value=row["amount_yuan"],
                     score=row["liquidity_score"], percentile=row["liquidity_score"],
+                    direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_board_height", raw_value=row["board_height"], score=row["board_height_score"],
+                    direction="target_range",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_seal_time_quality", raw_value=row["board_height"], score=row["seal_time_score"],
+                    direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_float_mv_fit", raw_value=row["float_mv"], score=row["float_mv_fit_score"],
+                    direction="target_range",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_board_position", raw_value=row["board_height"], score=row["board_score"],
                     direction="higher_better",
                 ),
                 make_long_record(

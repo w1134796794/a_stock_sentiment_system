@@ -91,7 +91,7 @@ class FinalReportGenerator:
         report.append("### 筛选标准")
         report.append("1. **活跃度**: 20日内涨停次数 ≥ 2次")
         report.append("2. **连板能力**: 最高连板数 ≥ 2板")
-        report.append("3. **涨幅表现**: 平均涨幅 ≥ 9.5%")
+        report.append("3. **涨幅表现**: 平均涨幅处于强势区间")
         report.append("4. **所属板块**: 属于主线板块\n")
         
         report.append(f"**筛选结果**: 共 {len(self.focus)} 只标的符合条件\n")

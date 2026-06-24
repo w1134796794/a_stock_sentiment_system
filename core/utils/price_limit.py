@@ -47,45 +47,6 @@ def get_price_limit_pct_points(code: Any, name: Any = "", pre_close: Optional[fl
     return None if pct is None else pct * 100.0
 
 
-def near_limit_buffer_pct_points(limit_pct_points: float) -> float:
-    # Keep the old 9.5% main-board threshold, while ST keeps a tighter 4.8% threshold.
-    return 0.2 if limit_pct_points <= 5.0 else 0.5
-
-
-def near_limit_up_threshold_pct(code: Any, name: Any = "", pre_close: Optional[float] = None) -> Optional[float]:
-    limit_pct = get_price_limit_pct_points(code, name, pre_close)
-    if limit_pct is None:
-        return None
-    return limit_pct - near_limit_buffer_pct_points(limit_pct)
-
-
-def near_limit_down_threshold_pct(code: Any, name: Any = "", pre_close: Optional[float] = None) -> Optional[float]:
-    limit_pct = get_price_limit_pct_points(code, name, pre_close)
-    if limit_pct is None:
-        return None
-    return -limit_pct + near_limit_buffer_pct_points(limit_pct)
-
-
-def is_near_limit_up_pct(pct_chg: Any, code: Any, name: Any = "", pre_close: Optional[float] = None) -> bool:
-    threshold = near_limit_up_threshold_pct(code, name, pre_close)
-    if threshold is None:
-        return False
-    try:
-        return float(pct_chg) >= threshold
-    except Exception:
-        return False
-
-
-def is_near_limit_down_pct(pct_chg: Any, code: Any, name: Any = "", pre_close: Optional[float] = None) -> bool:
-    threshold = near_limit_down_threshold_pct(code, name, pre_close)
-    if threshold is None:
-        return False
-    try:
-        return float(pct_chg) <= threshold
-    except Exception:
-        return False
-
-
 def limit_progress(pct_chg: Any, code: Any, name: Any = "", pre_close: Optional[float] = None) -> float:
     limit_pct = get_price_limit_pct_points(code, name, pre_close)
     if not limit_pct:

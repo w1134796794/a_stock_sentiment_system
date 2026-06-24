@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -130,18 +131,6 @@ def _normalize_stock_code(code: Any) -> str:
     return digits[:6]
 
 
-def _limit_threshold(code: Any, name: Any = "") -> float:
-    code6 = _normalize_stock_code(code)
-    label = str(name or "").upper()
-    if "ST" in label:
-        return 4.8
-    if code6.startswith(("300", "301", "688", "689")):
-        return 19.5
-    if code6.startswith(("8", "4", "920")):
-        return 29.5
-    return 9.5
-
-
 def _position_range(score: float) -> str:
     if score >= 70:
         return "60-80%"
@@ -170,85 +159,140 @@ def _table_exists(con: Any, table: str) -> bool:
         return False
 
 
-def _board_counts(df: Any, date: str) -> Dict[str, int]:
-    """Count consecutive limit-up days ending at date when historical rows exist."""
-    counts: Dict[str, int] = {}
-    if df is None or getattr(df, "empty", True):
-        return counts
-    for code, group in df.groupby("code", sort=False):
-        group = group.sort_values("trade_date")
-        if str(group.iloc[-1].get("trade_date")) != str(date) or not bool(group.iloc[-1].get("is_limit_up")):
-            continue
-        n = 0
-        for ok in reversed(group["is_limit_up"].tolist()):
-            if ok:
-                n += 1
-            else:
-                break
-        counts[str(code)] = max(n, 1)
-    return counts
-
-
-def _cohort_stats(rows: Any, board_count: Dict[str, int]) -> Dict[str, Any]:
-    if rows is None or getattr(rows, "empty", True):
-        return {
-            "limit_up_count": None,
-            "limit_down_count": None,
-            "max_board_height": None,
-            "continuous_count": None,
-            "broken_rate": None,
-        }
-    codes = [str(x) for x in rows.get("code", []).tolist()]
-    boards = [board_count.get(c, 1) for c in codes if board_count.get(c, 0) > 0]
-    return {
-        "limit_up_count": int(rows["is_limit_up"].sum()),
-        "limit_down_count": int(rows["is_limit_down"].sum()),
-        "max_board_height": max(boards) if boards else 0,
-        "continuous_count": sum(1 for b in boards if b >= 2),
-        "broken_rate": None,
-    }
-
-
-def _promotion_stats(hist: Any, today_board: Dict[str, int], date: str) -> Dict[str, Any]:
-    empty = {"overall": None, "rate_1to2": None, "rate_2to3": None, "rate_high": None}
-    if hist is None or getattr(hist, "empty", True):
-        return empty
-    dates = sorted(str(x) for x in hist["trade_date"].dropna().unique().tolist() if str(x) < str(date))
-    if not dates:
-        return empty
-    prev_date = dates[-1]
-    prev_hist = hist[hist["trade_date"] <= prev_date].copy()
-    prev_board = _board_counts(prev_hist, prev_date)
-    if not prev_board:
-        return empty
-
-    def rate(prev_level: int | None = None, high: bool = False) -> float | None:
-        base = []
-        for code, b in prev_board.items():
-            if high and b >= 3:
-                base.append((code, b))
-            elif prev_level is not None and b == prev_level:
-                base.append((code, b))
-        if not base:
-            return None
-        promoted = sum(1 for code, b in base if today_board.get(code, 0) >= b + 1)
-        return round(promoted / len(base) * 100, 2)
-
-    all_base = list(prev_board.items())
-    promoted_all = sum(1 for code, b in all_base if today_board.get(code, 0) >= b + 1)
-    return {
-        "overall": round(promoted_all / len(all_base) * 100, 2) if all_base else None,
-        "rate_1to2": rate(1),
-        "rate_2to3": rate(2),
-        "rate_high": rate(high=True),
-    }
-
-
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _format_amount_yuan(value: Any) -> str:
+    amount = _safe_float(value)
+    if amount <= 0:
+        return ""
+    if amount >= 1e12:
+        return f"{amount / 1e12:.2f}万亿"
+    if amount >= 1e8:
+        return f"{amount / 1e8:.0f}亿"
+    return f"{amount:,.0f}"
+
+
+def _all_daily_amount_yuan(path: Path) -> float:
+    if not path.exists():
+        return 0.0
+    total = 0.0
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            fields = set(reader.fieldnames or [])
+            if "amount_yuan" in fields:
+                col, multiplier = "amount_yuan", 1.0
+            elif "成交额" in fields:
+                col, multiplier = "成交额", 1.0
+            elif "amount" in fields:
+                # Tushare daily.amount is in thousand yuan.
+                col, multiplier = "amount", 1000.0
+            else:
+                return 0.0
+            for row in reader:
+                total += _safe_float(row.get(col)) * multiplier
+    except Exception:
+        return 0.0
+    return total
+
+
+@lru_cache(maxsize=64)
+def _market_amount_overlay(date: str) -> Dict[str, Any]:
+    base = Path(BASE_DIR) / "data" / "cache" / "stock" / "all_daily"
+    if not date or not base.exists():
+        return {}
+    files = sorted(
+        (p for p in base.glob("*.csv") if p.stem.isdigit() and p.stem <= str(date)),
+        key=lambda p: p.stem,
+    )
+    current = next((p for p in files if p.stem == str(date)), None)
+    if current is None:
+        return {}
+    amount_today = _all_daily_amount_yuan(current)
+    if amount_today <= 0:
+        return {}
+    prev_files = [p for p in files if p.stem < str(date)]
+    prev = prev_files[-1] if prev_files else None
+    amount_prev = _all_daily_amount_yuan(prev) if prev else 0.0
+    ratio_prev = amount_today / amount_prev if amount_prev > 0 else None
+    return {
+        "amount_total": amount_today,
+        "amount_text": _format_amount_yuan(amount_today),
+        "amount_prev_date": prev.stem if prev else "",
+        "amount_ratio_prev": ratio_prev,
+        "amount_source": str(current),
+    }
+
+
+def _read_limit_pool_count(path: Path, limit_type: str) -> int | None:
+    if not path.exists():
+        return None
+    try:
+        count = 0
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            fields = set(reader.fieldnames or [])
+            for row in reader:
+                if "limit" in fields and str(row.get("limit") or "").strip().upper() != limit_type:
+                    continue
+                count += 1
+        return count
+    except Exception:
+        return None
+
+
+def _fetch_and_cache_limit_pool(date: str, limit_type: str) -> int | None:
+    token = (TUSHARE_TOKEN or "").strip()
+    if not token or token == "your_tushare_token_here":
+        return None
+    try:
+        import tushare as ts  # type: ignore
+
+        pro = ts.pro_api(token)
+        try:
+            df = pro.limit_list_d(trade_date=str(date), limit_type=limit_type)
+        except TypeError:
+            df = pro.limit_list_d(trade_date=str(date))
+        if df is None or df.empty:
+            count = 0
+        else:
+            if "limit" in df.columns:
+                df = df[df["limit"].astype(str).str.upper() == limit_type].copy()
+            count = int(len(df))
+        folder = Path(BASE_DIR) / "data" / "cache" / "market" / ("limit_up" if limit_type == "U" else "limit_down")
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{date}.csv"
+        if df is not None:
+            df.to_csv(path, index=False)
+        return count
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=64)
+def _strict_limit_counts(date: str) -> Dict[str, Any]:
+    if not date:
+        return {}
+    base = Path(BASE_DIR) / "data" / "cache" / "market"
+    up_path = base / "limit_up" / f"{date}.csv"
+    down_path = base / "limit_down" / f"{date}.csv"
+    up_count = _read_limit_pool_count(up_path, "U")
+    down_count = _read_limit_pool_count(down_path, "D")
+    if up_count is None:
+        up_count = _fetch_and_cache_limit_pool(date, "U")
+    if down_count is None:
+        down_count = _fetch_and_cache_limit_pool(date, "D")
+    out: Dict[str, Any] = {"limit_source": "tushare_limit_list_d"}
+    if up_count is not None:
+        out["limit_up"] = int(up_count)
+    if down_count is not None:
+        out["limit_down"] = int(down_count)
+    return out
 
 
 def _limitup_cache_overlay(date: str) -> Dict[str, Any]:
@@ -402,55 +446,34 @@ def _etl_market_overlay(date: str) -> Dict[str, Any]:
                     out["indices"] = rows
 
             if _table_exists(con, "stock_daily_silver"):
-                hist = con.execute(
+                today = con.execute(
                     """
                     SELECT trade_date, code, ts_code, name, pct_chg, amount_yuan
                     FROM stock_daily_silver
-                    WHERE trade_date <= ?
-                    ORDER BY code, trade_date
+                    WHERE trade_date = ?
                     """,
                     [str(date)],
                 ).fetchdf()
-                if hist is not None and not hist.empty:
-                    hist["trade_date"] = hist["trade_date"].astype(str)
-                    hist["code"] = hist["code"].astype(str)
-                    hist["pct_chg"] = hist["pct_chg"].fillna(0).astype(float)
-                    hist["amount_yuan"] = hist["amount_yuan"].fillna(0).astype(float)
-                    hist["is_limit_up"] = hist.apply(
-                        lambda r: float(r["pct_chg"]) >= _limit_threshold(r.get("code"), r.get("name")),
-                        axis=1,
-                    )
-                    hist["is_limit_down"] = hist.apply(
-                        lambda r: float(r["pct_chg"]) <= -_limit_threshold(r.get("code"), r.get("name")),
-                        axis=1,
-                    )
-                    today = hist[hist["trade_date"] == str(date)].copy()
-                    if not today.empty:
-                        today_board = _board_counts(hist, date)
-                        total = max(len(today), 1)
-                        out.update({
-                            "up_count": int((today["pct_chg"] > 0).sum()),
-                            "down_count": int((today["pct_chg"] < 0).sum()),
-                            "flat_count": int((today["pct_chg"] == 0).sum()),
-                            "up_ratio": round(float((today["pct_chg"] > 0).sum()) / total * 100, 1),
-                            "limit_up": int(today["is_limit_up"].sum()),
-                            "limit_down": int(today["is_limit_down"].sum()),
-                            "max_board": max(today_board.values()) if today_board else 0,
-                            "amount_total": float(today["amount_yuan"].sum()),
-                            "promotion": _promotion_stats(hist, today_board, date),
-                        })
-                        ranked = today.sort_values("amount_yuan", ascending=True).reset_index(drop=True)
-                        n = len(ranked)
-                        small_end = int(n * 0.6)
-                        mid_end = int(n * 0.9)
-                        out["cohorts"] = {
-                            "small": _cohort_stats(ranked.iloc[:small_end], today_board),
-                            "mid": _cohort_stats(ranked.iloc[small_end:mid_end], today_board),
-                            "large": _cohort_stats(ranked.iloc[mid_end:], today_board),
-                        }
+                if today is not None and not today.empty:
+                    today["pct_chg"] = today["pct_chg"].fillna(0).astype(float)
+                    today["amount_yuan"] = today["amount_yuan"].fillna(0).astype(float)
+                    total = max(len(today), 1)
+                    out.update({
+                        "up_count": int((today["pct_chg"] > 0).sum()),
+                        "down_count": int((today["pct_chg"] < 0).sum()),
+                        "flat_count": int((today["pct_chg"] == 0).sum()),
+                        "up_ratio": round(float((today["pct_chg"] > 0).sum()) / total * 100, 1),
+                        "amount_total": float(today["amount_yuan"].sum()),
+                    })
+        amount_overlay = _market_amount_overlay(date)
+        if amount_overlay:
+            out.update(amount_overlay)
         cache_overlay = _limitup_cache_overlay(date)
         if cache_overlay:
             out.update(cache_overlay)
+        strict_counts = _strict_limit_counts(date)
+        if strict_counts:
+            out.update(strict_counts)
         return out
     except Exception:
         return {}
@@ -479,9 +502,11 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
         trade_date = str(snap.get("meta", {}).get("date") or m.get("date") or "")
         overlay = _etl_market_overlay(trade_date)
         market_row = overlay.get("market_row") or {}
-        market_score = _f(env.get("market_score") or market_row.get("market_score") or (m.get("scores") or {}).get("etl_market_score"))
-        trend_score = _f(env.get("trend_score") or market_row.get("trend_score"))
-        amount_ratio = metrics.get("amount_ratio_5d")
+        market_score = _f(market_row.get("market_score") or env.get("market_score") or (m.get("scores") or {}).get("etl_market_score"))
+        trend_score = _f(market_row.get("trend_score") or env.get("trend_score"))
+        amount_ratio = overlay.get("amount_ratio_prev")
+        if amount_ratio is None:
+            amount_ratio = metrics.get("amount_ratio_5d")
         if amount_ratio is None:
             amount_ratio = market_row.get("amount_ratio_5d")
         position = _position_range(market_score)
@@ -519,6 +544,10 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
             "vol_word": "放量" if _f(amount_ratio, 1.0) >= 1.05
             else ("缩量" if _f(amount_ratio, 1.0) <= 0.95 else "平量"),
             "amount_total": amount_total,
+            "amount_text": overlay.get("amount_text") or _format_amount_yuan(amount_total),
+            "amount_prev_date": overlay.get("amount_prev_date") or "",
+            "amount_source": overlay.get("amount_source") or "",
+            "limit_source": overlay.get("limit_source") or "",
             "cycle_name": m.get("cycle_name"),
             "phase_label": None,
             "phase_progress": None,
@@ -660,5 +689,3 @@ def tail_log(lines: int = 500) -> str:
         return "\n".join(rows[-n:])
     except Exception as exc:  # noqa: BLE001
         return f"[读取日志失败] {exc!r}"
-
-

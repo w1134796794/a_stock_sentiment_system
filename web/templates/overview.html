@@ -70,7 +70,7 @@
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">涨停 / 跌停</div>
     <div class="text-xl font-bold mono"><span class="text-rose-400">{{ mk.limit_up if mk.limit_up is not none else '--' }}</span><span class="text-slate-500"> / </span><span class="text-emerald-400">{{ mk.limit_down if mk.limit_down is not none else '--' }}</span></div>
-    <div class="text-[11px] text-slate-500 mt-1">最高 {{ mk.max_board if mk.max_board is not none else '--' }} 板{% if mk.broken_rate is not none %} · 炸板 {{ mk.broken_rate }}%{% endif %}</div>
+    <div class="text-[11px] text-slate-500 mt-1">最高 {{ mk.max_board if mk.max_board is not none else '--' }} 板{% if mk.broken_rate is not none %} · 炸板 {{ mk.broken_rate }}%{% endif %}{% if mk.limit_source %} · 严格口径{% endif %}</div>
   </div>
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">涨跌家数</div>
@@ -80,7 +80,12 @@
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">市场量能</div>
     <div class="text-xl font-bold {% if mk.vol_word == '放量' %}text-rose-400{% elif mk.vol_word == '缩量' %}text-emerald-400{% else %}text-slate-300{% endif %}">{{ mk.vol_word or '--' }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">{% if mk.vol_pct is not none %}较昨日 {{ '%+.1f'|format(mk.vol_pct) }}%{% else %}—{% endif %}</div>
+    <div class="text-[11px] text-slate-500 mt-1">
+      {% if mk.amount_text %}成交额 {{ mk.amount_text }}{% endif %}
+      {% if mk.vol_pct is not none %}
+        {% if mk.amount_text %} · {% endif %}较{{ mk.amount_prev_date or '昨日' }} {{ '%+.1f'|format(mk.vol_pct) }}%
+      {% elif not mk.amount_text %}—{% endif %}
+    </div>
   </div>
   <a href="/data/strategy" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
     <div class="text-xs text-slate-400 mb-1">指标候选</div>

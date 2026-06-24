@@ -413,6 +413,12 @@ class ScreeningEngine:
             })
         return final
 
+    @staticmethod
+    def _factor_series(df: pd.DataFrame, factor: str, neutral_score: float) -> pd.Series:
+        """取因子列为数值 Series；缺失列退化为中性分（避免 df.get 返回标量导致 .fillna 崩溃）。"""
+        col = df[factor] if factor in df.columns else pd.Series(neutral_score, index=df.index)
+        return pd.to_numeric(col, errors="coerce").fillna(neutral_score)
+
     def _ranking_score(self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float) -> pd.Series:
         weights = (cfg.get("ranking") or {}).get("weights") or {"stk_total_score": 1.0}
         total_weight = sum(max(float(w), 0.0) for w in weights.values())
@@ -421,7 +427,7 @@ class ScreeningEngine:
         score = pd.Series([0.0] * len(df), index=df.index, dtype=float)
         for factor, weight in weights.items():
             weight = max(float(weight), 0.0)
-            values = pd.to_numeric(df.get(factor, neutral_score), errors="coerce").fillna(neutral_score)
+            values = self._factor_series(df, factor, neutral_score)
             score += values * weight
         score = score / total_weight
         penalty = self._ranking_penalty(df, cfg, neutral_score)
@@ -434,7 +440,7 @@ class ScreeningEngine:
             max_penalty = _to_float(rule.get("max_penalty"), 0.0)
             if not factor or max_penalty <= 0:
                 continue
-            values = pd.to_numeric(df.get(factor, neutral_score), errors="coerce").fillna(neutral_score)
+            values = self._factor_series(df, factor, neutral_score)
             if "below" in rule:
                 below = _to_float(rule.get("below"), neutral_score)
                 floor = _to_float(rule.get("floor"), 0.0)

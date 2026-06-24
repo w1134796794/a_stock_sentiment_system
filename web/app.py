@@ -48,7 +48,6 @@ from config.settings import (
     WEB_DATA_DIR,
     FACTOR_DB_PATH,
 )
-from core.utils.price_limit import near_limit_up_threshold_pct
 from snapshot.reader import SnapshotReader
 
 BASE = Path(__file__).parent
@@ -618,10 +617,6 @@ def _mainline_theme_rows(date: str, limit: int = 10, lookback: int = 10) -> List
     return selected
 
 
-def _limit_up_threshold(code: Any, name: Any = "") -> float:
-    return near_limit_up_threshold_pct(code, name) or 9.5
-
-
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -634,6 +629,13 @@ def _format_board_time(value: Any) -> str:
     if not text:
         return ""
     text = text.split(".")[0]
+    if ":" in text:
+        parts = text.split(":")
+        if len(parts) >= 2:
+            hh = parts[0].zfill(2)
+            mm = parts[1].zfill(2)
+            ss = (parts[2] if len(parts) >= 3 else "00").zfill(2)
+            return f"{hh}:{mm}:{ss}"
     if not text.isdigit() or int(text or "0") <= 0:
         return ""
     text = text.zfill(6)[-6:]
@@ -687,7 +689,7 @@ def _build_limitup_section_from_cache(date: str) -> Optional[Dict[str, Any]]:
         "kind": "table",
         "columns": ["行业", "概念", "股票代码", "股票名称", "连板数", "涨幅%", "最新价", "成交额(亿)", "首次涨停时间", "炸板次数"],
         "rows": rows,
-        "summary": "由本地 limit_up_stocks.csv 涨停明细缓存生成，包含连板数、封板时间、炸板次数和行业归属。",
+        "summary": "包含连板数、封板时间、炸板次数和行业归属。",
     }
 
 
@@ -702,25 +704,36 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
         if not Path(FACTOR_DB_PATH).exists():
             return None
         with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
-            exists = con.execute(
+            limit_exists = con.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'limit_up_pool_silver'"
+            ).fetchone()[0]
+            if not limit_exists:
+                return None
+            stock_exists = con.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'stock_daily_silver'"
             ).fetchone()[0]
-            if not exists:
-                return None
-            df = con.execute(
+            if stock_exists:
+                sql = """
+                SELECT l.trade_date, l.code, l.ts_code, l.name, l.pct_chg,
+                       l.first_time, l.open_times, l.limit_times, l.fd_amount, l.float_mv,
+                       s.close, s.amount_yuan
+                FROM limit_up_pool_silver l
+                LEFT JOIN stock_daily_silver s
+                  ON s.trade_date = l.trade_date AND s.code = l.code
+                WHERE l.trade_date = ?
+                ORDER BY l.limit_times DESC, l.first_time ASC, l.fd_amount DESC
                 """
-                WITH recent_dates AS (
-                    SELECT DISTINCT trade_date
-                    FROM stock_daily_silver
-                    WHERE trade_date <= ?
-                    ORDER BY trade_date DESC
-                    LIMIT 30
-                )
-                SELECT s.trade_date, s.code, s.ts_code, s.name, s.close, s.pct_chg, s.amount_yuan
-                FROM stock_daily_silver s
-                JOIN recent_dates d ON s.trade_date = d.trade_date
-                ORDER BY code, trade_date
-                """,
+            else:
+                sql = """
+                SELECT trade_date, code, ts_code, name, pct_chg,
+                       first_time, open_times, limit_times, fd_amount, float_mv,
+                       0.0 AS close, 0.0 AS amount_yuan
+                FROM limit_up_pool_silver
+                WHERE trade_date = ?
+                ORDER BY limit_times DESC, first_time ASC, fd_amount DESC
+                """
+            df = con.execute(
+                sql,
                 [str(date)],
             ).fetchdf()
     except Exception:
@@ -728,32 +741,10 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
 
     if df is None or df.empty:
         return None
-    df["trade_date"] = df["trade_date"].astype(str)
-    df["pct_chg"] = df["pct_chg"].fillna(0).astype(float)
-    df["is_limit_up"] = df.apply(
-        lambda r: float(r["pct_chg"]) >= _limit_up_threshold(r.get("code"), r.get("name")),
-        axis=1,
-    )
-    today = df[(df["trade_date"] == str(date)) & (df["is_limit_up"])].copy()
-    if today.empty:
-        return None
 
     concept_map = _stock_concept_map()
-    board_count: Dict[str, int] = {}
-    for code, group in df.groupby("code", sort=False):
-        group = group.sort_values("trade_date")
-        if str(group.iloc[-1].get("trade_date")) != str(date) or not bool(group.iloc[-1].get("is_limit_up")):
-            continue
-        count = 0
-        for ok in reversed(group["is_limit_up"].tolist()):
-            if ok:
-                count += 1
-            else:
-                break
-        board_count[str(code)] = max(count, 1)
-
     rows: List[Dict[str, Any]] = []
-    for _, r in today.iterrows():
+    for _, r in df.iterrows():
         amount_yuan = float(r.get("amount_yuan") or 0)
         code = str(r.get("code") or "")
         concepts = concept_map.get(_normalize_stock_code(code)) or []
@@ -763,12 +754,12 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
             "概念": concept_label,
             "股票代码": code,
             "股票名称": str(r.get("name") or ""),
-            "连板数": int(board_count.get(code, 1)),
+            "连板数": int(_to_float(r.get("limit_times"), 1.0) or 1),
             "涨幅%": round(float(r.get("pct_chg") or 0), 2),
             "最新价": round(float(r.get("close") or 0), 2),
             "成交额(亿)": round(amount_yuan / 1e8, 2) if amount_yuan else None,
-            "首次涨停时间": "",
-            "炸板次数": 0,
+            "首次涨停时间": _format_board_time(r.get("first_time")),
+            "炸板次数": int(_to_float(r.get("open_times"))),
             "_concepts": concepts[:5],
         })
     rows.sort(key=lambda x: (x.get("连板数") or 0, x.get("涨幅%") or 0, x.get("成交额(亿)") or 0), reverse=True)
@@ -777,7 +768,7 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
         "kind": "table",
         "columns": ["行业", "概念", "股票代码", "股票名称", "连板数", "涨幅%", "最新价", "成交额(亿)", "首次涨停时间", "炸板次数"],
         "rows": rows,
-        "summary": "由 stock_daily_silver 按涨停阈值合成，并用本地 THS 概念成员表补充概念归属。",
+        "summary": "由 limit_up_pool_silver 官方涨停池生成，并用本地 THS 概念成员表补充概念归属。",
     }
 
 
@@ -1012,8 +1003,6 @@ DATA_CATEGORIES: List[Dict[str, Any]] = [
      "names": ["涨停梯队", "概念连板梯队"]},
     {"key": "capital", "label": "龙虎榜资金", "signals": False,
      "names": ["龙虎榜", "资金流向", "筹码结构"]},
-    {"key": "review", "label": "数据产物", "signals": False,
-     "names": ["指标筛选", "交易计划", "因子原始数据", "风控闸门"]},
 ]
 _CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
 
