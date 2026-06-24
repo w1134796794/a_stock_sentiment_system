@@ -158,11 +158,13 @@ class MarketDataManager(DataManagerBase):
             df = self.ts_pro.limit_list_d(trade_date=date)
             if df.empty:
                 logger.warning(f"[get_limit_up_pool] {date} 未获取到数据")
+                df.to_csv(cache_file, index=False)
                 return pd.DataFrame()
 
             df = df[df['limit'] == 'U'].copy()
             if df.empty:
                 logger.info(f"[get_limit_up_pool] {date} 无涨停股票")
+                df.to_csv(cache_file, index=False)
                 return pd.DataFrame()
 
             df = self._normalize_limit_up_format(df, date)
@@ -190,11 +192,13 @@ class MarketDataManager(DataManagerBase):
             df = self.ts_pro.limit_list_d(trade_date=date)
             if df.empty:
                 logger.warning(f"[get_limit_down_pool] {date} 未获取到数据")
+                df.to_csv(cache_file, index=False)
                 return pd.DataFrame()
 
             df = df[df['limit'] == 'D'].copy()
             if df.empty:
                 logger.info(f"[get_limit_down_pool] {date} 无跌停股票")
+                df.to_csv(cache_file, index=False)
                 return pd.DataFrame()
 
             df.to_csv(cache_file, index=False)

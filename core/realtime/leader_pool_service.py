@@ -9,7 +9,6 @@ from typing import Any, Dict, Iterable, List, Optional
 from core.realtime.models import normalize_stock_code
 from core.utils.price_limit import (
     get_price_limit_pct_points,
-    is_near_limit_up_pct,
     limit_progress,
 )
 
@@ -135,7 +134,7 @@ class LeaderPoolService:
         name = raw.get("name") or source.get("name") or ""
         limit_pct = get_price_limit_pct_points(code, name) or 10.0
         limit_ratio = limit_progress(pct_chg, code, name)
-        limit_bonus = 5.0 if is_near_limit_up_pct(pct_chg, code, name) else 0.0
+        limit_bonus = 5.0 if limit_ratio >= 0.95 else 0.0
         leader_score = (
             latest_score * 0.35
             + appearance_score * 0.16
@@ -207,8 +206,8 @@ class LeaderPoolService:
         pct_chg = _to_float(context.get("pct_chg"))
         limit_pct = get_price_limit_pct_points(code, name) or 10.0
         progress = limit_progress(pct_chg, code, name)
-        if is_near_limit_up_pct(pct_chg, code, name):
-            reasons.append(f"当日接近{limit_pct:.0f}cm涨停或涨停，涨幅 {_pct_text(pct_chg)}")
+        if progress >= 0.95:
+            reasons.append(f"当日涨停进度接近满档（{limit_pct:.0f}cm进度 {progress * 100:.0f}%），涨幅 {_pct_text(pct_chg)}")
         elif progress >= 0.60:
             reasons.append(f"当日强涨幅 {_pct_text(pct_chg)}，{limit_pct:.0f}cm涨停进度 {progress * 100:.0f}%")
         amount_ratio = _to_float(context.get("amount_ratio"), 1.0)

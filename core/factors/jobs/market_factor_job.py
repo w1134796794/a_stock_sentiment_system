@@ -1,8 +1,11 @@
 """Market-level batch factor job."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
+from config.settings import CACHE_DIR
 from core.factors.jobs.gold_utils import (
     FactorJobResult,
     long_records_to_frame,
@@ -13,7 +16,89 @@ from core.factors.jobs.gold_utils import (
     write_replace_partition,
     now_iso,
 )
-from core.utils.price_limit import is_near_limit_down_pct, is_near_limit_up_pct
+
+
+def _table_exists(con, table: str) -> bool:
+    try:
+        return bool(con.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+            [table],
+        ).fetchone()[0])
+    except Exception:
+        return False
+
+
+def _strict_limit_up_count(con, trade_date: str) -> int | None:
+    try:
+        if not _table_exists(con, "limit_up_pool_silver"):
+            return None
+        count = con.execute(
+            "SELECT COUNT(*) FROM limit_up_pool_silver WHERE trade_date = ?",
+            [str(trade_date)],
+        ).fetchone()[0]
+        return int(count)
+    except Exception:
+        return None
+
+
+def _strict_limit_down_count(con, trade_date: str) -> int | None:
+    try:
+        if not _table_exists(con, "limit_down_pool_silver"):
+            return None
+        count = con.execute(
+            "SELECT COUNT(*) FROM limit_down_pool_silver WHERE trade_date = ?",
+            [str(trade_date)],
+        ).fetchone()[0]
+        return int(count)
+    except Exception:
+        return None
+
+
+def _strict_limit_cache_count(trade_date: str, limit_type: str) -> int | None:
+    folder = "limit_up" if limit_type == "U" else "limit_down"
+    path = Path(CACHE_DIR) / "market" / folder / f"{trade_date}.csv"
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+        if "limit" in df.columns:
+            df = df[df["limit"].astype(str).str.upper() == limit_type]
+        return int(len(df))
+    except Exception:
+        return None
+
+
+def _all_daily_amount_yuan(path: Path) -> float:
+    if not path.exists():
+        return 0.0
+    try:
+        df = pd.read_csv(path, usecols=lambda c: c in {"amount_yuan", "amount", "成交额"})
+        if "amount_yuan" in df.columns:
+            return float(pd.to_numeric(df["amount_yuan"], errors="coerce").fillna(0).sum())
+        if "成交额" in df.columns:
+            return float(pd.to_numeric(df["成交额"], errors="coerce").fillna(0).sum())
+        if "amount" in df.columns:
+            # Tushare daily.amount is in thousand yuan.
+            return float(pd.to_numeric(df["amount"], errors="coerce").fillna(0).sum()) * 1000.0
+    except Exception:
+        return 0.0
+    return 0.0
+
+
+def _cached_amount_ratio_prev(trade_date: str, amount_today: float) -> float | None:
+    base = Path(CACHE_DIR) / "stock" / "all_daily"
+    if amount_today <= 0 or not base.exists():
+        return None
+    files = sorted(
+        (p for p in base.glob("*.csv") if p.stem.isdigit() and p.stem < str(trade_date)),
+        key=lambda p: p.stem,
+    )
+    if not files:
+        return None
+    amount_prev = _all_daily_amount_yuan(files[-1])
+    if amount_prev <= 0:
+        return None
+    return amount_today / amount_prev
 
 
 class MarketFactorJob:
@@ -40,20 +125,32 @@ class MarketFactorJob:
         up_ratio = float((today["pct_chg"] > 0).sum() / total_count)
         down_ratio = float((today["pct_chg"] < 0).sum() / total_count)
         avg_pct = float(today["pct_chg"].mean())
-        limit_up_count = int(today.apply(
-            lambda row: is_near_limit_up_pct(row.get("pct_chg"), row.get("code"), row.get("name")),
-            axis=1,
-        ).sum())
-        limit_down_count = int(today.apply(
-            lambda row: is_near_limit_down_pct(row.get("pct_chg"), row.get("code"), row.get("name")),
-            axis=1,
-        ).sum())
+
+        limit_up_cache_count = _strict_limit_cache_count(trade_date, "U")
+        limit_down_cache_count = _strict_limit_cache_count(trade_date, "D")
+        limit_up_count = (
+            limit_up_cache_count
+            if limit_up_cache_count is not None
+            else _strict_limit_up_count(con, trade_date)
+        )
+        limit_down_count = (
+            limit_down_cache_count
+            if limit_down_cache_count is not None
+            else _strict_limit_down_count(con, trade_date)
+        )
+        if limit_up_count is None or limit_down_count is None:
+            result.ok = False
+            result.add_message("缺少 limit_list_d 涨跌停池，已拒绝使用 pct_chg 阈值推断涨跌停")
+            return result
         amount_today = float(today["amount_yuan"].sum())
 
         by_day = stock.groupby("trade_date", as_index=False)["amount_yuan"].sum().sort_values("trade_date")
         prev_days = by_day[by_day["trade_date"] < str(trade_date)].tail(5)
         amount_base = float(prev_days["amount_yuan"].mean()) if not prev_days.empty else amount_today
         amount_ratio = amount_today / amount_base if amount_base > 0 else 1.0
+        cached_amount_ratio = _cached_amount_ratio_prev(trade_date, amount_today)
+        if cached_amount_ratio is not None:
+            amount_ratio = cached_amount_ratio
 
         width_score = up_ratio * 100.0
         trend_score = score_between(avg_pct, -3.0, 3.0)

@@ -15,6 +15,8 @@ STOCK_DAILY_SILVER_COLUMNS = [
     "pct_chg",
     "vol_hand",
     "amount_yuan",
+    "circ_mv",
+    "total_mv",
     "source",
     "as_of_date",
     "ingested_at",
@@ -56,8 +58,31 @@ INDEX_DAILY_SILVER_COLUMNS = [
     "ingested_at",
 ]
 
+LIMIT_UP_POOL_SILVER_COLUMNS = [
+    "trade_date",
+    "code",
+    "ts_code",
+    "name",
+    "pct_chg",
+    "first_time",
+    "last_time",
+    "open_times",
+    "limit_times",
+    "fd_amount",
+    "float_mv",
+    "total_mv",
+    "turnover_ratio",
+    "source",
+    "as_of_date",
+    "ingested_at",
+]
+
+LIMIT_DOWN_POOL_SILVER_COLUMNS = LIMIT_UP_POOL_SILVER_COLUMNS.copy()
+
 QUALITY_TABLES = [
     "stock_daily_silver",
     "sector_daily_silver",
     "index_daily_silver",
+    "limit_up_pool_silver",
+    "limit_down_pool_silver",
 ]

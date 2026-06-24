@@ -673,6 +673,46 @@ factors:
     enabled: true
     params: {}
 
+  # --- board 子类：打板身位（由 gold stock_factor_job 计算，仅对当日涨停票有意义）---
+  stk_board_height:
+    id: "D6"
+    name: "连板高度梯队分"
+    category: "stock_tech"
+    sub_category: "board"
+    description: "连板高度映射梯队分（非单调：二板加速最优，高位衰减）；非涨停=中性50"
+    data_source: "limit_up_pool"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.50
+    enabled: true
+    params: {}
+
+  stk_seal_time_quality:
+    id: "D7"
+    name: "封板时间质量分"
+    category: "stock_tech"
+    sub_category: "board"
+    description: "首次封板越早越强，炸板次数扣分；非涨停=中性50"
+    data_source: "limit_up_pool"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.30
+    enabled: true
+    params: {}
+
+  stk_float_mv_fit:
+    id: "D8"
+    name: "流通市值适配分"
+    category: "stock_tech"
+    sub_category: "board"
+    description: "流通市值区间打分，中小盘弹性更优，两端衰减；缺失=中性50"
+    data_source: "limit_up_pool"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
+    enabled: true
+    params: {}
+
   # ==========================================
   # E. 资金流向类 (moneyflow)
   # ==========================================

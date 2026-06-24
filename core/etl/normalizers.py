@@ -13,6 +13,8 @@ import pandas as pd
 
 from core.etl.schemas import (
     INDEX_DAILY_SILVER_COLUMNS,
+    LIMIT_DOWN_POOL_SILVER_COLUMNS,
+    LIMIT_UP_POOL_SILVER_COLUMNS,
     SECTOR_DAILY_SILVER_COLUMNS,
     STOCK_DAILY_SILVER_COLUMNS,
 )
@@ -29,8 +31,14 @@ def pick(row: Any, names: Iterable[str], default: Any = None) -> Any:
             value = row.get(name)
         except Exception:
             value = None
-        if value not in (None, ""):
-            return value
+        if value is None or value == "":
+            continue
+        try:
+            if pd.isna(value):
+                continue
+        except (TypeError, ValueError):
+            pass
+        return value
     return default
 
 
@@ -178,6 +186,8 @@ def standardize_stock_daily_frame(
             "pct_chg": normalize_pct(pick(row, ("pct_chg", "pct_change", "change_pct", "涨跌幅"), 0)),
             "vol_hand": to_float(pick(row, ("vol_hand", "vol", "成交量(手)", "volume_hand"), 0)),
             "amount_yuan": to_float(amount) if "amount_yuan" in row else normalize_amount_yuan(amount, unit=amount_unit),
+            "circ_mv": to_float(pick(row, ("circ_mv", "流通市值"), 0)),
+            "total_mv": to_float(pick(row, ("total_mv", "总市值"), 0)),
             "source": str(pick(row, ("source", "数据源"), source) or source),
             "as_of_date": normalize_trade_date(as_of_date or td, td),
             "ingested_at": ingested_at,
@@ -230,6 +240,68 @@ def standardize_sector_daily_frame(
             "ingested_at": ingested_at,
         })
     return _ensure_columns(pd.DataFrame(rows), SECTOR_DAILY_SILVER_COLUMNS)
+
+
+def standardize_limit_up_pool_frame(
+    df: Optional[pd.DataFrame],
+    *,
+    trade_date: str = "",
+    as_of_date: str = "",
+    source: str = "limit_up_pool",
+) -> pd.DataFrame:
+    """标准化涨停池（limit_list_d）为银层表。
+
+    上游 ``get_limit_up_pool`` 同时保留英文原始列与中文别名，这里两者兼取，
+    输出供个股因子任务消费的连板/封板时间/流通市值等字段。仅覆盖当日涨停的票。
+    """
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        raw_code = pick(row, ("code", "ts_code", "代码", "股票代码"))
+        code = normalize_stock_code(raw_code, add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date", "date", "日期"), trade_date), trade_date)
+        rows.append({
+            "trade_date": td,
+            "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True),
+            "name": str(pick(row, ("name", "名称", "股票名称"), "") or ""),
+            "pct_chg": normalize_pct(pick(row, ("pct_chg", "pct_change", "涨跌幅"), 0)),
+            "first_time": normalize_time(pick(row, ("first_time", "首次封板时间"), "")),
+            "last_time": normalize_time(pick(row, ("last_time", "最后封板时间"), "")),
+            "open_times": to_float(pick(row, ("open_times", "炸板次数"), 0)),
+            "limit_times": to_float(pick(row, ("limit_times", "连板数"), 1)),
+            "fd_amount": to_float(pick(row, ("fd_amount", "封单金额", "涨停封单额"), 0)),
+            "float_mv": to_float(pick(row, ("float_mv", "流通市值"), 0)),
+            "total_mv": to_float(pick(row, ("total_mv", "总市值"), 0)),
+            "turnover_ratio": to_float(pick(row, ("turnover_ratio", "换手率"), 0)),
+            "source": str(pick(row, ("source", "数据源"), source) or source),
+            "as_of_date": normalize_trade_date(as_of_date or td, td),
+            "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), LIMIT_UP_POOL_SILVER_COLUMNS)
+
+
+def standardize_limit_down_pool_frame(
+    df: Optional[pd.DataFrame],
+    *,
+    trade_date: str = "",
+    as_of_date: str = "",
+    source: str = "limit_down_pool",
+) -> pd.DataFrame:
+    """标准化跌停池（limit_list_d）为银层表。
+
+    跌停池与涨停池来自同一个 Tushare 接口，字段结构保持一致，供市场情绪
+    和后续复盘严格按官方涨跌停列表取数。
+    """
+    out = standardize_limit_up_pool_frame(
+        df,
+        trade_date=trade_date,
+        as_of_date=as_of_date,
+        source=source,
+    )
+    return _ensure_columns(out, LIMIT_DOWN_POOL_SILVER_COLUMNS)
 
 
 def standardize_index_daily_frame(

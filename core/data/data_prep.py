@@ -57,6 +57,7 @@ class DataPrep:
               extra_codes: Optional[Iterable[str]] = None,
               daily_lookback_calendar_days: int = 120,
               prefetch_limit_up: bool = True,
+              prefetch_limit_down: bool = True,
               limit_up_history_days: int = 16,
               prefetch_all_daily: bool = True,
               prefetch_universe_daily: bool = True,
@@ -101,6 +102,8 @@ class DataPrep:
             self._prefetch_daily_basic(ds, trade_date)
             if prefetch_limit_up:
                 self._prefetch_limit_up(ds, trade_date, limit_up_history_days)
+            if prefetch_limit_down:
+                self._prefetch_limit_down(ds, trade_date)
             if prefetch_sectors:
                 self._prefetch_sectors(ds, trade_date, prev_trade_date, sector_history_days)
             if index_codes:
@@ -297,6 +300,19 @@ class DataPrep:
         if ds.limit_up:
             ds.prefetched.add("limit_up")
         logger.info(f"[DataPrep] limit_up 预取：{len(ds.limit_up)} 个交易日，非空 {n_ok} 个")
+
+    def _prefetch_limit_down(self, ds: MarketDataset, trade_date: str) -> None:
+        """预取当日跌停池，严格来自 Tushare limit_list_d。"""
+        if not hasattr(self.dm, "get_limit_down_pool"):
+            return
+        try:
+            df = self.dm.get_limit_down_pool(str(trade_date))
+            if isinstance(df, pd.DataFrame):
+                ds.limit_down[str(trade_date)] = df
+                ds.prefetched.add("limit_down")
+                logger.info(f"[DataPrep] limit_down 预取：{len(df)} 行 @ {trade_date}")
+        except Exception as e:
+            logger.warning(f"[DataPrep] limit_down 预取失败（将回退 dm）：{e}")
 
     def _prefetch_sectors(self, ds: MarketDataset, trade_date: str, prev_trade_date: str,
                           history_days: int = 10) -> None:

@@ -11,11 +11,23 @@ from loguru import logger
 
 from core.data.market_dataset import MarketDataset
 from core.etl.normalizers import (
+    normalize_stock_code,
     standardize_index_daily_frame,
+    standardize_limit_down_pool_frame,
+    standardize_limit_up_pool_frame,
     standardize_sector_daily_frame,
     standardize_stock_daily_frame,
 )
 from core.etl.quality import QualityReport, build_quality_report
+
+
+SILVER_DATE_PARTITION_COLUMN = {
+    "stock_daily_silver": "trade_date",
+    "sector_daily_silver": "trade_date",
+    "index_daily_silver": "trade_date",
+    "limit_up_pool_silver": "trade_date",
+    "limit_down_pool_silver": "trade_date",
+}
 
 
 class SilverWarehouse:
@@ -32,7 +44,11 @@ class SilverWarehouse:
             "rows": int(len(df)),
             "duckdb": False,
             "file": "",
+            "mode": mode,
+            "partition_dates": [],
         }
+        if "trade_date" in df.columns and not df.empty:
+            result["partition_dates"] = sorted(str(x) for x in df["trade_date"].dropna().astype(str).unique().tolist())
 
         if self.duckdb_path is not None:
             result["duckdb"] = self._write_duckdb_with_retry(table_name, df, mode=mode)
@@ -82,9 +98,39 @@ class SilverWarehouse:
             if mode == "append":
                 con.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM _etl_df WHERE 1=0")
                 con.execute(f"INSERT INTO {table_name} SELECT * FROM _etl_df")
+            elif mode == "upsert_dates":
+                self._upsert_duckdb_date_partitions(con, table_name, df)
             else:
                 con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _etl_df")
             con.unregister("_etl_df")
+
+    def _upsert_duckdb_date_partitions(self, con, table_name: str, df: pd.DataFrame) -> None:
+        partition_col = SILVER_DATE_PARTITION_COLUMN.get(table_name, "trade_date")
+        con.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM _etl_df WHERE 1=0")
+        table_cols = [str(row[0]) for row in con.execute(f"DESCRIBE {table_name}").fetchall()]
+        for col in df.columns:
+            if str(col) not in table_cols:
+                con.execute(f"ALTER TABLE {table_name} ADD COLUMN {_quote_ident(col)} {_duckdb_type(df[col])}")
+                table_cols.append(str(col))
+        for col in table_cols:
+            if col not in df.columns:
+                df[col] = None
+        df = df[table_cols]
+
+        con.unregister("_etl_df")
+        con.register("_etl_df", df)
+        if partition_col not in df.columns:
+            if not df.empty:
+                cols = ", ".join(_quote_ident(col) for col in table_cols)
+                con.execute(f"INSERT INTO {table_name} ({cols}) SELECT {cols} FROM _etl_df")
+            return
+
+        dates = sorted(str(x) for x in df[partition_col].dropna().astype(str).unique().tolist())
+        if dates:
+            con.execute(f"DELETE FROM {table_name} WHERE {_quote_ident(partition_col)} IN (SELECT DISTINCT {_quote_ident(partition_col)} FROM _etl_df)")
+        if not df.empty:
+            cols = ", ".join(_quote_ident(col) for col in table_cols)
+            con.execute(f"INSERT INTO {table_name} ({cols}) SELECT {cols} FROM _etl_df")
 
     def _write_parquet_file(self, df: pd.DataFrame, path: Path) -> None:
         """Write parquet without pandas.to_parquet to avoid pyarrow extension re-registration in long-lived apps."""
@@ -109,6 +155,20 @@ class SilverWarehouse:
 def _looks_like_duckdb_lock(error: Exception) -> bool:
     text = str(error).lower()
     return any(token in text for token in ("cannot open file", "正在使用", "being used", "locked", "lock"))
+
+
+def _quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _duckdb_type(series: pd.Series) -> str:
+    if pd.api.types.is_bool_dtype(series):
+        return "BOOLEAN"
+    if pd.api.types.is_integer_dtype(series):
+        return "BIGINT"
+    if pd.api.types.is_float_dtype(series):
+        return "DOUBLE"
+    return "VARCHAR"
 
 
 def _normalize_stock_tables(ds: MarketDataset) -> pd.DataFrame:
@@ -145,7 +205,43 @@ def _normalize_stock_tables(ds: MarketDataset) -> pd.DataFrame:
         if name_map and "name" in out.columns:
             empty_name = out["name"].fillna("").astype(str).str.strip() == ""
             out.loc[empty_name, "name"] = out.loc[empty_name, "code"].map(name_map).fillna("")
+        out = _merge_daily_basic_market_cap(ds, out)
     return out
+
+
+def _merge_daily_basic_market_cap(ds: MarketDataset, out: pd.DataFrame) -> pd.DataFrame:
+    """把 daily_basic 的流通/总市值（万元）按 (trade_date, code) 合并进个股银表。
+
+    daily_basic 仅按交易日预取（通常只有当日），历史日无市值时保持 0。
+    """
+    mv_frames: List[pd.DataFrame] = []
+    for date, df in (ds.daily_basic or {}).items():
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+        cols = {c.lower(): c for c in df.columns}
+        code_col = cols.get("ts_code") or cols.get("code")
+        if not code_col:
+            continue
+        sub = pd.DataFrame({
+            "trade_date": str(date),
+            "code": df[code_col].map(lambda v: normalize_stock_code(v, add_suffix=False)),
+            "circ_mv": pd.to_numeric(df.get(cols.get("circ_mv")), errors="coerce") if cols.get("circ_mv") else 0.0,
+            "total_mv": pd.to_numeric(df.get(cols.get("total_mv")), errors="coerce") if cols.get("total_mv") else 0.0,
+        })
+        mv_frames.append(sub)
+    if not mv_frames:
+        return out
+    mv = pd.concat(mv_frames, ignore_index=True)
+    mv = mv[mv["code"].astype(str).str.len() > 0].drop_duplicates(["trade_date", "code"], keep="last")
+    merged = out.merge(mv, on=["trade_date", "code"], how="left", suffixes=("", "_db"))
+    for col in ("circ_mv", "total_mv"):
+        db_col = f"{col}_db"
+        if db_col in merged.columns:
+            merged[col] = pd.to_numeric(merged[db_col], errors="coerce").fillna(
+                pd.to_numeric(merged.get(col), errors="coerce")
+            ).fillna(0.0)
+            merged = merged.drop(columns=[db_col])
+    return merged
 
 
 def _stock_name_map(ds: MarketDataset) -> Dict[str, str]:
@@ -314,11 +410,55 @@ def _normalize_index_tables(ds: MarketDataset) -> pd.DataFrame:
     return out
 
 
+def _normalize_limit_up_tables(ds: MarketDataset) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+    for date, df in (ds.limit_up or {}).items():
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+        frames.append(
+            standardize_limit_up_pool_frame(
+                df,
+                trade_date=str(date),
+                as_of_date=ds.trade_date,
+                source="limit_up_pool",
+            )
+        )
+    if not frames:
+        return standardize_limit_up_pool_frame(pd.DataFrame())
+    out = pd.concat(frames, ignore_index=True)
+    if not out.empty:
+        out = out.drop_duplicates(["trade_date", "code"], keep="first")
+    return out
+
+
+def _normalize_limit_down_tables(ds: MarketDataset) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+    for date, df in (ds.limit_down or {}).items():
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+        frames.append(
+            standardize_limit_down_pool_frame(
+                df,
+                trade_date=str(date),
+                as_of_date=ds.trade_date,
+                source="limit_down_pool",
+            )
+        )
+    if not frames:
+        return standardize_limit_down_pool_frame(pd.DataFrame())
+    out = pd.concat(frames, ignore_index=True)
+    if not out.empty:
+        out = out.drop_duplicates(["trade_date", "code"], keep="first")
+    return out
+
+
 def build_silver_frames(ds: MarketDataset) -> Dict[str, pd.DataFrame]:
     return {
         "stock_daily_silver": _normalize_stock_tables(ds),
         "sector_daily_silver": _normalize_sector_tables(ds),
         "index_daily_silver": _normalize_index_tables(ds),
+        "limit_up_pool_silver": _normalize_limit_up_tables(ds),
+        "limit_down_pool_silver": _normalize_limit_down_tables(ds),
     }
 
 
@@ -340,7 +480,7 @@ def persist_market_dataset_silver(
     frames = build_silver_frames(ds)
     warehouse = SilverWarehouse(duckdb_path=duckdb_path, silver_dir=silver_dir)
     writes = {
-        name: warehouse.write_table(name, frame)
+        name: warehouse.write_table(name, frame, mode="upsert_dates")
         for name, frame in frames.items()
     }
 

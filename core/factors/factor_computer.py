@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import loguru
 
-from core.utils.price_limit import is_near_limit_down_pct, near_limit_down_threshold_pct, near_limit_up_threshold_pct
+from core.utils.price_limit import limit_down_price, limit_up_price, normalize_code
 from .factor_registry import FactorRegistry, FactorDefinition, FactorCategory
 
 logger = loguru.logger
@@ -343,16 +343,9 @@ class FactorComputer:
         if self.dm is None:
             return None
         try:
-            df = self.dm.get_all_stocks_daily(trade_date=trade_date)
-            if df is not None and not df.empty and 'pct_chg' in df.columns:
-                return float(df.apply(
-                    lambda row: is_near_limit_down_pct(
-                        row.get('pct_chg'),
-                        row.get('code') or row.get('ts_code') or row.get('代码'),
-                        row.get('name') or row.get('名称') or row.get('股票名称'),
-                    ),
-                    axis=1,
-                ).sum())
+            df = self.dm.get_limit_down_pool(trade_date)
+            if df is not None:
+                return float(len(df))
         except Exception:
             pass
         return None
@@ -490,24 +483,33 @@ class FactorComputer:
             df = self.dm.get_all_stocks_daily(trade_date=trade_date)
             if df is None or df.empty:
                 return None
+            zt = self.dm.get_limit_up_pool(trade_date)
+            dt = self.dm.get_limit_down_pool(trade_date)
 
             required_cols = ['open', 'close', 'pre_close']
             if not all(c in df.columns for c in required_cols):
                 return None
+
+            close_up_codes = self._limit_pool_codes(zt)
+            close_down_codes = self._limit_pool_codes(dt)
+            if not close_up_codes and not close_down_codes:
+                return 0.0
 
             count = 0
             for _, row in df.iterrows():
                 pre_close = float(row.get('pre_close') or 0)
                 if pre_close <= 0:
                     continue
-                open_pct = (float(row.get('open') or 0) - pre_close) / pre_close
-                close_pct = (float(row.get('close') or 0) - pre_close) / pre_close
                 code = row.get('code') or row.get('ts_code') or row.get('代码')
                 name = row.get('name') or row.get('名称') or row.get('股票名称')
-                up_threshold = (near_limit_up_threshold_pct(code, name, pre_close) or 9.5) / 100.0
-                down_threshold = (near_limit_down_threshold_pct(code, name, pre_close) or -9.5) / 100.0
-                heaven_to_hell = open_pct >= up_threshold and close_pct <= down_threshold
-                hell_to_heaven = open_pct <= down_threshold and close_pct >= up_threshold
+                code6 = normalize_code(code)
+                open_price = float(row.get('open') or 0)
+                up_price = limit_up_price(pre_close, code, name)
+                down_price = limit_down_price(pre_close, code, name)
+                open_at_up = up_price is not None and abs(open_price - float(up_price)) <= 0.01
+                open_at_down = down_price is not None and abs(open_price - float(down_price)) <= 0.01
+                heaven_to_hell = open_at_up and code6 in close_down_codes
+                hell_to_heaven = open_at_down and code6 in close_up_codes
                 if heaven_to_hell or hell_to_heaven:
                     count += 1
 
@@ -515,6 +517,17 @@ class FactorComputer:
         except Exception:
             pass
         return None
+
+    @staticmethod
+    def _limit_pool_codes(df: Optional[pd.DataFrame]) -> set:
+        if df is None or df.empty:
+            return set()
+        codes = set()
+        for col in ['code', 'ts_code', '代码', '股票代码']:
+            if col not in df.columns:
+                continue
+            codes.update(normalize_code(v) for v in df[col].tolist())
+        return {c for c in codes if c}
 
     def _calc_B5(self, trade_date: str, params: Dict, extra_context: Dict = None) -> Optional[float]:
         """B5: 涨停股平均封单比"""
