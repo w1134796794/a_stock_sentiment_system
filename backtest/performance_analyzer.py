@@ -170,6 +170,17 @@ class PerformanceAnalyzer:
     def _calculate_trade_metrics(self, result: Dict) -> Dict:
         """计算交易指标"""
         trade_history = result.get('trade_history', [])
+
+        # 支持字典和对象两种格式
+        def get_attr(obj, attr, default=0):
+            if isinstance(obj, dict):
+                return obj.get(attr, default)
+            return getattr(obj, attr, default)
+
+        trade_history = [
+            t for t in trade_history
+            if str(get_attr(t, 'action', '')).upper().startswith('SELL')
+        ]
         if not trade_history:
             # 返回完整字段，避免KeyError
             return {
@@ -190,12 +201,6 @@ class PerformanceAnalyzer:
                 'max_consecutive_wins': 0,
                 'max_consecutive_losses': 0
             }
-
-        # 支持字典和对象两种格式
-        def get_attr(obj, attr, default=0):
-            if isinstance(obj, dict):
-                return obj.get(attr, default)
-            return getattr(obj, attr, default)
 
         trades_df = pd.DataFrame([{
             'pnl': get_attr(t, 'pnl'),
@@ -258,14 +263,19 @@ class PerformanceAnalyzer:
     def _calculate_pattern_metrics(self, result: Dict) -> Dict:
         """计算各模式表现"""
         trade_history = result.get('trade_history', [])
-        if not trade_history:
-            return {}
 
         # 支持字典和对象两种格式
         def get_attr(obj, attr, default=0):
             if isinstance(obj, dict):
                 return obj.get(attr, default)
             return getattr(obj, attr, default)
+
+        trade_history = [
+            t for t in trade_history
+            if str(get_attr(t, 'action', '')).upper().startswith('SELL')
+        ]
+        if not trade_history:
+            return {}
 
         trades_df = pd.DataFrame([{
             'pattern_type': get_attr(t, 'pattern_type'),
@@ -299,14 +309,19 @@ class PerformanceAnalyzer:
     def _calculate_resonance_metrics(self, result: Dict) -> Dict:
         """计算热点共振效果"""
         trade_history = result.get('trade_history', [])
-        if not trade_history:
-            return {}
 
         # 支持字典和对象两种格式
         def get_attr(obj, attr, default=0):
             if isinstance(obj, dict):
                 return obj.get(attr, default)
             return getattr(obj, attr, default)
+
+        trade_history = [
+            t for t in trade_history
+            if str(get_attr(t, 'action', '')).upper().startswith('SELL')
+        ]
+        if not trade_history:
+            return {}
 
         trades_df = pd.DataFrame([{
             'hot_resonance': get_attr(t, 'hot_resonance'),

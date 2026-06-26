@@ -13,9 +13,13 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from backtest.strategy_stats import _attr
-
 _SELL_ACTIONS = ("SELL", "SELL_PARTIAL")
+
+
+def _attr(obj, name: str, default=None):
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
 
 
 def extract_trade_pnls(trade_history: List) -> List[float]:

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block page_title %}用户管理{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">账号授权 · 到期续费 · 会话控制</div>{% endblock %}
+
+{% block content %}
+<section class="grid xl:grid-cols-[380px_1fr] gap-4">
+  <div class="card border border-slate-800 rounded-xl p-4 h-fit">
+    <h2 class="font-bold mb-3">创建账号</h2>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-[11px] text-slate-500 mb-1">账号</label>
+        <input id="new-username" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </div>
+      <div>
+        <label class="block text-[11px] text-slate-500 mb-1">显示名</label>
+        <input id="new-display" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </div>
+      <div>
+        <label class="block text-[11px] text-slate-500 mb-1">密码</label>
+        <input id="new-password" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500">
+      </div>
+      <div class="grid grid-cols-3 gap-2">
+        <div>
+          <label class="block text-[11px] text-slate-500 mb-1">角色</label>
+          <select id="new-role" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm outline-none focus:border-emerald-500">
+            <option value="viewer">只读</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-500 mb-1">天数</label>
+          <input id="new-days" type="number" value="30" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm mono outline-none focus:border-emerald-500">
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-500 mb-1">会话</label>
+          <input id="new-max-sessions" type="number" value="1" min="1" max="5" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm mono outline-none focus:border-emerald-500">
+        </div>
+      </div>
+      <button onclick="createUser()" class="w-full bg-emerald-600 hover:bg-emerald-500 rounded-lg px-4 py-2 text-sm font-semibold">创建</button>
+      <div id="admin-msg" class="text-xs text-slate-500 min-h-4"></div>
+    </div>
+  </div>
+
+  <div class="space-y-4">
+    <section class="card border border-slate-800 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-bold">账号列表</h2>
+        <button onclick="reloadUsers()" class="text-xs border border-slate-700 hover:border-emerald-600 rounded-md px-3 py-1.5 text-slate-300">刷新</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-xs text-slate-500 border-b border-slate-800">
+            <tr>
+              <th class="text-left py-2 pr-3">账号</th>
+              <th class="text-left py-2 pr-3">角色</th>
+              <th class="text-left py-2 pr-3">状态</th>
+              <th class="text-left py-2 pr-3">到期</th>
+              <th class="text-left py-2 pr-3">在线</th>
+              <th class="text-left py-2 pr-3">最近登录</th>
+              <th class="text-left py-2">操作</th>
+            </tr>
+          </thead>
+          <tbody id="users-body" class="divide-y divide-slate-800"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card border border-slate-800 rounded-xl p-4">
+      <h2 class="font-bold mb-3">最近登录</h2>
+      <div id="login-logs" class="grid gap-2"></div>
+    </section>
+  </div>
+</section>
+
+<script>
+const seedUsers = {{ users|tojson }};
+const seedLogs = {{ login_logs|tojson }};
+
+function msg(text, good = false) {
+  const el = document.getElementById('admin-msg');
+  el.textContent = text || '';
+  el.className = 'text-xs min-h-4 ' + (good ? 'text-emerald-300' : 'text-rose-300');
+}
+function val(id) { return document.getElementById(id).value.trim(); }
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+async function postJson(url, body = {}) {
+  const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok || j.ok === false) throw new Error(j.error || j.message || '操作失败');
+  return j;
+}
+async function createUser() {
+  try {
+    await postJson('/api/admin/users', {
+      username: val('new-username'), display_name: val('new-display'), password: val('new-password'),
+      role: val('new-role'), days: val('new-days'), max_sessions: val('new-max-sessions')
+    });
+    msg('账号已创建', true);
+    ['new-username','new-display','new-password'].forEach(id => document.getElementById(id).value = '');
+    reloadUsers();
+  } catch (e) { msg(e.message); }
+}
+async function setStatus(id, status) {
+  try { await postJson(`/api/admin/users/${id}/status`, {status}); reloadUsers(); }
+  catch (e) { msg(e.message); }
+}
+async function extendUser(id, days) {
+  try { await postJson(`/api/admin/users/${id}/extend`, {days}); reloadUsers(); }
+  catch (e) { msg(e.message); }
+}
+async function resetPass(id) {
+  const password = prompt('输入新密码');
+  if (!password) return;
+  try { await postJson(`/api/admin/users/${id}/reset-password`, {password}); msg('密码已重置，在线会话已踢出', true); reloadUsers(); }
+  catch (e) { msg(e.message); }
+}
+async function revokeSessions(id) {
+  try { await postJson(`/api/admin/users/${id}/revoke-sessions`); msg('已强制下线', true); reloadUsers(); }
+  catch (e) { msg(e.message); }
+}
+async function saveLimits(id) {
+  const maxSessions = document.getElementById(`max-${id}`).value;
+  const displayName = document.getElementById(`display-${id}`).value;
+  try { await postJson(`/api/admin/users/${id}/limits`, {max_sessions: maxSessions, display_name: displayName}); msg('账号信息已保存', true); reloadUsers(); }
+  catch (e) { msg(e.message); }
+}
+async function reloadUsers() {
+  const r = await fetch('/api/admin/users');
+  const j = await r.json();
+  renderUsers(j.users || []);
+  renderLogs(j.login_logs || []);
+}
+function badge(text, cls) {
+  return `<span class="inline-flex rounded-md px-2 py-0.5 text-[11px] ${cls}">${text}</span>`;
+}
+function renderUsers(users) {
+  document.getElementById('users-body').innerHTML = users.map(u => {
+    const username = esc(u.username);
+    const displayName = esc(u.display_name || '');
+    const expire = esc(u.expire_at_display || '长期');
+    const lastLogin = esc(u.last_login_at || '--');
+    const expired = u.is_expired && u.role !== 'admin';
+    const status = u.status === 'active' && !expired
+      ? badge('启用', 'bg-emerald-500/10 text-emerald-300')
+      : expired ? badge('到期', 'bg-amber-500/10 text-amber-300') : badge('禁用', 'bg-rose-500/10 text-rose-300');
+    return `<tr class="align-top">
+      <td class="py-3 pr-3">
+        <div class="font-semibold">${username}</div>
+        <input id="display-${u.id}" value="${displayName}" class="mt-1 w-36 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs">
+      </td>
+      <td class="py-3 pr-3">${u.role === 'admin' ? '管理员' : '只读'}</td>
+      <td class="py-3 pr-3">${status}</td>
+      <td class="py-3 pr-3 mono text-xs">${expire}</td>
+      <td class="py-3 pr-3">
+        <div class="mono">${u.active_sessions || 0} / <input id="max-${u.id}" value="${u.max_sessions || 1}" type="number" min="1" max="5" class="w-12 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-xs"></div>
+      </td>
+      <td class="py-3 pr-3 text-xs text-slate-500">${lastLogin}</td>
+      <td class="py-3">
+        <div class="flex flex-wrap gap-1.5">
+          <button onclick="extendUser(${u.id}, 30)" class="px-2 py-1 rounded border border-slate-700 hover:border-emerald-600 text-xs">延30天</button>
+          <button onclick="saveLimits(${u.id})" class="px-2 py-1 rounded border border-slate-700 hover:border-emerald-600 text-xs">保存</button>
+          <button onclick="resetPass(${u.id})" class="px-2 py-1 rounded border border-slate-700 hover:border-emerald-600 text-xs">重置密码</button>
+          <button onclick="revokeSessions(${u.id})" class="px-2 py-1 rounded border border-amber-700/70 hover:border-amber-500 text-xs text-amber-200">踢下线</button>
+          ${u.status === 'active'
+            ? `<button onclick="setStatus(${u.id}, 'disabled')" class="px-2 py-1 rounded border border-rose-800 hover:border-rose-500 text-xs text-rose-300">禁用</button>`
+            : `<button onclick="setStatus(${u.id}, 'active')" class="px-2 py-1 rounded border border-emerald-700 hover:border-emerald-500 text-xs text-emerald-300">启用</button>`}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+function renderLogs(logs) {
+  document.getElementById('login-logs').innerHTML = logs.slice(0, 40).map(l => {
+    const good = Number(l.success) === 1;
+    return `<div class="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs">
+      <div class="flex items-center justify-between gap-2">
+        <span class="${good ? 'text-emerald-300' : 'text-rose-300'}">${good ? '成功' : '失败'} · ${esc(l.username || '--')} · ${esc(l.reason || '')}</span>
+        <span class="mono text-slate-500">${esc(l.created_at || '')}</span>
+      </div>
+      <div class="text-slate-500 mt-1 truncate">${esc(l.ip || '')} · ${esc(l.user_agent || '')}</div>
+    </div>`;
+  }).join('');
+}
+renderUsers(seedUsers || []);
+renderLogs(seedLogs || []);
+</script>
+{% endblock %}

@@ -14,7 +14,7 @@ from kb.llm_client import get_llm_client
 SYSTEM_BRIEF = (
     "你是A股短线情绪交易的资深助手。请仅依据用户提供的【当日数据】用中文写一段简洁解读，"
     "禁止编造未给出的数字或标的。结构：①今日情绪与主线（1-2句）②明日策略与重点计划"
-    "（结合给出的计划、风控判定，并参考【历史胜率参考】判断哪个模式在当前周期更有胜算）"
+    "（结合给出的计划、风控判定与当前市场状态判断是否值得执行）"
     "③风险提示。总字数控制在 240 字以内，不用 markdown 标题。"
 )
 
@@ -51,7 +51,7 @@ def _save_cache(db_path: Path, date: str, model: str, content: str) -> None:
 
 
 def _winrate_lines(cycle: str) -> List[str]:
-    """当前情绪周期下各模式的历史 T+1 胜率（来自复盘矩阵），给解读提供实战 edge。"""
+    """保留兼容接口：旧策略胜率矩阵已移除，暂无历史胜率参考。"""
     try:
         from config.settings import WINRATE_PATH
         from kb.winrate import load_matrix, winrate_for_cycle

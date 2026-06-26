@@ -96,7 +96,7 @@ def _extract_patterns(data_dict: Dict) -> Dict[str, Any]:
     return out
 
 
-# Excel sheet 顺序 -> data_dict 取值器（用于通用 sheet 浏览）。
+# 页面 section 顺序 -> data_dict 取值器（用于通用数据浏览）。
 # 形如 (展示名, 取值函数)；取值函数失败时该 section 跳过。
 _SECTION_SPEC = [
     ("热点概念", lambda d: d.get("hot_concepts_df")),
@@ -106,13 +106,10 @@ _SECTION_SPEC = [
     ("主线主题", lambda d: d.get("mainline_df")),
     ("涨停梯队", lambda d: d.get("hierarchy_df")),
     ("概念连板梯队", lambda d: d.get("concept_hierarchy")),
-    ("龙头池", lambda d: d.get("dragon_pool")),
-    ("走弱池", lambda d: d.get("weakening_pool")),
     ("龙虎榜", lambda d: d.get("lhb_result")),
     ("资金流向", lambda d: d.get("moneyflow_analysis")),
     ("筹码结构", lambda d: d.get("chip_analysis")),
     ("复盘总结", lambda d: d.get("review_result")),
-    ("周期模式胜率", lambda d: d.get("cycle_pattern_matrix")),
 ]
 
 
@@ -150,10 +147,9 @@ def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
     risk_gate = _safe(lambda: _extract_risk_gate(data_dict), None)
     patterns = _safe(lambda: _extract_patterns(data_dict), {})
 
-    # 通用浏览 sections（含 4 大模式 + 交易计划 + 因子）
+    # 通用浏览 sections（交易计划 + 指标/板块等数据）
     sections: List[Dict[str, Any]] = []
 
-    # 4 大模式优先排前
     for name, blk in patterns.items():
         sections.append({
             "name": name, "kind": "signals",
@@ -203,19 +199,36 @@ def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
                     cols.append(k)
         sections.append({"name": "因子原始数据", "kind": "table", "columns": cols, "rows": factor_rows})
 
+    etl_screening = to_jsonable(data_dict.get("etl_screening") or {})
+    etl_gold_summary = to_jsonable(data_dict.get("etl_gold_summary") or {})
+    etl_rows = (etl_screening or {}).get("final") or []
+    if etl_rows:
+        sections.append({
+            "name": "指标筛选",
+            "kind": "table",
+            "columns": ["rank", "code", "name", "score", "gold_rank", "reasons"],
+            "rows": etl_rows,
+        })
+
     snapshot = {
         "meta": {
             "date": date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "schema_version": SCHEMA_VERSION,
+            "engine": str(data_dict.get("engine") or "legacy"),
             # Phase 2：因子 profile + 启用因子清单（复盘归因留痕）
             "factor_profile": str(data_dict.get("factor_profile") or ""),
             "enabled_factors": list(data_dict.get("enabled_factors") or []),
+            "screening_profile": str((etl_screening or {}).get("profile") or ""),
         },
         "market": market,
         "trade_plans": trade_plans,
         "risk_gate": risk_gate,
         "patterns": patterns,
+        "etl": {
+            "screening": etl_screening,
+            "gold_summary": etl_gold_summary,
+        },
         "sections": sections,
     }
     return snapshot

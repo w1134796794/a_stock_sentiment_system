@@ -197,7 +197,7 @@ class AuctionConfirmer:
         # 决策优先级：低开 > 巨量高开滞涨 > 放量高开 > 缩量 > 区间外 > 温和高开
         if gap <= th["low_open_gap"]:
             base["level"] = LEVEL_ABANDON
-            base["advice"] = f"低开{gap_txt}，放弃竞价买点；若看好转『盘中弱转强』确认再低吸{trend_txt}。"
+            base["advice"] = f"低开{gap_txt}，放弃竞价买点；若仍关注则等待盘中实时确认{trend_txt}。"
         elif is_surge and vol_ratio >= th["huge_vol_ratio"] and gap >= th["huge_open_gap"]:
             base["level"] = LEVEL_OBSERVE
             base["advice"] = (f"巨量高开{gap_txt}(量比{vr_txt}/额{amt_wan:.0f}万)，警惕一字烂板或高位出货，"

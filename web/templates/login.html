@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>登录 · A股短线系统</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Noto Sans SC', system-ui, sans-serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="min-h-screen grid place-items-center px-4">
+    <section class="w-full max-w-md border border-slate-800 rounded-xl bg-slate-900/70 shadow-2xl shadow-slate-950/60 overflow-hidden">
+      <div class="px-6 pt-6 pb-4 border-b border-slate-800">
+        <div class="flex items-center gap-3">
+          <span class="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-500/15 text-emerald-300 font-bold">情</span>
+          <div>
+            <h1 class="text-lg font-bold tracking-tight">A股短线系统</h1>
+            <p class="text-xs text-slate-500 mt-0.5">授权账号登录后进入数据看板</p>
+          </div>
+        </div>
+      </div>
+
+      <form method="post" action="/login" class="px-6 py-6 space-y-4">
+        <input type="hidden" name="next" value="{{ next or '/' }}">
+
+        {% if error %}
+        <div class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+          {{ error }}
+        </div>
+        {% endif %}
+
+        <div>
+          <label for="username" class="block text-xs text-slate-400 mb-1.5">账号</label>
+          <input id="username" name="username" type="text" autocomplete="username" autofocus
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+                 placeholder="请输入账号">
+        </div>
+
+        <div>
+          <label for="password" class="block text-xs text-slate-400 mb-1.5">密码</label>
+          <input id="password" name="password" type="password" autocomplete="current-password"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+                 placeholder="请输入密码">
+        </div>
+
+        <button type="submit"
+                class="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition">
+          登录
+        </button>
+
+        <div class="grid grid-cols-2 gap-2 pt-1 text-[11px] text-slate-500">
+          <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div class="font-medium text-slate-300">管理员</div>
+            <div class="mt-1">管理用户、生成数据、调参数</div>
+          </div>
+          <div class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div class="font-medium text-slate-300">授权用户</div>
+            <div class="mt-1">按有效期查看已有数据</div>
+          </div>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

@@ -156,7 +156,8 @@ class MarketDataset:
         return (f"MarketDataset({self.trade_date}) "
                 f"daily={len(self.daily)} all_daily={len(self.all_daily)} "
                 f"auction={len(self.auction)} sector_map={len(self.sector_map)} "
-                f"limit_up={len(self.limit_up)} prefetched={sorted(self.prefetched)}")
+                f"limit_up={len(self.limit_up)} limit_down={len(self.limit_down)} "
+                f"prefetched={sorted(self.prefetched)}")
 
     # ------------------------------------------------------------------
     # 可选落盘 / 加载（离线复现）。daily 等 DataFrame 走 parquet（无引擎则降级 csv）。
@@ -172,6 +173,9 @@ class MarketDataset:
         for date, df in self.limit_up.items():
             (out_dir / "limit_up").mkdir(parents=True, exist_ok=True)
             self._write_frame(df, out_dir / "limit_up" / f"{date}")
+        for date, df in self.limit_down.items():
+            (out_dir / "limit_down").mkdir(parents=True, exist_ok=True)
+            self._write_frame(df, out_dir / "limit_down" / f"{date}")
         meta = {
             "trade_date": self.trade_date,
             "prev_trade_date": self.prev_trade_date,

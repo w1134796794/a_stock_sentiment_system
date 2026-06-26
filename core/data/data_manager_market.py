@@ -39,6 +39,31 @@ class MarketDataManager(DataManagerBase):
 
         return pd.DataFrame()
 
+    def get_stock_basic(self) -> pd.DataFrame:
+        """获取 A 股股票基础资料（代码/名称等，稳定数据，长期缓存）。"""
+        cache_file = self.market_dir / "stock_basic.csv"
+        if cache_file.exists():
+            return pd.read_csv(cache_file)
+
+        if not self.ts_pro:
+            logger.warning("[get_stock_basic] Tushare未初始化")
+            return pd.DataFrame()
+
+        try:
+            df = self.ts_pro.stock_basic(
+                exchange="",
+                list_status="L",
+                fields="ts_code,symbol,name,area,industry,market,list_date",
+            )
+            if df is not None and not df.empty:
+                df.to_csv(cache_file, index=False)
+                logger.info(f"[get_stock_basic] 获取股票基础资料: {len(df)}条")
+                return df
+        except Exception as e:
+            logger.error(f"[get_stock_basic] 获取股票基础资料失败: {e}")
+
+        return pd.DataFrame()
+
     def get_index_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
         获取指数日线行情（Tushare index_daily 接口）
@@ -133,11 +158,13 @@ class MarketDataManager(DataManagerBase):
             df = self.ts_pro.limit_list_d(trade_date=date)
             if df.empty:
                 logger.warning(f"[get_limit_up_pool] {date} 未获取到数据")
+                df.to_csv(cache_file, index=False)
                 return pd.DataFrame()
 
             df = df[df['limit'] == 'U'].copy()
             if df.empty:
                 logger.info(f"[get_limit_up_pool] {date} 无涨停股票")
+                df.to_csv(cache_file, index=False)
                 return pd.DataFrame()
 
             df = self._normalize_limit_up_format(df, date)
@@ -165,11 +192,13 @@ class MarketDataManager(DataManagerBase):
             df = self.ts_pro.limit_list_d(trade_date=date)
             if df.empty:
                 logger.warning(f"[get_limit_down_pool] {date} 未获取到数据")
+                df.to_csv(cache_file, index=False)
                 return pd.DataFrame()
 
             df = df[df['limit'] == 'D'].copy()
             if df.empty:
                 logger.info(f"[get_limit_down_pool] {date} 无跌停股票")
+                df.to_csv(cache_file, index=False)
                 return pd.DataFrame()
 
             df.to_csv(cache_file, index=False)

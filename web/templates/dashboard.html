@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}明日计划 · {{ date }}{% endblock %}
-{% block page_title %}明日交易计划{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">买什么 · 什么价位 · 为什么</div>{% endblock %}
+{% block title %}交易计划 · {{ date }}{% endblock %}
+{% block page_title %}交易计划{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">指标筛选 · 竞价高开确认 · 实时取消/观察</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
@@ -19,12 +19,32 @@
 {% if snapshot is none %}
   <div class="card border border-slate-800 rounded-xl p-10 text-center">
     <div class="text-xl font-semibold mb-1">没有找到 {{ date }} 的快照</div>
-    <div class="text-slate-400">请确认该日已运行收盘分析。</div>
+    <div class="text-slate-400">请确认该日已生成数据。</div>
   </div>
 {% else %}
+{% set meta = snapshot.get('meta') or {} %}
+{% set etl = snapshot.get('etl') or {} %}
+{% set screening = etl.get('screening') or {} %}
+{% set gold = etl.get('gold_summary') or {} %}
+{% set is_etl = meta.get('engine') == 'etl' or meta.get('factor_profile') or meta.get('enabled_factors') or etl %}
 
 {# ===== 情绪温度计 ===== #}
 {% set m = market %}
+{% if is_etl %}
+<section class="card border border-emerald-900/60 rounded-xl p-4 mb-6 bg-emerald-950/10">
+  <div class="flex flex-wrap items-center gap-3">
+    <span class="text-xs font-bold text-emerald-300 border border-emerald-500/40 rounded px-2 py-0.5">指标</span>
+    <span class="text-sm text-slate-300">方案 <span class="mono text-sky-300">{{ screening.get('profile') or meta.get('screening_profile') or '--' }}</span></span>
+    <span class="text-sm text-slate-300">输入 <span class="mono">{{ screening.get('input_count') or 0 }}</span></span>
+    <span class="text-sm text-slate-300">入选 <span class="mono text-emerald-300">{{ screening.get('final_count') or plans|length }}</span></span>
+    {% if gold.get('market') %}
+    <span class="text-sm text-slate-300">市场分 <span class="mono text-amber-300">{{ '%.0f'|format(gold.get('market').get('market_score') or 0) }}</span></span>
+    {% endif %}
+    <a href="/realtime" class="ml-auto text-sm text-emerald-300 hover:text-emerald-200">打开实时确认</a>
+  </div>
+</section>
+{% endif %}
+
 <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">情绪周期</div>
@@ -35,7 +55,7 @@
     <div class="text-xl font-bold">{{ m.get('position') or '--' }}</div>
   </div>
   <div class="card border border-slate-800 rounded-xl p-4">
-    <div class="text-xs text-slate-400 mb-1">策略基调</div>
+    <div class="text-xs text-slate-400 mb-1">{{ '筛选基调' if is_etl else '策略基调' }}</div>
     <div class="text-base font-semibold text-slate-200">{{ m.get('strategy') or '--' }}</div>
   </div>
   <div class="card border border-slate-800 rounded-xl p-4">
@@ -102,7 +122,7 @@
 {% endif %}
 
 {# ===== 周期 × 模式 历史胜率矩阵 ===== #}
-{% if winrate and winrate.cells %}
+{% if (not is_etl) and winrate and winrate.cells %}
 <section class="card border border-slate-800 rounded-xl p-4 mb-6">
   <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
     <h2 class="text-base font-bold flex items-center gap-2">周期 × 模式 历史胜率
@@ -143,13 +163,13 @@
 </section>
 {% endif %}
 
-{# ===== 明日计划卡片 ===== #}
+{# ===== 交易计划卡片 ===== #}
 <section class="mb-8">
-  <h2 class="text-lg font-bold mb-3 flex items-center gap-2">明日交易计划
-    <span class="text-xs font-normal text-slate-500">买什么 · 什么价位 · 为什么</span></h2>
+  <h2 class="text-lg font-bold mb-3 flex items-center gap-2">交易计划
+    <span class="text-xs font-normal text-slate-500">先看盘后指标，盘中由实时行情确认/取消</span></h2>
   {% if not plans %}
     <div class="card border border-slate-800 rounded-xl p-8 text-center text-slate-400">
-      今日无交易计划（信号数为 0 或大盘风险过高）
+      今日无交易计划（指标筛选为空或市场风险过高）
     </div>
   {% else %}
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -220,15 +240,14 @@
   {% endif %}
 </section>
 
-{# ===== 数据浏览入口（已拆分到左侧菜单：策略/板块/涨停/复盘） ===== #}
+{# ===== 数据浏览入口 ===== #}
 <section>
   <h2 class="text-lg font-bold mb-3">数据浏览</h2>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
     {% for c in [
-      {"href": "/data/strategy/" ~ date, "title": "策略信号", "desc": "四大模式信号明细"},
-      {"href": "/data/sector/" ~ date, "title": "板块题材", "desc": "热点概念/行业/持续性"},
-      {"href": "/data/limitup/" ~ date, "title": "涨停梯队", "desc": "个股梯队/概念连板"},
-      {"href": "/data/review/" ~ date, "title": "复盘统计", "desc": "胜率/复盘/因子"},
+      {"href": "/data/strategy/" ~ date, "title": "指标筛选", "desc": "候选池与交易计划"},
+      {"href": "/data/sector/" ~ date, "title": "板块热度", "desc": "板块主线和强度排序"},
+      {"href": "/realtime", "title": "实时确认", "desc": "盘中确认/取消/观察"},
     ] %}
     <a href="{{ c.href }}" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
       <div class="font-semibold text-slate-200">{{ c.title }}</div>

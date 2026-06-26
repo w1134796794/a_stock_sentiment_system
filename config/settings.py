@@ -11,7 +11,7 @@ from pathlib import Path
 # ============================================
 # 打包成 exe（PyInstaller，sys.frozen）后，源码被收进归档，工作数据应落在
 # exe 所在目录；否则按源码项目根目录解析。这样 webdata / logs / output /
-# dragon_pools.json / .env 始终位于用户可见的程序目录旁边。
+# .env 始终位于用户可见的程序目录旁边。
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
 else:
@@ -34,13 +34,23 @@ try:
 except ImportError:  # pragma: no cover
     pass
 
+
+def _env_path(name: str, default: Path) -> Path:
+    value = os.getenv(name, "").strip().strip('"').strip("'")
+    if not value:
+        return default
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path.resolve()
+
+
 # ============================================
 # Web / 快照 / 知识库 存储（P0：与 Excel 同源的结构化快照）
 # 收盘跑批时，喂给 Excel 的 data_dict 会同步落到这里，供 Web 页面与 KB 复用。
 # ============================================
-WEB_DATA_DIR = BASE_DIR / "webdata"
+WEB_DATA_DIR = _env_path("WEB_DATA_DIR", BASE_DIR / "webdata")
 SNAPSHOT_DIR = WEB_DATA_DIR / "snapshots"        # 每日整页 JSON 快照
-RECAP_DIR = WEB_DATA_DIR / "recaps"              # 复盘短视频分镜脚本（storyboard JSON）
 APP_DB_PATH = WEB_DATA_DIR / "app.sqlite"        # 结构化索引（计划/信号/快照）
 FACTOR_DB_PATH = WEB_DATA_DIR / "factors.duckdb"  # 因子大表（定量查询，可选）
 KB_DB_PATH = WEB_DATA_DIR / "kb.sqlite"          # 知识库块存储（向量 + 词法）

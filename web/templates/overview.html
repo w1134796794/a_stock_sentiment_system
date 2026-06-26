@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block title %}概览 · 管理控制台{% endblock %}
 {% block page_title %}概览{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">检查问题 · 关键产物 · 快速操作</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">数据产物 · 指标仓库 · 快速操作</div>{% endblock %}
 
 {% block content %}
 {% set ov = ov %}
 {% set mk = ov.market %}
+{% set phase_progress = mk.get('phase_progress') if mk else none %}
+{% set is_admin = request.state.is_admin %}
 
 {% if mk and mk.available %}
 {# ===== 情绪周期 + 综合趋势 ===== #}
@@ -18,7 +20,7 @@
     <div class="flex items-baseline gap-2 flex-wrap">
       <span class="text-2xl font-bold text-amber-300">{{ mk.cycle_name or '--' }}</span>
       {% if mk.phase_label %}<span class="text-sm text-slate-300">{{ mk.phase_label }}</span>{% endif %}
-      {% if mk.phase_progress is not none %}<span class="text-[11px] text-slate-500 mono">进度 {{ mk.phase_progress|int }}%</span>{% endif %}
+      {% if phase_progress is not none %}<span class="text-[11px] text-slate-500 mono">进度 {{ phase_progress|int }}%</span>{% endif %}
     </div>
     {% if mk.strategy %}<div class="text-sm text-slate-300 mt-2">{{ mk.strategy }}{% if mk.position %} <span class="text-slate-500">· 建议仓位 {{ mk.position }}</span>{% endif %}</div>{% endif %}
     {% if mk.transition_warning %}<div class="text-[12px] text-amber-400/90 mt-2">{{ mk.transition_warning }}</div>{% endif %}
@@ -50,7 +52,7 @@
 {# ===== 各指数涨跌幅（红涨绿跌） ===== #}
 {% if mk.indices %}
 {% if mk.index_stale %}
-<div class="text-[12px] text-amber-400 mb-2">⚠ 指数数据为 {{ mk.index_date }}（当日指数日线尚未入库），请稍后重跑收盘分析刷新</div>
+<div class="text-[12px] text-amber-400 mb-2">指数数据为 {{ mk.index_date }}（当日指数日线尚未入库），{% if is_admin %}请稍后重新生成数据{% else %}请等待管理员更新数据{% endif %}</div>
 {% endif %}
 <section class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
   {% for ix in mk.indices %}
@@ -63,12 +65,12 @@
 </section>
 {% endif %}
 
-{# ===== 涨跌停 / 涨跌家数 / 量能 / 龙头池 ===== #}
+{# ===== 涨跌停 / 涨跌家数 / 量能 / 指标候选 ===== #}
 <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">涨停 / 跌停</div>
     <div class="text-xl font-bold mono"><span class="text-rose-400">{{ mk.limit_up if mk.limit_up is not none else '--' }}</span><span class="text-slate-500"> / </span><span class="text-emerald-400">{{ mk.limit_down if mk.limit_down is not none else '--' }}</span></div>
-    <div class="text-[11px] text-slate-500 mt-1">最高 {{ mk.max_board if mk.max_board is not none else '--' }} 板{% if mk.broken_rate is not none %} · 炸板 {{ mk.broken_rate }}%{% endif %}</div>
+    <div class="text-[11px] text-slate-500 mt-1">最高 {{ mk.max_board if mk.max_board is not none else '--' }} 板{% if mk.broken_rate is not none %} · 炸板 {{ mk.broken_rate }}%{% endif %}{% if mk.limit_source %} · 严格口径{% endif %}</div>
   </div>
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">涨跌家数</div>
@@ -78,12 +80,17 @@
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">市场量能</div>
     <div class="text-xl font-bold {% if mk.vol_word == '放量' %}text-rose-400{% elif mk.vol_word == '缩量' %}text-emerald-400{% else %}text-slate-300{% endif %}">{{ mk.vol_word or '--' }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">{% if mk.vol_pct is not none %}较昨日 {{ '%+.1f'|format(mk.vol_pct) }}%{% else %}—{% endif %}</div>
+    <div class="text-[11px] text-slate-500 mt-1">
+      {% if mk.amount_text %}成交额 {{ mk.amount_text }}{% endif %}
+      {% if mk.vol_pct is not none %}
+        {% if mk.amount_text %} · {% endif %}较{{ mk.amount_prev_date or '昨日' }} {{ '%+.1f'|format(mk.vol_pct) }}%
+      {% elif not mk.amount_text %}—{% endif %}
+    </div>
   </div>
-  <a href="/dragon" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
-    <div class="text-xs text-slate-400 mb-1">龙头 / 走弱池</div>
-    <div class="text-xl font-bold mono">{{ ov.dragon_count }}<span class="text-slate-500"> / </span><span class="text-amber-300">{{ ov.weak_count }}</span></div>
-    <div class="text-[11px] text-slate-500 mt-1">监控中 / 待转强</div>
+  <a href="/data/strategy" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
+    <div class="text-xs text-slate-400 mb-1">指标候选</div>
+    <div class="text-xl font-bold mono text-emerald-300">{{ mk.plan_count if mk.plan_count is not none else '--' }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">交易计划 / 筛选结果</div>
   </a>
 </section>
 
@@ -110,13 +117,13 @@
 {% endif %}
 
 {# ===== 真·晋级率（昨日 N 板今日晋级 N+1） ===== #}
-{% if mk.promotion and mk.promotion.overall is not none %}
+{% if mk.promotion %}
 <section class="mb-6">
   <div class="text-xs text-slate-400 mb-2">连板晋级率 <span class="text-slate-600">（昨日涨停今日接力，领先指标）</span></div>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
     <div class="card border border-slate-800 rounded-xl p-3">
       <div class="text-[11px] text-slate-400 mb-1">总晋级率</div>
-      <div class="text-lg font-bold mono text-slate-200">{{ mk.promotion.overall }}%</div>
+      <div class="text-lg font-bold mono text-slate-200">{{ mk.promotion.overall if mk.promotion.overall is not none else '--' }}{% if mk.promotion.overall is not none %}%{% endif %}</div>
     </div>
     <div class="card border border-slate-800 rounded-xl p-3">
       <div class="text-[11px] text-slate-400 mb-1">1 进 2</div>
@@ -143,28 +150,34 @@
 {% else %}
 {# ===== 无快照市场数据时的降级 ===== #}
 <section class="grid grid-cols-2 md:grid-cols-2 gap-3 mb-4">
-  <a href="/dragon" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
-    <div class="text-xs text-slate-400 mb-1">龙头池</div>
-    <div class="text-xl font-bold mono">{{ ov.dragon_count }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">监控中标的</div>
+  <a href="/data/strategy" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
+    <div class="text-xs text-slate-400 mb-1">指标筛选</div>
+    <div class="text-xl font-bold mono">{{ ov.latest or '--' }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">最新快照</div>
   </a>
-  <a href="/dragon" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
-    <div class="text-xs text-slate-400 mb-1">走弱池</div>
-    <div class="text-xl font-bold mono text-amber-300">{{ ov.weak_count }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">待转强观察</div>
+  <a href="/realtime" class="card border border-slate-800 rounded-xl p-4 hover:border-emerald-600/60 transition">
+    <div class="text-xs text-slate-400 mb-1">实时确认</div>
+    <div class="text-xl font-bold text-emerald-300">行情</div>
+    <div class="text-[11px] text-slate-500 mt-1">个股 / 板块</div>
   </a>
 </section>
-<div class="text-sm text-slate-400 mb-6">暂无最新快照的大盘数据，请先运行收盘分析。</div>
+<div class="text-sm text-slate-400 mb-6">暂无最新快照的大盘数据，{% if is_admin %}请先生成数据。{% else %}请等待管理员生成数据。{% endif %}</div>
 {% endif %}
 
 {# ===== 快速操作 ===== #}
 <section>
   <h2 class="text-base font-bold mb-3">快速操作</h2>
   <div class="flex flex-wrap gap-3">
-    <a href="/run" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">运行收盘分析</a>
-    <a href="/report" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">查看明日计划</a>
+    {% if is_admin %}
+    <a href="/run" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-4 py-2">生成数据</a>
+    {% endif %}
+    <a href="/report" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">查看交易计划</a>
+    <a href="/data/strategy" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">指标筛选</a>
+    <a href="/realtime" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">实时确认</a>
+    {% if is_admin %}
     <a href="/config" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">参数配置</a>
     <a href="/logs" class="border border-slate-700 hover:border-emerald-600 text-slate-200 text-sm rounded-lg px-4 py-2">查看日志</a>
+    {% endif %}
   </div>
 </section>
 {% endblock %}

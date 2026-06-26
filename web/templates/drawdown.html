@@ -16,13 +16,18 @@
 {% endblock %}
 
 {% block content %}
+{% set is_admin = request.state.is_admin %}
 {% set runner_redirect = '/drawdown' %}
 {% include "partials/run_backtest.html" %}
 
 {% if not dd.exists %}
   <div class="card border border-slate-800 rounded-xl p-10 text-center">
     <div class="text-xl font-semibold mb-1">暂无回测结果</div>
+    {% if is_admin %}
     <div class="text-slate-400 text-sm">点击上方「运行回测」生成净值曲线，或命令行执行：<span class="mono">python run_backtest.py</span></div>
+    {% else %}
+    <div class="text-slate-400 text-sm">当前还没有可查看的回撤分析，请等待管理员运行回测。</div>
+    {% endif %}
     <div class="text-slate-600 text-xs mt-2">结果目录：{{ dd.results_dir }}</div>
   </div>
 {% else %}

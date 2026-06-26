@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import loguru
 
+from core.utils.price_limit import limit_down_price, limit_up_price, normalize_code
 from .factor_registry import FactorRegistry, FactorDefinition, FactorCategory
 
 logger = loguru.logger
@@ -341,12 +342,10 @@ class FactorComputer:
         """A5: 跌停家数"""
         if self.dm is None:
             return None
-        threshold = params.get('limit_down_threshold', -9.5)
         try:
-            df = self.dm.get_all_stocks_daily(trade_date=trade_date)
-            if df is not None and not df.empty and 'pct_chg' in df.columns:
-                pct = pd.to_numeric(df['pct_chg'], errors='coerce')
-                return float((pct <= threshold).sum())
+            df = self.dm.get_limit_down_pool(trade_date)
+            if df is not None:
+                return float(len(df))
         except Exception:
             pass
         return None
@@ -480,30 +479,55 @@ class FactorComputer:
         """B4: 地天板/天地板数量"""
         if self.dm is None:
             return None
-        threshold = params.get('limit_threshold', 0.095)
         try:
             df = self.dm.get_all_stocks_daily(trade_date=trade_date)
             if df is None or df.empty:
                 return None
+            zt = self.dm.get_limit_up_pool(trade_date)
+            dt = self.dm.get_limit_down_pool(trade_date)
 
             required_cols = ['open', 'close', 'pre_close']
             if not all(c in df.columns for c in required_cols):
                 return None
 
-            open_vals = pd.to_numeric(df['open'], errors='coerce')
-            close_vals = pd.to_numeric(df['close'], errors='coerce')
-            pre_close_vals = pd.to_numeric(df['pre_close'], errors='coerce')
+            close_up_codes = self._limit_pool_codes(zt)
+            close_down_codes = self._limit_pool_codes(dt)
+            if not close_up_codes and not close_down_codes:
+                return 0.0
 
-            open_pct = (open_vals - pre_close_vals) / pre_close_vals
-            close_pct = (close_vals - pre_close_vals) / pre_close_vals
+            count = 0
+            for _, row in df.iterrows():
+                pre_close = float(row.get('pre_close') or 0)
+                if pre_close <= 0:
+                    continue
+                code = row.get('code') or row.get('ts_code') or row.get('代码')
+                name = row.get('name') or row.get('名称') or row.get('股票名称')
+                code6 = normalize_code(code)
+                open_price = float(row.get('open') or 0)
+                up_price = limit_up_price(pre_close, code, name)
+                down_price = limit_down_price(pre_close, code, name)
+                open_at_up = up_price is not None and abs(open_price - float(up_price)) <= 0.01
+                open_at_down = down_price is not None and abs(open_price - float(down_price)) <= 0.01
+                heaven_to_hell = open_at_up and code6 in close_down_codes
+                hell_to_heaven = open_at_down and code6 in close_up_codes
+                if heaven_to_hell or hell_to_heaven:
+                    count += 1
 
-            heaven_to_hell = (open_pct >= threshold) & (close_pct <= -threshold)
-            hell_to_heaven = (open_pct <= -threshold) & (close_pct >= threshold)
-
-            return float((heaven_to_hell | hell_to_heaven).sum())
+            return float(count)
         except Exception:
             pass
         return None
+
+    @staticmethod
+    def _limit_pool_codes(df: Optional[pd.DataFrame]) -> set:
+        if df is None or df.empty:
+            return set()
+        codes = set()
+        for col in ['code', 'ts_code', '代码', '股票代码']:
+            if col not in df.columns:
+                continue
+            codes.update(normalize_code(v) for v in df[col].tolist())
+        return {c for c in codes if c}
 
     def _calc_B5(self, trade_date: str, params: Dict, extra_context: Dict = None) -> Optional[float]:
         """B5: 涨停股平均封单比"""

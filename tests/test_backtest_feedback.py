@@ -1,0 +1,208 @@
+import json
+from pathlib import Path
+
+import pandas as pd
+
+from backtest.backtest_engine import BacktestEngine, TradeRecord
+from backtest.attribution import build_attribution_frames
+from backtest.plan_source import build_backtest_plan_dir
+
+
+def test_plan_source_keeps_only_top_three_for_backtest(tmp_path):
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir()
+    output_dir = tmp_path / "webdata"
+
+    final = []
+    for rank in range(1, 6):
+        final.append({
+            "code": f"00000{rank}",
+            "name": f"股票{rank}",
+            "rank": rank,
+            "score": 70 - rank,
+            "reasons": [f"rank {rank}"],
+            "metrics": {
+                "stk_total_score": 70 - rank,
+                "stk_amount_ratio_5d": 80 - rank,
+            },
+        })
+    payload = {
+        "meta": {"date": "20260618", "engine": "etl"},
+        "etl": {"screening": {"profile": "default", "final": final}},
+    }
+    (snapshot_dir / "20260618.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    plan_dir, file_count, row_count = build_backtest_plan_dir(
+        snapshot_dir=snapshot_dir,
+        output_dir=output_dir,
+        start_date="20260618",
+        end_date="20260618",
+    )
+
+    assert file_count == 1
+    assert row_count == 3
+    df = pd.read_csv(plan_dir / "交易计划_20260618.csv")
+    assert list(df["优先级"]) == [1, 2, 3]
+    assert "因子指标" in df.columns
+
+
+def test_plan_source_prefers_external_screening_over_snapshot(tmp_path):
+    snapshot_dir = tmp_path / "snapshots"
+    screening_dir = tmp_path / "screening"
+    output_dir = tmp_path / "webdata"
+    snapshot_dir.mkdir()
+    screening_dir.mkdir()
+
+    snapshot_payload = {
+        "meta": {"date": "20260618"},
+        "etl": {"screening": {"profile": "default", "final": [{
+            "code": "000001", "name": "旧候选", "rank": 1, "score": 99, "metrics": {}
+        }]}},
+    }
+    external_payload = {
+        "trade_date": "20260618",
+        "profile": "default",
+        "ok": True,
+        "final": [{
+            "code": "000002", "name": "新候选", "rank": 1, "score": 88, "metrics": {}
+        }],
+    }
+    (snapshot_dir / "20260618.json").write_text(json.dumps(snapshot_payload, ensure_ascii=False), encoding="utf-8")
+    (screening_dir / "screening_20260618.json").write_text(json.dumps(external_payload, ensure_ascii=False), encoding="utf-8")
+
+    plan_dir, file_count, row_count = build_backtest_plan_dir(
+        snapshot_dir=snapshot_dir,
+        output_dir=output_dir,
+        screening_dir=screening_dir,
+        start_date="20260618",
+        end_date="20260618",
+    )
+
+    assert file_count == 1
+    assert row_count == 1
+    df = pd.read_csv(plan_dir / "交易计划_20260618.csv")
+    assert df.iloc[0]["名称"] == "新候选"
+
+
+def test_backtest_report_counts_only_closed_trades():
+    engine = BacktestEngine(data_manager=None)
+    engine.config.initial_capital = 100_000
+    engine.total_capital = 101_000
+    engine.daily_nav = [
+        {"date": "20260617", "total_value": 100_000},
+        {"date": "20260618", "total_value": 101_000},
+    ]
+    engine.trade_history = [
+        TradeRecord(
+            date="20260617", stock_code="000001", stock_name="A", pattern_type="指标筛选/default",
+            action="BUY", entry_price=10, exit_price=0, shares=1000, position_size=10_000,
+            pnl=0, pnl_pct=0, holding_days=0, hot_resonance=False, resonance_sectors="",
+        ),
+        TradeRecord(
+            date="20260618", stock_code="000001", stock_name="A", pattern_type="指标筛选/default",
+            action="SELL", entry_price=10, exit_price=11, shares=1000, position_size=10_000,
+            pnl=1_000, pnl_pct=0.1, holding_days=1, hot_resonance=False, resonance_sectors="",
+        ),
+        TradeRecord(
+            date="20260618", stock_code="000002", stock_name="B", pattern_type="指标筛选/default",
+            action="SELL", entry_price=10, exit_price=9.5, shares=1000, position_size=10_000,
+            pnl=-500, pnl_pct=-0.05, holding_days=1, hot_resonance=False, resonance_sectors="",
+        ),
+    ]
+
+    report = engine._generate_backtest_report()
+
+    assert report["total_trades"] == 2
+    assert report["buy_trades"] == 1
+    assert report["closed_trades"] == 2
+    assert report["win_rate"] == 0.5
+
+
+def test_backtest_engine_state_roundtrip_for_daily_continuation():
+    engine = BacktestEngine(data_manager=None)
+    engine.config.initial_capital = 100_000
+    engine.cash = 80_000
+    engine.total_capital = 101_000
+    engine.current_positions = {
+        "000001": {
+            "stock_name": "A",
+            "entry_date": "20260622",
+            "entry_price": 10,
+            "shares": 2000,
+            "cost_basis": 20_000,
+            "market_value": 21_000,
+            "pattern_type": "指标筛选/default",
+            "highest_price": 10.5,
+        }
+    }
+    engine.daily_nav = [{"date": "20260622", "cash": 80_000, "position_value": 21_000, "total_value": 101_000}]
+    engine.trade_history = [
+        TradeRecord(
+            date="20260622", stock_code="000001", stock_name="A", pattern_type="指标筛选/default",
+            action="BUY", entry_price=10, exit_price=0, shares=2000, position_size=20_000,
+            pnl=0, pnl_pct=0, holding_days=0, hot_resonance=False, resonance_sectors="",
+            entry_date="20260622", exit_reason="buy",
+        )
+    ]
+
+    state = engine.export_state()
+    restored = BacktestEngine(data_manager=None)
+    restored.import_state(state)
+
+    assert restored.cash == 80_000
+    assert restored.total_capital == 101_000
+    assert restored.daily_nav[-1]["date"] == "20260622"
+    assert restored.current_positions["000001"]["shares"] == 2000
+    assert restored.trade_history[0].stock_code == "000001"
+
+
+def test_factor_feedback_uses_strong_weak_buckets():
+    result = {
+        "trade_history": [
+            {
+                "date": "20260618", "stock_code": "000001", "stock_name": "强A",
+                "action": "SELL", "pnl": 1000, "pnl_pct": 0.1,
+                "stop_loss_triggered": False, "take_profit_triggered": True,
+                "plan_rank": 1, "plan_score": 80,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 82}),
+            },
+            {
+                "date": "20260618", "stock_code": "000002", "stock_name": "强B",
+                "action": "SELL", "pnl": 800, "pnl_pct": 0.08,
+                "stop_loss_triggered": False, "take_profit_triggered": True,
+                "plan_rank": 2, "plan_score": 78,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 78}),
+            },
+            {
+                "date": "20260618", "stock_code": "000003", "stock_name": "弱A",
+                "action": "SELL", "pnl": -500, "pnl_pct": -0.05,
+                "stop_loss_triggered": True, "take_profit_triggered": False,
+                "plan_rank": 3, "plan_score": 70,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 30}),
+            },
+            {
+                "date": "20260618", "stock_code": "000004", "stock_name": "弱B",
+                "action": "SELL", "pnl": -400, "pnl_pct": -0.04,
+                "stop_loss_triggered": True, "take_profit_triggered": False,
+                "plan_rank": 3, "plan_score": 69,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 35}),
+            },
+            {
+                "date": "20260618", "stock_code": "000005", "stock_name": "弱C",
+                "action": "SELL", "pnl": -300, "pnl_pct": -0.03,
+                "stop_loss_triggered": True, "take_profit_triggered": False,
+                "plan_rank": 3, "plan_score": 68,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 42}),
+            },
+        ]
+    }
+
+    feedback = build_attribution_frames(result)["factor_feedback"]
+    amount = feedback[feedback["factor_id"] == "stk_amount_ratio_5d"].iloc[0]
+
+    assert amount["strong_count"] == 2
+    assert amount["strong_total_pnl"] == 1800
+    assert amount["weak_count"] == 3
+    assert amount["weak_total_pnl"] == -1200
+    assert amount["weak_stop_loss_rate"] == 1
+    assert amount["feedback"] == "弱项导致止损"

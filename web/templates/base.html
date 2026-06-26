@@ -25,6 +25,8 @@
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100">
+  {% set current_user = request.state.user %}
+  {% set is_admin = current_user and current_user.get('role') == 'admin' %}
   <div class="flex h-screen overflow-hidden">
     {# ===== 侧边导航（Codex++ 风格） ===== #}
     <aside class="w-56 shrink-0 border-r border-slate-800 bg-slate-950/95 flex flex-col">
@@ -32,108 +34,26 @@
         <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-300 font-bold">情</span>
         <div class="leading-tight">
           <div class="font-bold tracking-tight">A股短线系统</div>
-          <div class="text-[11px] text-slate-500">管理控制台</div>
+          <div class="text-[11px] text-slate-500">{{ '管理控制台' if is_admin else '只读看板' }}</div>
         </div>
       </div>
       <nav class="flex-1 overflow-y-auto p-2 space-y-0.5" id="side-nav">
-        <a class="nav-link" href="/" data-prefix="/" data-exact>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          <span>概览</span>
-        </a>
-        <a class="nav-link" href="/report" data-prefix="/report">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V9m4 8V5m4 12v-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-          <span>明日计划</span>
-        </a>
-
-        <div class="nav-group">数据浏览</div>
-        <a class="nav-link" href="/data/strategy" data-prefix="/data/strategy">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
-          <span>策略信号</span>
-        </a>
-        <a class="nav-link" href="/data/sector" data-prefix="/data/sector">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>
-          <span>板块题材</span>
-        </a>
-        <a class="nav-link" href="/data/limitup" data-prefix="/data/limitup">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>
-          <span>涨停梯队</span>
-        </a>
-        {# 菜单隐藏（路由保留，可直接访问 /data/capital）
-        <a class="nav-link" href="/data/capital" data-prefix="/data/capital">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5a2.5 2.5 0 00-2.5-1.5c-1.4 0-2.5.8-2.5 2s1.1 1.8 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2a2.5 2.5 0 01-2.5-1.5M12 6.5v11"/></svg>
-          <span>龙虎榜资金</span>
-        </a>
-        #}
-        <a class="nav-link" href="/data/review" data-prefix="/data/review">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6a1 1 0 011 1v1h-8V4a1 1 0 011-1z"/><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 11h8M8 15h5"/></svg>
-          <span>复盘统计</span>
-        </a>
-        <a class="nav-link" href="/dragon" data-prefix="/dragon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/></svg>
-          <span>龙头池</span>
-        </a>
-        <a class="nav-link" href="/intraday" data-prefix="/intraday">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          <span>盘中转强</span>
-        </a>
-        <a class="nav-link" href="/realtime" data-prefix="/realtime">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-6 4 12 2-6h6"/><circle cx="5" cy="19" r="1"/><circle cx="12" cy="19" r="1"/><circle cx="19" cy="19" r="1"/></svg>
-          <span>实时行情</span>
-        </a>
-        {# 菜单隐藏（路由保留，可直接访问 /recap、/m）
-        <a class="nav-link" href="/recap" data-prefix="/recap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><polygon points="10 8 16 10.5 10 13 10 8" fill="currentColor" stroke="none"/><path d="M8 21h8"/></svg>
-          <span>复盘</span>
-        </a>
-        <a class="nav-link" href="/m" data-prefix="/m">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
-          <span>手机版</span>
-        </a>
-        #}
-
-        <div class="nav-group">回测</div>
-        <a class="nav-link" href="/backtest" data-prefix="/backtest">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M19 9l-5 5-3-3-4 4"/></svg>
-          <span>模拟交易</span>
-        </a>
-        <a class="nav-link" href="/drawdown" data-prefix="/drawdown">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4v16h18"/><path d="M7 8l4 6 3-3 4 5"/></svg>
-          <span>回撤分析</span>
-        </a>
-
-        {# 菜单隐藏（路由保留，可直接访问 /ask）
-        <div class="nav-group">智能问答</div>
-        <a class="nav-link" href="/ask" data-prefix="/ask">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg>
-          <span>问 AI</span>
-        </a>
-        #}
-
-        <div class="nav-group">系统</div>
-        <a class="nav-link" href="/run" data-prefix="/run">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
-          <span>运行分析</span>
-        </a>
-        <a class="nav-link" href="/config" data-prefix="/config">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-2.92.67 1.65 1.65 0 01-3.16 0 1.65 1.65 0 00-2.92-.67l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-          <span>参数配置</span>
-        </a>
-        <a class="nav-link" href="/factors" data-prefix="/factors">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><circle cx="4" cy="12" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="14" r="2"/></svg>
-          <span>因子面板</span>
-        </a>
-        <a class="nav-link" href="/logs" data-prefix="/logs">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
-          <span>日志</span>
-        </a>
-        <a class="nav-link" href="/about" data-prefix="/about">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
-          <span>关于</span>
-        </a>
+        {% for group in visible_menu_groups(current_user) %}
+          {% if group.get('label') %}<div class="nav-group">{{ group.get('label') }}</div>{% endif %}
+          {% for item in group.get('items', []) %}
+          <a class="nav-link" href="{{ item.get('href') }}" data-prefix="{{ item.get('prefix') or item.get('href') }}" {% if item.get('exact') %}data-exact{% endif %}>
+            {{ item.get('icon') | safe }}
+            <span>{{ item.get('label') }}</span>
+          </a>
+          {% endfor %}
+        {% endfor %}
       </nav>
-      <div class="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500 flex items-center gap-2">
-        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
-        <span>本地内嵌服务 · 离线运行</span>
+      <div class="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500 space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span>{{ current_user.get('label') if current_user else '未登录' }} · {{ current_user.get('username') if current_user else '' }}</span>
+        </div>
+        <a href="/logout" class="inline-flex items-center text-slate-400 hover:text-emerald-300">退出登录</a>
       </div>
     </aside>
 
@@ -147,6 +67,10 @@
           </div>
           <div class="flex-1"></div>
           {% block header_extra %}{% endblock %}
+          <div class="hidden md:flex items-center gap-2 text-xs text-slate-500 border border-slate-800 rounded-md px-2.5 py-1.5">
+            <span class="w-1.5 h-1.5 rounded-full {{ 'bg-emerald-400' if is_admin else 'bg-sky-400' }}"></span>
+            <span>{{ current_user.get('label') if current_user else '未登录' }}</span>
+          </div>
           <button onclick="location.reload()" title="刷新"
                   class="text-slate-400 hover:text-emerald-300 border border-slate-700 hover:border-emerald-600 rounded-md p-1.5">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
@@ -158,6 +82,13 @@
       </main>
     </div>
   </div>
+
+  {% if current_user %}
+  <div class="fixed right-3 bottom-3 z-50 pointer-events-none select-none text-[11px] leading-5 text-slate-400/60 text-right">
+    <div>{{ current_user.get('username') }} · {{ current_user.get('label') }}</div>
+    <div>有效期 {{ current_user.get('expire_at_display') }}</div>
+  </div>
+  {% endif %}
 
   <script>
     (function () {

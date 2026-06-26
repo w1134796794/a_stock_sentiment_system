@@ -18,7 +18,7 @@
 {% block content %}
 <section class="card border border-slate-800 rounded-xl p-4" id="ask-ai" data-date="{{ date or '' }}">
   <div class="flex flex-wrap gap-1.5 mb-3 text-xs">
-    {% for q in ["今天为什么是这个仓位？", "明日重点关注哪只？为什么？", "首板突破最近出现频率如何？", "当前情绪周期处于什么阶段？"] %}
+    {% for q in ["今天为什么是这个仓位？", "明日重点关注哪只？为什么？", "当前启用哪些指标？", "当前情绪周期处于什么阶段？"] %}
     <button class="ask-suggest px-2 py-1 rounded-full bg-slate-800/70 hover:bg-slate-700 text-slate-300">{{ q }}</button>
     {% endfor %}
   </div>
@@ -31,7 +31,7 @@
   </div>
   <div id="ask-answer" class="mt-4 text-sm text-slate-200 whitespace-pre-line leading-relaxed min-h-[1.5rem]"></div>
   {% if not date %}
-  <div class="mt-3 text-xs text-amber-300/80">暂无快照数据，回答将不带当日上下文。可先到「运行分析」生成快照。</div>
+  <div class="mt-3 text-xs text-amber-300/80">暂无快照数据，回答将不带当日上下文。可先到「生成数据」生成快照。</div>
   {% endif %}
 </section>
 

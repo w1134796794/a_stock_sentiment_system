@@ -57,13 +57,19 @@ class DataPrep:
               extra_codes: Optional[Iterable[str]] = None,
               daily_lookback_calendar_days: int = 120,
               prefetch_limit_up: bool = True,
+              prefetch_limit_down: bool = True,
               limit_up_history_days: int = 16,
               prefetch_all_daily: bool = True,
+              prefetch_universe_daily: bool = True,
               prefetch_auction: bool = False,
               prefetch_sectors: bool = True,
               sector_history_days: int = 10,
               index_codes: Optional[Iterable[str]] = None,
-              index_lookbacks: tuple = (120, 30)) -> MarketDataset:
+              index_lookbacks: tuple = (120, 30),
+              persist_silver: bool = False,
+              warehouse_path=None,
+              silver_dir=None,
+              quality_dir=None) -> MarketDataset:
         """构建当日只读数据集。
 
         预取域：
@@ -89,11 +95,15 @@ class DataPrep:
 
             ds.meta["universe_size"] = len(universe)
 
-            # all_daily / limit_up / 板块列表 不依赖 universe，先做（即使 universe 为空也有价值）
+            # all_daily / limit_up / 板块列表 / daily_basic 不依赖 universe，先做（即使 universe 为空也有价值）
             if prefetch_all_daily:
                 self._prefetch_all_daily(ds, trade_date)
+            self._prefetch_stock_basic(ds)
+            self._prefetch_daily_basic(ds, trade_date)
             if prefetch_limit_up:
                 self._prefetch_limit_up(ds, trade_date, limit_up_history_days)
+            if prefetch_limit_down:
+                self._prefetch_limit_down(ds, trade_date)
             if prefetch_sectors:
                 self._prefetch_sectors(ds, trade_date, prev_trade_date, sector_history_days)
             if index_codes:
@@ -101,10 +111,20 @@ class DataPrep:
 
             if not universe:
                 logger.info("[DataPrep] universe 为空，跳过 daily/auction 预取")
+                if persist_silver:
+                    self.persist_silver(
+                        ds,
+                        warehouse_path=warehouse_path,
+                        silver_dir=silver_dir,
+                        quality_dir=quality_dir,
+                    )
                 logger.info(f"[DataPrep] {ds.summary()}")
                 return ds
 
-            self._prefetch_daily(ds, universe, trade_date, daily_lookback_calendar_days)
+            if prefetch_universe_daily:
+                self._prefetch_daily(ds, universe, trade_date, daily_lookback_calendar_days)
+            else:
+                logger.info("[DataPrep] ETL主路径跳过逐股历史日线批量获取，使用 all_daily/silver 因子主表")
             if prefetch_auction:
                 self._prefetch_auction(ds, universe, trade_date)
 
@@ -113,8 +133,37 @@ class DataPrep:
             logger.warning(f"[DataPrep] 预取过程异常（将回退 dm）：{e}")
             logger.debug(traceback.format_exc())
 
+        if persist_silver:
+            self.persist_silver(
+                ds,
+                warehouse_path=warehouse_path,
+                silver_dir=silver_dir,
+                quality_dir=quality_dir,
+            )
+
         logger.info(f"[DataPrep] {ds.summary()}")
         return ds
+
+    def persist_silver(self, ds: MarketDataset, *, warehouse_path=None, silver_dir=None, quality_dir=None) -> dict:
+        """把已预取数据集标准化并落到 Phase 1 silver 表。
+
+        默认写入 ``config.settings.FACTOR_DB_PATH`` 和
+        ``webdata/warehouse/silver``；当运行环境未安装 duckdb 时自动保留 parquet/csv
+        文件落盘，不影响原复盘流程。
+        """
+        try:
+            from core.etl.warehouse import persist_market_dataset_silver
+
+            return persist_market_dataset_silver(
+                ds,
+                duckdb_path=warehouse_path,
+                silver_dir=silver_dir,
+                quality_dir=quality_dir,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[DataPrep] silver 落盘失败（不影响分析流程）：{e}")
+            ds.meta["silver_persist_error"] = str(e)
+            return {"ok": False, "error": str(e)}
 
     # ------------------------------------------------------------------
     def _prefetch_daily(self, ds: MarketDataset, universe: List[str],
@@ -166,6 +215,31 @@ class DataPrep:
                 logger.info(f"[DataPrep] all_daily 预取：{len(df)} 行 @ {trade_date}")
         except Exception as e:
             logger.warning(f"[DataPrep] all_daily 预取失败（将回退 dm）：{e}")
+
+    def _prefetch_daily_basic(self, ds: MarketDataset, trade_date: str) -> None:
+        """预取当日全市场 daily_basic（流通股本/换手率/市值等，单次接口调用）。"""
+        if not hasattr(self.dm, "get_daily_basic"):
+            return
+        try:
+            df = self.dm.get_daily_basic(str(trade_date))
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                ds.daily_basic[str(trade_date)] = df
+                ds.prefetched.add("daily_basic")
+                logger.info(f"[DataPrep] daily_basic 预取：{len(df)} 行 @ {trade_date}")
+        except Exception as e:
+            logger.warning(f"[DataPrep] daily_basic 预取失败（将回退 dm）：{e}")
+
+    def _prefetch_stock_basic(self, ds: MarketDataset) -> None:
+        """预取股票基础资料，用于补齐 ETL 计划和实时页面的股票名称。"""
+        if not hasattr(self.dm, "get_stock_basic"):
+            return
+        try:
+            df = self.dm.get_stock_basic()
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                ds.put_call("stock_basic", df, "stock_basic")
+                logger.info(f"[DataPrep] stock_basic 预取：{len(df)} 行")
+        except Exception as e:
+            logger.warning(f"[DataPrep] stock_basic 预取失败（不影响主流程）：{e}")
 
     def _prefetch_index_daily(self, ds: MarketDataset, index_codes: Iterable[str],
                               trade_date: str, lookbacks: tuple = (120, 30)) -> None:
@@ -226,6 +300,19 @@ class DataPrep:
         if ds.limit_up:
             ds.prefetched.add("limit_up")
         logger.info(f"[DataPrep] limit_up 预取：{len(ds.limit_up)} 个交易日，非空 {n_ok} 个")
+
+    def _prefetch_limit_down(self, ds: MarketDataset, trade_date: str) -> None:
+        """预取当日跌停池，严格来自 Tushare limit_list_d。"""
+        if not hasattr(self.dm, "get_limit_down_pool"):
+            return
+        try:
+            df = self.dm.get_limit_down_pool(str(trade_date))
+            if isinstance(df, pd.DataFrame):
+                ds.limit_down[str(trade_date)] = df
+                ds.prefetched.add("limit_down")
+                logger.info(f"[DataPrep] limit_down 预取：{len(df)} 行 @ {trade_date}")
+        except Exception as e:
+            logger.warning(f"[DataPrep] limit_down 预取失败（将回退 dm）：{e}")
 
     def _prefetch_sectors(self, ds: MarketDataset, trade_date: str, prev_trade_date: str,
                           history_days: int = 10) -> None:

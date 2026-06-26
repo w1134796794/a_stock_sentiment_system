@@ -7,9 +7,7 @@
 - 账本用 R-1 的 ``PortfolioState``（实盘 / 回测共用，规则不漂移）。
 - 撮合用 B-1 的 ``matching_rules``（涨跌停 / 一字板 / 停牌 / 滑点）。
 - 行情用 B-2a 的 point-in-time 价格源（``AsOfPriceProvider`` / ``StaticPriceProvider``）。
-- 交易计划由 ``plan_provider`` 注入，两种实现：
-    * ``PipelinePlanProvider``——以历史某日为"今天"重跑流水线（真·历史重演，需数据/token）；
-    * ``CsvPlanProvider``——读取已落盘的（且已过 L4.5 风控闸门的）交易计划 CSV。
+- 交易计划由 ``plan_provider`` 注入，当前 dev 分支使用快照/筛选结果派生的 CSV 计划。
 
 执行时序（严格 T+1）：在交易日 T，
   1. 先用 T 的行情对**已有持仓**做退出判定（止损/移动止盈/时间止损/分批止盈/止盈）；

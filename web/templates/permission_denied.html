@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}无权限{% endblock %}
+{% block page_title %}无权限{% endblock %}
+{% block page_subtitle %}
+<div class="text-xs text-slate-500">当前账号为只读权限</div>
+{% endblock %}
+
+{% block content %}
+<section class="max-w-2xl border border-slate-800 rounded-xl bg-slate-900/70 p-6">
+  <h2 class="text-base font-bold">这个入口需要超级账号</h2>
+  <p class="mt-2 text-sm text-slate-400 leading-6">
+    只读账号可以查看概览、交易计划、数据浏览、龙头池、盘中转强、实时行情和已有回测结果，
+    但不能运行数据生成、回测任务、修改参数或调整指标因子。
+  </p>
+  <div class="mt-5 flex gap-2">
+    <a href="/" class="inline-flex items-center rounded-lg bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition">返回概览</a>
+    <a href="/logout" class="inline-flex items-center rounded-lg border border-slate-700 hover:border-emerald-600 px-4 py-2 text-sm text-slate-300 transition">切换账号</a>
+  </div>
+</section>
+{% endblock %}

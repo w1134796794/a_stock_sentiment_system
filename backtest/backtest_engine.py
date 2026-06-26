@@ -8,13 +8,14 @@
 """
 import pandas as pd
 import numpy as np
+import json
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import asdict, dataclass
 from pathlib import Path
 import loguru
 
-from backtest.matching_rules import open_gap_pct
+from backtest.matching_rules import limit_up_price, open_gap_pct
 from backtest.trade_calendar import TradeCalendar
 
 logger = loguru.logger
@@ -28,6 +29,7 @@ class BacktestConfig:
     max_total_position: float = 0.8  # 总仓位上限80%
     max_positions: int = 8  # 最多同时持仓只数（仅风控开启时生效）
     max_sector_concentration: float = 0.4  # 单一板块最大仓位（仅风控开启时生效）
+    max_plan_rank: int = 3  # 只执行每日候选前N名，后续候选仅观察
 
     # 风控闸门总开关：关闭后不施加组合层约束（单票/总仓/持仓数/板块集中度），
     # 仅保留现金/价格有效性等基础校验，用于对比"无风控"模拟结果。个股止损止盈
@@ -83,6 +85,12 @@ class TradeRecord:
     resonance_sectors: str
     stop_loss_triggered: bool = False
     take_profit_triggered: bool = False
+    entry_date: str = ""
+    exit_reason: str = ""
+    plan_rank: int = 0
+    plan_score: float = 0.0
+    plan_reason: str = ""
+    factor_metrics_json: str = ""
 
 
 class BacktestEngine:
@@ -100,6 +108,50 @@ class BacktestEngine:
         self.current_positions: Dict[str, Dict] = {}  # 当前持仓
         self.cash: float = self.config.initial_capital
         self.total_capital: float = self.config.initial_capital
+
+    def export_state(self) -> Dict[str, Any]:
+        """导出可落盘的账户状态，用于单日接力回测。"""
+        return {
+            "version": 1,
+            "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_date": str(self.daily_nav[-1].get("date") if self.daily_nav else ""),
+            "initial_capital": self.config.initial_capital,
+            "cash": self.cash,
+            "total_capital": self.total_capital,
+            "current_positions": json.loads(json.dumps(self.current_positions, ensure_ascii=False)),
+            "daily_nav": json.loads(json.dumps(self.daily_nav, ensure_ascii=False)),
+            "trade_history": [asdict(t) for t in self.trade_history],
+        }
+
+    def import_state(self, state: Dict[str, Any]) -> None:
+        """恢复账户状态；调用后可继续处理下一个交易日。"""
+        state = dict(state or {})
+        initial = self._float(state.get("initial_capital"), self.config.initial_capital)
+        self.config.initial_capital = initial
+        self.cash = self._float(state.get("cash"), initial)
+        self.total_capital = self._float(state.get("total_capital"), self.cash)
+        self.current_positions = {
+            str(code).zfill(6): dict(pos or {})
+            for code, pos in (state.get("current_positions") or {}).items()
+        }
+        self.daily_nav = [dict(row or {}) for row in (state.get("daily_nav") or [])]
+        allowed = set(TradeRecord.__dataclass_fields__.keys())
+        self.trade_history = []
+        for row in state.get("trade_history") or []:
+            if isinstance(row, TradeRecord):
+                self.trade_history.append(row)
+                continue
+            if not isinstance(row, dict):
+                continue
+            data = {k: row.get(k) for k in allowed}
+            defaults = {
+                "date": "", "stock_code": "", "stock_name": "", "pattern_type": "",
+                "action": "", "entry_price": 0.0, "exit_price": 0.0, "shares": 0,
+                "position_size": 0.0, "pnl": 0.0, "pnl_pct": 0.0,
+                "holding_days": 0, "hot_resonance": False, "resonance_sectors": "",
+            }
+            defaults.update({k: v for k, v in data.items() if v is not None})
+            self.trade_history.append(TradeRecord(**defaults))
 
     def run_backtest(self,
                      start_date: str,
@@ -131,6 +183,18 @@ class BacktestEngine:
         logger.info(f"回测完成: 最终资金 {self.total_capital:,.2f}")
         logger.info(f"总收益率: {report['total_return']:.2%}")
 
+        return report
+
+    def run_one_day(self, trade_date: str, trade_plans_dir: str) -> Dict:
+        """只处理一个交易日，账户状态由调用方提前 import_state。"""
+        logger.info(f"开始单日接力回测: {trade_date}")
+        trade_dates = self._get_trade_dates(trade_date, trade_date)
+        if not trade_dates:
+            logger.warning(f"{trade_date} 不是交易日或交易日历无数据，跳过")
+            return self._generate_backtest_report()
+        self._process_date(trade_dates[0], trade_plans_dir)
+        report = self._generate_backtest_report()
+        logger.info(f"单日接力完成: {trade_date}，当前资金 {self.total_capital:,.2f}")
         return report
 
     def _get_trade_dates(self, start_date: str, end_date: str) -> List[str]:
@@ -180,6 +244,18 @@ class BacktestEngine:
             # 只保留买入计划
             if '动作' in df.columns:
                 df = df[df['动作'] == '买入']
+            if self.config.max_plan_rank and self.config.max_plan_rank > 0 and '优先级' in df.columns:
+                rank = pd.to_numeric(df['优先级'], errors='coerce')
+                df = df[rank.notna() & (rank <= self.config.max_plan_rank)].copy()
+                df['_rank'] = pd.to_numeric(df['优先级'], errors='coerce').fillna(999999)
+                sort_cols = ['_rank']
+                ascending = [True]
+                if '综合评分' in df.columns:
+                    df['_score'] = pd.to_numeric(df['综合评分'], errors='coerce').fillna(0)
+                    sort_cols.append('_score')
+                    ascending.append(False)
+                df = df.sort_values(sort_cols, ascending=ascending)
+                df = df.drop(columns=[c for c in ('_rank', '_score') if c in df.columns])
             return df
         except Exception as e:
             logger.error(f"加载交易计划失败 {date}: {e}")
@@ -248,15 +324,15 @@ class BacktestEngine:
             logger.warning(f"{stock_name} 买入价格无效，跳过")
             return
 
-        # 确保买入价格不超过涨停价（A股涨停为10%，ST为5%）
+        # 确保买入价格不超过对应板块涨停价。
         # 从DataManager获取昨日收盘价计算涨停价
         try:
             prev_close = self._get_prev_close(stock_code, date)
             if prev_close and prev_close > 0:
-                limit_up_price = prev_close * 1.1  # 10%涨停限制
-                if entry_price > limit_up_price:
-                    logger.warning(f"{stock_name} 买入价{entry_price:.2f}超过涨停价{limit_up_price:.2f}，调整为涨停价")
-                    entry_price = limit_up_price
+                lu_price = limit_up_price(prev_close, stock_code, stock_name)
+                if lu_price is not None and entry_price > lu_price:
+                    logger.warning(f"{stock_name} 买入价{entry_price:.2f}超过涨停价{lu_price:.2f}，调整为涨停价")
+                    entry_price = lu_price
         except Exception as e:
             logger.debug(f"获取昨日收盘价失败 {stock_code}: {e}")
 
@@ -275,6 +351,11 @@ class BacktestEngine:
         # 执行买入
         self.cash -= (actual_cost + commission)
 
+        plan_rank = self._int(plan.get('优先级'), 0)
+        plan_score = self._float(plan.get('综合评分'), 0.0)
+        plan_reason = str(plan.get('理由') or '')
+        factor_metrics_json = self._factor_metrics_json(plan)
+
         self.current_positions[stock_code] = {
             'stock_name': stock_name,
             'entry_date': date,
@@ -285,6 +366,10 @@ class BacktestEngine:
             'pattern_type': plan['模式'],
             'hot_resonance': plan.get('热点共振', False),
             'resonance_sectors': plan.get('共振板块', ''),
+            'plan_rank': plan_rank,
+            'plan_score': plan_score,
+            'plan_reason': plan_reason,
+            'factor_metrics_json': factor_metrics_json,
             'stop_loss_price': entry_price * (1 - self.config.stop_loss_pct),
             'take_profit_price': entry_price * (1 + self.config.take_profit_pct),
             'highest_price': entry_price  # 用于跟踪回撤
@@ -309,7 +394,13 @@ class BacktestEngine:
             hot_resonance=plan.get('热点共振', False),
             resonance_sectors=plan.get('共振板块', ''),
             stop_loss_triggered=False,
-            take_profit_triggered=False
+            take_profit_triggered=False,
+            entry_date=date,
+            exit_reason='buy',
+            plan_rank=plan_rank,
+            plan_score=plan_score,
+            plan_reason=plan_reason,
+            factor_metrics_json=factor_metrics_json,
         )
         self.trade_history.append(trade_record)
 
@@ -359,8 +450,8 @@ class BacktestEngine:
 
         # 检查是否涨停开盘（无法买入）
         if prev_close and prev_close > 0:
-            limit_up_price = prev_close * 1.1
-            if open_price >= limit_up_price * 0.998:  # 考虑浮点误差
+            lu_price = limit_up_price(prev_close, stock_code, stock_name)
+            if lu_price is not None and open_price >= lu_price * 0.998:  # 考虑浮点误差
                 logger.info(f"{stock_name} 涨停开盘，无法买入")
                 return False, 0
         
@@ -547,7 +638,13 @@ class BacktestEngine:
             hot_resonance=position['hot_resonance'],
             resonance_sectors=position['resonance_sectors'],
             stop_loss_triggered=(reason == 'stop_loss'),
-            take_profit_triggered=(reason == 'take_profit')
+            take_profit_triggered=(reason == 'take_profit'),
+            entry_date=position.get('entry_date', ''),
+            exit_reason=reason,
+            plan_rank=int(position.get('plan_rank') or 0),
+            plan_score=float(position.get('plan_score') or 0.0),
+            plan_reason=str(position.get('plan_reason') or ''),
+            factor_metrics_json=str(position.get('factor_metrics_json') or ''),
         )
 
         self.trade_history.append(trade_record)
@@ -611,7 +708,13 @@ class BacktestEngine:
             hot_resonance=position['hot_resonance'],
             resonance_sectors=position['resonance_sectors'],
             stop_loss_triggered=False,
-            take_profit_triggered=(reason.startswith('partial'))
+            take_profit_triggered=(reason.startswith('partial')),
+            entry_date=position.get('entry_date', ''),
+            exit_reason=reason,
+            plan_rank=int(position.get('plan_rank') or 0),
+            plan_score=float(position.get('plan_score') or 0.0),
+            plan_reason=str(position.get('plan_reason') or ''),
+            factor_metrics_json=str(position.get('factor_metrics_json') or ''),
         )
 
         self.trade_history.append(trade_record)
@@ -696,6 +799,42 @@ class BacktestEngine:
             # 默认上海
             return f"{code}.SH"
 
+    @staticmethod
+    def _float(value: Any, default: float = 0.0) -> float:
+        try:
+            if value is None or pd.isna(value):
+                return default
+        except Exception:
+            pass
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _int(cls, value: Any, default: int = 0) -> int:
+        try:
+            return int(cls._float(value, float(default)))
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _factor_metrics_json(cls, plan: pd.Series) -> str:
+        text = str(plan.get('因子指标') or '').strip()
+        if text and text.lower() not in ('nan', 'none'):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return json.dumps(parsed, ensure_ascii=False, sort_keys=True)
+            except Exception:
+                pass
+        metrics = {}
+        for key, value in plan.items():
+            key = str(key)
+            if key.startswith('因子_'):
+                metrics[key.replace('因子_', '', 1)] = cls._float(value)
+        return json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+
     def _get_prev_close(self, stock_code: str, date: str) -> Optional[float]:
         """获取昨日收盘价（B-1：真实交易日历取前一交易日）"""
         try:
@@ -731,14 +870,28 @@ class BacktestEngine:
     def _generate_backtest_report(self) -> Dict:
         """生成回测报告"""
         if not self.trade_history:
+            nav_series = pd.DataFrame(self.daily_nav)
+            max_drawdown = 0
+            if not nav_series.empty and 'total_value' in nav_series.columns:
+                nav_series['cummax'] = nav_series['total_value'].cummax()
+                nav_series['drawdown'] = (nav_series['total_value'] - nav_series['cummax']) / nav_series['cummax']
+                max_drawdown = nav_series['drawdown'].min()
             return {
                 'total_return': 0,
                 'annualized_return': 0,
                 'sharpe_ratio': 0,
-                'max_drawdown': 0,
+                'max_drawdown': max_drawdown,
                 'win_rate': 0,
                 'profit_loss_ratio': 0,
-                'total_trades': 0
+                'total_trades': 0,
+                'buy_trades': 0,
+                'closed_trades': 0,
+                'initial_capital': self.config.initial_capital,
+                'final_capital': self.total_capital,
+                'pattern_stats': pd.DataFrame(),
+                'resonance_stats': pd.DataFrame(),
+                'daily_nav': self.daily_nav,
+                'trade_history': self.trade_history,
             }
 
         # 计算收益率
@@ -756,18 +909,38 @@ class BacktestEngine:
 
         # 计算胜率
         trades_df = pd.DataFrame([{
+            'action': t.action,
             'pnl': t.pnl,
             'pnl_pct': t.pnl_pct,
             'pattern_type': t.pattern_type,
             'hot_resonance': t.hot_resonance
         } for t in self.trade_history])
+        closed_df = trades_df[trades_df['action'].astype(str).str.upper().str.startswith('SELL')].copy()
 
-        win_rate = (trades_df['pnl'] > 0).mean()
+        if closed_df.empty:
+            win_rate = 0
+            profit_loss_ratio = 0
+            pattern_stats = pd.DataFrame()
+            resonance_stats = pd.DataFrame()
+        else:
+            win_rate = (closed_df['pnl'] > 0).mean()
 
-        # 计算盈亏比
-        avg_profit = trades_df[trades_df['pnl'] > 0]['pnl'].mean() if len(trades_df[trades_df['pnl'] > 0]) > 0 else 0
-        avg_loss = abs(trades_df[trades_df['pnl'] < 0]['pnl'].mean()) if len(trades_df[trades_df['pnl'] < 0]) > 0 else 1
-        profit_loss_ratio = avg_profit / avg_loss if avg_loss > 0 else 0
+            # 计算盈亏比
+            avg_profit = closed_df[closed_df['pnl'] > 0]['pnl'].mean() if len(closed_df[closed_df['pnl'] > 0]) > 0 else 0
+            avg_loss = abs(closed_df[closed_df['pnl'] < 0]['pnl'].mean()) if len(closed_df[closed_df['pnl'] < 0]) > 0 else 1
+            profit_loss_ratio = avg_profit / avg_loss if avg_loss > 0 else 0
+
+            # 按模式统计
+            pattern_stats = closed_df.groupby('pattern_type').agg({
+                'pnl': ['count', 'sum', 'mean'],
+                'pnl_pct': 'mean'
+            }).round(4)
+
+            # 热点共振 vs 非共振统计
+            resonance_stats = closed_df.groupby('hot_resonance').agg({
+                'pnl': ['count', 'sum', 'mean'],
+                'pnl_pct': 'mean'
+            }).round(4)
 
         # 计算Sharpe比率（简化）
         if len(nav_series) > 1:
@@ -776,18 +949,6 @@ class BacktestEngine:
         else:
             sharpe_ratio = 0
 
-        # 按模式统计
-        pattern_stats = trades_df.groupby('pattern_type').agg({
-            'pnl': ['count', 'sum', 'mean'],
-            'pnl_pct': 'mean'
-        }).round(4)
-
-        # 热点共振 vs 非共振统计
-        resonance_stats = trades_df.groupby('hot_resonance').agg({
-            'pnl': ['count', 'sum', 'mean'],
-            'pnl_pct': 'mean'
-        }).round(4)
-
         report = {
             'total_return': total_return,
             'annualized_return': annualized_return,
@@ -795,7 +956,9 @@ class BacktestEngine:
             'max_drawdown': max_drawdown,
             'win_rate': win_rate,
             'profit_loss_ratio': profit_loss_ratio,
-            'total_trades': len(self.trade_history),
+            'total_trades': len(closed_df),
+            'buy_trades': int((trades_df['action'].astype(str).str.upper() == 'BUY').sum()),
+            'closed_trades': len(closed_df),
             'initial_capital': self.config.initial_capital,
             'final_capital': self.total_capital,
             'pattern_stats': pattern_stats,
