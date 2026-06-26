@@ -61,7 +61,7 @@
     <div class="text-slate-500 text-sm py-4">无数据</div>
   {% else %}
     {% set name_prefs = ['sector_name', '板块名称', '概念名称', '股票名称', 'stock_name', '名称', 'name'] %}
-    {% set code_prefs = ['sector_code', '板块代码', '股票代码', 'stock_code', '代码', 'ts_code'] %}
+    {% set code_prefs = ['sector_code', '板块代码', '股票代码', 'stock_code', 'code', '代码', 'ts_code'] %}
     {% set metric_prefs = ['模式类型', 'pattern_type', '板块类型', '类型', 'type', '置信度', 'confidence',
                            '主线主题评分', '当日主线评分', '近10日上榜天数',
                            '综合评分', 'composite_score', 'mainline_score', '动量评分', 'momentum_score',
@@ -92,11 +92,17 @@
         </summary>
         <div class="md-detail">
           {% for c in columns %}
+          {% set hidden_sector_detail_cols = ['sector_name', '板块名称', 'sector_code', '板块代码', 'trade_date', 'computed_at', 'compute_at'] %}
+          {% set hidden_stock_detail_cols = ['code', 'name', '股票代码', '股票名称', 'stock_code', 'stock_name', 'ts_code', '代码', '名称'] %}
+          {% if (section.name in ['热点概念', '热点行业', '主线主题'] and c in hidden_sector_detail_cols)
+                or (section.name in ['指标筛选', '交易计划', '龙头池', '盘中转强'] and c in hidden_stock_detail_cols) %}
+          {% else %}
           {% set v = row.get(c) %}
           <div class="md-field{% if v is mapping or (v is iterable and v is not string) %} md-field--wide{% endif %}">
             <div class="md-field-k">{{ c | col_label }}</div>
             <div class="md-field-v">{{ render_value(v) }}</div>
           </div>
+          {% endif %}
           {% endfor %}
         </div>
       </details>
