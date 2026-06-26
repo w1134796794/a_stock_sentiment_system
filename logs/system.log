@@ -1,76 +1,65 @@
-2026-06-24 20:24:29.097 | INFO     | core.data.data_manager_main:__init__:52 - [DataManager] 初始化完成，缓存目录: G:\a_stock_sentiment_system\data\cache
-2026-06-24 20:24:29.098 | INFO     | main:run_daily_analysis:45 - 开始执行 20260624 的日度数据生成...
-2026-06-24 20:24:29.098 | INFO     | main:run_daily_analysis:46 - 对比日期: 20260623
-2026-06-24 20:24:29.099 | INFO     | core.etl.daily_pipeline:run:80 - [数据生成] 开始主流程: 20260624, prev=20260623
-2026-06-24 20:24:31.254 | INFO     | core.data.data_manager_market:get_limit_up_pool:170 - [get_limit_up_pool] 获取 20260624 涨停池数据: 98条
-2026-06-24 20:24:31.339 | INFO     | core.data.data_manager_market:_append_to_limit_up_summary:376 - 追加98条涨停数据: G:\a_stock_sentiment_system\data\cache\summary\limit_up_stocks.csv
-2026-06-24 20:24:34.044 | INFO     | core.data.data_manager_stock:get_all_stocks_daily:225 - [get_all_stocks_daily] 20260624 获取 5512 只股票日线数据
-2026-06-24 20:24:34.046 | INFO     | core.data.data_prep:_prefetch_all_daily:212 - [DataPrep] all_daily 预取：5512 行 @ 20260624
-2026-06-24 20:24:34.130 | INFO     | core.data.data_prep:_prefetch_stock_basic:237 - [DataPrep] stock_basic 预取：5529 行
-2026-06-24 20:24:36.741 | INFO     | core.data.data_prep:_prefetch_daily_basic:225 - [DataPrep] daily_basic 预取：5590 行 @ 20260624
-2026-06-24 20:24:37.692 | INFO     | core.data.data_prep:_prefetch_limit_up:299 - [DataPrep] limit_up 预取：16 个交易日，非空 16 个
-2026-06-24 20:25:31.855 | INFO     | core.data.data_manager_market:get_limit_cpt_list:255 - [get_limit_cpt_list] 过滤ST板块后剩余: 20条
-2026-06-24 20:25:31.857 | INFO     | core.data.data_manager_market:get_limit_cpt_list:258 - [get_limit_cpt_list] 获取 20260624 最强板块数据: 20条
-2026-06-24 20:25:34.052 | INFO     | core.data.data_manager_moneyflow:get_moneyflow_summary:95 - [get_moneyflow_summary] 20260624 全市场资金流向: 5192条
-2026-06-24 20:25:34.122 | INFO     | core.data.data_prep:_prefetch_sectors:365 - [DataPrep] 板块/资金流预取：['ths_index', 'ths_daily', 'limit_cpt_list', 'moneyflow_summary']（板块按日窗口 10 天，调用缓存 26 条）
-2026-06-24 20:25:35.212 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 000001.SH 获取 121 条数据
-2026-06-24 20:25:38.346 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 000001.SH 获取 31 条数据
-2026-06-24 20:25:38.995 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399001.SZ 获取 121 条数据
-2026-06-24 20:25:40.490 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399001.SZ 获取 31 条数据
-2026-06-24 20:25:41.959 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399006.SZ 获取 121 条数据
-2026-06-24 20:25:42.766 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399006.SZ 获取 31 条数据
-2026-06-24 20:25:42.766 | INFO     | core.data.data_prep:_prefetch_index_daily:274 - [DataPrep] index_daily 预取：3 指数 × 2 窗口，成功 6 次
-2026-06-24 20:25:42.767 | INFO     | core.data.data_prep:build:124 - [DataPrep] ETL主路径跳过逐股历史日线批量获取，使用 all_daily/silver 因子主表
-2026-06-24 20:27:03.775 | INFO     | core.etl.warehouse:persist_market_dataset_silver:421 - [SilverWarehouse] Phase1 silver 落盘完成 20260624: quality_ok=True issues=0
-2026-06-24 20:27:03.779 | INFO     | core.data.data_prep:build:141 - [DataPrep] MarketDataset(20260624) daily=0 all_daily=1 auction=0 sector_map=0 limit_up=16 prefetched=['all_daily', 'daily_basic', 'index_daily', 'limit_cpt_list', 'limit_up', 'moneyflow_summary', 'stock_basic', 'ths_daily', 'ths_index']
-2026-06-24 20:27:12.964 | INFO     | snapshot.writer:write:276 - [Snapshot] 20260624 快照已落盘: json, sqlite
-2026-06-24 20:27:16.728 | WARNING  | kb.embeddings:embed:51 - [KB] 云嵌入调用失败，回退词法检索: 400 Client Error: Bad Request for url: https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings
-2026-06-24 20:27:16.733 | INFO     | kb.ingest:ingest_snapshot:29 - [KB] 20260624 未取得向量，按词法检索入库
-2026-06-24 20:27:16.847 | INFO     | kb.ingest:ingest_snapshot:33 - [KB] 20260624 入库 11 块（词法）
-2026-06-24 20:27:16.848 | INFO     | core.etl.daily_pipeline:run:127 - [数据生成] 主流程完成: ok=True, 候选=10, snapshot=G:\a_stock_sentiment_system\webdata\snapshots\20260624.json
-2026-06-24 20:29:07.499 | INFO     | core.data.data_manager_main:__init__:52 - [DataManager] 初始化完成，缓存目录: G:\a_stock_sentiment_system\data\cache
-2026-06-24 20:29:07.533 | INFO     | backtest.backtest_engine:run_one_day:190 - 开始单日接力回测: 20260624
-2026-06-24 20:29:09.484 | INFO     | backtest.backtest_engine:_check_stop_loss_take_profit:586 - [20260624] 三安光电 触发基础止盈: 21.81 (盈利28.34%)
-2026-06-24 20:29:09.930 | INFO     | backtest.backtest_engine:_check_stop_loss_take_profit:579 - [20260624] 兆易创新 触发第二次分批止盈: 705.09 (盈利18.47%, 卖出100股)
-2026-06-24 20:29:23.277 | INFO     | backtest.backtest_engine:_check_stop_loss_take_profit:530 - [20260624] 厦门钨业 触发硬止损: 83.03 (亏损-14.44%)
-2026-06-24 20:29:23.804 | INFO     | backtest.backtest_engine:_check_stop_loss_take_profit:530 - [20260624] 中钨高新 触发硬止损: 100.08 (亏损-12.38%)
-2026-06-24 20:29:23.805 | INFO     | backtest.backtest_engine:_execute_partial_sell:722 - [20260624] 分批卖出 兆易创新(603986): 100股 @ 703.68, 盈亏:10739.85(18.04%), 剩余:100股
-2026-06-24 20:29:23.805 | INFO     | backtest.backtest_engine:_execute_sell:652 - [20260624] 卖出 三安光电(600703): 3200股 @ 21.77, 盈亏:15165.01(27.88%)
-2026-06-24 20:29:23.805 | INFO     | backtest.backtest_engine:_execute_sell:652 - [20260624] 卖出 厦门钨业(600549): 2500股 @ 82.86, 盈亏:-35791.49(-14.75%)
-2026-06-24 20:29:23.806 | INFO     | backtest.backtest_engine:_execute_sell:652 - [20260624] 卖出 中钨高新(000657): 2100股 @ 99.88, 盈亏:-30454.72(-12.69%)
-2026-06-24 20:29:23.823 | INFO     | backtest.backtest_engine:_process_date:218 - [20260624] 加载 20260623 制定的 3 条交易计划
-2026-06-24 20:29:24.616 | INFO     | backtest.backtest_engine:_check_buy_conditions:448 - 大族激光 低开-5.77%，未高开，放弃竞价买点
-2026-06-24 20:29:32.198 | INFO     | backtest.backtest_engine:_check_buy_conditions:448 - 长飞光纤 低开-2.17%，未高开，放弃竞价买点
-2026-06-24 20:29:40.071 | INFO     | backtest.backtest_engine:_check_buy_conditions:448 - 黄河旋风 低开-2.36%，未高开，放弃竞价买点
-2026-06-24 20:29:40.093 | INFO     | backtest.backtest_engine:run_one_day:197 - 单日接力完成: 20260624，当前资金 1,575,689.19
-2026-06-24 20:29:40.156 | INFO     | run_backtest:save_backtest_results:116 - 交易记录已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_trades_20260624_202940.csv
-2026-06-24 20:29:40.162 | INFO     | run_backtest:save_backtest_results:123 - 净值曲线已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_nav_20260624_202940.csv
-2026-06-24 20:29:40.167 | INFO     | run_backtest:save_backtest_results:145 - 汇总报告已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_summary_20260624_202940.csv
-2026-06-24 20:29:40.249 | INFO     | run_backtest:save_backtest_results:156 - 回测归因已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_attribution_20260624_202940.csv
-2026-06-24 20:29:40.252 | INFO     | run_backtest:save_backtest_results:156 - 回测归因已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_factor_feedback_20260624_202940.csv
-2026-06-24 20:29:40.253 | INFO     | run_backtest:save_backtest_results:156 - 回测归因已保存: G:\a_stock_sentiment_system\output\backtest_results\backtest_rank_feedback_20260624_202940.csv
-2026-06-24 20:30:30.754 | INFO     | config.config_loader:_load_all_configs:54 - [ConfigLoader] 加载配置: emotion_cycle_config.yaml
-2026-06-24 20:30:30.764 | INFO     | config.config_loader:_load_all_configs:54 - [ConfigLoader] 加载配置: sector_tracker_config.yaml
-2026-06-24 20:30:30.830 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/factor_registry.yaml
-2026-06-24 20:30:30.834 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer1_market_env.yaml
-2026-06-24 20:30:30.837 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/emotion_cycle.yaml
-2026-06-24 20:30:30.843 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer2_sector.yaml
-2026-06-24 20:30:30.846 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer3_stock_select.yaml
-2026-06-24 20:30:30.849 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer4_trade_plan.yaml
-2026-06-24 20:30:30.849 | INFO     | config.config_loader:reload_config:251 - [ConfigLoader] 重新加载所有配置
-2026-06-24 20:30:30.850 | INFO     | core.factors.factor_registry:_load_registry:137 - [FactorRegistry] 从注册表加载 57 个因子
-2026-06-24 20:30:30.850 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer1_market_env.yaml
-2026-06-24 20:30:30.851 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: emotion_cycle.yaml
-2026-06-24 20:30:30.851 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer2_sector.yaml
-2026-06-24 20:30:30.851 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer3_stock_select.yaml
-2026-06-24 20:30:30.852 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer4_trade_plan.yaml
-2026-06-24 20:30:30.857 | INFO     | core.factors.factor_registry:_load_profiles:311 - [FactorRegistry] 加载 5 个情绪周期 profile
-2026-06-24 20:30:30.857 | INFO     | core.factors.factor_registry:__init__:81 - [FactorRegistry] 初始化完成，加载 57 个因子定义
-2026-06-24 20:30:30.858 | INFO     | core.factors.factor_registry:_load_registry:137 - [FactorRegistry] 从注册表加载 57 个因子
-2026-06-24 20:30:30.858 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer1_market_env.yaml
-2026-06-24 20:30:30.859 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: emotion_cycle.yaml
-2026-06-24 20:30:30.860 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer2_sector.yaml
-2026-06-24 20:30:30.860 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer3_stock_select.yaml
-2026-06-24 20:30:30.860 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer4_trade_plan.yaml
-2026-06-24 20:30:30.863 | INFO     | core.factors.factor_registry:_load_profiles:311 - [FactorRegistry] 加载 5 个情绪周期 profile
-2026-06-24 20:30:30.863 | INFO     | core.factors.factor_registry:reload:295 - [FactorRegistry] 配置已重新加载
+2026-06-26 20:39:58.939 | INFO     | config.config_loader:_load_all_configs:54 - [ConfigLoader] 加载配置: emotion_cycle_config.yaml
+2026-06-26 20:39:58.946 | INFO     | config.config_loader:_load_all_configs:54 - [ConfigLoader] 加载配置: sector_tracker_config.yaml
+2026-06-26 20:39:58.996 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/factor_registry.yaml
+2026-06-26 20:39:59.001 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer1_market_env.yaml
+2026-06-26 20:39:59.005 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/emotion_cycle.yaml
+2026-06-26 20:39:59.008 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer2_sector.yaml
+2026-06-26 20:39:59.011 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer3_stock_select.yaml
+2026-06-26 20:39:59.015 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer4_trade_plan.yaml
+2026-06-26 20:40:00.659 | INFO     | core.data.data_manager_main:__init__:52 - [DataManager] 初始化完成，缓存目录: G:\a_stock_sentiment_system\data\cache
+2026-06-26 20:40:00.667 | INFO     | main:run_daily_analysis:45 - 开始执行 20260626 的日度数据生成...
+2026-06-26 20:40:00.668 | INFO     | main:run_daily_analysis:46 - 对比日期: 20260625
+2026-06-26 20:40:00.670 | INFO     | core.etl.daily_pipeline:run:80 - [数据生成] 开始主流程: 20260626, prev=20260625
+2026-06-26 20:40:02.017 | INFO     | core.data.data_manager_market:get_limit_up_pool:172 - [get_limit_up_pool] 获取 20260626 涨停池数据: 60条
+2026-06-26 20:40:02.092 | INFO     | core.data.data_manager_market:_append_to_limit_up_summary:380 - 追加60条涨停数据: G:\a_stock_sentiment_system\data\cache\summary\limit_up_stocks.csv
+2026-06-26 20:40:03.712 | INFO     | core.data.data_manager_stock:get_all_stocks_daily:225 - [get_all_stocks_daily] 20260626 获取 5513 只股票日线数据
+2026-06-26 20:40:03.713 | INFO     | core.data.data_prep:_prefetch_all_daily:215 - [DataPrep] all_daily 预取：5513 行 @ 20260626
+2026-06-26 20:40:03.749 | INFO     | core.data.data_prep:_prefetch_stock_basic:240 - [DataPrep] stock_basic 预取：5529 行
+2026-06-26 20:40:07.009 | INFO     | core.data.data_prep:_prefetch_daily_basic:228 - [DataPrep] daily_basic 预取：5591 行 @ 20260626
+2026-06-26 20:40:07.864 | INFO     | core.data.data_prep:_prefetch_limit_up:302 - [DataPrep] limit_up 预取：16 个交易日，非空 16 个
+2026-06-26 20:40:10.271 | INFO     | core.data.data_manager_market:get_limit_down_pool:205 - [get_limit_down_pool] 获取 20260626 跌停池数据: 30条
+2026-06-26 20:40:10.271 | INFO     | core.data.data_prep:_prefetch_limit_down:313 - [DataPrep] limit_down 预取：30 行 @ 20260626
+2026-06-26 20:40:18.210 | INFO     | core.data.data_manager_market:get_limit_cpt_list:259 - [get_limit_cpt_list] 过滤ST板块后剩余: 19条
+2026-06-26 20:40:18.212 | INFO     | core.data.data_manager_market:get_limit_cpt_list:262 - [get_limit_cpt_list] 获取 20260626 最强板块数据: 19条
+2026-06-26 20:40:20.954 | INFO     | core.data.data_manager_moneyflow:get_moneyflow_summary:95 - [get_moneyflow_summary] 20260626 全市场资金流向: 5193条
+2026-06-26 20:40:21.010 | INFO     | core.data.data_prep:_prefetch_sectors:381 - [DataPrep] 板块/资金流预取：['ths_index', 'ths_daily', 'limit_cpt_list', 'moneyflow_summary']（板块按日窗口 10 天，调用缓存 26 条）
+2026-06-26 20:40:21.783 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 000001.SH 获取 121 条数据
+2026-06-26 20:40:22.829 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 000001.SH 获取 31 条数据
+2026-06-26 20:40:23.905 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399001.SZ 获取 121 条数据
+2026-06-26 20:40:25.175 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399001.SZ 获取 31 条数据
+2026-06-26 20:40:26.701 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399006.SZ 获取 121 条数据
+2026-06-26 20:40:28.445 | INFO     | core.data.data_manager_market:get_index_daily:121 - [get_index_daily] 399006.SZ 获取 31 条数据
+2026-06-26 20:40:28.468 | INFO     | core.data.data_prep:_prefetch_index_daily:277 - [DataPrep] index_daily 预取：3 指数 × 2 窗口，成功 6 次
+2026-06-26 20:40:28.512 | INFO     | core.data.data_prep:build:127 - [DataPrep] ETL主路径跳过逐股历史日线批量获取，使用 all_daily/silver 因子主表
+2026-06-26 20:41:32.942 | INFO     | core.etl.warehouse:persist_market_dataset_silver:501 - [SilverWarehouse] Phase1 silver 落盘完成 20260626: quality_ok=True issues=0
+2026-06-26 20:41:32.944 | INFO     | core.data.data_prep:build:144 - [DataPrep] MarketDataset(20260626) daily=0 all_daily=1 auction=0 sector_map=0 limit_up=16 limit_down=1 prefetched=['all_daily', 'daily_basic', 'index_daily', 'limit_cpt_list', 'limit_down', 'limit_up', 'moneyflow_summary', 'stock_basic', 'ths_daily', 'ths_index']
+2026-06-26 20:41:44.772 | INFO     | snapshot.writer:write:276 - [Snapshot] 20260626 快照已落盘: json, sqlite
+2026-06-26 20:42:03.259 | WARNING  | kb.embeddings:embed:51 - [KB] 云嵌入调用失败，回退词法检索: 400 Client Error: Bad Request for url: https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings
+2026-06-26 20:42:03.269 | INFO     | kb.ingest:ingest_snapshot:29 - [KB] 20260626 未取得向量，按词法检索入库
+2026-06-26 20:42:03.369 | INFO     | kb.ingest:ingest_snapshot:33 - [KB] 20260626 入库 11 块（词法）
+2026-06-26 20:42:03.370 | INFO     | core.etl.daily_pipeline:run:127 - [数据生成] 主流程完成: ok=True, 候选=10, snapshot=G:\a_stock_sentiment_system\webdata\snapshots\20260626.json
+2026-06-26 20:45:52.099 | INFO     | config.config_loader:_load_all_configs:54 - [ConfigLoader] 加载配置: emotion_cycle_config.yaml
+2026-06-26 20:45:52.108 | INFO     | config.config_loader:_load_all_configs:54 - [ConfigLoader] 加载配置: sector_tracker_config.yaml
+2026-06-26 20:45:52.165 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/factor_registry.yaml
+2026-06-26 20:45:52.169 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer1_market_env.yaml
+2026-06-26 20:45:52.176 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/emotion_cycle.yaml
+2026-06-26 20:45:52.179 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer2_sector.yaml
+2026-06-26 20:45:52.183 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer3_stock_select.yaml
+2026-06-26 20:45:52.186 | INFO     | config.config_loader:_load_factor_configs:89 - [ConfigLoader] 加载因子配置: factors/layer4_trade_plan.yaml
+2026-06-26 20:45:52.186 | INFO     | config.config_loader:reload_config:251 - [ConfigLoader] 重新加载所有配置
+2026-06-26 20:45:52.188 | INFO     | core.factors.factor_registry:_load_registry:137 - [FactorRegistry] 从注册表加载 57 个因子
+2026-06-26 20:45:52.189 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer1_market_env.yaml
+2026-06-26 20:45:52.190 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: emotion_cycle.yaml
+2026-06-26 20:45:52.191 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer2_sector.yaml
+2026-06-26 20:45:52.191 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer3_stock_select.yaml
+2026-06-26 20:45:52.192 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer4_trade_plan.yaml
+2026-06-26 20:45:52.194 | INFO     | core.factors.factor_registry:_load_profiles:311 - [FactorRegistry] 加载 5 个情绪周期 profile
+2026-06-26 20:45:52.195 | INFO     | core.factors.factor_registry:__init__:81 - [FactorRegistry] 初始化完成，加载 57 个因子定义
+2026-06-26 20:45:52.196 | INFO     | core.factors.factor_registry:_load_registry:137 - [FactorRegistry] 从注册表加载 57 个因子
+2026-06-26 20:45:52.196 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer1_market_env.yaml
+2026-06-26 20:45:52.197 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: emotion_cycle.yaml
+2026-06-26 20:45:52.198 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer2_sector.yaml
+2026-06-26 20:45:52.198 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer3_stock_select.yaml
+2026-06-26 20:45:52.199 | INFO     | core.factors.factor_registry:_load_layer_configs:156 - [FactorRegistry] 加载Layer配置: layer4_trade_plan.yaml
+2026-06-26 20:45:52.201 | INFO     | core.factors.factor_registry:_load_profiles:311 - [FactorRegistry] 加载 5 个情绪周期 profile
+2026-06-26 20:45:52.202 | INFO     | core.factors.factor_registry:reload:295 - [FactorRegistry] 配置已重新加载

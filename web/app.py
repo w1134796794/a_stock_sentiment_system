@@ -332,6 +332,320 @@ def _col_label(col: Any) -> str:
 templates.env.filters["col_label"] = _col_label
 
 
+@lru_cache(maxsize=1)
+def _factor_name_map() -> Dict[str, str]:
+    """Factor id -> display label used by candidate detail chips."""
+    mapping: Dict[str, str] = {
+        "tech_score": "技术综合分",
+        "volume_score": "量能综合分",
+        "liquidity_score": "流动性分位",
+        "sector_resonance_score": "板块共振",
+        "board_score": "打板身位",
+        "stk_pct_chg_1d": "当日涨幅强度",
+        "stk_limit_progress": "涨停进度",
+        "stk_vol_ratio_5d": "5日量比",
+        "stk_amount_ratio_5d": "5日成交额比",
+        "stk_new_high_20d": "20日强势位置",
+        "stk_liquidity_percentile": "流动性分位",
+        "stk_board_height": "连板高度",
+        "stk_seal_time_quality": "封板时间质量",
+        "stk_float_mv_fit": "流通市值适配",
+        "stk_board_position": "打板身位",
+        "stk_total_score": "个股总评分",
+        "sec_pct_chg_1d": "板块当日涨幅",
+        "sec_amount_percentile": "板块成交额分位",
+        "sec_amount_ratio_5d_score": "板块5日量能",
+        "sec_persistence_score": "板块持续性",
+        "sec_mainline_score": "板块主线评分",
+    }
+    try:
+        import yaml  # type: ignore
+
+        path = BASE.parent / "config" / "factors" / "factor_registry.yaml"
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
+        for fid, cfg in (data.get("factors") or {}).items():
+            label = str((cfg or {}).get("name") or "").strip()
+            if label:
+                mapping.setdefault(str(fid), label)
+    except Exception:
+        pass
+    return mapping
+
+
+def _fmt_score(value: Any) -> str:
+    try:
+        return f"{float(value):.1f}"
+    except Exception:
+        return "--"
+
+
+def _fmt_raw_value(value: Any) -> str:
+    raw_num = float(value)
+    abs_num = abs(raw_num)
+    if abs_num >= 1e8:
+        return f"{raw_num / 1e8:.2f}亿"
+    if abs_num >= 1e4:
+        return f"{raw_num / 1e4:.2f}万"
+    return f"{raw_num:.2f}"
+
+
+def _factor_value_long_map(date: str, codes: List[str], entity_type: str = "stock") -> Dict[str, List[Dict[str, Any]]]:
+    def normalize(value: Any) -> str:
+        if entity_type == "stock":
+            return _normalize_stock_code(value)
+        return str(value or "").strip()
+
+    wanted = {normalize(code) for code in codes if normalize(code)}
+    if not date or not wanted or not Path(FACTOR_DB_PATH).exists():
+        return {}
+    try:
+        import duckdb  # type: ignore
+    except Exception:
+        return {}
+
+    try:
+        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+            exists = con.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_value_long'"
+            ).fetchone()[0]
+            if not exists:
+                return {}
+            rows = con.execute(
+                """
+                SELECT entity_id, factor_id, raw_value, score, rank_value, direction
+                FROM factor_value_long
+                WHERE trade_date = ? AND entity_type = ?
+                """,
+                [str(date), str(entity_type or "stock")],
+            ).fetchall()
+    except Exception:
+        return {}
+
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for entity_id, factor_id, raw_value, score, rank_value, direction in rows:
+        code = normalize(entity_id)
+        if code not in wanted:
+            continue
+        out.setdefault(code, []).append({
+            "factor_id": str(factor_id or ""),
+            "raw_value": raw_value,
+            "score": score,
+            "rank_value": rank_value,
+            "direction": direction,
+        })
+    for items in out.values():
+        items.sort(key=lambda x: _to_float(x.get("score")), reverse=True)
+    return out
+
+
+def _factor_row_tags(
+    factor_rows: List[Dict[str, Any]],
+    prefix: str = "命中",
+    min_score: float = 0.0,
+    max_count: int = 10,
+) -> List[str]:
+    labels = _factor_name_map()
+    tags: List[str] = []
+    seen = set()
+    for row in factor_rows or []:
+        factor_id = str(row.get("factor_id") or "").strip()
+        if not factor_id or factor_id in seen:
+            continue
+        score = _to_float(row.get("score"), 0.0)
+        if score < min_score and tags:
+            continue
+        seen.add(factor_id)
+        label = labels.get(factor_id) or COLUMN_LABELS.get(factor_id) or factor_id
+        text = f"{prefix} · {label} {_fmt_score(score)}分"
+        try:
+            raw_num = float(row.get("raw_value"))
+            if abs(raw_num - score) > 0.05:
+                text += f"（原始 {_fmt_raw_value(raw_num)}）"
+        except Exception:
+            pass
+        rank_value = row.get("rank_value")
+        try:
+            if rank_value is not None:
+                text += f"（排名 {int(float(rank_value))}）"
+        except Exception:
+            pass
+        tags.append(text)
+        if len(tags) >= max_count:
+            break
+    return tags
+
+
+def _candidate_indicator_tags(item: Dict[str, Any], factor_rows: List[Dict[str, Any]]) -> List[str]:
+    labels = _factor_name_map()
+    tags: List[str] = []
+    seen = set()
+
+    def add(prefix: str, factor_id: str, score: Any, raw: Any = None) -> None:
+        fid = str(factor_id or "").strip()
+        if not fid or fid in seen:
+            return
+        seen.add(fid)
+        label = labels.get(fid) or COLUMN_LABELS.get(fid) or fid
+        score_text = _fmt_score(score)
+        text = f"{prefix} · {label} {score_text}分"
+        try:
+            raw_num = float(raw)
+            score_num = float(score)
+            if abs(raw_num - score_num) > 0.05:
+                text += f"（原始 {_fmt_raw_value(raw_num)}）"
+        except Exception:
+            pass
+        tags.append(text)
+
+    for factor_id, score in (item.get("metrics") or {}).items():
+        add("排序", str(factor_id), score)
+
+    for row in factor_rows:
+        score = _to_float(row.get("score"), 0.0)
+        if score < 65 and len(tags) >= 3:
+            continue
+        add("命中", str(row.get("factor_id") or ""), score, row.get("raw_value"))
+        if len(tags) >= 10:
+            break
+
+    for reason in item.get("penalty_reasons") or []:
+        text = str(reason or "").strip()
+        if text:
+            tags.append(f"扣分 · {text}")
+        if len(tags) >= 12:
+            break
+    return tags[:12]
+
+
+def _insert_column_after(columns: List[str], column: str, anchors: List[str]) -> List[str]:
+    if column in columns:
+        return columns
+    out = list(columns)
+    for anchor in anchors:
+        if anchor in out:
+            out.insert(out.index(anchor) + 1, column)
+            return out
+    out.append(column)
+    return out
+
+
+def _merge_plan_fields_into_screening(row: Dict[str, Any], plan: Dict[str, Any]) -> bool:
+    field_map = [
+        ("模式类型", "模式类型"),
+        ("优先级", "优先级"),
+        ("综合评分", "计划评分"),
+        ("建议仓位", "建议仓位"),
+        ("入场区间", "入场区间"),
+        ("止损", "止损"),
+        ("止盈", "止盈"),
+        ("竞价条件", "竞价条件"),
+        ("次日预期", "次日预期"),
+        ("风险提示", "风险提示"),
+    ]
+    changed = False
+    for source_key, target_key in field_map:
+        value = plan.get(source_key)
+        if value is None or str(value).strip() == "":
+            continue
+        row[target_key] = value
+        changed = True
+    return changed
+
+
+def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: str) -> None:
+    target_names = {"指标筛选", "ETL指标筛选", "交易计划"}
+    codes: List[str] = []
+    screening_by_code: Dict[str, Dict[str, Any]] = {}
+    plans_by_code: Dict[str, Dict[str, Any]] = {}
+    for section in sections or []:
+        if section.get("name") not in target_names:
+            continue
+        for row in section.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            code = _normalize_stock_code(row.get("code") or row.get("股票代码") or row.get("stock_code") or "")
+            if not code:
+                continue
+            codes.append(code)
+            if section.get("name") in {"指标筛选", "ETL指标筛选"}:
+                screening_by_code[code] = row
+            elif section.get("name") == "交易计划":
+                plans_by_code[code] = row
+
+    factor_map = _factor_value_long_map(date, codes)
+    if not factor_map and not screening_by_code and not plans_by_code:
+        return
+
+    for section in sections or []:
+        if section.get("name") not in target_names:
+            continue
+        rows = section.get("rows") or []
+        changed = False
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            code = _normalize_stock_code(row.get("code") or row.get("股票代码") or row.get("stock_code") or "")
+            if not code:
+                continue
+            source = screening_by_code.get(code) or row
+            if section.get("name") in {"指标筛选", "ETL指标筛选"}:
+                changed = _merge_plan_fields_into_screening(row, plans_by_code.get(code) or {}) or changed
+            tags = _candidate_indicator_tags(source, factor_map.get(code) or [])
+            if tags:
+                row["命中指标"] = tags
+                changed = True
+        if changed:
+            columns = list(section.get("columns") or [])
+            if section.get("name") in {"指标筛选", "ETL指标筛选"}:
+                anchor = "gold_rank"
+                for column in [
+                    "模式类型", "优先级", "计划评分", "建议仓位", "入场区间",
+                    "止损", "止盈", "竞价条件", "次日预期", "风险提示",
+                ]:
+                    if any(isinstance(row, dict) and str(row.get(column) or "").strip() for row in rows):
+                        columns = _insert_column_after(columns, column, [anchor, "gold_rank", "score", "name"])
+                        anchor = column
+            section["columns"] = _insert_column_after(columns, "命中指标", ["筛选理由", "reasons", "score", "综合评分"])
+
+
+def _enrich_sector_indicator_sections(sections: List[Dict[str, Any]], date: str) -> None:
+    target_names = {"热点概念", "热点行业", "主线主题"}
+    codes: List[str] = []
+    for section in sections or []:
+        if section.get("name") not in target_names:
+            continue
+        for row in section.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("sector_code") or row.get("板块代码") or row.get("ts_code") or "").strip()
+            if code:
+                codes.append(code)
+
+    factor_map = _factor_value_long_map(date, codes, entity_type="sector")
+    if not factor_map:
+        return
+
+    for section in sections or []:
+        if section.get("name") not in target_names:
+            continue
+        rows = section.get("rows") or []
+        changed = False
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("sector_code") or row.get("板块代码") or row.get("ts_code") or "").strip()
+            tags = _factor_row_tags(factor_map.get(code) or [], prefix="命中因子", max_count=8)
+            if tags:
+                row["命中因子"] = tags
+                changed = True
+        if changed:
+            section["columns"] = _insert_column_after(
+                list(section.get("columns") or []),
+                "命中因子",
+                ["persistence_score", "持续性评分", "mainline_score", "主线主题评分"],
+            )
+
+
 def _sector_type_label(value: Any) -> str:
     text = str(value or "").strip()
     return {
@@ -824,6 +1138,7 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
     for section in prepared:
         if section.get("name") == "ETL指标筛选":
             section["name"] = "指标筛选"
+    _enrich_candidate_indicator_sections(prepared, date)
 
     hotspot_rows = _factor_sector_rows(date, limit=20)
     mainline_rows = _mainline_theme_rows(date, limit=20)
@@ -872,6 +1187,7 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
         for section in prepared:
             if section.get("name") in ("热点概念", "热点行业", "主线主题"):
                 _enrich_sector_rows(section.get("rows") or [])
+    _enrich_sector_indicator_sections(prepared, date)
 
     limit_section = _build_limitup_section(date)
     if limit_section and limit_section.get("rows"):
@@ -996,7 +1312,7 @@ def _clear_data_caches() -> None:
 # 注：候选池、板块热度与涨停数据分别由数据浏览页承载。
 # ----------------------------------------------------------------------
 DATA_CATEGORIES: List[Dict[str, Any]] = [
-    {"key": "strategy", "label": "指标筛选", "signals": True, "names": ["ETL指标筛选", "指标筛选", "交易计划"]},
+    {"key": "strategy", "label": "指标筛选", "signals": True, "names": ["ETL指标筛选", "指标筛选"]},
     {"key": "sector", "label": "板块热度", "signals": False,
      "names": ["热点概念", "热点行业", "概念持续性", "行业持续性", "主线主题"]},
     {"key": "limitup", "label": "涨停数据", "signals": False,
