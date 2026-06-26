@@ -38,77 +38,15 @@
         </div>
       </div>
       <nav class="flex-1 overflow-y-auto p-2 space-y-0.5" id="side-nav">
-        <a class="nav-link" href="/" data-prefix="/" data-exact>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          <span>概览</span>
-        </a>
-        <a class="nav-link" href="/report" data-prefix="/report">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V9m4 8V5m4 12v-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-          <span>交易计划</span>
-        </a>
-
-        <div class="nav-group">数据浏览</div>
-        <a class="nav-link" href="/data/strategy" data-prefix="/data/strategy">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
-          <span>指标筛选</span>
-        </a>
-        <a class="nav-link" href="/data/sector" data-prefix="/data/sector">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>
-          <span>板块热度</span>
-        </a>
-        <a class="nav-link" href="/data/limitup" data-prefix="/data/limitup">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>
-          <span>涨停数据</span>
-        </a>
-        <a class="nav-link" href="/dragon" data-prefix="/dragon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/></svg>
-          <span>龙头池</span>
-        </a>
-        <a class="nav-link" href="/intraday" data-prefix="/intraday">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          <span>盘中转强</span>
-        </a>
-        <a class="nav-link" href="/realtime" data-prefix="/realtime">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-6 4 12 2-6h6"/><circle cx="5" cy="19" r="1"/><circle cx="12" cy="19" r="1"/><circle cx="19" cy="19" r="1"/></svg>
-          <span>实时行情</span>
-        </a>
-        <div class="nav-group">回测</div>
-        <a class="nav-link" href="/backtest" data-prefix="/backtest">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M19 9l-5 5-3-3-4 4"/></svg>
-          <span>模拟交易</span>
-        </a>
-        <a class="nav-link" href="/drawdown" data-prefix="/drawdown">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4v16h18"/><path d="M7 8l4 6 3-3 4 5"/></svg>
-          <span>回撤分析</span>
-        </a>
-
-        <div class="nav-group">系统</div>
-        {% if is_admin %}
-        <a class="nav-link" href="/admin/users" data-prefix="/admin/users">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
-          <span>用户管理</span>
-        </a>
-        <a class="nav-link" href="/run" data-prefix="/run">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
-          <span>生成数据</span>
-        </a>
-        <a class="nav-link" href="/config" data-prefix="/config">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-2.92.67 1.65 1.65 0 01-3.16 0 1.65 1.65 0 00-2.92-.67l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-          <span>参数配置</span>
-        </a>
-        <a class="nav-link" href="/factors" data-prefix="/factors">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><circle cx="4" cy="12" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="14" r="2"/></svg>
-          <span>指标因子</span>
-        </a>
-        <a class="nav-link" href="/logs" data-prefix="/logs">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
-          <span>日志</span>
-        </a>
-        {% endif %}
-        <a class="nav-link" href="/about" data-prefix="/about">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
-          <span>关于</span>
-        </a>
+        {% for group in visible_menu_groups(current_user) %}
+          {% if group.get('label') %}<div class="nav-group">{{ group.get('label') }}</div>{% endif %}
+          {% for item in group.get('items', []) %}
+          <a class="nav-link" href="{{ item.get('href') }}" data-prefix="{{ item.get('prefix') or item.get('href') }}" {% if item.get('exact') %}data-exact{% endif %}>
+            {{ item.get('icon') | safe }}
+            <span>{{ item.get('label') }}</span>
+          </a>
+          {% endfor %}
+        {% endfor %}
       </nav>
       <div class="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500 space-y-2">
         <div class="flex items-center gap-2">
