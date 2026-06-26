@@ -34,11 +34,22 @@ try:
 except ImportError:  # pragma: no cover
     pass
 
+
+def _env_path(name: str, default: Path) -> Path:
+    value = os.getenv(name, "").strip().strip('"').strip("'")
+    if not value:
+        return default
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path.resolve()
+
+
 # ============================================
 # Web / 快照 / 知识库 存储（P0：与 Excel 同源的结构化快照）
 # 收盘跑批时，喂给 Excel 的 data_dict 会同步落到这里，供 Web 页面与 KB 复用。
 # ============================================
-WEB_DATA_DIR = BASE_DIR / "webdata"
+WEB_DATA_DIR = _env_path("WEB_DATA_DIR", BASE_DIR / "webdata")
 SNAPSHOT_DIR = WEB_DATA_DIR / "snapshots"        # 每日整页 JSON 快照
 APP_DB_PATH = WEB_DATA_DIR / "app.sqlite"        # 结构化索引（计划/信号/快照）
 FACTOR_DB_PATH = WEB_DATA_DIR / "factors.duckdb"  # 因子大表（定量查询，可选）

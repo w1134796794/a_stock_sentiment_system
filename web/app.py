@@ -37,6 +37,12 @@ from web.auth_store import (
     update_user_status,
     validate_session,
 )
+from web.permissions import (
+    is_api_path,
+    is_public_path,
+    requires_admin,
+    visible_menu_groups,
+)
 
 from config.settings import (
     SNAPSHOT_DIR,
@@ -52,6 +58,7 @@ from snapshot.reader import SnapshotReader
 
 BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
+templates.env.globals["visible_menu_groups"] = visible_menu_groups
 reader = SnapshotReader(SNAPSHOT_DIR)
 _REALTIME_QUOTE_SERVICE = None
 _REALTIME_SECTOR_SERVICE = None
@@ -1329,28 +1336,6 @@ _static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
-# ----------------------------------------------------------------------
-# 登录、订阅与权限
-# ----------------------------------------------------------------------
-PUBLIC_PATHS = {"/login", "/logout", "/expired", "/favicon.ico"}
-ADMIN_PAGE_PREFIXES = (
-    "/admin",
-    "/run",
-    "/config",
-    "/factors",
-    "/logs",
-    "/ask",
-    "/api/docs",
-    "/openapi.json",
-)
-ADMIN_GET_API_PREFIXES = (
-    "/api/admin",
-    "/api/run",
-    "/api/logs",
-    "/api/config",
-    "/api/factors",
-    "/api/backtest/run/status",
-)
 _RATE_BUCKETS: Dict[str, deque] = {}
 
 
@@ -1369,28 +1354,6 @@ def _safe_next(raw: Optional[str]) -> str:
     if not raw or not raw.startswith("/") or raw.startswith("//"):
         return "/"
     return raw
-
-
-def _is_public_path(path: str) -> bool:
-    return path in PUBLIC_PATHS or path.startswith("/static/")
-
-
-def _is_api_path(path: str) -> bool:
-    return path.startswith("/api/") or path == "/openapi.json"
-
-
-def _matches_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
-    return any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
-
-
-def _requires_admin(path: str, method: str) -> bool:
-    if _matches_prefix(path, ADMIN_PAGE_PREFIXES):
-        return True
-    if _is_api_path(path):
-        if method.upper() != "GET":
-            return True
-        return _matches_prefix(path, ADMIN_GET_API_PREFIXES)
-    return False
 
 
 def _login_redirect(request: Request) -> RedirectResponse:
@@ -1424,7 +1387,7 @@ def _rate_limit_exceeded(request: Request, user: Optional[Dict[str, Any]]) -> bo
 
 
 def _rate_limited_response(request: Request) -> HTMLResponse | JSONResponse:
-    if _is_api_path(request.url.path):
+    if is_api_path(request.url.path):
         return JSONResponse({"error": "rate_limited", "message": "请求过于频繁，请稍后再试"}, status_code=429)
     return HTMLResponse(
         '<!doctype html><meta charset="utf-8"><body style="background:#020617;color:#e2e8f0;font-family:sans-serif;padding:40px">请求过于频繁，请稍后再试。</body>',
@@ -1444,29 +1407,29 @@ async def auth_middleware(request: Request, call_next):
     if _rate_limit_exceeded(request, user):
         return _rate_limited_response(request)
 
-    if _is_public_path(path):
+    if is_public_path(path):
         return await call_next(request)
 
     if not user:
         if auth_error in {"session_revoked", "session_expired", "user_disabled"}:
             response = (
                 JSONResponse({"error": auth_error, "message": "登录状态已失效"}, status_code=401)
-                if _is_api_path(path)
+                if is_api_path(path)
                 else _login_redirect(request)
             )
             response.delete_cookie(SESSION_COOKIE_NAME)
             return response
-        if _is_api_path(path):
+        if is_api_path(path):
             return JSONResponse({"error": "not_authenticated", "message": "请先登录"}, status_code=401)
         return _login_redirect(request)
 
     if auth_error == "subscription_expired":
-        if _is_api_path(path):
+        if is_api_path(path):
             return JSONResponse({"error": "subscription_expired", "message": "服务已到期"}, status_code=403)
         return RedirectResponse(url="/expired", status_code=303)
 
-    if user.get("role") != "admin" and _requires_admin(path, request.method):
-        if _is_api_path(path):
+    if user.get("role") != "admin" and requires_admin(path, request.method):
+        if is_api_path(path):
             return JSONResponse(
                 {"error": "readonly_forbidden", "message": "只读账号不能执行任务或修改配置"},
                 status_code=403,
