@@ -92,8 +92,8 @@ def _rows_from_screening(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "优先级": item.get("rank"),
             "综合评分": item.get("score"),
             "建议仓位": "中性 20%-30%",
-            "入场区间": "竞价高开且实时确认后",
-            "竞价条件": "高开才买入，低开直接放弃",
+            "入场区间": "竞价高开0%-3%且实时确认后",
+            "竞价条件": "高开0%-3%才买入，平开、低开或高开超过3%直接放弃",
             "风险提示": "实时行情为取消/观察时不主动买入",
             "筛选理由": "；".join(str(x) for x in (item.get("reasons") or [])[:5]),
             "惩罚理由": "；".join(str(x) for x in (item.get("penalty_reasons") or [])[:5]),
@@ -106,6 +106,22 @@ def _rows_from_screening(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
+def _attach_market_context(rows: List[Dict[str, Any]], payload: Dict[str, Any]) -> None:
+    """Attach point-in-time market context to every plan row."""
+    market = (((payload.get("etl") or {}).get("gold_summary") or {}).get("market") or {})
+    if not market:
+        market = payload.get("market") or {}
+    mapping = {
+        "原始_mkt_market_score": market.get("market_score"),
+        "原始_mkt_width_score": market.get("width_score"),
+        "原始_mkt_emotion_score": market.get("emotion_score"),
+    }
+    for row in rows:
+        for key, value in mapping.items():
+            if value is not None and row.get(key) in (None, ""):
+                row[key] = value
+
+
 def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     code = _code6(row.get("股票代码") or row.get("code") or row.get("ts_code"))
     name = str(row.get("股票名称") or row.get("name") or "").strip()
@@ -115,9 +131,9 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     mode = str(row.get("模式类型") or row.get("pattern_type") or "指标筛选/default")
     score = row.get("综合评分") if row.get("综合评分") is not None else row.get("score")
     reason = str(row.get("筛选理由") or row.get("reason") or "")
-    entry = str(row.get("入场区间") or "竞价高开且实时确认后")
-    condition = str(row.get("竞价条件") or "高开才买入，低开直接放弃")
-    cancel = str(row.get("风险提示") or "低开/平开直接放弃")
+    entry = str(row.get("入场区间") or "竞价高开0%-3%且实时确认后")
+    condition = str(row.get("竞价条件") or "高开0%-3%才买入，平开、低开或高开超过3%直接放弃")
+    cancel = str(row.get("风险提示") or "平开、低开或高开超过3%直接放弃")
     position = _position(row.get("建议仓位") or row.get("position"))
     factor_metrics = {
         key.replace("因子_", "", 1): _to_number(value)
@@ -209,6 +225,7 @@ def build_backtest_plan_dir(
             rows = _rows_from_screening(payload)
         if not rows:
             rows = _rows_from_snapshot(payload)
+        _attach_market_context(rows, payload)
         if max_rank and max_rank > 0:
             rows = [row for row in rows if (_rank_value(row) or 999999) <= max_rank]
         bt_rows = [x for x in (_to_backtest_row(row) for row in rows) if x]
@@ -218,6 +235,7 @@ def build_backtest_plan_dir(
             screening = _load_json(screening_path)
             fallback_payload = {"etl": {"screening": screening}}
             rows = _rows_from_screening(fallback_payload)
+            _attach_market_context(rows, payload)
             if max_rank and max_rank > 0:
                 rows = [row for row in rows if (_rank_value(row) or 999999) <= max_rank]
             bt_rows = [x for x in (_to_backtest_row(row) for row in rows) if x]
