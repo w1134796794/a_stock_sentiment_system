@@ -17,7 +17,6 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
-CACHE_DIR = DATA_DIR / "cache"
 OUTPUT_DIR = BASE_DIR / "output"
 
 # ============================================
@@ -43,6 +42,10 @@ def _env_path(name: str, default: Path) -> Path:
     if not path.is_absolute():
         path = BASE_DIR / path
     return path.resolve()
+
+
+# 高频写入缓存可放到代码仓库外，避免部署用户与运行用户的权限冲突。
+CACHE_DIR = _env_path("CACHE_DIR", DATA_DIR / "cache")
 
 
 # ============================================
