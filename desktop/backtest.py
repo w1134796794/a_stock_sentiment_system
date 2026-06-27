@@ -122,6 +122,16 @@ def _fmt_money(value: Any) -> str:
         return ""
 
 
+def _fmt_price(value: Any, *, blank_zero: bool = False) -> str:
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if blank_zero and price == 0:
+        return ""
+    return f"{price:.2f}"
+
+
 def _fmt_pct(value: Any, signed: bool = False) -> str:
     try:
         fmt = "{:+.1f}%" if signed else "{:.1f}%"
@@ -327,6 +337,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
 
     rank_feedback_rows = []
     for r in load_table("rank_feedback", run):
+        total_pnl = float(r.get("total_pnl") or 0)
         rank_feedback_rows.append({
             "排名": r.get("plan_rank", ""),
             "样本": r.get("sample_count", 0),
@@ -336,32 +347,81 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "止损率": _fmt_pct(r.get("stop_loss_rate")),
             "止盈率": _fmt_pct(r.get("take_profit_rate")),
             "均分": f"{float(r.get('avg_score') or 0):.1f}",
+            "_pnl": total_pnl,
         })
+    rank_feedback_rows.sort(key=lambda row: int(row.get("排名") or 999999))
+    next_rank = 1
+    for row in rank_feedback_rows:
+        rank = int(row.get("排名") or 0)
+        if rank == next_rank and row["_pnl"] > 0:
+            next_rank += 1
+        elif rank <= next_rank:
+            break
+    rank_suggestion = 3 if not rank_feedback_rows else max(1, min(next_rank - 1, 3))
+    for row in rank_feedback_rows:
+        row.pop("_pnl", None)
 
-    # 交易明细（倒序，最近在前）
+    # 一行表示一笔持仓：卖出记录对应已平仓交易，未匹配卖出的买入记录对应当前持仓。
+    open_lots: Dict[str, List[Dict[str, Any]]] = {}
+    paired: List[Tuple[Dict[str, Any], Optional[Dict[str, Any]], int]] = []
+    for trade in trades:
+        action = str(trade.get("action") or "").upper()
+        code = str(trade.get("stock_code") or "")
+        shares = int(float(trade.get("shares") or 0))
+        if action == "BUY":
+            open_lots.setdefault(code, []).append({"trade": trade, "remaining": shares})
+            continue
+        if not action.startswith("SELL"):
+            continue
+
+        lots = open_lots.get(code) or []
+        buy = lots[0]["trade"] if lots else None
+        remaining_to_match = shares
+        while lots and remaining_to_match > 0:
+            lot = lots[0]
+            matched = min(int(lot["remaining"]), remaining_to_match)
+            lot["remaining"] -= matched
+            remaining_to_match -= matched
+            if lot["remaining"] <= 0:
+                lots.pop(0)
+        paired.append((trade, buy, shares))
+
+    for lots in open_lots.values():
+        for lot in lots:
+            if int(lot.get("remaining") or 0) > 0:
+                paired.append((lot["trade"], None, int(lot["remaining"])))
+
     trade_rows = []
-    for t in reversed(trades):
-        pnl = t.get("pnl")
-        pnl_pct = t.get("pnl_pct")
+    for record, buy, display_shares in paired:
+        action = str(record.get("action") or "").upper()
+        is_open = action == "BUY"
+        pnl = None if is_open else record.get("pnl")
+        pnl_pct = None if is_open else record.get("pnl_pct")
+        entry_date = record.get("entry_date") or (buy or {}).get("date") or record.get("date") or ""
+        exit_date = "" if is_open else record.get("date", "")
         trade_rows.append({
-            "日期": t.get("date", ""),
-            "名称": t.get("stock_name", ""),
-            "代码": t.get("stock_code", ""),
-            "模式": t.get("pattern_type", ""),
-            "动作": t.get("action", ""),
-            "买入价": t.get("entry_price", ""),
-            "卖出价": t.get("exit_price", ""),
-            "股数": t.get("shares", ""),
+            "买入日": entry_date,
+            "卖出日": exit_date,
+            "名称": record.get("stock_name", ""),
+            "代码": record.get("stock_code", ""),
+            "模式": record.get("pattern_type", ""),
+            "买入价": _fmt_price(record.get("entry_price") or (buy or {}).get("entry_price")),
+            "卖出价": "" if is_open else _fmt_price(record.get("exit_price"), blank_zero=True),
+            "股数": display_shares,
             "盈亏": (f"{float(pnl):+,.0f}" if isinstance(pnl, (int, float)) else ""),
             "盈亏%": (f"{float(pnl_pct) * 100:+.2f}%" if isinstance(pnl_pct, (int, float)) else ""),
-            "持仓天数": t.get("holding_days", ""),
-            "止损": "是" if t.get("stop_loss_triggered") else "",
-            "止盈": "是" if t.get("take_profit_triggered") else "",
-            "排名": t.get("plan_rank", ""),
-            "评分": (f"{float(t.get('plan_score')):.2f}"
-                   if isinstance(t.get("plan_score"), (int, float)) else ""),
-            "退出": t.get("exit_reason", ""),
+            "持仓天数": record.get("holding_days", ""),
+            "止损": "是" if record.get("stop_loss_triggered") else "",
+            "止盈": "是" if record.get("take_profit_triggered") else "",
+            "排名": record.get("plan_rank", ""),
+            "评分": (f"{float(record.get('plan_score')):.2f}"
+                   if isinstance(record.get("plan_score"), (int, float)) else ""),
+            "退出": "持仓中" if is_open else record.get("exit_reason", ""),
+            "_sort_date": exit_date or entry_date,
         })
+    trade_rows.sort(key=lambda row: str(row.get("_sort_date") or ""), reverse=True)
+    for row in trade_rows:
+        row.pop("_sort_date", None)
 
     base.update({
         "summary": summary,
@@ -373,8 +433,11 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "sharpe": summary.get("sharpe_ratio"),
         "win_rate": summary.get("win_rate"),
         "pl_ratio": summary.get("profit_loss_ratio"),
-        "total_trades": summary.get("total_trades") or len(trades),
+        "total_trades": summary.get("total_trades") if summary.get("total_trades") is not None else len(closed),
         "closed_count": len(closed),
+        "buy_count": sum(1 for t in trades if str(t.get("action", "")).upper() == "BUY"),
+        "execution_count": len(trades),
+        "open_count": sum(len(lots) for lots in open_lots.values()),
         "win_count": len(wins),
         "loss_count": len(losses),
         "nav_start": nav[0]["date"] if nav else "",
@@ -384,8 +447,10 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "pattern_rows": pattern_rows,
         "factor_feedback_rows": factor_feedback_rows,
         "rank_feedback_rows": rank_feedback_rows,
+        "rank_suggestion": rank_suggestion,
+        "transaction_view": True,
         "trade_rows": trade_rows,
-        "trade_columns": ["日期", "名称", "代码", "模式", "动作", "买入价", "卖出价",
+        "trade_columns": ["买入日", "卖出日", "名称", "代码", "模式", "买入价", "卖出价",
                           "股数", "盈亏", "盈亏%", "持仓天数", "止损", "止盈", "排名", "评分", "退出"],
     })
     return base

@@ -738,31 +738,43 @@ def _sector_code_keys(code: str) -> List[str]:
     return keys
 
 
-@lru_cache(maxsize=1)
-def _stock_concept_map() -> Dict[str, List[str]]:
-    """Stock code -> THS concept names, sourced from local cached concept members."""
+@lru_cache(maxsize=32)
+def _stock_concept_map(trade_date: str = "") -> Dict[str, List[str]]:
+    """Stock code -> concept names from local, date-scoped membership caches."""
     mapping: Dict[str, List[str]] = {}
     base = Path(CACHE_DIR) / "concept" / "members"
-    try:
-        files = sorted(base.glob("all_*.csv"), key=lambda p: (p.name, p.stat().st_mtime), reverse=True)
-    except Exception:
-        files = []
+    files: List[Path] = []
+    date = str(trade_date or "").replace("-", "")[:8]
+    if date:
+        dated = base / f"limit_up_{date}.csv"
+        if dated.exists():
+            files.append(dated)
+    if not files:
+        try:
+            legacy = sorted(base.glob("all_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if legacy:
+                files.append(legacy[0])
+        except Exception:
+            pass
     if not files:
         return mapping
-    try:
-        with files[0].open("r", encoding="utf-8-sig", newline="") as f:
-            for row in csv.DictReader(f):
-                code = _normalize_stock_code(
-                    str(row.get("con_code") or row.get("stock_code") or row.get("ts_code") or "")
-                )
-                concept = str(row.get("concept_name") or row.get("concept") or row.get("板块名称") or "").strip()
-                if not code or not concept:
-                    continue
-                bucket = mapping.setdefault(code, [])
-                if concept not in bucket:
-                    bucket.append(concept)
-    except Exception:
-        return mapping
+    for path in dict.fromkeys(files):
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as f:
+                for row in csv.DictReader(f):
+                    code = _normalize_stock_code(
+                        str(row.get("con_code") or row.get("stock_code") or row.get("code") or "")
+                    )
+                    concept = str(
+                        row.get("concept_name") or row.get("concept") or row.get("板块名称") or ""
+                    ).strip()
+                    if not code or not concept:
+                        continue
+                    bucket = mapping.setdefault(code, [])
+                    if concept not in bucket:
+                        bucket.append(concept)
+        except Exception:
+            continue
     return mapping
 
 
@@ -997,7 +1009,7 @@ def _build_limitup_section_from_cache(date: str) -> Optional[Dict[str, Any]]:
     path = Path(CACHE_DIR) / "summary" / "limit_up_stocks.csv"
     if not path.exists():
         return None
-    concept_map = _stock_concept_map()
+    concept_map = _stock_concept_map(str(date))
     rows: List[Dict[str, Any]] = []
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as f:
@@ -1093,7 +1105,7 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
     if df is None or df.empty:
         return None
 
-    concept_map = _stock_concept_map()
+    concept_map = _stock_concept_map(str(date))
     rows: List[Dict[str, Any]] = []
     for _, r in df.iterrows():
         amount_yuan = float(r.get("amount_yuan") or 0)
@@ -1340,6 +1352,8 @@ def _latest_date() -> Optional[str]:
 def _clear_data_caches() -> None:
     _load_snapshot_cached.cache_clear()
     _load_prepared_snapshot_cached.cache_clear()
+    _stock_concept_map.cache_clear()
+    _sector_meta_map.cache_clear()
     _DATES_CACHE["expires_at"] = 0.0
     _DATES_CACHE["dates"] = []
 
@@ -2590,8 +2604,8 @@ def api_backtest_run(payload: dict = Body(default={})) -> Any:
     """启动一次回测（重新生成净值/交易/回撤）。
 
     body:
-      - 区间重算: {mode:'range', start_date?, end_date?, initial_capital?, risk_control?}
-      - 单日接力: {mode:'daily', trade_date, initial_capital?, risk_control?, reset_state?}
+      - 区间重算: {mode:'range', start_date?, end_date?, initial_capital?, risk_control?, max_plan_rank?}
+      - 单日接力: {mode:'daily', trade_date, initial_capital?, risk_control?, max_plan_rank?, reset_state?}
     risk_control 缺省时回退到全局 RiskConfig.enabled。
     """
     from desktop.runner import BACKTEST_CONTROLLER
@@ -2600,6 +2614,7 @@ def api_backtest_run(payload: dict = Body(default={})) -> Any:
     ok, msg = BACKTEST_CONTROLLER.start(
         p.get("start_date"), p.get("end_date"), p.get("initial_capital"),
         risk_control=p.get("risk_control"),
+        max_plan_rank=p.get("max_plan_rank") or 3,
         mode=p.get("mode") or "range",
         trade_date=p.get("trade_date"),
         reset_state=p.get("reset_state"))

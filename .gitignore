@@ -7,10 +7,16 @@
 /webdata/kb.sqlite
 /webdata/kb.sqlite.*
 /webdata/warehouse/
+/webdata/auth.sqlite
 /logs
 /data/
 /webdata/etl_quality/quality_*.json
 /webdata/etl_quality/quality_*.md
+/webdata/screening/analysis_*.json
+/webdata/screening/screening_*.json
+/webdata/snapshots/*.json
+/webdata/output/*
+/webdata/realtime/*.json
 
 # 忽略 Python 缓存
 __pycache__/

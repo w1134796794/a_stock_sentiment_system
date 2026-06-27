@@ -85,7 +85,8 @@ class DataPrep:
 
         try:
             universe: List[str] = []
-            universe += _extract_codes(zt_pool)
+            limit_up_codes = _extract_codes(zt_pool)
+            universe += limit_up_codes
             universe += _extract_codes(prev_zt_pool)
             if extra_codes:
                 universe += [_norm_code(c) for c in extra_codes]
@@ -106,6 +107,7 @@ class DataPrep:
                 self._prefetch_limit_down(ds, trade_date)
             if prefetch_sectors:
                 self._prefetch_sectors(ds, trade_date, prev_trade_date, sector_history_days)
+                self._prefetch_limit_up_concepts(ds, limit_up_codes, trade_date)
             if index_codes:
                 self._prefetch_index_daily(ds, index_codes, trade_date, index_lookbacks)
 
@@ -240,6 +242,20 @@ class DataPrep:
                 logger.info(f"[DataPrep] stock_basic 预取：{len(df)} 行")
         except Exception as e:
             logger.warning(f"[DataPrep] stock_basic 预取失败（不影响主流程）：{e}")
+
+    def _prefetch_limit_up_concepts(
+        self, ds: MarketDataset, stock_codes: List[str], trade_date: str
+    ) -> None:
+        """预取涨停股概念归属，生成概念连板梯队所需的按日缓存。"""
+        if not stock_codes or not hasattr(self.dm, "cache_limit_up_stock_concepts"):
+            return
+        try:
+            frame = self.dm.cache_limit_up_stock_concepts(stock_codes, str(trade_date))
+            if isinstance(frame, pd.DataFrame):
+                ds.meta["limit_up_concept_relations"] = len(frame)
+                ds.prefetched.add("limit_up_concepts")
+        except Exception as e:
+            logger.warning(f"[DataPrep] 涨停股概念归属预取失败（不影响主流程）：{e}")
 
     def _prefetch_index_daily(self, ds: MarketDataset, index_codes: Iterable[str],
                               trade_date: str, lookbacks: tuple = (120, 30)) -> None:

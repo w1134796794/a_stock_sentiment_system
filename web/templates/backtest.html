@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}模拟交易结果{% endblock %}
 {% block page_title %}模拟交易结果{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">回测净值 · 逐笔交易 · 方案表现</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">回测净值 · 成交记录 · 方案表现</div>{% endblock %}
 
 {% block header_extra %}
   {% if bt.runs %}
@@ -61,9 +61,9 @@
     <div class="text-[11px] text-slate-500 mt-1">盈 {{ bt.win_count }} · 亏 {{ bt.loss_count }}</div>
   </div>
   <div class="card border border-slate-800 rounded-xl p-4">
-    <div class="text-xs text-slate-400 mb-1">交易笔数</div>
-    <div class="text-xl font-bold mono">{{ bt.total_trades }}</div>
-    <div class="text-[11px] text-slate-500 mt-1">盈亏比 {{ '%.2f'|format(bt.pl_ratio or 0) }}</div>
+    <div class="text-xs text-slate-400 mb-1">已平仓交易</div>
+    <div class="text-xl font-bold mono">{{ bt.closed_count }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">持仓中 {{ bt.open_count|default(0, true) }} · 盈亏比 {{ '%.2f'|format(bt.pl_ratio or 0) }}</div>
   </div>
 </section>
 
@@ -128,7 +128,10 @@
 <section class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
   {% if bt.rank_feedback_rows %}
   <div class="card border border-slate-800 rounded-xl p-4">
-    <h2 class="text-base font-bold mb-3">排名反哺</h2>
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <h2 class="text-base font-bold">排名反哺</h2>
+      <span class="text-xs text-emerald-300">本批次建议重算前 {{ bt.rank_suggestion }} 名</span>
+    </div>
     <div class="overflow-x-auto">
       <table class="w-full text-sm border-collapse">
         <thead><tr class="text-slate-400">
@@ -196,11 +199,16 @@
 </section>
 {% endif %}
 
-{# ===== 逐笔交易 ===== #}
+{# ===== 逐笔交易 / 旧进程兼容成交记录 ===== #}
+{% set transaction_view = bt.transaction_view|default(false) %}
 <section class="card border border-slate-800 rounded-xl p-4">
   <div class="flex items-center justify-between mb-3">
-    <h2 class="text-base font-bold">逐笔交易</h2>
-    <span class="text-xs text-slate-500 mono">{{ bt.trade_rows|length }} 笔</span>
+    <h2 class="text-base font-bold">{{ '逐笔交易' if transaction_view else '成交记录' }}</h2>
+    {% if transaction_view %}
+    <span class="text-xs text-slate-500 mono">{{ bt.closed_count }} 笔已平仓 · {{ bt.open_count }} 笔持仓中</span>
+    {% else %}
+    <span class="text-xs text-slate-500 mono">{{ bt.execution_count|default(bt.trade_rows|length, true) }} 条 · 买入和卖出均单独记录</span>
+    {% endif %}
   </div>
   <div class="overflow-x-auto max-h-[560px]">
     <table class="w-full text-sm border-collapse">
@@ -218,7 +226,11 @@
           {% set v = row.get(c) %}
           <td class="px-3 py-1.5 border-b border-slate-800/60 whitespace-nowrap mono text-xs
             {% if c == '盈亏' or c == '盈亏%' %}{% if v and v.startswith('-') %}text-rose-400{% elif v and v.startswith('+') %}text-emerald-300{% endif %}{% else %}text-slate-200{% endif %}">
-            {{ v if v not in (none, '') else '--' }}
+            {% if c in ('买入价', '卖出价') and v not in (none, '') %}
+              {% if c == '卖出价' and (v|float) == 0 %}--{% else %}{{ '%.2f'|format(v|float) }}{% endif %}
+            {% else %}
+              {{ v if v not in (none, '') else '--' }}
+            {% endif %}
           </td>
           {% endfor %}
         </tr>

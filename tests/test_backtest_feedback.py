@@ -6,6 +6,7 @@ import pandas as pd
 from backtest.backtest_engine import BacktestEngine, TradeRecord
 from backtest.attribution import build_attribution_frames
 from backtest.plan_source import build_backtest_plan_dir
+from desktop import backtest as backtest_view
 
 
 def test_plan_source_keeps_only_top_three_for_backtest(tmp_path):
@@ -44,6 +45,66 @@ def test_plan_source_keeps_only_top_three_for_backtest(tmp_path):
     df = pd.read_csv(plan_dir / "交易计划_20260618.csv")
     assert list(df["优先级"]) == [1, 2, 3]
     assert "因子指标" in df.columns
+
+
+def test_plan_source_supports_top_one_comparison(tmp_path):
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir()
+    payload = {
+        "meta": {"date": "20260618"},
+        "etl": {"screening": {"profile": "default", "final": [
+            {"code": "000001", "name": "第一名", "rank": 1, "score": 90},
+            {"code": "000002", "name": "第二名", "rank": 2, "score": 89},
+        ]}},
+    }
+    (snapshot_dir / "20260618.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+
+    plan_dir, _, row_count = build_backtest_plan_dir(
+        snapshot_dir=snapshot_dir,
+        output_dir=tmp_path / "webdata",
+        max_rank=1,
+    )
+
+    assert row_count == 1
+    result = pd.read_csv(plan_dir / "交易计划_20260618.csv")
+    assert result.iloc[0]["名称"] == "第一名"
+
+
+def test_backtest_view_distinguishes_closed_trades_and_execution_rows(tmp_path, monkeypatch):
+    run = "20260627_120000"
+    monkeypatch.setattr(backtest_view, "RESULTS_DIR", tmp_path)
+    (tmp_path / f"backtest_summary_{run}.csv").write_text(
+        "initial_capital,final_capital,total_trades,total_return,win_rate\n"
+        "100000,101000,1,0.01,1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / f"backtest_nav_{run}.csv").write_text(
+        "date,total_value\n20260626,100000\n20260627,101000\n",
+        encoding="utf-8",
+    )
+    (tmp_path / f"backtest_trades_{run}.csv").write_text(
+        "date,stock_code,stock_name,pattern_type,action,entry_price,exit_price,shares,pnl,pnl_pct\n"
+        "20260626,000001,A,default,BUY,10.126,0,1000,0,0\n"
+        "20260627,000001,A,default,SELL,10.126,11.239,1000,1000,0.1\n"
+        "20260627,000002,B,default,BUY,20.555,0,500,0,0\n",
+        encoding="utf-8",
+    )
+
+    overview = backtest_view.backtest_overview(run)
+
+    assert overview["closed_count"] == 1
+    assert overview["buy_count"] == 2
+    assert overview["execution_count"] == 3
+    assert overview["open_count"] == 1
+    assert len(overview["trade_rows"]) == 2
+    closed = next(row for row in overview["trade_rows"] if row["退出"] != "持仓中")
+    opened = next(row for row in overview["trade_rows"] if row["退出"] == "持仓中")
+    assert closed["买入价"] == "10.13"
+    assert closed["卖出价"] == "11.24"
+    assert opened["买入价"] == "20.55"
+    assert opened["卖出价"] == ""
 
 
 def test_plan_source_prefers_external_screening_over_snapshot(tmp_path):

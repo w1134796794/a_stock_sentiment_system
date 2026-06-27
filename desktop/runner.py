@@ -360,6 +360,7 @@ class BacktestController:
     def start(self, start_date: Optional[str], end_date: Optional[str],
               initial_capital: object = None,
               risk_control: object = None,
+              max_plan_rank: object = 3,
               mode: object = "range",
               trade_date: Optional[str] = None,
               reset_state: object = False) -> Tuple[bool, str]:
@@ -373,6 +374,10 @@ class BacktestController:
             capital = float(initial_capital) if initial_capital not in (None, "") else 100000.0
         except (TypeError, ValueError):
             capital = 100000.0
+        try:
+            max_rank = max(1, min(int(max_plan_rank or 3), 3))
+        except (TypeError, ValueError):
+            max_rank = 3
 
         # 风控闸门开关：未显式指定时回退到全局 RiskConfig.enabled
         if risk_control is None:
@@ -397,20 +402,21 @@ class BacktestController:
                     "trade_date": target,
                     "initial_capital": capital,
                     "risk_control": risk_on,
+                    "max_plan_rank": max_rank,
                     "reset_state": bool(reset_state),
                 }
                 self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.finished_at = None
                 self._thread = threading.Thread(
                     target=self._worker_daily,
-                    args=(target, capital, risk_on, bool(reset_state)),
+                    args=(target, capital, risk_on, bool(reset_state), max_rank),
                     daemon=True,
                     name="backtest-run-daily",
                 )
                 self._thread.start()
             mode_txt = "开启风控" if risk_on else "关闭风控"
             reset_txt = "重置接力账户" if reset_state else "承接上一交易日账户"
-            return True, f"已启动单日接力回测：{target}（{mode_txt}，{reset_txt}）"
+            return True, f"已启动单日接力回测：{target}（每日前{max_rank}名，{mode_txt}，{reset_txt}）"
 
         # 默认区间：结束=今日，开始=结束前 90 天（交易日历会自动剔除非交易日）
         end = end_date or datetime.now().strftime("%Y%m%d")
@@ -429,16 +435,17 @@ class BacktestController:
             self.state = "running"
             self.error = None
             self.params = {"mode": "range", "start_date": start, "end_date": end,
-                           "initial_capital": capital, "risk_control": risk_on}
+                           "initial_capital": capital, "risk_control": risk_on,
+                           "max_plan_rank": max_rank}
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(start, end, capital, risk_on),
+                target=self._worker, args=(start, end, capital, risk_on, max_rank),
                 daemon=True, name="backtest-run"
             )
             self._thread.start()
         mode = "开启风控" if risk_on else "关闭风控"
-        return True, f"已启动回测：{start} ~ {end}（{mode}）"
+        return True, f"已启动回测：{start} ~ {end}（每日前{max_rank}名，{mode}）"
 
     def status(self, since: int = 0) -> Dict:
         lines, nxt = self.buffer.read_from(since)
@@ -453,7 +460,7 @@ class BacktestController:
         }
 
     def _worker(self, start: str, end: str, capital: float,
-                risk_control: bool = True) -> None:
+                risk_control: bool = True, max_plan_rank: int = 3) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -485,6 +492,7 @@ class BacktestController:
                 screening_dir=Path(WEB_DATA_DIR) / "screening",
                 start_date=start,
                 end_date=end,
+                max_rank=max_plan_rank,
             )
             if file_count <= 0:
                 self.buffer.append_line(f"!!! 当前数据快照中没有可回测的交易计划：{SNAPSHOT_DIR}")
@@ -493,13 +501,14 @@ class BacktestController:
                 self.state = "error"
                 return
             self.buffer.append_line(
-                f"已从当前数据快照生成回测计划：{file_count} 个交易日，{row_count} 条候选（仅执行每日前3名），目录 {trade_plans_dir}"
+                f"已从当前数据快照生成回测计划：{file_count} 个交易日，{row_count} 条候选（仅执行每日前{max_plan_rank}名），目录 {trade_plans_dir}"
             )
 
             dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=False)
             config = BacktestConfig.from_risk_config(
                 RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
             )
+            config.max_plan_rank = max_plan_rank
             self.buffer.append_line(
                 f"退出策略：盈利达 {config.trailing_activation_pct:.1%} 后，"
                 f"从持仓高点回撤 {config.trailing_stop_pct:.1%} 全部止盈；不设固定止盈"
@@ -517,6 +526,7 @@ class BacktestController:
                 "start_date": start,
                 "end_date": end,
                 "risk_control": risk_control,
+                "max_plan_rank": max_plan_rank,
             })
             state_path = self._save_rolling_state(engine, "range")
 
@@ -537,7 +547,8 @@ class BacktestController:
             self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def _worker_daily(self, trade_date: str, capital: float,
-                      risk_control: bool = True, reset_state: bool = False) -> None:
+                      risk_control: bool = True, reset_state: bool = False,
+                      max_plan_rank: int = 3) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -578,6 +589,7 @@ class BacktestController:
                 screening_dir=Path(WEB_DATA_DIR) / "screening",
                 start_date=prev_date,
                 end_date=prev_date,
+                max_rank=max_plan_rank,
             )
             if file_count <= 0:
                 self.buffer.append_line(f"!!! 未找到上一交易日 {prev_date} 的交易计划，无法执行 {trade_date}。")
@@ -585,12 +597,13 @@ class BacktestController:
                 self.state = "error"
                 return
             self.buffer.append_line(
-                f"已加载上一交易日 {prev_date} 的回测计划：{row_count} 条候选（仅执行每日前3名）。")
+                f"已加载上一交易日 {prev_date} 的回测计划：{row_count} 条候选（仅执行每日前{max_plan_rank}名）。")
 
             dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=False)
             config = BacktestConfig.from_risk_config(
                 RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
             )
+            config.max_plan_rank = max_plan_rank
             self.buffer.append_line(
                 f"退出策略：盈利达 {config.trailing_activation_pct:.1%} 后，"
                 f"从持仓高点回撤 {config.trailing_stop_pct:.1%} 全部止盈；不设固定止盈"
@@ -637,6 +650,7 @@ class BacktestController:
                 "continued_from": prev_date,
                 "state_source": state_source,
                 "risk_control": risk_control,
+                "max_plan_rank": max_plan_rank,
             })
             state_path = self._save_rolling_state(engine, "daily", state_source=state_source)
 
