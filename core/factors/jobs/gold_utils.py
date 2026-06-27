@@ -77,6 +77,34 @@ def read_table(con, table: str, *, where: str = "", params: Optional[List[Any]] 
     return con.execute(sql, params or []).fetchdf()
 
 
+def read_recent_trade_dates(
+    con,
+    table: str,
+    trade_date: str,
+    *,
+    days: int,
+    columns: Optional[Iterable[str]] = None,
+) -> pd.DataFrame:
+    """Read only the recent date partitions needed by rolling factors."""
+    if not table_exists(con, table):
+        return pd.DataFrame()
+    selected = ", ".join(_quote_ident(col) for col in columns) if columns else "*"
+    quoted_table = _quote_ident(table)
+    date_col = _quote_ident("trade_date")
+    sql = f"""
+        SELECT {selected}
+        FROM {quoted_table}
+        WHERE CAST({date_col} AS VARCHAR) IN (
+            SELECT DISTINCT CAST({date_col} AS VARCHAR) AS partition_date
+            FROM {quoted_table}
+            WHERE CAST({date_col} AS VARCHAR) <= ?
+            ORDER BY partition_date DESC
+            LIMIT ?
+        )
+    """
+    return con.execute(sql, [str(trade_date), max(1, int(days))]).fetchdf()
+
+
 def _quote_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 

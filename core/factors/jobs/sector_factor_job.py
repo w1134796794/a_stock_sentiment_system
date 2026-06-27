@@ -8,7 +8,7 @@ from core.factors.jobs.gold_utils import (
     long_records_to_frame,
     make_long_record,
     percentile_score,
-    read_table,
+    read_recent_trade_dates,
     safe_weighted_score,
     score_between,
     to_float,
@@ -22,7 +22,16 @@ class SectorFactorJob:
 
     def run(self, con, trade_date: str) -> FactorJobResult:
         result = FactorJobResult(name=self.name, trade_date=str(trade_date))
-        sector = read_table(con, "sector_daily_silver", where="trade_date <= ?", params=[str(trade_date)])
+        sector = read_recent_trade_dates(
+            con,
+            "sector_daily_silver",
+            trade_date,
+            days=6,
+            columns=(
+                "trade_date", "sector_code", "sector_name", "sector_type",
+                "pct_chg", "amount_yuan", "close", "pre_close", "vol_hand",
+            ),
+        )
         if sector.empty:
             result.ok = False
             result.add_message("sector_daily_silver 为空，无法计算板块指标")

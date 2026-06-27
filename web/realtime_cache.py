@@ -30,6 +30,12 @@ class RealtimePayloadCache:
     def get_or_load(self, key: Hashable, loader: Callable[[], Any]) -> Any:
         return self._load(key, loader, force=False)
 
+    def get(self, key: Hashable) -> Any:
+        """Return the latest payload regardless of age."""
+        with self._lock:
+            entry = self._entries.get(key)
+        return deepcopy(entry.value) if entry is not None else None
+
     def refresh(self, key: Hashable, loader: Callable[[], Any]) -> Any:
         return self._load(key, loader, force=True)
 

@@ -7,6 +7,7 @@ write snapshot-ready analysis payload.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -79,6 +80,8 @@ class ETLDailyPipeline:
 
         logger.info(f"[数据生成] 开始主流程: {trade_date}, prev={prev_trade_date or '-'}")
 
+        phase_started = time.monotonic()
+        logger.info(f"[数据生成][Phase1] 数据预取与 Silver 落盘开始: {trade_date}")
         zt_pool = self._safe_df(lambda: self.dm.get_limit_up_pool(trade_date), "今日涨停池")
         prev_zt_pool = self._safe_df(lambda: self.dm.get_limit_up_pool(prev_trade_date), "昨日涨停池") if prev_trade_date else pd.DataFrame()
 
@@ -97,13 +100,24 @@ class ETLDailyPipeline:
         result.silver_summary = dict(dataset.meta.get("silver_persist") or {})
         if not result.silver_summary:
             result.warnings.append("silver_summary 为空，Phase 1 可能未成功落盘")
+        logger.info(
+            f"[数据生成][Phase1] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
+        )
 
+        phase_started = time.monotonic()
+        logger.info(f"[数据生成][Phase2] 因子计算开始: {trade_date}")
         factor_results = FactorJobRunner(self.duckdb_path).run(trade_date)
         result.factor_results = [item.to_dict() for item in factor_results]
         failed = [item for item in result.factor_results if not item.get("ok")]
         if failed:
             result.warnings.append(f"因子任务失败: {[item.get('name') for item in failed]}")
+        logger.info(
+            f"[数据生成][Phase2] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s, "
+            f"失败={len(failed)}"
+        )
 
+        phase_started = time.monotonic()
+        logger.info(f"[数据生成][Phase3] 指标筛选开始: {trade_date}, profile={profile}")
         screening = ScreeningEngine(
             duckdb_path=self.duckdb_path,
             output_dir=self.web_data_dir / "screening",
@@ -111,18 +125,32 @@ class ETLDailyPipeline:
         result.screening = screening.to_dict()
         if not screening.ok:
             result.warnings.append(f"筛选失败: {screening.message}")
+        logger.info(
+            f"[数据生成][Phase3] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s, "
+            f"候选={len(result.screening.get('final') or [])}"
+        )
 
+        phase_started = time.monotonic()
+        logger.info(f"[数据生成][Phase4] 分析摘要开始: {trade_date}")
         result.gold_summary = build_gold_analysis_summary(
             trade_date,
             duckdb_path=self.duckdb_path,
             screening_dir=self.web_data_dir / "screening",
         )
         result.analysis_path = str(self._write_analysis_json(result.gold_summary, self.web_data_dir / "screening", trade_date))
+        logger.info(
+            f"[数据生成][Phase4] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
+        )
 
+        phase_started = time.monotonic()
+        logger.info(f"[数据生成][Phase5] 页面快照开始: {trade_date}")
         data_dict = self.build_snapshot_data(result)
         result.snapshot_paths = SnapshotWriter(self.snapshot_dir, self.app_db_path, self.duckdb_path).write(data_dict)
         if self.ingest_kb:
             self._ingest_kb(data_dict, self.kb_db_path)
+        logger.info(
+            f"[数据生成][Phase5] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
+        )
 
         logger.info(
             f"[数据生成] 主流程完成: ok={result.ok}, "

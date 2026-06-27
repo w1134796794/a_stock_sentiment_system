@@ -1,6 +1,7 @@
 """Runner for Phase 2 batch factor jobs."""
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -31,7 +32,10 @@ class FactorJobRunner:
     def run(self, trade_date: str, *, jobs: Optional[Iterable[str]] = None) -> List[FactorJobResult]:
         selected = list(jobs or ("market", "sector", "stock"))
         results: List[FactorJobResult] = []
+        connect_started = time.monotonic()
+        logger.info(f"[Phase2] 打开因子仓库: {self.duckdb_path}")
         with connect_duckdb(self.duckdb_path) as con:
+            logger.info(f"[Phase2] 因子仓库已打开, 耗时={time.monotonic() - connect_started:.1f}s")
             for job_name in selected:
                 job_cls = self.JOBS.get(str(job_name))
                 if job_cls is None:
@@ -40,6 +44,8 @@ class FactorJobRunner:
                     results.append(result)
                     continue
                 job = job_cls()
+                job_started = time.monotonic()
+                logger.info(f"[Phase2][{job_name}] 开始: {trade_date}")
                 try:
                     result = job.run(con, str(trade_date))
                 except Exception as e:  # noqa: BLE001
@@ -47,6 +53,10 @@ class FactorJobRunner:
                     result = FactorJobResult(name=job.name, trade_date=str(trade_date), ok=False)
                     result.add_message(str(e))
                 results.append(result)
+                logger.info(
+                    f"[Phase2][{job_name}] 完成: {trade_date}, ok={result.ok}, "
+                    f"耗时={time.monotonic() - job_started:.1f}s, rows={result.rows}"
+                )
         return results
 
 

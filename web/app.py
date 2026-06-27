@@ -1367,6 +1367,22 @@ async def _app_lifespan(_app: FastAPI):
 
 app = FastAPI(title="A股情绪系统 · 指标看板", docs_url="/api/docs", lifespan=_app_lifespan)
 
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        "Unhandled request error: %s %s",
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    if is_api_path(request.url.path):
+        return JSONResponse(
+            {"ok": False, "error": "server_error", "message": "服务器内部错误，请查看服务日志"},
+            status_code=500,
+        )
+    return HTMLResponse("Internal Server Error", status_code=500)
+
 _static_dir = BASE / "static"
 _static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -2046,7 +2062,26 @@ def _build_realtime_health_payload(*, probe: bool = False) -> Dict[str, Any]:
     }
 
 
+def _data_generation_running() -> bool:
+    try:
+        from desktop.runner import CONTROLLER
+
+        return CONTROLLER.state == "running"
+    except Exception:
+        return False
+
+
+def _get_cached_realtime_payload(key: tuple, loader) -> Any:
+    if _data_generation_running():
+        stale = _REALTIME_PAYLOAD_CACHE.get(key)
+        if stale is not None:
+            return stale
+    return _REALTIME_PAYLOAD_CACHE.get_or_load(key, loader)
+
+
 def _refresh_realtime_defaults() -> None:
+    if _data_generation_running():
+        return
     trade_date = _latest_date()
     jobs = [
         (
@@ -2056,10 +2091,6 @@ def _refresh_realtime_defaults() -> None:
         (
             _sector_cache_key(None, "ths", 5, False),
             lambda: _build_realtime_sector_payload(None, source="ths", limit=5, include_raw=False),
-        ),
-        (
-            _sector_cache_key(None, "east", 5, False),
-            lambda: _build_realtime_sector_payload(None, source="east", limit=5, include_raw=False),
         ),
         (("health", False), lambda: _build_realtime_health_payload(probe=False)),
     ]
@@ -2106,7 +2137,7 @@ def _stop_realtime_refresh_worker() -> None:
 @app.get("/api/realtime/quote/{code}")
 def api_realtime_quote(code: str, include_raw: bool = False) -> Any:
     normalized_code = _normalize_stock_code(code)
-    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+    payload = _get_cached_realtime_payload(
         ("quote", normalized_code, bool(include_raw)),
         lambda: _build_realtime_quote_payload(normalized_code, include_raw=include_raw),
     )
@@ -2123,7 +2154,7 @@ def api_realtime_quotes(
     if not code_list:
         return JSONResponse({"ok": False, "message": "codes 参数不能为空", "quotes": []}, status_code=400)
     normalized_stale = max(1, int(stale_after_seconds or 90))
-    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+    payload = _get_cached_realtime_payload(
         ("quotes", tuple(code_list), bool(include_raw), normalized_stale),
         lambda: _build_realtime_quotes_payload(
             code_list,
@@ -2144,7 +2175,7 @@ def api_realtime_sectors(
     code_list = _split_codes(codes) or None
     normalized_limit = max(1, min(int(limit or 20), 100))
     key = _sector_cache_key(code_list, source, normalized_limit, include_raw)
-    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+    payload = _get_cached_realtime_payload(
         key,
         lambda: _build_realtime_sector_payload(
             code_list,
@@ -2164,7 +2195,7 @@ def api_realtime_market(
 ) -> Any:
     code_list = _split_codes(codes) or None
     normalized_limit = max(1, min(int(limit or 100), 500))
-    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+    payload = _get_cached_realtime_payload(
         ("market", tuple(code_list or []), normalized_limit, bool(include_raw)),
         lambda: _build_realtime_market_payload(
             code_list,
@@ -2211,7 +2242,7 @@ def api_realtime_overlay(
         _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
     else:
         key = _overlay_cache_key(trade_date, profile, normalized_limit, normalized_stale)
-        payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+        payload = _get_cached_realtime_payload(
             key,
             lambda: _build_realtime_overlay_payload(
                 trade_date,

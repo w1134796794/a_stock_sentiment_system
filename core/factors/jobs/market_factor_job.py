@@ -10,7 +10,7 @@ from core.factors.jobs.gold_utils import (
     FactorJobResult,
     long_records_to_frame,
     make_long_record,
-    read_table,
+    read_recent_trade_dates,
     safe_weighted_score,
     score_between,
     write_replace_partition,
@@ -106,7 +106,13 @@ class MarketFactorJob:
 
     def run(self, con, trade_date: str) -> FactorJobResult:
         result = FactorJobResult(name=self.name, trade_date=str(trade_date))
-        stock = read_table(con, "stock_daily_silver", where="trade_date <= ?", params=[str(trade_date)])
+        stock = read_recent_trade_dates(
+            con,
+            "stock_daily_silver",
+            trade_date,
+            days=6,
+            columns=("trade_date", "pct_chg", "amount_yuan"),
+        )
         if stock.empty:
             result.ok = False
             result.add_message("stock_daily_silver 为空，无法计算大盘指标")
@@ -126,18 +132,12 @@ class MarketFactorJob:
         down_ratio = float((today["pct_chg"] < 0).sum() / total_count)
         avg_pct = float(today["pct_chg"].mean())
 
-        limit_up_cache_count = _strict_limit_cache_count(trade_date, "U")
-        limit_down_cache_count = _strict_limit_cache_count(trade_date, "D")
-        limit_up_count = (
-            limit_up_cache_count
-            if limit_up_cache_count is not None
-            else _strict_limit_up_count(con, trade_date)
-        )
-        limit_down_count = (
-            limit_down_cache_count
-            if limit_down_cache_count is not None
-            else _strict_limit_down_count(con, trade_date)
-        )
+        limit_up_count = _strict_limit_up_count(con, trade_date)
+        limit_down_count = _strict_limit_down_count(con, trade_date)
+        if limit_up_count is None:
+            limit_up_count = _strict_limit_cache_count(trade_date, "U")
+        if limit_down_count is None:
+            limit_down_count = _strict_limit_cache_count(trade_date, "D")
         if limit_up_count is None or limit_down_count is None:
             result.ok = False
             result.add_message("缺少 limit_list_d 涨跌停池，已拒绝使用 pct_chg 阈值推断涨跌停")

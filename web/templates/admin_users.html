@@ -18,7 +18,7 @@
       </div>
       <div>
         <label class="block text-[11px] text-slate-500 mb-1">密码</label>
-        <input id="new-password" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500">
+        <input id="new-password" type="password" autocomplete="new-password" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500">
       </div>
       <div class="grid grid-cols-3 gap-2">
         <div>
@@ -37,7 +37,7 @@
           <input id="new-max-sessions" type="number" value="1" min="1" max="5" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm mono outline-none focus:border-emerald-500">
         </div>
       </div>
-      <button onclick="createUser()" class="w-full bg-emerald-600 hover:bg-emerald-500 rounded-lg px-4 py-2 text-sm font-semibold">创建</button>
+      <button id="create-user-btn" onclick="createUser()" class="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg px-4 py-2 text-sm font-semibold">创建</button>
       <div id="admin-msg" class="text-xs text-slate-500 min-h-4"></div>
     </div>
   </div>
@@ -86,22 +86,56 @@ function val(id) { return document.getElementById(id).value.trim(); }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
+async function requestJson(url, options = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await fetch(url, {...options, credentials:'same-origin', signal:ctrl.signal});
+    if (r.redirected && new URL(r.url).pathname === '/login') {
+      throw new Error('登录状态已失效，请重新登录');
+    }
+    const text = await r.text();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (_) {
+        const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+        throw new Error(`服务器响应异常（HTTP ${r.status}）${plain ? '：' + plain : ''}`);
+      }
+    }
+    if (!r.ok || data.ok === false) {
+      throw new Error(data.error || data.message || `操作失败（HTTP ${r.status}）`);
+    }
+    return data;
+  } catch (error) {
+    if (error && error.name === 'AbortError') throw new Error('服务器响应超时，请检查数据任务或服务状态');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 async function postJson(url, body = {}) {
-  const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  const j = await r.json();
-  if (!r.ok || j.ok === false) throw new Error(j.error || j.message || '操作失败');
-  return j;
+  return requestJson(url, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+  });
 }
 async function createUser() {
+  const button = document.getElementById('create-user-btn');
+  const username = val('new-username');
+  const password = val('new-password');
+  if (!username || !password) { msg('账号和密码不能为空'); return; }
+  button.disabled = true;
   try {
     await postJson('/api/admin/users', {
-      username: val('new-username'), display_name: val('new-display'), password: val('new-password'),
+      username, display_name: val('new-display'), password,
       role: val('new-role'), days: val('new-days'), max_sessions: val('new-max-sessions')
     });
     msg('账号已创建', true);
     ['new-username','new-display','new-password'].forEach(id => document.getElementById(id).value = '');
-    reloadUsers();
+    await reloadUsers();
   } catch (e) { msg(e.message); }
+  finally { button.disabled = false; }
 }
 async function setStatus(id, status) {
   try { await postJson(`/api/admin/users/${id}/status`, {status}); reloadUsers(); }
@@ -128,10 +162,13 @@ async function saveLimits(id) {
   catch (e) { msg(e.message); }
 }
 async function reloadUsers() {
-  const r = await fetch('/api/admin/users');
-  const j = await r.json();
-  renderUsers(j.users || []);
-  renderLogs(j.login_logs || []);
+  try {
+    const j = await requestJson('/api/admin/users');
+    renderUsers(j.users || []);
+    renderLogs(j.login_logs || []);
+  } catch (e) {
+    msg(e.message);
+  }
 }
 function badge(text, cls) {
   return `<span class="inline-flex rounded-md px-2 py-0.5 text-[11px] ${cls}">${text}</span>`;

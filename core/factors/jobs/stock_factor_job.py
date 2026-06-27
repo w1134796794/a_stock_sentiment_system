@@ -8,6 +8,7 @@ from core.factors.jobs.gold_utils import (
     long_records_to_frame,
     make_long_record,
     percentile_score,
+    read_recent_trade_dates,
     read_table,
     safe_weighted_score,
     score_between,
@@ -103,7 +104,16 @@ class StockFactorJob:
 
     def run(self, con, trade_date: str) -> FactorJobResult:
         result = FactorJobResult(name=self.name, trade_date=str(trade_date))
-        stock = read_table(con, "stock_daily_silver", where="trade_date <= ?", params=[str(trade_date)])
+        stock = read_recent_trade_dates(
+            con,
+            "stock_daily_silver",
+            trade_date,
+            days=21,
+            columns=(
+                "trade_date", "code", "ts_code", "name", "pct_chg", "vol_hand",
+                "amount_yuan", "high", "close", "pre_close", "circ_mv",
+            ),
+        )
         if stock.empty:
             result.ok = False
             result.add_message("stock_daily_silver 为空，无法计算个股指标")
@@ -127,15 +137,8 @@ class StockFactorJob:
             limit_pool["code"] = limit_pool["code"].astype(str)
             pool_by_code = limit_pool.drop_duplicates("code", keep="last").set_index("code").to_dict("index")
 
-        existing_wide = read_table(con, "factor_stock_wide", where="trade_date < ?", params=[str(trade_date)])
         amount_hist = hist[["trade_date", "code", "amount_yuan"]].copy() if not hist.empty else pd.DataFrame()
         vol_hist = hist[["trade_date", "code", "vol_hand"]].copy() if not hist.empty else pd.DataFrame()
-        if not existing_wide.empty and {"trade_date", "code", "amount_yuan"}.issubset(existing_wide.columns):
-            prev_amount = existing_wide[["trade_date", "code", "amount_yuan"]].copy()
-            amount_hist = pd.concat([amount_hist, prev_amount], ignore_index=True)
-        if not existing_wide.empty and {"trade_date", "code", "vol_hand"}.issubset(existing_wide.columns):
-            prev_vol = existing_wide[["trade_date", "code", "vol_hand"]].copy()
-            vol_hist = pd.concat([vol_hist, prev_vol], ignore_index=True)
         if not amount_hist.empty:
             amount_hist["trade_date"] = amount_hist["trade_date"].astype(str)
             amount_hist["amount_yuan"] = pd.to_numeric(amount_hist["amount_yuan"], errors="coerce").fillna(0)

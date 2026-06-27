@@ -7,7 +7,9 @@
 仅读取快照产物，无需 tushare 等重依赖。
 """
 import argparse
+import faulthandler
 import os
+import signal
 import sys
 
 import uvicorn
@@ -47,6 +49,16 @@ def _sanitize_stdio() -> None:
         sys.stderr = _NullStream()
 
 
+def _enable_fault_diagnostics() -> None:
+    """Enable on-demand Python thread dumps in systemd logs on Linux."""
+    try:
+        faulthandler.enable(file=sys.stderr, all_threads=True)
+        if hasattr(signal, "SIGUSR1"):
+            faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
+    except Exception:
+        pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="A股情绪系统 · Web 看板")
     parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认仅本机）")
@@ -55,6 +67,7 @@ def main() -> None:
     args = parser.parse_args()
 
     _sanitize_stdio()
+    _enable_fault_diagnostics()
     uvicorn.run("web.app:app", host=args.host, port=args.port, reload=args.reload)
 
 

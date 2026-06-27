@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import json
+import time
 import threading
 import traceback
 from datetime import datetime, timedelta
@@ -270,20 +271,45 @@ class RunController:
 
             system = SentimentSystem()
             for idx, trade_date in enumerate(trade_dates, 1):
+                date_started = time.monotonic()
+                heartbeat_stop = threading.Event()
+
+                def heartbeat(current_date=trade_date, started=date_started):
+                    while not heartbeat_stop.wait(60.0):
+                        loguru.logger.info(
+                            f"[批量生成] {current_date} 仍在运行，累计耗时 "
+                            f"{time.monotonic() - started:.0f}s"
+                        )
+
+                heartbeat_thread = threading.Thread(
+                    target=heartbeat,
+                    daemon=True,
+                    name=f"batch-heartbeat-{trade_date}",
+                )
+                heartbeat_thread.start()
                 self.buffer.append_line("")
                 self.buffer.append_line(f"--- [{idx}/{len(trade_dates)}] {trade_date} 开始 ---")
                 try:
                     system.run_daily_analysis(trade_date)
                     self.completed = idx
                     self.date = trade_date
-                    self.buffer.append_line(f"--- [{idx}/{len(trade_dates)}] {trade_date} 完成 ---")
+                    self.buffer.append_line(
+                        f"--- [{idx}/{len(trade_dates)}] {trade_date} 完成 · "
+                        f"耗时 {time.monotonic() - date_started:.1f}s ---"
+                    )
                 except Exception as exc:  # noqa: BLE001
                     failures.append(trade_date)
                     self.failed = list(failures)
                     self.completed = idx
                     self.date = trade_date
-                    self.buffer.append_line(f"!!! [{idx}/{len(trade_dates)}] {trade_date} 失败: {exc!r}")
+                    self.buffer.append_line(
+                        f"!!! [{idx}/{len(trade_dates)}] {trade_date} 失败 · "
+                        f"耗时 {time.monotonic() - date_started:.1f}s: {exc!r}"
+                    )
                     self.buffer.append_text(traceback.format_exc())
+                finally:
+                    heartbeat_stop.set()
+                    heartbeat_thread.join(timeout=0.2)
 
             if failures:
                 self.error = f"批量生成完成，失败 {len(failures)} 个交易日: {', '.join(failures)}"
