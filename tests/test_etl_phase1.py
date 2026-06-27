@@ -12,7 +12,7 @@ from core.etl.normalizers import (
     standardize_sector_daily_frame,
     standardize_stock_daily_frame,
 )
-from core.etl.warehouse import persist_market_dataset_silver
+from core.etl.warehouse import SilverWarehouse, persist_market_dataset_silver
 
 
 DUCKDB_MISSING = importlib.util.find_spec("duckdb") is None
@@ -181,3 +181,71 @@ def test_persist_market_dataset_silver_keeps_historical_trade_dates(tmp_path):
         ).fetchall()
 
     assert rows == [("20260617", 10.0), ("20260618", 12.0)]
+
+
+@pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
+def test_silver_warehouse_migrates_legacy_integer_trade_date(tmp_path):
+    import duckdb  # type: ignore
+
+    db_path = tmp_path / "factors.duckdb"
+    with duckdb.connect(str(db_path)) as con:
+        con.execute(
+            """
+            CREATE TABLE stock_daily_silver (
+                trade_date INTEGER,
+                code INTEGER,
+                close DOUBLE
+            )
+            """
+        )
+        con.execute("INSERT INTO stock_daily_silver VALUES (20260625, 1, 10.0)")
+        con.execute("INSERT INTO stock_daily_silver VALUES (20260626, 1, 11.0)")
+
+    incoming = pd.DataFrame([
+        {"trade_date": "20260626", "code": "000001", "close": 12.0},
+    ])
+    result = SilverWarehouse(duckdb_path=db_path).write_table(
+        "stock_daily_silver",
+        incoming,
+        mode="upsert_dates",
+    )
+
+    assert result["duckdb"] is True
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        schema = {row[0]: row[1] for row in con.execute("DESCRIBE stock_daily_silver").fetchall()}
+        rows = con.execute(
+            "SELECT trade_date, code, close FROM stock_daily_silver ORDER BY trade_date"
+        ).fetchall()
+
+    assert schema["trade_date"] == "VARCHAR"
+    assert schema["code"] == "VARCHAR"
+    assert rows == [("20260625", "1", 10.0), ("20260626", "000001", 12.0)]
+
+
+@pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
+def test_silver_warehouse_rolls_back_partition_when_insert_fails(tmp_path):
+    import duckdb  # type: ignore
+
+    db_path = tmp_path / "factors.duckdb"
+    with duckdb.connect(str(db_path)) as con:
+        con.execute(
+            "CREATE TABLE stock_daily_silver (trade_date INTEGER, code VARCHAR, close DOUBLE)"
+        )
+        con.execute("INSERT INTO stock_daily_silver VALUES (20260626, '000001', 11.0)")
+
+    incoming = pd.DataFrame([
+        {"trade_date": "20260626", "code": "000001", "close": "not-a-number"},
+    ])
+    result = SilverWarehouse(duckdb_path=db_path).write_table(
+        "stock_daily_silver",
+        incoming,
+        mode="upsert_dates",
+    )
+
+    assert result["duckdb"] is False
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        schema = {row[0]: row[1] for row in con.execute("DESCRIBE stock_daily_silver").fetchall()}
+        rows = con.execute("SELECT trade_date, code, close FROM stock_daily_silver").fetchall()
+
+    assert schema["trade_date"] == "INTEGER"
+    assert rows == [(20260626, "000001", 11.0)]

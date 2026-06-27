@@ -29,6 +29,24 @@ SILVER_DATE_PARTITION_COLUMN = {
     "limit_down_pool_silver": "trade_date",
 }
 
+SILVER_CANONICAL_VARCHAR_COLUMNS = {
+    "trade_date",
+    "code",
+    "ts_code",
+    "name",
+    "exchange",
+    "sector_code",
+    "sector_name",
+    "sector_type",
+    "index_code",
+    "index_name",
+    "first_time",
+    "last_time",
+    "source",
+    "as_of_date",
+    "ingested_at",
+}
+
 
 class SilverWarehouse:
     """Write normalized silver tables to DuckDB when available, else parquet/csv."""
@@ -95,23 +113,56 @@ class SilverWarehouse:
 
         with duckdb.connect(str(self.duckdb_path)) as con:
             con.register("_etl_df", df)
-            if mode == "append":
-                con.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM _etl_df WHERE 1=0")
-                con.execute(f"INSERT INTO {table_name} SELECT * FROM _etl_df")
-            elif mode == "upsert_dates":
-                self._upsert_duckdb_date_partitions(con, table_name, df)
-            else:
-                con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _etl_df")
-            con.unregister("_etl_df")
+            try:
+                con.execute("BEGIN TRANSACTION")
+                if mode == "append":
+                    con.execute(
+                        f"CREATE TABLE IF NOT EXISTS {_quote_ident(table_name)} "
+                        "AS SELECT * FROM _etl_df WHERE 1=0"
+                    )
+                    con.execute(f"INSERT INTO {_quote_ident(table_name)} SELECT * FROM _etl_df")
+                elif mode == "upsert_dates":
+                    self._upsert_duckdb_date_partitions(con, table_name, df)
+                else:
+                    con.execute(
+                        f"CREATE OR REPLACE TABLE {_quote_ident(table_name)} AS SELECT * FROM _etl_df"
+                    )
+                con.execute("COMMIT")
+            except Exception:
+                con.execute("ROLLBACK")
+                raise
+            finally:
+                try:
+                    con.unregister("_etl_df")
+                except Exception:
+                    pass
 
     def _upsert_duckdb_date_partitions(self, con, table_name: str, df: pd.DataFrame) -> None:
         partition_col = SILVER_DATE_PARTITION_COLUMN.get(table_name, "trade_date")
-        con.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM _etl_df WHERE 1=0")
-        table_cols = [str(row[0]) for row in con.execute(f"DESCRIBE {table_name}").fetchall()]
+        quoted_table = _quote_ident(table_name)
+        con.execute(f"CREATE TABLE IF NOT EXISTS {quoted_table} AS SELECT * FROM _etl_df WHERE 1=0")
+        table_schema = _duckdb_table_schema(con, table_name)
+        table_cols = list(table_schema)
         for col in df.columns:
             if str(col) not in table_cols:
-                con.execute(f"ALTER TABLE {table_name} ADD COLUMN {_quote_ident(col)} {_duckdb_type(df[col])}")
+                column_type = _duckdb_type(df[col])
+                con.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {_quote_ident(col)} {column_type}")
                 table_cols.append(str(col))
+                table_schema[str(col)] = column_type
+
+        for col in table_cols:
+            column_type = table_schema.get(col, "")
+            if col in SILVER_CANONICAL_VARCHAR_COLUMNS and not _is_varchar_type(column_type):
+                quoted_col = _quote_ident(col)
+                con.execute(
+                    f"ALTER TABLE {quoted_table} ALTER COLUMN {quoted_col} "
+                    f"SET DATA TYPE VARCHAR USING CAST({quoted_col} AS VARCHAR)"
+                )
+                table_schema[col] = "VARCHAR"
+                logger.info(
+                    f"[SilverWarehouse] 迁移字段类型 {table_name}.{col}: {column_type} -> VARCHAR"
+                )
+
         for col in table_cols:
             if col not in df.columns:
                 df[col] = None
@@ -125,12 +176,22 @@ class SilverWarehouse:
                 con.execute(f"INSERT INTO {table_name} ({cols}) SELECT {cols} FROM _etl_df")
             return
 
+        table_schema = _duckdb_table_schema(con, table_name)
         dates = sorted(str(x) for x in df[partition_col].dropna().astype(str).unique().tolist())
         if dates:
-            con.execute(f"DELETE FROM {table_name} WHERE {_quote_ident(partition_col)} IN (SELECT DISTINCT {_quote_ident(partition_col)} FROM _etl_df)")
+            quoted_partition = _quote_ident(partition_col)
+            con.execute(
+                f"DELETE FROM {quoted_table} "
+                f"WHERE CAST({quoted_partition} AS VARCHAR) IN "
+                f"(SELECT DISTINCT CAST({quoted_partition} AS VARCHAR) FROM _etl_df)"
+            )
         if not df.empty:
             cols = ", ".join(_quote_ident(col) for col in table_cols)
-            con.execute(f"INSERT INTO {table_name} ({cols}) SELECT {cols} FROM _etl_df")
+            select_cols = ", ".join(
+                f"CAST({_quote_ident(col)} AS {table_schema[col]}) AS {_quote_ident(col)}"
+                for col in table_cols
+            )
+            con.execute(f"INSERT INTO {quoted_table} ({cols}) SELECT {select_cols} FROM _etl_df")
 
     def _write_parquet_file(self, df: pd.DataFrame, path: Path) -> None:
         """Write parquet without pandas.to_parquet to avoid pyarrow extension re-registration in long-lived apps."""
@@ -169,6 +230,18 @@ def _duckdb_type(series: pd.Series) -> str:
     if pd.api.types.is_float_dtype(series):
         return "DOUBLE"
     return "VARCHAR"
+
+
+def _duckdb_table_schema(con, table_name: str) -> Dict[str, str]:
+    return {
+        str(row[0]): str(row[1])
+        for row in con.execute(f"DESCRIBE {_quote_ident(table_name)}").fetchall()
+    }
+
+
+def _is_varchar_type(column_type: str) -> bool:
+    normalized = str(column_type or "").upper()
+    return normalized.startswith(("VARCHAR", "CHAR", "TEXT"))
 
 
 def _normalize_stock_tables(ds: MarketDataset) -> pd.DataFrame:

@@ -1,7 +1,35 @@
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 from core.realtime.quote_service import RealtimeQuoteService
 from core.realtime.sector_service import RealtimeSectorService
+
+
+def test_realtime_package_does_not_eagerly_import_service_modules():
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import sys
+import core.realtime
+
+service_modules = {
+    'core.realtime.overlay_service',
+    'core.realtime.quote_service',
+    'core.realtime.sector_service',
+}
+loaded = service_modules.intersection(sys.modules)
+assert not loaded, f'eager realtime imports: {sorted(loaded)}'
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 class FakeQuoteDataManager:

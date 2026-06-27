@@ -103,6 +103,8 @@
 <script>
   const tradeDate = {{ (date or '')|tojson }};
   const defaultSectorCodes = [];
+  const autoRefreshMs = 5000;
+  let refreshing = false;
   const els = {
     overlayCards: document.getElementById('overlay-cards'),
     overlayEmpty: document.getElementById('overlay-empty'),
@@ -162,7 +164,21 @@
     const timer = setTimeout(() => ctrl.abort(), timeoutMs || 6000);
     try {
       const r = await fetch(url, { signal: ctrl.signal });
-      return await r.json();
+      const body = await r.text();
+      let data = {};
+      if (body) {
+        try {
+          data = JSON.parse(body);
+        } catch (_) {
+          const brief = body.trim().replace(/\s+/g, ' ').slice(0, 160);
+          throw new Error(`接口响应格式错误 (${r.status})${brief ? ': ' + brief : ''}`);
+        }
+      }
+      if (!r.ok) {
+        const message = data.message || data.error || `HTTP ${r.status}`;
+        throw new Error(`请求失败 (${r.status}): ${message}`);
+      }
+      return data;
     } finally {
       clearTimeout(timer);
     }
@@ -257,15 +273,18 @@
     }
   }
 
-  async function refreshAll() {
+  async function refreshAll(silent = false) {
+    if (refreshing) return;
+    refreshing = true;
     els.refreshAll.disabled = true;
     els.refreshSpin.classList.remove('hidden');
     try {
       await Promise.all([loadHealth(), loadCandidateConfirm(), loadSectors()]);
-      toast('已刷新', true);
+      if (!silent) toast('已刷新', true);
     } finally {
       els.refreshSpin.classList.add('hidden');
       els.refreshAll.disabled = false;
+      refreshing = false;
       setClock();
     }
   }
@@ -275,5 +294,8 @@
 
   setClock();
   refreshAll();
+  setInterval(() => {
+    if (document.visibilityState === 'visible') refreshAll(true);
+  }, autoRefreshMs);
 </script>
 {% endblock %}

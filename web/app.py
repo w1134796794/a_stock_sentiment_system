@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from collections import Counter, deque
 from functools import lru_cache
 from pathlib import Path
+from threading import Event, Lock, Thread
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, quote
 
@@ -43,6 +46,7 @@ from web.permissions import (
     requires_admin,
     visible_menu_groups,
 )
+from web.realtime_cache import RealtimePayloadCache
 
 from config.settings import (
     SNAPSHOT_DIR,
@@ -54,14 +58,37 @@ from config.settings import (
     WEB_DATA_DIR,
     FACTOR_DB_PATH,
 )
+from core.realtime.overlay_service import RealtimeOverlayService
+from core.realtime.quote_service import RealtimeQuoteService
+from core.realtime.sector_service import RealtimeSectorService
 from snapshot.reader import SnapshotReader
 
+logger = logging.getLogger(__name__)
 BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.globals["visible_menu_groups"] = visible_menu_groups
 reader = SnapshotReader(SNAPSHOT_DIR)
 _REALTIME_QUOTE_SERVICE = None
 _REALTIME_SECTOR_SERVICE = None
+_REALTIME_SERVICE_LOCK = Lock()
+_REALTIME_WORKER_LOCK = Lock()
+_REALTIME_REFRESH_STOP = Event()
+_REALTIME_REFRESH_THREAD = None
+
+
+def _seconds_env(name: str, default: float) -> float:
+    try:
+        return max(float(os.getenv(name, str(default))), 1.0)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+_REALTIME_REFRESH_SECONDS = _seconds_env("REALTIME_REFRESH_SECONDS", 5.0)
+_REALTIME_CACHE_TTL_SECONDS = _seconds_env(
+    "REALTIME_CACHE_TTL_SECONDS",
+    max(_REALTIME_REFRESH_SECONDS * 3.0, 15.0),
+)
+_REALTIME_PAYLOAD_CACHE = RealtimePayloadCache(ttl_seconds=_REALTIME_CACHE_TTL_SECONDS)
 
 
 def _money(value: Any, signed: bool = False) -> str:
@@ -1329,7 +1356,16 @@ DATA_CATEGORIES: List[Dict[str, Any]] = [
 ]
 _CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
 
-app = FastAPI(title="A股情绪系统 · 指标看板", docs_url="/api/docs")
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    _start_realtime_refresh_worker()
+    try:
+        yield
+    finally:
+        _stop_realtime_refresh_worker()
+
+
+app = FastAPI(title="A股情绪系统 · 指标看板", docs_url="/api/docs", lifespan=_app_lifespan)
 
 _static_dir = BASE / "static"
 _static_dir.mkdir(parents=True, exist_ok=True)
@@ -1820,21 +1856,44 @@ def _split_codes(codes: Optional[str]) -> List[str]:
 def _get_realtime_quote_service(stale_after_seconds: int = 90):
     global _REALTIME_QUOTE_SERVICE
     if _REALTIME_QUOTE_SERVICE is None:
-        from core.realtime.quote_service import RealtimeQuoteService
-
-        _REALTIME_QUOTE_SERVICE = RealtimeQuoteService(stale_after_seconds=stale_after_seconds)
-    else:
-        _REALTIME_QUOTE_SERVICE.stale_after_seconds = max(float(stale_after_seconds), 1.0)
+        with _REALTIME_SERVICE_LOCK:
+            if _REALTIME_QUOTE_SERVICE is None:
+                _REALTIME_QUOTE_SERVICE = RealtimeQuoteService(stale_after_seconds=stale_after_seconds)
+    _REALTIME_QUOTE_SERVICE.stale_after_seconds = max(float(stale_after_seconds), 1.0)
     return _REALTIME_QUOTE_SERVICE
 
 
 def _get_realtime_sector_service():
     global _REALTIME_SECTOR_SERVICE
     if _REALTIME_SECTOR_SERVICE is None:
-        from core.realtime.sector_service import RealtimeSectorService
-
-        _REALTIME_SECTOR_SERVICE = RealtimeSectorService()
+        with _REALTIME_SERVICE_LOCK:
+            if _REALTIME_SECTOR_SERVICE is None:
+                _REALTIME_SECTOR_SERVICE = RealtimeSectorService()
     return _REALTIME_SECTOR_SERVICE
+
+
+def _overlay_cache_key(
+    trade_date: Optional[str], profile: str, limit: int, stale_after_seconds: int,
+) -> tuple:
+    return (
+        "overlay",
+        str(trade_date or ""),
+        str(profile or ""),
+        int(limit),
+        int(stale_after_seconds),
+    )
+
+
+def _sector_cache_key(
+    codes: Optional[List[str]], source: str, limit: int, include_raw: bool,
+) -> tuple:
+    return (
+        "sectors",
+        tuple(codes or []),
+        str(source or "east").lower(),
+        int(limit),
+        bool(include_raw),
+    )
 
 
 def _add_stock_name(mapping: Dict[str, str], code: Any, name: Any) -> None:
@@ -1904,15 +1963,154 @@ def _enrich_stock_names(rows: List[Dict[str, Any]], snapshot: Optional[Dict], da
         row.setdefault("display_name", row.get("name") or mapping.get(code) or code)
 
 
+def _build_realtime_overlay_payload(
+    trade_date: Optional[str],
+    *,
+    profile: str = "",
+    limit: int = 20,
+    stale_after_seconds: int = 90,
+) -> Dict[str, Any]:
+    service = RealtimeOverlayService(
+        quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
+    )
+    payload = service.build_overlay(
+        trade_date,
+        profile=profile,
+        limit=limit,
+        persist=False,
+    )
+    snapshot = _load_snapshot(trade_date) if trade_date else None
+    _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    return payload
+
+
+def _build_realtime_quote_payload(code: str, *, include_raw: bool) -> Dict[str, Any]:
+    quote = _get_realtime_quote_service().get_quote(code, include_raw=include_raw)
+    latest = _latest_date()
+    if quote:
+        _enrich_stock_names([quote], _load_snapshot(latest) if latest else None, latest)
+    return {
+        "ok": bool(quote),
+        "message": "" if quote else "未获取到实时行情",
+        "quote": quote or {},
+    }
+
+
+def _build_realtime_quotes_payload(
+    codes: List[str],
+    *,
+    include_raw: bool,
+    stale_after_seconds: int,
+) -> Dict[str, Any]:
+    payload = _get_realtime_quote_service(
+        stale_after_seconds=stale_after_seconds,
+    ).get_quotes(codes, include_raw=include_raw)
+    latest = _latest_date()
+    _enrich_stock_names(payload.get("quotes") or [], _load_snapshot(latest) if latest else None, latest)
+    return payload
+
+
+def _build_realtime_sector_payload(
+    codes: Optional[List[str]],
+    *,
+    source: str,
+    limit: int,
+    include_raw: bool,
+) -> Dict[str, Any]:
+    return _get_realtime_sector_service().get_sector_quotes(
+        codes or None,
+        source=source,
+        limit=limit,
+        include_raw=include_raw,
+    )
+
+
+def _build_realtime_market_payload(
+    codes: Optional[List[str]],
+    *,
+    limit: int,
+    include_raw: bool,
+) -> Dict[str, Any]:
+    return _get_realtime_sector_service().get_market_quotes(
+        codes or None,
+        limit=limit,
+        include_raw=include_raw,
+    )
+
+
+def _build_realtime_health_payload(*, probe: bool = False) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "quotes": _get_realtime_quote_service().health(probe=probe),
+        "sectors": _get_realtime_sector_service().health(probe=probe),
+    }
+
+
+def _refresh_realtime_defaults() -> None:
+    trade_date = _latest_date()
+    jobs = [
+        (
+            _overlay_cache_key(trade_date, "", 20, 90),
+            lambda: _build_realtime_overlay_payload(trade_date, limit=20, stale_after_seconds=90),
+        ),
+        (
+            _sector_cache_key(None, "ths", 5, False),
+            lambda: _build_realtime_sector_payload(None, source="ths", limit=5, include_raw=False),
+        ),
+        (
+            _sector_cache_key(None, "east", 5, False),
+            lambda: _build_realtime_sector_payload(None, source="east", limit=5, include_raw=False),
+        ),
+        (("health", False), lambda: _build_realtime_health_payload(probe=False)),
+    ]
+    for key, loader in jobs:
+        try:
+            _REALTIME_PAYLOAD_CACHE.refresh(key, loader)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Realtime cache refresh failed for %s: %s", key[0], exc)
+
+
+def _realtime_refresh_loop() -> None:
+    logger.info("Realtime cache worker started, interval=%ss", _REALTIME_REFRESH_SECONDS)
+    while not _REALTIME_REFRESH_STOP.is_set():
+        started = time.monotonic()
+        _refresh_realtime_defaults()
+        elapsed = time.monotonic() - started
+        _REALTIME_REFRESH_STOP.wait(max(_REALTIME_REFRESH_SECONDS - elapsed, 0.5))
+    logger.info("Realtime cache worker stopped")
+
+
+def _start_realtime_refresh_worker() -> None:
+    global _REALTIME_REFRESH_THREAD
+    with _REALTIME_WORKER_LOCK:
+        if _REALTIME_REFRESH_THREAD and _REALTIME_REFRESH_THREAD.is_alive():
+            return
+        _REALTIME_REFRESH_STOP.clear()
+        _REALTIME_REFRESH_THREAD = Thread(
+            target=_realtime_refresh_loop,
+            name="realtime-cache-refresh",
+            daemon=True,
+        )
+        _REALTIME_REFRESH_THREAD.start()
+
+
+def _stop_realtime_refresh_worker() -> None:
+    global _REALTIME_REFRESH_THREAD
+    _REALTIME_REFRESH_STOP.set()
+    thread = _REALTIME_REFRESH_THREAD
+    if thread and thread.is_alive():
+        thread.join(timeout=3.0)
+    _REALTIME_REFRESH_THREAD = None
+
+
 @app.get("/api/realtime/quote/{code}")
 def api_realtime_quote(code: str, include_raw: bool = False) -> Any:
-    service = _get_realtime_quote_service()
-    quote = service.get_quote(code, include_raw=include_raw)
-    if not quote:
-        return JSONResponse({"ok": False, "message": "未获取到实时行情", "quote": {}}, status_code=502)
-    latest = _latest_date()
-    _enrich_stock_names([quote], _load_snapshot(latest) if latest else None, latest)
-    return JSONResponse({"ok": True, "quote": quote})
+    normalized_code = _normalize_stock_code(code)
+    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+        ("quote", normalized_code, bool(include_raw)),
+        lambda: _build_realtime_quote_payload(normalized_code, include_raw=include_raw),
+    )
+    return JSONResponse(payload, status_code=200 if payload.get("ok") else 502)
 
 
 @app.get("/api/realtime/quotes")
@@ -1924,10 +2122,15 @@ def api_realtime_quotes(
     code_list = _split_codes(codes)
     if not code_list:
         return JSONResponse({"ok": False, "message": "codes 参数不能为空", "quotes": []}, status_code=400)
-    service = _get_realtime_quote_service(stale_after_seconds=stale_after_seconds)
-    payload = service.get_quotes(code_list, include_raw=include_raw)
-    latest = _latest_date()
-    _enrich_stock_names(payload.get("quotes") or [], _load_snapshot(latest) if latest else None, latest)
+    normalized_stale = max(1, int(stale_after_seconds or 90))
+    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+        ("quotes", tuple(code_list), bool(include_raw), normalized_stale),
+        lambda: _build_realtime_quotes_payload(
+            code_list,
+            include_raw=include_raw,
+            stale_after_seconds=normalized_stale,
+        ),
+    )
     return JSONResponse(payload)
 
 
@@ -1938,15 +2141,19 @@ def api_realtime_sectors(
     limit: int = 20,
     include_raw: bool = False,
 ) -> Any:
-    service = _get_realtime_sector_service()
-    return JSONResponse(
-        service.get_sector_quotes(
-            _split_codes(codes) or None,
+    code_list = _split_codes(codes) or None
+    normalized_limit = max(1, min(int(limit or 20), 100))
+    key = _sector_cache_key(code_list, source, normalized_limit, include_raw)
+    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+        key,
+        lambda: _build_realtime_sector_payload(
+            code_list,
             source=source,
-            limit=max(1, min(int(limit or 20), 100)),
+            limit=normalized_limit,
             include_raw=include_raw,
-        )
+        ),
     )
+    return JSONResponse(payload)
 
 
 @app.get("/api/realtime/market")
@@ -1955,23 +2162,28 @@ def api_realtime_market(
     limit: int = 100,
     include_raw: bool = False,
 ) -> Any:
-    service = _get_realtime_sector_service()
-    return JSONResponse(
-        service.get_market_quotes(
-            _split_codes(codes) or None,
-            limit=max(1, min(int(limit or 100), 500)),
+    code_list = _split_codes(codes) or None
+    normalized_limit = max(1, min(int(limit or 100), 500))
+    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+        ("market", tuple(code_list or []), normalized_limit, bool(include_raw)),
+        lambda: _build_realtime_market_payload(
+            code_list,
+            limit=normalized_limit,
             include_raw=include_raw,
-        )
+        ),
     )
+    return JSONResponse(payload)
 
 
 @app.get("/api/realtime/health")
 def api_realtime_health(probe: bool = False) -> Any:
-    return JSONResponse({
-        "ok": True,
-        "quotes": _get_realtime_quote_service().health(probe=probe),
-        "sectors": _get_realtime_sector_service().health(probe=probe),
-    })
+    payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+        ("health", bool(probe)),
+        lambda: _build_realtime_health_payload(probe=probe),
+    )
+    payload["cache"] = _REALTIME_PAYLOAD_CACHE.stats()
+    payload["refresh_seconds"] = _REALTIME_REFRESH_SECONDS
+    return JSONResponse(payload)
 
 
 @app.get("/api/realtime/overlay")
@@ -1982,20 +2194,32 @@ def api_realtime_overlay(
     persist: bool = False,
     stale_after_seconds: int = 90,
 ) -> Any:
-    from core.realtime.overlay_service import RealtimeOverlayService
-
     trade_date = date or _latest_date()
-    service = RealtimeOverlayService(
-        quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
-    )
-    payload = service.build_overlay(
-        trade_date,
-        profile=profile,
-        limit=max(1, min(int(limit or 20), 100)),
-        persist=bool(persist),
-    )
-    snapshot = _load_snapshot(trade_date) if trade_date else None
-    _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    normalized_limit = max(1, min(int(limit or 20), 100))
+    normalized_stale = max(1, int(stale_after_seconds or 90))
+    if persist:
+        service = RealtimeOverlayService(
+            quote_service=_get_realtime_quote_service(stale_after_seconds=normalized_stale),
+        )
+        payload = service.build_overlay(
+            trade_date,
+            profile=profile,
+            limit=normalized_limit,
+            persist=True,
+        )
+        snapshot = _load_snapshot(trade_date) if trade_date else None
+        _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    else:
+        key = _overlay_cache_key(trade_date, profile, normalized_limit, normalized_stale)
+        payload = _REALTIME_PAYLOAD_CACHE.get_or_load(
+            key,
+            lambda: _build_realtime_overlay_payload(
+                trade_date,
+                profile=profile,
+                limit=normalized_limit,
+                stale_after_seconds=normalized_stale,
+            ),
+        )
     return JSONResponse(payload)
 
 
