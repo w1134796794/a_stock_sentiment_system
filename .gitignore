@@ -9,6 +9,9 @@
 /webdata/warehouse/
 /logs
 /data/
+/webdata/etl_quality/quality_*.json
+/webdata/etl_quality/quality_*.md
+
 # 忽略 Python 缓存
 __pycache__/
 *.pyc
