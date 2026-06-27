@@ -16,6 +16,8 @@ from core.realtime.models import QuoteSnapshot, SectorSnapshot
 class RealtimeSectorService:
     """Realtime sector quotes through adata when it is installed."""
 
+    INVALID_CODE_TEXT = {"", "-", "--", "nan", "none", "null", "nat", "<na>"}
+
     DEFAULT_SECTOR_NAMES = {
         "886109": "2026一季报预增",
         "886108": "AI应用",
@@ -249,14 +251,14 @@ class RealtimeSectorService:
                 logger.debug(f"[RealtimeSectorService] {name} failed: {e}")
                 continue
             for row in records:
-                code = str(
+                code = self._clean_code(
                     row.get("code")
                     or row.get("index_code")
                     or row.get("板块代码")
                     or row.get("概念代码")
                     or row.get("行业代码")
                     or ""
-                ).strip()
+                )
                 if code and code not in seen:
                     seen.add(code)
                     codes.append(code)
@@ -300,13 +302,13 @@ class RealtimeSectorService:
             type_hint = "概念" if "concept" in name else ("行业" if "industry" in name else "")
             try:
                 for row in self._records(method()):
-                    code = str(
+                    code = self._clean_code(
                         row.get("code")
                         or row.get("index_code")
                         or row.get("concept_code")
                         or row.get("industry_code")
                         or ""
-                    ).strip()
+                    )
                     label = self._row_sector_name(row)
                     typ = self._sector_type_label(
                         row.get("sector_type") or row.get("type") or row.get("板块类型") or type_hint
@@ -331,7 +333,7 @@ class RealtimeSectorService:
 
     @staticmethod
     def _row_sector_code(row: Dict[str, Any]) -> str:
-        return str(
+        return RealtimeSectorService._clean_code(
             row.get("code")
             or row.get("index_code")
             or row.get("sector_code")
@@ -340,10 +342,15 @@ class RealtimeSectorService:
             or row.get("概念代码")
             or row.get("行业代码")
             or ""
-        ).strip()
+        )
+
+    @staticmethod
+    def _clean_code(value: Any) -> str:
+        text = str(value or "").strip()
+        return "" if text.lower() in RealtimeSectorService.INVALID_CODE_TEXT else text
 
     def _remember_sector_meta(self, code: str, label: str, typ: str) -> None:
-        code = str(code or "").strip()
+        code = self._clean_code(code)
         if not code:
             return
         keys = [code]
@@ -443,10 +450,11 @@ class RealtimeSectorService:
         if isinstance(codes, str):
             parts = [x.strip() for x in codes.replace("，", ",").split(",")]
         else:
-            parts = [str(x).strip() for x in codes]
+            parts = [RealtimeSectorService._clean_code(x) for x in codes]
         out: List[str] = []
         seen = set()
         for code in parts:
+            code = RealtimeSectorService._clean_code(code)
             if code and code not in seen:
                 seen.add(code)
                 out.append(code)

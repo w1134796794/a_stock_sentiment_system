@@ -131,3 +131,9 @@ def test_realtime_sector_service_falls_back_to_ths_auto_list():
     assert result["sectors"][0]["code"] == "886109"
     assert result["sectors"][0]["name"] == "2026一季报预增"
     assert result["sectors"][0]["time"] == "2026-06-15 09:31:00"
+
+
+def test_realtime_sector_service_filters_missing_code_markers():
+    assert RealtimeSectorService._row_sector_code({"index_code": "nan"}) == ""
+    assert RealtimeSectorService._row_sector_code({"index_code": "None"}) == ""
+    assert RealtimeSectorService._normalize_codes(["nan", "--", None, "886109"]) == ["886109"]
