@@ -41,9 +41,12 @@ from web.auth_store import (
     validate_session,
 )
 from web.permissions import (
+    can_access_path,
     is_api_path,
     is_public_path,
-    requires_admin,
+    permission_matrix,
+    reset_permission_matrix,
+    update_permission_matrix,
     visible_menu_groups,
 )
 from web.realtime_cache import RealtimePayloadCache
@@ -1480,10 +1483,10 @@ async def auth_middleware(request: Request, call_next):
             return JSONResponse({"error": "subscription_expired", "message": "服务已到期"}, status_code=403)
         return RedirectResponse(url="/expired", status_code=303)
 
-    if user.get("role") != "admin" and requires_admin(path, request.method):
+    if not can_access_path(user, path, request.method):
         if is_api_path(path):
             return JSONResponse(
-                {"error": "readonly_forbidden", "message": "只读账号不能执行任务或修改配置"},
+                {"error": "permission_denied", "message": "当前账号没有该功能的访问权限"},
                 status_code=403,
             )
         return templates.TemplateResponse(
@@ -1655,6 +1658,34 @@ def admin_users_page(request: Request) -> Any:
         "admin_users.html",
         {"users": list_users(), "login_logs": recent_login_logs(80)},
     )
+
+
+@app.get("/admin/permissions", response_class=HTMLResponse)
+def admin_permissions_page(request: Request) -> Any:
+    return templates.TemplateResponse(
+        request,
+        "admin_permissions.html",
+        {"permission_data": permission_matrix()},
+    )
+
+
+@app.get("/api/admin/permissions")
+def api_admin_permissions() -> Any:
+    return JSONResponse({"ok": True, "data": permission_matrix()})
+
+
+@app.post("/api/admin/permissions")
+def api_admin_update_permissions(payload: dict = Body(default={})) -> Any:
+    try:
+        data = update_permission_matrix((payload or {}).get("updates"))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "data": data})
+
+
+@app.post("/api/admin/permissions/reset")
+def api_admin_reset_permissions() -> Any:
+    return JSONResponse({"ok": True, "data": reset_permission_matrix()})
 
 
 @app.get("/api/admin/users")

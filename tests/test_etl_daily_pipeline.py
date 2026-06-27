@@ -10,6 +10,9 @@ DUCKDB_MISSING = importlib.util.find_spec("duckdb") is None
 
 
 class FakeETLDataManager:
+    def __init__(self):
+        self.warmed_codes = []
+
     def get_limit_up_pool(self, trade_date):
         return pd.DataFrame([{"代码": "000001", "名称": "平安银行"}])
 
@@ -39,11 +42,21 @@ class FakeETLDataManager:
             {"ts_code": code, "trade_date": "20260616", "open": 3000, "high": 3050, "low": 2990, "close": 3040, "pre_close": 3001, "pct_chg": 1.3, "vol": 10000, "amount": 999}
         ])
 
+    def warm_trade_plan_daily_cache(self, trade_date, codes):
+        self.warmed_codes = list(codes)
+        return {
+            "date": trade_date,
+            "requested": len(self.warmed_codes),
+            "cached": len(self.warmed_codes),
+            "missing": [],
+        }
+
 
 @pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
 def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path):
+    dm = FakeETLDataManager()
     pipeline = ETLDailyPipeline(
-        FakeETLDataManager(),
+        dm,
         duckdb_path=tmp_path / "factors.duckdb",
         web_data_dir=tmp_path / "webdata",
         snapshot_dir=tmp_path / "snapshots",
@@ -56,6 +69,8 @@ def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path):
 
     assert result.ok is True
     assert result.screening["final_count"] >= 1
+    assert result.plan_cache_summary["cached"] >= 1
+    assert "000001" in dm.warmed_codes
     assert result.snapshot_paths.get("json")
     assert (tmp_path / "snapshots" / "20260616.json").exists()
     assert (tmp_path / "webdata" / "screening" / "screening_20260616.json").exists()

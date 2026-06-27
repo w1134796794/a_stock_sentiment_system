@@ -55,7 +55,6 @@ class RiskConfig:
     hard_stop_loss: float = 0.05              # 硬止损
     trailing_stop: float = 0.08               # 移动止损（从最高点回撤）
     trailing_activation: float = 0.05         # 盈利多少后启动移动止损
-    take_profit: float = 0.10                 # 基础止盈
     time_stop_days: int = 5                   # 时间止损天数
     time_stop_profit_threshold: float = 0.02  # 时间止损时的盈利下限
 

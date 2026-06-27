@@ -344,7 +344,7 @@ class BacktestController:
     """单例回测控制器：在进程内重跑回测（生成净值/交易/回撤），并实时缓冲日志。
 
     基于 webdata/snapshots 当前交易计划生成回测输入，回测结果通过 run_backtest.save_backtest_results
-    落到 output/backtest_results，「模拟交易」「回撤分析」两页直接读取最新批次。
+    落到可配置 OUTPUT_DIR/backtest_results，「模拟交易」「回撤分析」两页直接读取最新批次。
     """
 
     def __init__(self) -> None:
@@ -474,6 +474,7 @@ class BacktestController:
             from core.data.data_manager_main import DataManager
             from backtest.backtest_engine import BacktestConfig, BacktestEngine
             from backtest.performance_analyzer import PerformanceAnalyzer
+            from risk.risk_config import RiskConfig
 
             if not (TUSHARE_TOKEN or "").strip():
                 self.buffer.append_line("[提示] 未配置 TUSHARE_TOKEN，将仅依赖本地缓存数据，缺数据的票会被跳过。")
@@ -495,8 +496,14 @@ class BacktestController:
                 f"已从当前数据快照生成回测计划：{file_count} 个交易日，{row_count} 条候选（仅执行每日前3名），目录 {trade_plans_dir}"
             )
 
-            dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
-            config = BacktestConfig(initial_capital=capital, risk_control=risk_control)
+            dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=False)
+            config = BacktestConfig.from_risk_config(
+                RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
+            )
+            self.buffer.append_line(
+                f"退出策略：盈利达 {config.trailing_activation_pct:.1%} 后，"
+                f"从持仓高点回撤 {config.trailing_stop_pct:.1%} 全部止盈；不设固定止盈"
+            )
             engine = BacktestEngine(dm, config)
             result = engine.run_backtest(
                 start_date=start, end_date=end, trade_plans_dir=str(trade_plans_dir))
@@ -552,6 +559,7 @@ class BacktestController:
             from core.data.data_manager_main import DataManager
             from backtest.backtest_engine import BacktestConfig, BacktestEngine
             from backtest.performance_analyzer import PerformanceAnalyzer
+            from risk.risk_config import RiskConfig
 
             calendar = TradeCalendar()
             if not calendar.is_trade_date(trade_date):
@@ -579,8 +587,14 @@ class BacktestController:
             self.buffer.append_line(
                 f"已加载上一交易日 {prev_date} 的回测计划：{row_count} 条候选（仅执行每日前3名）。")
 
-            dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
-            config = BacktestConfig(initial_capital=capital, risk_control=risk_control)
+            dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=False)
+            config = BacktestConfig.from_risk_config(
+                RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
+            )
+            self.buffer.append_line(
+                f"退出策略：盈利达 {config.trailing_activation_pct:.1%} 后，"
+                f"从持仓高点回撤 {config.trailing_stop_pct:.1%} 全部止盈；不设固定止盈"
+            )
             engine = BacktestEngine(dm, config)
             state_source = "reset"
 
@@ -715,7 +729,6 @@ class BacktestController:
                     "plan_reason": trade.get("plan_reason") or "",
                     "factor_metrics_json": trade.get("factor_metrics_json") or "",
                     "stop_loss_price": entry_price * (1 - engine.config.stop_loss_pct),
-                    "take_profit_price": entry_price * (1 + engine.config.take_profit_pct),
                     "highest_price": entry_price,
                 }
             elif action == "SELL_PARTIAL" and code in positions:

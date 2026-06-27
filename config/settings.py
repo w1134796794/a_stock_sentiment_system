@@ -17,7 +17,6 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
-OUTPUT_DIR = BASE_DIR / "output"
 
 # ============================================
 # .env 加载（必须在任何 os.getenv 之前）
@@ -53,6 +52,9 @@ CACHE_DIR = _env_path("CACHE_DIR", DATA_DIR / "cache")
 # 收盘跑批时，喂给 Excel 的 data_dict 会同步落到这里，供 Web 页面与 KB 复用。
 # ============================================
 WEB_DATA_DIR = _env_path("WEB_DATA_DIR", BASE_DIR / "webdata")
+# 回测等运行产物默认跟随 WEB_DATA_DIR，服务器可将整个运行数据目录放到
+# /srv 等可写位置；也可通过 OUTPUT_DIR 单独覆盖。
+OUTPUT_DIR = _env_path("OUTPUT_DIR", WEB_DATA_DIR / "output")
 SNAPSHOT_DIR = WEB_DATA_DIR / "snapshots"        # 每日整页 JSON 快照
 APP_DB_PATH = WEB_DATA_DIR / "app.sqlite"        # 结构化索引（计划/信号/快照）
 FACTOR_DB_PATH = WEB_DATA_DIR / "factors.duckdb"  # 因子大表（定量查询，可选）

@@ -1,0 +1,2 @@
+﻿total_return,annualized_return,sharpe_ratio,max_drawdown,win_rate,profit_loss_ratio,total_trades,buy_trades,closed_trades,initial_capital,final_capital,run_mode,start_date,end_date,risk_control
+0.5539078674303997,1.6494186368306445,2.931644618313543,-0.1082202778051201,0.4880952380952381,1.8214093485853746,84,88,84,1000000.0,1553907.8674303996,range,20260101,20260627,False

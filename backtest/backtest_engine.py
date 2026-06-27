@@ -36,9 +36,8 @@ class BacktestConfig:
     # 属于交易计划的退出策略，始终生效，不受此开关影响。
     risk_control: bool = True
 
-    # 基础止损止盈
+    # 硬止损
     stop_loss_pct: float = 0.05  # 硬止损线5%
-    take_profit_pct: float = 0.10  # 基础止盈线10%
 
     # 移动止盈（跟踪止损）
     trailing_stop: bool = True  # 启用跟踪止损
@@ -49,13 +48,6 @@ class BacktestConfig:
     time_stop_days: int = 5  # 持仓超过5天强制卖出
     time_stop_profit_threshold: float = 0.02  # 盈利低于2%时触发时间止损
 
-    # 分批止盈
-    partial_take_profit: bool = True  # 启用分批止盈
-    partial_profit_first_pct: float = 0.08  # 第一次止盈8%
-    partial_profit_first_ratio: float = 0.5  # 卖出50%仓位
-    partial_profit_second_pct: float = 0.15  # 第二次止盈15%
-    partial_profit_second_ratio: float = 0.5  # 再卖出剩余50%（即总仓位的25%）
-
     # 费用设置
     commission_rate: float = 0.0003  # 佣金率0.03%
     stamp_duty_rate: float = 0.001  # 印花税0.1%（卖出）
@@ -64,6 +56,32 @@ class BacktestConfig:
 
     # 数据缺失时是否用随机价格兜底（B-1：默认关闭，缺数据则跳过该票，避免回测失真）
     use_simulated_prices: bool = False
+
+    @classmethod
+    def from_risk_config(
+        cls, risk_config, *, initial_capital: Optional[float] = None,
+        risk_control: Optional[bool] = None,
+    ) -> "BacktestConfig":
+        """Project the unified RiskConfig into the active backtest engine."""
+        trailing_pct = max(float(risk_config.trailing_stop), 0.0)
+        return cls(
+            initial_capital=float(initial_capital or risk_config.initial_capital),
+            max_position_per_stock=float(risk_config.max_position_per_stock),
+            max_total_position=float(risk_config.max_total_position),
+            max_positions=int(risk_config.max_positions),
+            max_sector_concentration=float(risk_config.max_sector_concentration),
+            risk_control=bool(risk_config.enabled if risk_control is None else risk_control),
+            stop_loss_pct=float(risk_config.hard_stop_loss),
+            trailing_stop=trailing_pct > 0,
+            trailing_stop_pct=trailing_pct,
+            trailing_activation_pct=max(float(risk_config.trailing_activation), 0.0),
+            time_stop_days=int(risk_config.time_stop_days),
+            time_stop_profit_threshold=float(risk_config.time_stop_profit_threshold),
+            commission_rate=float(risk_config.commission_rate),
+            stamp_duty_rate=float(risk_config.stamp_duty_rate),
+            slippage=float(risk_config.slippage),
+            min_holding_days=int(risk_config.min_holding_days),
+        )
 
 
 @dataclass
@@ -371,7 +389,6 @@ class BacktestEngine:
             'plan_reason': plan_reason,
             'factor_metrics_json': factor_metrics_json,
             'stop_loss_price': entry_price * (1 - self.config.stop_loss_pct),
-            'take_profit_price': entry_price * (1 + self.config.take_profit_pct),
             'highest_price': entry_price  # 用于跟踪回撤
         }
 
@@ -503,20 +520,25 @@ class BacktestEngine:
         return self.total_capital * position_pct
 
     def _check_stop_loss_take_profit(self, date: str):
-        """检查止损止盈 - 综合卖出策略"""
+        """检查退出：硬止损/时间止损保持不变，盈利只按高点回撤退出。"""
         stocks_to_sell = []
-        stocks_to_partial_sell = []
 
         for stock_code, position in self.current_positions.items():
-            # 获取当日价格数据
-            current_price = self._get_stock_price(stock_code, date)
-
-            if current_price is None:
+            daily_bar = self._get_stock_daily_bar(stock_code, date)
+            if not daily_bar:
+                continue
+            current_price = self._float(daily_bar.get('close'))
+            if current_price <= 0:
                 continue
 
-            # 更新最高价（用于回撤计算）
-            if current_price > position['highest_price']:
-                position['highest_price'] = current_price
+            # 最高价采用当日 high，而不是只看收盘价；触发仍按收盘确认，避免
+            # 仅有 OHLC 时假设无法得知的日内高低点先后顺序。
+            session_high = self._float(daily_bar.get('high'), current_price)
+            position['highest_price'] = max(
+                self._float(position.get('highest_price'), position['entry_price']),
+                session_high,
+                current_price,
+            )
 
             # 计算当前盈亏比例
             current_pnl_pct = (current_price - position['entry_price']) / position['entry_price']
@@ -553,42 +575,6 @@ class BacktestEngine:
                     logger.info(f"[{date}] {position['stock_name']} 触发时间止损: {current_price:.2f} "
                                f"(持仓{holding_days}天, 盈利{current_pnl_pct:.2%})")
                     continue
-
-            # ========== 4. 分批止盈 ==========
-            if self.config.partial_take_profit:
-                # 第一次止盈
-                if (current_pnl_pct >= self.config.partial_profit_first_pct and
-                    not position.get('first_partial_sold', False)):
-                    shares_to_sell = int(position['shares'] * self.config.partial_profit_first_ratio / 100) * 100
-                    if shares_to_sell >= 100:
-                        stocks_to_partial_sell.append((stock_code, current_price, 'partial_first', shares_to_sell))
-                        position['first_partial_sold'] = True
-                        logger.info(f"[{date}] {position['stock_name']} 触发第一次分批止盈: {current_price:.2f} "
-                                   f"(盈利{current_pnl_pct:.2%}, 卖出{shares_to_sell}股)")
-                        continue
-
-                # 第二次止盈
-                if (current_pnl_pct >= self.config.partial_profit_second_pct and
-                    position.get('first_partial_sold', False) and
-                    not position.get('second_partial_sold', False)):
-                    remaining_shares = position['shares']
-                    shares_to_sell = int(remaining_shares * self.config.partial_profit_second_ratio / 100) * 100
-                    if shares_to_sell >= 100:
-                        stocks_to_partial_sell.append((stock_code, current_price, 'partial_second', shares_to_sell))
-                        position['second_partial_sold'] = True
-                        logger.info(f"[{date}] {position['stock_name']} 触发第二次分批止盈: {current_price:.2f} "
-                                   f"(盈利{current_pnl_pct:.2%}, 卖出{shares_to_sell}股)")
-                        continue
-
-            # ========== 5. 基础止盈 ==========
-            if current_price >= position['take_profit_price']:
-                stocks_to_sell.append((stock_code, current_price, 'take_profit'))
-                logger.info(f"[{date}] {position['stock_name']} 触发基础止盈: {current_price:.2f} (盈利{current_pnl_pct:.2%})")
-                continue
-
-        # 执行分批卖出
-        for stock_code, sell_price, reason, shares in stocks_to_partial_sell:
-            self._execute_partial_sell(stock_code, sell_price, date, reason, shares)
 
         # 执行全部卖出
         for stock_code, sell_price, reason in stocks_to_sell:
@@ -638,7 +624,7 @@ class BacktestEngine:
             hot_resonance=position['hot_resonance'],
             resonance_sectors=position['resonance_sectors'],
             stop_loss_triggered=(reason == 'stop_loss'),
-            take_profit_triggered=(reason == 'take_profit'),
+            take_profit_triggered=(reason == 'trailing_stop'),
             entry_date=position.get('entry_date', ''),
             exit_reason=reason,
             plan_rank=int(position.get('plan_rank') or 0),
@@ -654,80 +640,14 @@ class BacktestEngine:
         # 移除持仓
         del self.current_positions[stock_code]
 
-    def _execute_partial_sell(self, stock_code: str, sell_price: float, date: str, reason: str, shares: int):
-        """执行分批卖出"""
-        if stock_code not in self.current_positions:
-            return
-
-        position = self.current_positions[stock_code]
-
-        # 确保卖出股数不超过持仓
-        shares = min(shares, position['shares'])
-        if shares < 100:
-            return
-
-        # 计算卖出金额（减去滑点）
-        actual_sell_price = sell_price * (1 - self.config.slippage)
-        sell_value = shares * actual_sell_price
-
-        # 计算费用
-        commission = sell_value * self.config.commission_rate
-        stamp_duty = sell_value * self.config.stamp_duty_rate
-
-        # 计算盈亏（按比例分摊成本）
-        cost_ratio = shares / position['shares']
-        total_cost = position['cost_basis'] * cost_ratio
-        total_revenue = sell_value - commission - stamp_duty
-        pnl = total_revenue - total_cost
-        pnl_pct = pnl / total_cost if total_cost > 0 else 0
-
-        # 更新现金
-        self.cash += total_revenue
-
-        # 更新持仓
-        position['shares'] -= shares
-        position['cost_basis'] -= total_cost
-        position['market_value'] = position['shares'] * sell_price
-
-        # 记录交易
-        holding_days = self._calculate_holding_days(position['entry_date'], date)
-
-        trade_record = TradeRecord(
-            date=date,
-            stock_code=stock_code,
-            stock_name=position['stock_name'],
-            pattern_type=position['pattern_type'],
-            action='SELL_PARTIAL',
-            entry_price=position['entry_price'],
-            exit_price=actual_sell_price,
-            shares=shares,
-            position_size=total_cost,
-            pnl=pnl,
-            pnl_pct=pnl_pct,
-            holding_days=holding_days,
-            hot_resonance=position['hot_resonance'],
-            resonance_sectors=position['resonance_sectors'],
-            stop_loss_triggered=False,
-            take_profit_triggered=(reason.startswith('partial')),
-            entry_date=position.get('entry_date', ''),
-            exit_reason=reason,
-            plan_rank=int(position.get('plan_rank') or 0),
-            plan_score=float(position.get('plan_score') or 0.0),
-            plan_reason=str(position.get('plan_reason') or ''),
-            factor_metrics_json=str(position.get('factor_metrics_json') or ''),
-        )
-
-        self.trade_history.append(trade_record)
-
-        logger.info(f"[{date}] 分批卖出 {position['stock_name']}({stock_code}): {shares}股 @ {actual_sell_price:.2f}, "
-                   f"盈亏:{pnl:.2f}({pnl_pct:.2%}), 剩余:{position['shares']}股")
-
-        # 如果全部卖完，移除持仓
-        if position['shares'] <= 0:
-            del self.current_positions[stock_code]
-
     def _get_stock_price(self, stock_code: str, date: str) -> Optional[float]:
         """获取股票当日价格"""
+        bar = self._get_stock_daily_bar(stock_code, date)
+        price = self._float((bar or {}).get('close'))
+        return price if price > 0 else None
+
+    def _get_stock_daily_bar(self, stock_code: str, date: str) -> Optional[Dict[str, float]]:
+        """获取当日 OHLC；回测默认只允许命中预取缓存。"""
         # 标准化股票代码为6位数字
         normalized_code = str(stock_code).zfill(6)
         # 标准化股票代码（添加交易所后缀）
@@ -736,10 +656,8 @@ class BacktestEngine:
         # 首先尝试从DataManager获取真实数据
         try:
             result = self.dm.get_stock_daily_data(standardized_code, date)
-            if result and 'close' in result:
-                price = result['close']
-                if price > 0:
-                    return float(price)
+            if result and self._float(result.get('close')) > 0:
+                return result
         except Exception as e:
             logger.debug(f"获取真实价格失败 {stock_code}({standardized_code}) {date}: {e}")
 
@@ -767,7 +685,8 @@ class BacktestEngine:
             simulated_price = max(simulated_price, 0.1)
 
             logger.debug(f"[{date}] {normalized_code} 使用模拟价格: {simulated_price:.2f} (基于昨收{prev_close:.2f}, 变动{daily_change:.2%})")
-            return simulated_price
+            return {"open": simulated_price, "high": simulated_price,
+                    "low": simulated_price, "close": simulated_price}
 
         return None
 

@@ -24,7 +24,7 @@ def run_backtest_demo():
     logger.info("=" * 60)
 
     # 1. 初始化数据管理器
-    dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+    dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=False)
 
     # 2. 设置回测参数
     # 回测最近30天的数据（使用示例数据）
@@ -35,16 +35,10 @@ def run_backtest_demo():
 
     # 3. 创建回测引擎
     from backtest.backtest_engine import BacktestConfig
+    from risk.risk_config import RiskConfig
 
-    config = BacktestConfig(
-        initial_capital=100000.0,  # 初始资金10万
-        max_position_per_stock=0.20,  # 单票最大20%
-        max_total_position=0.80,  # 总仓位最大80%
-        stop_loss_pct=0.05,  # 止损5%
-        take_profit_pct=0.10,  # 止盈10%
-        commission_rate=0.0003,  # 佣金0.03%
-        stamp_duty_rate=0.001,  # 印花税0.1%
-        slippage=0.002  # 滑点0.2%
+    config = BacktestConfig.from_risk_config(
+        RiskConfig.load(), initial_capital=100000.0,
     )
 
     backtest = BacktestEngine(dm, config)

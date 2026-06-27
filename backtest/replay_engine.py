@@ -10,7 +10,7 @@
 - 交易计划由 ``plan_provider`` 注入，当前 dev 分支使用快照/筛选结果派生的 CSV 计划。
 
 执行时序（严格 T+1）：在交易日 T，
-  1. 先用 T 的行情对**已有持仓**做退出判定（止损/移动止盈/时间止损/分批止盈/止盈）；
+  1. 先用 T 的行情对**已有持仓**做退出判定（止损/高点回撤止盈/时间止损）；
   2. 再执行"T-1 收盘后制定"的买入计划（用 T 的行情撮合）；
   3. 收盘盯市，记录净值。
 
@@ -42,7 +42,6 @@ class ReplayPlan:
     pattern: str = ""
     target_price: float = 0.0          # 期望买入价（0 表示按开盘价）
     stop_price: float = 0.0            # 绝对止损价（0 表示用配置 hard_stop_loss）
-    take_profit_price: float = 0.0     # 绝对止盈价（0 表示用配置 take_profit）
     position_pct: float = 0.0          # 建议仓位（占总权益）
     sectors: List[str] = field(default_factory=list)
     hot_resonance: bool = False
@@ -145,11 +144,8 @@ class ReplayEngine:
             meta["peak"] = peak
 
             stop_price = meta.get("stop_price") or entry * (1 - self.cfg.hard_stop_loss)
-            tp_price = meta.get("tp_price") or entry * (1 + self.cfg.take_profit)
-
             intended = None
             reason = None
-            partial_shares = 0
 
             # 1) 硬止损（最高优先）
             if low <= stop_price:
@@ -166,23 +162,10 @@ class ReplayEngine:
                   and (close - entry) / entry < self.cfg.time_stop_profit_threshold):
                 intended = close
                 reason = "time_stop"
-            # 4) 分批止盈（第一段）
-            elif (not meta.get("partial1") and high >= entry * 1.08):
-                partial_shares = (pos.shares // 2 // 100) * 100
-                if partial_shares >= 100:
-                    intended = max(entry * 1.08, openp)
-                    reason = "partial_first"
-                    meta["partial1"] = True
-            # 5) 基础止盈
-            if intended is None and high >= tp_price:
-                intended = max(tp_price, openp)
-                reason = "take_profit"
-
             if intended is None or reason is None:
                 continue
 
-            shares = partial_shares if partial_shares >= 100 else pos.shares
-            self._sell(code, date, ohlc, pre_close, intended, reason, shares)
+            self._sell(code, date, ohlc, pre_close, intended, reason, pos.shares)
 
     def _sell(self, code, date, ohlc, pre_close, intended_price, reason, shares):
         pos = self.account.positions.get(code)
@@ -207,7 +190,7 @@ class ReplayEngine:
         self.trade_history.append(TradeRecord(
             date=date, stock_code=code, stock_name=pos.name,
             pattern_type=meta.get("pattern", ""),
-            action="SELL_PARTIAL" if reason.startswith("partial") else "SELL",
+            action="SELL",
             entry_price=entry_price, exit_price=fill, shares=shares,
             position_size=cost, pnl=realized,
             pnl_pct=(realized / cost if cost > 0 else 0.0),
@@ -215,7 +198,7 @@ class ReplayEngine:
             hot_resonance=meta.get("hot_resonance", False),
             resonance_sectors=meta.get("sector", ""),
             stop_loss_triggered=(reason == "stop_loss"),
-            take_profit_triggered=reason.startswith(("take_profit", "partial")),
+            take_profit_triggered=(reason == "trailing_stop"),
         ))
         logger.info(f"[{date}] 卖出 {pos.name}({code}) {shares}股 @ {fill:.2f} "
                     f"[{reason}] 盈亏 {realized:,.0f}")
@@ -302,7 +285,6 @@ class ReplayEngine:
             self._exit_meta[code] = {
                 "peak": fill,
                 "stop_price": plan.stop_price or 0.0,
-                "tp_price": plan.take_profit_price or 0.0,
                 "pattern": plan.pattern,
                 "sector": ",".join(plan.sectors) if plan.sectors else "",
                 "hot_resonance": plan.hot_resonance,

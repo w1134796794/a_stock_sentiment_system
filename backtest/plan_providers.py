@@ -72,7 +72,6 @@ class CsvPlanProvider:
                 pattern=_clean_str(row.get("模式")),
                 target_price=float(row.get("目标价", 0) or 0),
                 stop_price=float(row.get("止损价", 0) or 0),
-                take_profit_price=float(row.get("止盈价", 0) or 0),
                 position_pct=self.pct_map.get(pos_str, 0.10),
                 sectors=sectors,
                 hot_resonance=_as_bool(row.get("热点共振", False)),

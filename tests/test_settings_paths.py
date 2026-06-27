@@ -26,3 +26,24 @@ def test_cache_dir_can_be_configured_from_environment(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert Path(result.stdout.strip()) == expected
+
+
+def test_output_dir_defaults_under_configured_web_data_dir(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    web_data = (tmp_path / "runtime-webdata").resolve()
+    env = os.environ.copy()
+    env["WEB_DATA_DIR"] = str(web_data)
+    env.pop("OUTPUT_DIR", None)
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from config.settings import OUTPUT_DIR; print(OUTPUT_DIR)"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert Path(result.stdout.strip()) == web_data / "output"

@@ -5,22 +5,22 @@
   "message": "筛选完成，输入 5513，最终 10",
   "input_count": 5513,
   "after_hard_filter": 3584,
-  "after_priority_filter": 291,
+  "after_priority_filter": 526,
   "final_count": 10,
   "final": [
     {
-      "code": "001389",
-      "ts_code": "001389.SZ",
-      "name": "广合科技",
-      "score": 99.1946,
+      "code": "600118",
+      "ts_code": "600118.SH",
+      "name": "中国卫星",
+      "score": 94.5592,
       "rank": 1,
-      "gold_rank": 1,
+      "gold_rank": 17,
       "reasons": [
-        "综合评分 99.2，候选排名第 1",
+        "综合评分 94.6，候选排名第 1",
         "当日接近10cm涨停，涨幅 +10.00%",
-        "量价活跃，成交额/成交量约为5日均值 2.22/1.96 倍",
-        "tech_score 100.0，指标表现靠前",
-        "阶段强势位置 100.0，走势接近阶段强势区"
+        "流动性分位 98.5，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
       ],
       "rule_reasons": [
         "市场综合分未进入极端风险区",
@@ -30,15 +30,129 @@
       ],
       "penalty_reasons": [],
       "metrics": {
-        "tech_score": 100.0,
-        "stk_liquidity_percentile": 97.31543624161074,
-        "stk_new_high_20d": 100.0
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 98.53074551061128,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 10.0,
-        "vol_ratio": 1.9622045225284717,
-        "amount_ratio": 2.217156581712631,
-        "new_high_ratio": 1.0688086712474596,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "limit_pct": 10.0,
+        "limit_progress": 1.0,
+        "limit_progress_score": 100.0,
+        "liquidity_score": 98.53074551061128,
+        "sector_resonance_score": 50.0
+      }
+    },
+    {
+      "code": "002129",
+      "ts_code": "002129.SZ",
+      "name": "TCL中环",
+      "score": 94.4232,
+      "rank": 2,
+      "gold_rank": 24,
+      "reasons": [
+        "综合评分 94.4，候选排名第 2",
+        "当日接近10cm涨停，涨幅 +10.03%",
+        "流动性分位 98.1，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
+      ],
+      "rule_reasons": [
+        "市场综合分未进入极端风险区",
+        "成交额分位达到基础流动性要求",
+        "当日涨幅接近对应板块涨停幅度",
+        "价格位置接近阶段强势区"
+      ],
+      "penalty_reasons": [],
+      "metrics": {
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 98.07727190277525,
+        "stk_new_high_20d": 88.23529411764706
+      },
+      "context": {
+        "pct_chg": 10.0295,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "limit_pct": 10.0,
+        "limit_progress": 1.00295,
+        "limit_progress_score": 100.0,
+        "liquidity_score": 98.07727190277525,
+        "sector_resonance_score": 50.0
+      }
+    },
+    {
+      "code": "600552",
+      "ts_code": "600552.SH",
+      "name": "凯盛科技",
+      "score": 94.2059,
+      "rank": 3,
+      "gold_rank": 22,
+      "reasons": [
+        "综合评分 94.2，候选排名第 3",
+        "当日接近10cm涨停，涨幅 +10.00%",
+        "流动性分位 97.4，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
+      ],
+      "rule_reasons": [
+        "市场综合分未进入极端风险区",
+        "成交额分位达到基础流动性要求",
+        "当日涨幅接近对应板块涨停幅度",
+        "价格位置接近阶段强势区"
+      ],
+      "penalty_reasons": [],
+      "metrics": {
+        "tech_score": 94.69570735294117,
+        "stk_liquidity_percentile": 97.36985307455106,
+        "stk_new_high_20d": 88.23529411764706
+      },
+      "context": {
+        "pct_chg": 9.9963,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "limit_pct": 10.0,
+        "limit_progress": 0.99963,
+        "limit_progress_score": 99.9815,
+        "liquidity_score": 97.36985307455106,
+        "sector_resonance_score": 50.0
+      }
+    },
+    {
+      "code": "001389",
+      "ts_code": "001389.SZ",
+      "name": "广合科技",
+      "score": 94.1946,
+      "rank": 4,
+      "gold_rank": 4,
+      "reasons": [
+        "综合评分 94.2，候选排名第 4",
+        "当日接近10cm涨停，涨幅 +10.00%",
+        "流动性分位 97.3，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
+      ],
+      "rule_reasons": [
+        "市场综合分未进入极端风险区",
+        "成交额分位达到基础流动性要求",
+        "当日涨幅接近对应板块涨停幅度",
+        "价格位置接近阶段强势区"
+      ],
+      "penalty_reasons": [],
+      "metrics": {
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 97.31543624161074,
+        "stk_new_high_20d": 88.23529411764706
+      },
+      "context": {
+        "pct_chg": 10.0,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
         "limit_pct": 10.0,
         "limit_progress": 1.0,
         "limit_progress_score": 100.0,
@@ -47,18 +161,18 @@
       }
     },
     {
-      "code": "002119",
-      "ts_code": "002119.SZ",
-      "name": "康强电子",
-      "score": 98.7103,
-      "rank": 2,
-      "gold_rank": 5,
+      "code": "002354",
+      "ts_code": "002354.SZ",
+      "name": "天娱数科",
+      "score": 94.1214,
+      "rank": 5,
+      "gold_rank": 1,
       "reasons": [
-        "综合评分 98.7，候选排名第 2",
-        "当日接近10cm涨停，涨幅 +10.01%",
-        "量价活跃，成交额/成交量约为5日均值 1.31/1.24 倍",
-        "tech_score 100.0，指标表现靠前",
-        "阶段强势位置 100.0，走势接近阶段强势区"
+        "综合评分 94.1，候选排名第 5",
+        "当日接近10cm涨停，涨幅 +9.96%",
+        "流动性分位 97.2，承接能力较好",
+        "tech_score 94.6，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
       ],
       "rule_reasons": [
         "市场综合分未进入极端风险区",
@@ -68,15 +182,91 @@
       ],
       "penalty_reasons": [],
       "metrics": {
-        "tech_score": 100.0,
+        "tech_score": 94.60303235294117,
+        "stk_liquidity_percentile": 97.24288046435697,
+        "stk_new_high_20d": 88.23529411764706
+      },
+      "context": {
+        "pct_chg": 9.9626,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "limit_pct": 10.0,
+        "limit_progress": 0.99626,
+        "limit_progress_score": 99.813,
+        "liquidity_score": 97.24288046435697,
+        "sector_resonance_score": 50.0
+      }
+    },
+    {
+      "code": "600367",
+      "ts_code": "600367.SH",
+      "name": "红星发展",
+      "score": 94.1076,
+      "rank": 6,
+      "gold_rank": 18,
+      "reasons": [
+        "综合评分 94.1，候选排名第 6",
+        "当日接近10cm涨停，涨幅 +10.00%",
+        "流动性分位 97.0，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
+      ],
+      "rule_reasons": [
+        "市场综合分未进入极端风险区",
+        "成交额分位达到基础流动性要求",
+        "当日涨幅接近对应板块涨停幅度",
+        "价格位置接近阶段强势区"
+      ],
+      "penalty_reasons": [],
+      "metrics": {
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 97.02521313259568,
+        "stk_new_high_20d": 88.23529411764706
+      },
+      "context": {
+        "pct_chg": 10.0038,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "limit_pct": 10.0,
+        "limit_progress": 1.00038,
+        "limit_progress_score": 100.0,
+        "liquidity_score": 97.02521313259568,
+        "sector_resonance_score": 50.0
+      }
+    },
+    {
+      "code": "002119",
+      "ts_code": "002119.SZ",
+      "name": "康强电子",
+      "score": 93.7103,
+      "rank": 7,
+      "gold_rank": 2,
+      "reasons": [
+        "综合评分 93.7，候选排名第 7",
+        "当日接近10cm涨停，涨幅 +10.01%",
+        "流动性分位 95.7，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
+      ],
+      "rule_reasons": [
+        "市场综合分未进入极端风险区",
+        "成交额分位达到基础流动性要求",
+        "当日涨幅接近对应板块涨停幅度",
+        "价格位置接近阶段强势区"
+      ],
+      "penalty_reasons": [],
+      "metrics": {
+        "tech_score": 94.70588235294119,
         "stk_liquidity_percentile": 95.70107019771449,
-        "stk_new_high_20d": 100.0
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 10.0149,
-        "vol_ratio": 1.2427330048948304,
-        "amount_ratio": 1.3115180616423012,
-        "new_high_ratio": 1.0451722190852626,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
         "limit_pct": 10.0,
         "limit_progress": 1.00149,
         "limit_progress_score": 100.0,
@@ -88,14 +278,14 @@
       "code": "603650",
       "ts_code": "603650.SH",
       "name": "彤程新材",
-      "score": 98.6888,
-      "rank": 3,
-      "gold_rank": 34,
+      "score": 93.6888,
+      "rank": 8,
+      "gold_rank": 30,
       "reasons": [
-        "综合评分 98.7，候选排名第 3",
+        "综合评分 93.7，候选排名第 8",
         "当日接近10cm涨停，涨幅 +10.00%",
-        "阶段强势位置 100.0，走势接近阶段强势区",
-        "tech_score 100.0，指标表现靠前",
+        "流动性分位 95.6，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
         "通过市场、流动性、强度、量能、趋势过滤"
       ],
       "rule_reasons": [
@@ -106,15 +296,15 @@
       ],
       "penalty_reasons": [],
       "metrics": {
-        "tech_score": 99.98955000000001,
+        "tech_score": 94.69543235294118,
         "stk_liquidity_percentile": 95.64665336477417,
-        "stk_new_high_20d": 100.0
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 9.9962,
-        "vol_ratio": 0.9732019375775615,
-        "amount_ratio": 1.1460406046704752,
-        "new_high_ratio": 1.0529996319470003,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
         "limit_pct": 10.0,
         "limit_progress": 0.99962,
         "limit_progress_score": 99.981,
@@ -126,15 +316,15 @@
       "code": "000823",
       "ts_code": "000823.SZ",
       "name": "超声电子",
-      "score": 98.6777,
-      "rank": 4,
-      "gold_rank": 15,
+      "score": 93.6777,
+      "rank": 9,
+      "gold_rank": 10,
       "reasons": [
-        "综合评分 98.7，候选排名第 4",
+        "综合评分 93.7，候选排名第 9",
         "当日接近10cm涨停，涨幅 +10.01%",
-        "量价活跃，成交额/成交量约为5日均值 1.26/1.00 倍",
-        "tech_score 100.0，指标表现靠前",
-        "阶段强势位置 100.0，走势接近阶段强势区"
+        "流动性分位 95.6，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
+        "通过市场、流动性、强度、量能、趋势过滤"
       ],
       "rule_reasons": [
         "市场综合分未进入极端风险区",
@@ -144,15 +334,15 @@
       ],
       "penalty_reasons": [],
       "metrics": {
-        "tech_score": 100.0,
+        "tech_score": 94.70588235294119,
         "stk_liquidity_percentile": 95.59223653183385,
-        "stk_new_high_20d": 100.0
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
         "pct_chg": 10.0116,
-        "vol_ratio": 1.002660453794461,
-        "amount_ratio": 1.2555023249421013,
-        "new_high_ratio": 1.1001159644375724,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
         "limit_pct": 10.0,
         "limit_progress": 1.00116,
         "limit_progress_score": 100.0,
@@ -164,166 +354,14 @@
       "code": "688409",
       "ts_code": "688409.SH",
       "name": "富创精密",
-      "score": 98.6722,
-      "rank": 5,
-      "gold_rank": 18,
+      "score": 93.6722,
+      "rank": 10,
+      "gold_rank": 19,
       "reasons": [
-        "综合评分 98.7，候选排名第 5",
+        "综合评分 93.7，候选排名第 10",
         "当日接近20cm涨停，涨幅 +20.00%",
-        "量价活跃，成交额/成交量约为5日均值 1.60/1.34 倍",
-        "tech_score 100.0，指标表现靠前",
-        "阶段强势位置 100.0，走势接近阶段强势区"
-      ],
-      "rule_reasons": [
-        "市场综合分未进入极端风险区",
-        "成交额分位达到基础流动性要求",
-        "当日涨幅接近对应板块涨停幅度",
-        "价格位置接近阶段强势区"
-      ],
-      "penalty_reasons": [],
-      "metrics": {
-        "tech_score": 100.0,
-        "stk_liquidity_percentile": 95.5740975875204,
-        "stk_new_high_20d": 100.0
-      },
-      "context": {
-        "pct_chg": 20.0,
-        "vol_ratio": 1.3352741153046257,
-        "amount_ratio": 1.5985393799800895,
-        "new_high_ratio": 1.1451431428928616,
-        "limit_pct": 20.0,
-        "limit_progress": 1.0,
-        "limit_progress_score": 100.0,
-        "liquidity_score": 95.5740975875204,
-        "sector_resonance_score": 50.0
-      }
-    },
-    {
-      "code": "000620",
-      "ts_code": "000620.SZ",
-      "name": "盈新发展",
-      "score": 98.4266,
-      "rank": 6,
-      "gold_rank": 12,
-      "reasons": [
-        "综合评分 98.4，候选排名第 6",
-        "当日接近10cm涨停，涨幅 +9.97%",
-        "量价活跃，成交额/成交量约为5日均值 2.65/2.35 倍",
-        "阶段强势位置 100.0，走势接近阶段强势区",
-        "tech_score 99.9，指标表现靠前"
-      ],
-      "rule_reasons": [
-        "市场综合分未进入极端风险区",
-        "成交额分位达到基础流动性要求",
-        "当日涨幅接近对应板块涨停幅度",
-        "价格位置接近阶段强势区"
-      ],
-      "penalty_reasons": [],
-      "metrics": {
-        "tech_score": 99.91145,
-        "stk_liquidity_percentile": 94.90295664792309,
-        "stk_new_high_20d": 100.0
-      },
-      "context": {
-        "pct_chg": 9.9678,
-        "vol_ratio": 2.349390912009081,
-        "amount_ratio": 2.650470400700967,
-        "new_high_ratio": 1.0426829268292683,
-        "limit_pct": 10.0,
-        "limit_progress": 0.99678,
-        "limit_progress_score": 99.839,
-        "liquidity_score": 94.90295664792309,
-        "sector_resonance_score": 50.0
-      }
-    },
-    {
-      "code": "688596",
-      "ts_code": "688596.SH",
-      "name": "正帆科技",
-      "score": 98.2478,
-      "rank": 7,
-      "gold_rank": 2,
-      "reasons": [
-        "综合评分 98.2，候选排名第 7",
-        "当日接近20cm涨停，涨幅 +20.00%",
-        "量价活跃，成交额/成交量约为5日均值 2.35/2.05 倍",
-        "tech_score 100.0，指标表现靠前",
-        "阶段强势位置 100.0，走势接近阶段强势区"
-      ],
-      "rule_reasons": [
-        "市场综合分未进入极端风险区",
-        "成交额分位达到基础流动性要求",
-        "当日涨幅接近对应板块涨停幅度",
-        "价格位置接近阶段强势区"
-      ],
-      "penalty_reasons": [],
-      "metrics": {
-        "tech_score": 100.0,
-        "stk_liquidity_percentile": 94.15925993107201,
-        "stk_new_high_20d": 100.0
-      },
-      "context": {
-        "pct_chg": 20.0,
-        "vol_ratio": 2.0525419377403042,
-        "amount_ratio": 2.3502411582376177,
-        "new_high_ratio": 1.0799077986938148,
-        "limit_pct": 20.0,
-        "limit_progress": 1.0,
-        "limit_progress_score": 100.0,
-        "liquidity_score": 94.15925993107201,
-        "sector_resonance_score": 50.0
-      }
-    },
-    {
-      "code": "688432",
-      "ts_code": "688432.SH",
-      "name": "有研硅",
-      "score": 97.9648,
-      "rank": 8,
-      "gold_rank": 8,
-      "reasons": [
-        "综合评分 98.0，候选排名第 8",
-        "当日接近20cm涨停，涨幅 +20.00%",
-        "量价活跃，成交额/成交量约为5日均值 1.84/1.62 倍",
-        "tech_score 100.0，指标表现靠前",
-        "阶段强势位置 100.0，走势接近阶段强势区"
-      ],
-      "rule_reasons": [
-        "市场综合分未进入极端风险区",
-        "成交额分位达到基础流动性要求",
-        "当日涨幅接近对应板块涨停幅度",
-        "价格位置接近阶段强势区"
-      ],
-      "penalty_reasons": [],
-      "metrics": {
-        "tech_score": 100.0,
-        "stk_liquidity_percentile": 93.21603482677308,
-        "stk_new_high_20d": 100.0
-      },
-      "context": {
-        "pct_chg": 20.0,
-        "vol_ratio": 1.6205380670181568,
-        "amount_ratio": 1.8403897728258898,
-        "new_high_ratio": 1.137702503681885,
-        "limit_pct": 20.0,
-        "limit_progress": 1.0,
-        "limit_progress_score": 100.0,
-        "liquidity_score": 93.21603482677308,
-        "sector_resonance_score": 50.0
-      }
-    },
-    {
-      "code": "600552",
-      "ts_code": "600552.SH",
-      "name": "凯盛科技",
-      "score": 97.2838,
-      "rank": 9,
-      "gold_rank": 28,
-      "reasons": [
-        "综合评分 97.3，候选排名第 9",
-        "当日接近10cm涨停，涨幅 +10.00%",
-        "tech_score 98.0，指标表现靠前",
-        "流动性分位 97.4，承接能力较好",
+        "流动性分位 95.6，承接能力较好",
+        "tech_score 94.7，指标表现靠前",
         "通过市场、流动性、强度、量能、趋势过滤"
       ],
       "rule_reasons": [
@@ -334,57 +372,19 @@
       ],
       "penalty_reasons": [],
       "metrics": {
-        "tech_score": 97.95474010420861,
-        "stk_liquidity_percentile": 97.36985307455106,
-        "stk_new_high_20d": 95.47758912046359
+        "tech_score": 94.70588235294119,
+        "stk_liquidity_percentile": 95.5740975875204,
+        "stk_new_high_20d": 88.23529411764706
       },
       "context": {
-        "pct_chg": 9.9963,
-        "vol_ratio": 1.0409125992234545,
-        "amount_ratio": 1.1711190173595356,
-        "new_high_ratio": 1.0123119015047881,
-        "limit_pct": 10.0,
-        "limit_progress": 0.99963,
-        "limit_progress_score": 99.9815,
-        "liquidity_score": 97.36985307455106,
-        "sector_resonance_score": 50.0
-      }
-    },
-    {
-      "code": "600206",
-      "ts_code": "600206.SH",
-      "name": "有研新材",
-      "score": 97.1588,
-      "rank": 10,
-      "gold_rank": 31,
-      "reasons": [
-        "综合评分 97.2，候选排名第 10",
-        "当日强涨幅 +8.19%，约为10cm涨停进度 82%",
-        "量价活跃，成交额/成交量约为5日均值 1.32/1.09 倍",
-        "阶段强势位置 100.0，走势接近阶段强势区",
-        "流动性分位 98.8，承接能力较好"
-      ],
-      "rule_reasons": [
-        "市场综合分未进入极端风险区",
-        "成交额分位达到基础流动性要求",
-        "未完全满足涨停强度确认，按综合评分保留观察",
-        "价格位置接近阶段强势区"
-      ],
-      "penalty_reasons": [],
-      "metrics": {
-        "tech_score": 95.02497500000001,
-        "stk_liquidity_percentile": 98.82096861962634,
-        "stk_new_high_20d": 100.0
-      },
-      "context": {
-        "pct_chg": 8.1909,
-        "vol_ratio": 1.089456916779469,
-        "amount_ratio": 1.3176315697621839,
-        "new_high_ratio": 1.0678383128295255,
-        "limit_pct": 10.0,
-        "limit_progress": 0.8190899999999999,
-        "limit_progress_score": 90.9545,
-        "liquidity_score": 98.82096861962634,
+        "pct_chg": 20.0,
+        "vol_ratio": 1.0,
+        "amount_ratio": 1.0,
+        "new_high_ratio": 1.0,
+        "limit_pct": 20.0,
+        "limit_progress": 1.0,
+        "limit_progress_score": 100.0,
+        "liquidity_score": 95.5740975875204,
         "sector_resonance_score": 50.0
       }
     }
@@ -2035,8 +2035,8 @@
       "op": ">=",
       "value": 70,
       "before_count": 896,
-      "passed_count": 291,
-      "kept_count": 291,
+      "passed_count": 526,
+      "kept_count": 526,
       "relaxed": false,
       "message": ""
     }

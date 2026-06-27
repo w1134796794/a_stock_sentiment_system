@@ -29,6 +29,7 @@ class ETLDailyResult:
     silver_summary: Dict[str, Any] = field(default_factory=dict)
     factor_results: List[Dict[str, Any]] = field(default_factory=list)
     screening: Dict[str, Any] = field(default_factory=dict)
+    plan_cache_summary: Dict[str, Any] = field(default_factory=dict)
     gold_summary: Dict[str, Any] = field(default_factory=dict)
     snapshot_paths: Dict[str, str] = field(default_factory=dict)
     analysis_path: str = ""
@@ -130,6 +131,20 @@ class ETLDailyPipeline:
             f"候选={len(result.screening.get('final') or [])}"
         )
 
+        # 当前候选与上一交易日计划的当日行情都从 Phase1 全市场日缓存切片落盘。
+        # 后续回测、竞价确认和页面服务不得再为这些股票逐票请求 Tushare daily。
+        current_codes = [str(item.get("code") or "") for item in result.screening.get("final") or []]
+        previous_codes = self._snapshot_plan_codes(prev_trade_date)
+        if hasattr(self.dm, "warm_trade_plan_daily_cache"):
+            result.plan_cache_summary = self.dm.warm_trade_plan_daily_cache(
+                trade_date, current_codes + previous_codes,
+            )
+            logger.info(
+                f"[数据生成][候选行情缓存] {trade_date}: "
+                f"{result.plan_cache_summary.get('cached', 0)}/"
+                f"{result.plan_cache_summary.get('requested', 0)} 只已落本地"
+            )
+
         phase_started = time.monotonic()
         logger.info(f"[数据生成][Phase4] 分析摘要开始: {trade_date}")
         result.gold_summary = build_gold_analysis_summary(
@@ -221,6 +236,13 @@ class ETLDailyPipeline:
 
     @staticmethod
     def _build_trade_plans(screening: Dict[str, Any], market_score: float) -> pd.DataFrame:
+        from risk.risk_config import RiskConfig
+
+        risk = RiskConfig.load()
+        trailing_text = (
+            f"盈利达{risk.trailing_activation:.0%}后，"
+            f"从持仓高点回撤{risk.trailing_stop:.0%}退出；持续上涨继续持有"
+        )
         rows = []
         position = _position_label(market_score)
         for item in screening.get("final") or []:
@@ -237,13 +259,31 @@ class ETLDailyPipeline:
                 "建议仓位": position,
                 "入场区间": "竞价高开且实时确认后",
                 "止损": "实时取消线或-3%",
-                "止盈": "分批止盈/次日转弱退出",
+                "止盈": trailing_text,
                 "竞价条件": "高开才买入，低开直接放弃",
                 "次日预期": "按指标评分排序，盘中只做确认/取消",
                 "风险提示": "实时行情为取消/观察时不主动买入",
                 "筛选理由": "；".join(str(x) for x in reasons[:4]),
             })
         return pd.DataFrame(rows)
+
+    def _snapshot_plan_codes(self, trade_date: str) -> List[str]:
+        if not trade_date:
+            return []
+        path = self.snapshot_dir / f"{trade_date}.json"
+        if not path.exists():
+            return []
+        try:
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[数据生成][候选行情缓存] 上一交易日快照读取失败 {path}: {exc}")
+            return []
+        rows = ((snapshot.get("trade_plans") or {}).get("rows") or [])
+        return [
+            str(row.get("股票代码") or row.get("代码") or row.get("code") or "")
+            for row in rows
+            if isinstance(row, dict)
+        ]
 
     @staticmethod
     def _screening_factor_ids(screening: Dict[str, Any]) -> List[str]:

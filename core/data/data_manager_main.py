@@ -47,8 +47,9 @@ class DataManager(
     兼容原有 DataManager 与 DataManagerExtensions 的所有方法签名。
     """
 
-    def __init__(self, tushare_token: str, cache_dir: Path):
+    def __init__(self, tushare_token: str, cache_dir: Path, *, allow_remote_history: bool = True):
         MarketDataManager.__init__(self, tushare_token, cache_dir)
+        self.allow_remote_history = bool(allow_remote_history)
         logger.info(f"[DataManager] 初始化完成，缓存目录: {cache_dir}")
 
 

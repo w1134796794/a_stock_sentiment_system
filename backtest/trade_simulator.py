@@ -17,8 +17,11 @@ class TradeSimulator:
     模拟T+1交易环境下的计划执行
     """
 
-    def __init__(self, data_manager):
+    def __init__(self, data_manager, risk_config=None):
+        from risk.risk_config import RiskConfig
+
         self.dm = data_manager
+        self.risk = risk_config or RiskConfig.load()
 
     def simulate_trade_execution(self,
                                  plan: Dict,
@@ -106,19 +109,17 @@ class TradeSimulator:
         """获取执行日价格数据"""
         try:
             # 从DataManager获取日线数据
-            df = self.dm.get_stock_daily_data(stock_code, date, date)
-            if df.empty:
+            data = self.dm.get_stock_daily_data(stock_code, date)
+            if not data:
                 return None
-
-            row = df.iloc[0]
             return {
-                'open': row['open'],
-                'high': row['high'],
-                'low': row['low'],
-                'close': row['close'],
-                'volume': row['volume'],
-                'amount': row['amount'],
-                'pre_close': row.get('pre_close', row['open'])
+                'open': data['open'],
+                'high': data['high'],
+                'low': data['low'],
+                'close': data['close'],
+                'volume': data.get('vol', data.get('volume', 0)),
+                'amount': data.get('amount', 0),
+                'pre_close': data.get('pre_close', data['open'])
             }
         except Exception as e:
             logger.error(f"获取价格数据失败 {stock_code} {date}: {e}")
@@ -233,8 +234,8 @@ class TradeSimulator:
         Returns:
             卖出结果
         """
-        stop_loss_price = plan.get('止损价', entry_price * 0.95)
-        take_profit_price = plan.get('目标价', entry_price * 1.10)
+        stop_loss_price = plan.get('止损价', entry_price * (1 - self.risk.hard_stop_loss))
+        highest_price = entry_price
 
         # 获取后续N天数据
         exit_date = entry_date
@@ -242,7 +243,7 @@ class TradeSimulator:
         holding_days = 0
         exit_reason = 'holding'
 
-        # 简化：模拟持有max_holding_days或触发止损止盈
+        # 观察窗口结束不强制卖出；只执行硬止损、时间止损和高点回撤止盈。
         for day in range(1, max_holding_days + 1):
             next_date = self._get_next_trade_date(entry_date, day)
             if not next_date:
@@ -256,6 +257,9 @@ class TradeSimulator:
             low_price = price_data['low']
             high_price = price_data['high']
             close_price = price_data['close']
+            highest_price = max(highest_price, high_price)
+            exit_date = next_date
+            exit_price = close_price
 
             # 检查止损
             if low_price <= stop_loss_price:
@@ -264,18 +268,23 @@ class TradeSimulator:
                 exit_reason = 'stop_loss'
                 break
 
-            # 检查止盈
-            if high_price >= take_profit_price:
-                exit_date = next_date
-                exit_price = take_profit_price
-                exit_reason = 'take_profit'
-                break
-
-            # 最后一天卖出
-            if day == max_holding_days:
+            peak_profit = (highest_price - entry_price) / entry_price
+            pullback = (highest_price - close_price) / highest_price
+            if (self.risk.trailing_stop > 0
+                    and peak_profit >= self.risk.trailing_activation
+                    and pullback >= self.risk.trailing_stop):
                 exit_date = next_date
                 exit_price = close_price
-                exit_reason = 'max_holding'
+                exit_reason = 'trailing_stop'
+                break
+
+            current_pnl = (close_price - entry_price) / entry_price
+            if (day >= self.risk.time_stop_days
+                    and current_pnl < self.risk.time_stop_profit_threshold):
+                exit_date = next_date
+                exit_price = close_price
+                exit_reason = 'time_stop'
+                break
 
         # 计算盈亏
         pnl = (exit_price - entry_price)

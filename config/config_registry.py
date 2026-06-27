@@ -47,6 +47,13 @@ _YAML_LABELS = {
 
 _RISK_GROUP = "risk_control"
 _RISK_LABEL = "风控参数 (RiskConfig)"
+_RISK_DESCRIPTIONS = {
+    "hard_stop_loss": "相对买入成本的硬止损比例。",
+    "trailing_activation": "持仓最高涨幅达到该比例后，开始保护利润。",
+    "trailing_stop": "激活后，相对持仓最高价回撤达到该比例时全部止盈。",
+    "time_stop_days": "达到该持仓交易日数且收益仍低于阈值时退出。",
+    "time_stop_profit_threshold": "时间止损使用的最低收益阈值。",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +240,10 @@ def _build_risk() -> List[Dict[str, Any]]:
         if _infer_type(default_val) is None:
             continue
         eff_val = store.get(key, default_val)
-        fields.append(_field("risk", _RISK_GROUP, _RISK_LABEL, key, key,
-                             eff_val, default_val, key in store))
+        item = _field("risk", _RISK_GROUP, _RISK_LABEL, key, key,
+                      eff_val, default_val, key in store)
+        item["desc"] = _RISK_DESCRIPTIONS.get(key, "")
+        fields.append(item)
     return [{"key": _RISK_GROUP, "label": _RISK_LABEL, "fields": fields}] if fields else []
 
 

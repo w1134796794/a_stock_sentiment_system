@@ -8,6 +8,7 @@ import os
 import secrets
 import sqlite3
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -121,6 +122,14 @@ def ensure_auth_db() -> None:
               success INTEGER NOT NULL DEFAULT 0,
               reason TEXT NOT NULL DEFAULT '',
               created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS role_permissions (
+              role TEXT NOT NULL CHECK(role IN ('admin','viewer')),
+              permission_key TEXT NOT NULL,
+              menu_visible INTEGER NOT NULL DEFAULT 1,
+              can_access INTEGER NOT NULL DEFAULT 1,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(role, permission_key)
             );
             """
         )
@@ -441,3 +450,59 @@ def recent_login_logs(limit: int = 80) -> List[Dict[str, Any]]:
             (max(1, min(300, int(limit or 80))),),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+@lru_cache(maxsize=1)
+def get_role_permission_overrides() -> Dict[str, Dict[str, Dict[str, bool]]]:
+    """Return persisted role permission overrides, cached between admin edits."""
+    ensure_auth_db()
+    result: Dict[str, Dict[str, Dict[str, bool]]] = {"admin": {}, "viewer": {}}
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT role, permission_key, menu_visible, can_access
+            FROM role_permissions
+            """
+        ).fetchall()
+    for row in rows:
+        role = str(row["role"])
+        result.setdefault(role, {})[str(row["permission_key"])] = {
+            "menu_visible": bool(row["menu_visible"]),
+            "can_access": bool(row["can_access"]),
+        }
+    return result
+
+
+def save_role_permission_overrides(rows: List[Dict[str, Any]]) -> None:
+    """Upsert validated role permission rows supplied by the permission layer."""
+    ensure_auth_db()
+    now = _now()
+    with _connect() as conn:
+        conn.executemany(
+            """
+            INSERT INTO role_permissions(role, permission_key, menu_visible, can_access, updated_at)
+            VALUES(?, ?, ?, ?, ?)
+            ON CONFLICT(role, permission_key) DO UPDATE SET
+              menu_visible=excluded.menu_visible,
+              can_access=excluded.can_access,
+              updated_at=excluded.updated_at
+            """,
+            [
+                (
+                    str(row["role"]),
+                    str(row["permission_key"]),
+                    1 if row.get("menu_visible") else 0,
+                    1 if row.get("can_access") else 0,
+                    now,
+                )
+                for row in rows
+            ],
+        )
+    get_role_permission_overrides.cache_clear()
+
+
+def reset_role_permission_overrides() -> None:
+    ensure_auth_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM role_permissions")
+    get_role_permission_overrides.cache_clear()

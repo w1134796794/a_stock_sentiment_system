@@ -12,7 +12,7 @@ import time
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 import loguru
 
 from core.data.data_manager_base import DataManagerBase
@@ -70,22 +70,137 @@ class StockDataManager(DataManagerBase):
             logger.debug(f"[StockDataManager] Ashare provider unavailable: {e}")
             return None
 
+    def _load_all_daily_partition(self, trade_date: str) -> Tuple[bool, pd.DataFrame]:
+        """Read the prefetched whole-market daily partition without remote fallback."""
+        date = str(trade_date)
+        cache_key = f"all_daily_partition_{date}"
+        cached = self._get_from_memory_cache(cache_key)
+        if cached is not None:
+            return True, cached
+
+        cache_file = self.stock_dir / "all_daily" / f"{date}.csv"
+        if not cache_file.exists():
+            return False, pd.DataFrame()
+        try:
+            df = pd.read_csv(
+                cache_file,
+                dtype={"ts_code": str, "code": str, "股票代码": str},
+            )
+            self._set_memory_cache(cache_key, df)
+            return True, df
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[get_stock_daily] 全市场日缓存读取失败 {cache_file}: {e}")
+            return False, pd.DataFrame()
+
+    @staticmethod
+    def _slice_stock_from_all_daily(df: pd.DataFrame, ts_code: str, trade_date: str) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame()
+        code_col = next((col for col in ("ts_code", "code", "股票代码", "代码") if col in df.columns), None)
+        if not code_col:
+            return pd.DataFrame()
+        code6 = StockCodeUtils.standardize_code(ts_code, add_suffix=False)
+        normalized = (
+            df[code_col].astype(str).str.split(".").str[0]
+            .str.replace(r"\D", "", regex=True).str.zfill(6).str[-6:]
+        )
+        out = df.loc[normalized == code6].copy()
+        if out.empty:
+            return out
+        out["ts_code"] = StockCodeUtils.standardize_code(code6, add_suffix=True)
+        if "trade_date" in out.columns:
+            out["trade_date"] = pd.to_datetime(out["trade_date"].astype(str))
+        else:
+            out["trade_date"] = pd.to_datetime(str(trade_date))
+        return out
+
+    def _get_stock_daily_from_prefetch(
+        self, ts_code: str, start_date: str, end_date: str,
+    ) -> Tuple[bool, pd.DataFrame]:
+        # Current consumers query one trading day at a time. Requiring an exact
+        # partition avoids returning a silently incomplete multi-day window.
+        if str(start_date) != str(end_date):
+            return False, pd.DataFrame()
+        covered, daily = self._load_all_daily_partition(str(start_date))
+        if not covered:
+            return False, pd.DataFrame()
+        return True, self._slice_stock_from_all_daily(daily, ts_code, str(start_date))
+
+    def warm_trade_plan_daily_cache(self, trade_date: str, codes: Iterable[str]) -> Dict[str, object]:
+        """Materialize plan-candidate daily rows from the prefetched market partition.
+
+        This method never calls a remote provider. It is run during daily data
+        generation so later backtests and page services read local files only.
+        """
+        date = str(trade_date)
+        unique_codes: List[str] = []
+        seen = set()
+        for raw in codes or []:
+            code6 = StockCodeUtils.standardize_code(raw, add_suffix=False)
+            if code6 and code6 not in seen:
+                seen.add(code6)
+                unique_codes.append(code6)
+
+        covered, daily = self._load_all_daily_partition(date)
+        if not covered:
+            return {"date": date, "requested": len(unique_codes), "cached": 0, "missing": unique_codes}
+
+        cached_count = 0
+        missing: List[str] = []
+        for code6 in unique_codes:
+            row = self._slice_stock_from_all_daily(daily, code6, date)
+            if row.empty:
+                missing.append(code6)
+                continue
+            canonical = StockCodeUtils.standardize_code(code6, add_suffix=True)
+            cache_file = self.stock_dir / "daily" / f"{canonical}_{date}_{date}.csv"
+            row.to_csv(cache_file, index=False)
+            self._set_memory_cache(f"stock_daily_{canonical}_{date}_{date}", row)
+            cached_count += 1
+        return {
+            "date": date,
+            "requested": len(unique_codes),
+            "cached": cached_count,
+            "missing": missing,
+        }
+
     def get_stock_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """获取个股历史日线数据"""
-        code = ts_code
-        cache_file = self.stock_dir / "daily" / f"{code}_{start_date}_{end_date}.csv"
-        if cache_file.exists():
-            return pd.read_csv(cache_file, parse_dates=['trade_date'])
+        code = str(ts_code)
+        canonical = StockCodeUtils.standardize_code(code, add_suffix=True)
+        cache_files = [
+            self.stock_dir / "daily" / f"{canonical}_{start_date}_{end_date}.csv",
+        ]
+        legacy_file = self.stock_dir / "daily" / f"{code}_{start_date}_{end_date}.csv"
+        if legacy_file not in cache_files:
+            cache_files.append(legacy_file)
+        for cache_file in cache_files:
+            if cache_file.exists():
+                return pd.read_csv(cache_file, parse_dates=['trade_date'])
+
+        covered, prefetched = self._get_stock_daily_from_prefetch(code, start_date, end_date)
+        if covered:
+            return prefetched
+
+        if not getattr(self, "allow_remote_history", True):
+            rt_df = self._get_realtime_daily_via_quote(code, start_date, end_date)
+            if rt_df is not None and not rt_df.empty:
+                return rt_df
+            logger.warning(
+                f"[get_stock_daily] 本地预取数据缺失 {canonical} {start_date}~{end_date}，"
+                "当前调用禁止按需请求 Tushare；请先生成对应交易日数据"
+            )
+            return pd.DataFrame()
 
         try:
             if self.ts_pro:
                 # Tushare daily 必须传带交易所后缀的 ts_code（如 002119.SZ）；
                 # 系统内部统一用 6 位代码，这里在调用边界补全后缀。
-                ts_code_full = StockCodeUtils.standardize_code(code, add_suffix=True)
+                ts_code_full = canonical
                 df = self.ts_pro.daily(ts_code=ts_code_full, start_date=start_date, end_date=end_date)
                 if not df.empty:
                     df['trade_date'] = pd.to_datetime(df['trade_date'])
-                    df.to_csv(cache_file, index=False)
+                    df.to_csv(cache_files[0], index=False)
                     return df
                 else:
                     logger.debug(f"[get_stock_daily] Tushare返回空数据")
@@ -207,6 +322,7 @@ class StockDataManager(DataManagerBase):
             try:
                 df = pd.read_csv(cache_file)
                 if not df.empty:
+                    self._set_memory_cache(f"all_daily_partition_{trade_date}", df)
                     return df
             except Exception:
                 pass
@@ -222,6 +338,7 @@ class StockDataManager(DataManagerBase):
                 return pd.DataFrame()
 
             df.to_csv(cache_file, index=False)
+            self._set_memory_cache(f"all_daily_partition_{trade_date}", df)
             logger.info(f"[get_all_stocks_daily] {trade_date} 获取 {len(df)} 只股票日线数据")
             return df
         except Exception as e:

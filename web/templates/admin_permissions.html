@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}权限配置{% endblock %}
+{% block page_title %}权限配置{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">按角色控制菜单显示与功能访问</div>{% endblock %}
+
+{% block content %}
+<div class="space-y-4 max-w-6xl">
+  <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+    <div class="text-sm text-slate-400">
+      关闭“访问”会同步隐藏菜单；仅关闭“显示”时，仍可通过直接地址访问。
+      <span class="ml-2 text-amber-300">固定项始终由管理员专享。</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="reset-btn" onclick="resetPermissions()" class="border border-slate-700 hover:border-amber-500 rounded-md px-3 py-2 text-sm text-slate-300 hover:text-amber-200">恢复默认</button>
+      <button id="save-btn" onclick="savePermissions()" class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-md px-4 py-2 text-sm font-semibold">保存配置</button>
+    </div>
+  </div>
+
+  <div id="permission-msg" class="hidden rounded-md border px-3 py-2 text-sm"></div>
+
+  <div class="border border-slate-800 rounded-lg overflow-x-auto">
+    <table class="w-full min-w-[820px] text-sm">
+      <thead class="bg-slate-900/80 text-slate-400">
+        <tr class="border-b border-slate-800">
+          <th rowspan="2" class="text-left px-4 py-3 font-medium">功能</th>
+          <th rowspan="2" class="text-left px-4 py-3 font-medium">路径</th>
+          <th colspan="2" class="text-center px-4 py-2 font-medium border-l border-slate-800">管理员</th>
+          <th colspan="2" class="text-center px-4 py-2 font-medium border-l border-slate-800">只读用户</th>
+        </tr>
+        <tr class="border-b border-slate-800 text-xs">
+          <th class="px-3 py-2 text-center border-l border-slate-800">显示</th>
+          <th class="px-3 py-2 text-center">访问</th>
+          <th class="px-3 py-2 text-center border-l border-slate-800">显示</th>
+          <th class="px-3 py-2 text-center">访问</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-800">
+        {% for group in permission_data.get('groups', []) %}
+        <tr class="bg-slate-900/45">
+          <td colspan="6" class="px-4 py-2 text-xs font-semibold text-slate-500">{{ group.get('label') }}</td>
+        </tr>
+          {% for item in group.get('items', []) %}
+          <tr class="hover:bg-slate-900/35" data-permission-row="{{ item.get('key') }}">
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-slate-200">{{ item.get('label') }}</span>
+                {% if item.get('forced_admin') %}
+                <span class="rounded border border-amber-700/60 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">固定</span>
+                {% endif %}
+              </div>
+            </td>
+            <td class="px-4 py-3 mono text-xs text-slate-500">{{ item.get('href') }}</td>
+            {% for role in ['admin', 'viewer'] %}
+              {% set p = item.get('permissions', {}).get(role, {}) %}
+              <td class="px-3 py-3 text-center border-l border-slate-800/80">
+                <input type="checkbox"
+                       class="permission-check h-4 w-4 accent-emerald-500 disabled:opacity-35"
+                       data-role="{{ role }}" data-key="{{ item.get('key') }}" data-kind="menu_visible"
+                       {% if p.get('menu_visible') %}checked{% endif %}
+                       {% if p.get('locked') %}disabled{% endif %}>
+              </td>
+              <td class="px-3 py-3 text-center">
+                <input type="checkbox"
+                       class="permission-check h-4 w-4 accent-emerald-500 disabled:opacity-35"
+                       data-role="{{ role }}" data-key="{{ item.get('key') }}" data-kind="can_access"
+                       {% if p.get('can_access') %}checked{% endif %}
+                       {% if p.get('locked') %}disabled{% endif %}>
+              </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function showMessage(text, good = false) {
+  const el = document.getElementById('permission-msg');
+  el.textContent = text;
+  el.className = `rounded-md border px-3 py-2 text-sm ${good
+    ? 'border-emerald-700/70 bg-emerald-500/10 text-emerald-300'
+    : 'border-rose-800 bg-rose-500/10 text-rose-300'}`;
+}
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, {...options, credentials: 'same-origin'});
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (_) {
+    const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+    throw new Error(`服务器响应异常（HTTP ${response.status}）${plain ? '：' + plain : ''}`);
+  }
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || data.message || `操作失败（HTTP ${response.status}）`);
+  }
+  return data;
+}
+
+document.querySelectorAll('.permission-check').forEach(input => {
+  input.addEventListener('change', () => {
+    const selector = `.permission-check[data-role="${input.dataset.role}"][data-key="${input.dataset.key}"]`;
+    const pair = [...document.querySelectorAll(selector)];
+    const visible = pair.find(el => el.dataset.kind === 'menu_visible');
+    const access = pair.find(el => el.dataset.kind === 'can_access');
+    if (input.dataset.kind === 'can_access' && !input.checked) visible.checked = false;
+    if (input.dataset.kind === 'menu_visible' && input.checked) access.checked = true;
+  });
+});
+
+function collectUpdates() {
+  const rows = new Map();
+  document.querySelectorAll('.permission-check').forEach(input => {
+    const id = `${input.dataset.role}:${input.dataset.key}`;
+    if (!rows.has(id)) {
+      rows.set(id, {role: input.dataset.role, permission_key: input.dataset.key});
+    }
+    rows.get(id)[input.dataset.kind] = input.checked;
+  });
+  return [...rows.values()];
+}
+
+async function savePermissions() {
+  const button = document.getElementById('save-btn');
+  button.disabled = true;
+  try {
+    await requestJson('/api/admin/permissions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({updates: collectUpdates()})
+    });
+    showMessage('权限配置已保存，用户下次请求立即生效。', true);
+  } catch (error) {
+    showMessage(error.message || '保存失败');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function resetPermissions() {
+  if (!confirm('恢复角色默认权限？当前自定义配置将被清除。')) return;
+  const button = document.getElementById('reset-btn');
+  button.disabled = true;
+  try {
+    await requestJson('/api/admin/permissions/reset', {method: 'POST'});
+    location.reload();
+  } catch (error) {
+    showMessage(error.message || '恢复失败');
+    button.disabled = false;
+  }
+}
+</script>
+{% endblock %}

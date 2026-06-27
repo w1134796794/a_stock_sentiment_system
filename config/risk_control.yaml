@@ -22,7 +22,6 @@ max_correlated_positions: 3      # 相关板块最多持仓数
 hard_stop_loss: 0.05             # 硬止损（亏损达此比例强制卖出）
 trailing_stop: 0.08              # 移动止损（从持仓最高点回撤比例）
 trailing_activation: 0.05        # 盈利达此比例后才启动移动止损
-take_profit: 0.10                # 基础止盈
 time_stop_days: 5                # 时间止损：持仓超过 N 天
 time_stop_profit_threshold: 0.02 # 时间止损触发时的盈利下限
 
