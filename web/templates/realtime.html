@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}实时确认 · 管理控制台{% endblock %}
-{% block page_title %}实时确认{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 候选确认 · 板块行情</div>{% endblock %}
+{% block title %}实时行情 · 管理控制台{% endblock %}
+{% block page_title %}实时行情{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 当日指标筛选确认 · 板块行情</div>{% endblock %}
 
 {% block header_extra %}
   <span id="rt-clock" class="mono text-xs text-slate-500 mr-2"></span>
@@ -22,12 +22,12 @@
 <section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4">
   <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
     <div class="flex flex-wrap items-center gap-2 mb-4">
-      <h2 class="font-bold mr-auto">候选确认</h2>
+      <h2 class="font-bold mr-auto">当日指标候选确认</h2>
       <span id="overlay-source" class="rt-pill">--</span>
       <span id="overlay-updated" class="text-xs text-slate-500 mono">--</span>
     </div>
     <div id="overlay-cards" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
-    <div id="overlay-empty" class="hidden text-sm text-slate-500 py-12 text-center">暂无候选确认数据</div>
+    <div id="overlay-empty" class="hidden text-sm text-slate-500 py-12 text-center">当日指标筛选尚未生成或暂无候选</div>
   </section>
 
   <aside class="space-y-4">

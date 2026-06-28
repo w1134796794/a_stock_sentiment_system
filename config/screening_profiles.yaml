@@ -1,15 +1,10 @@
 screening_profiles:
   default:
-    description: "默认短线筛选：弱市空仓，按候选池分位综合量能、板块主线、流动性与技术强度。"
+    description: "默认短线候选：每日持续产出，市场分层只控制是否开仓；按候选池分位综合量能、板块主线、流动性与技术强度。"
     candidate_source: factor_stock_wide
     missing:
       neutral_score: 50
     hard_filters:
-      - name: "市场环境不弱"
-        factor: mkt_market_score
-        op: ">="
-        value: 50
-        reason: "市场综合分达到允许开仓区间"
       - name: "个股流动性合格"
         factor: stk_liquidity_percentile
         op: ">="

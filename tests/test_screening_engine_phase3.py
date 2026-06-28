@@ -57,7 +57,7 @@ def test_screening_engine_reads_gold_tables_and_writes_json(tmp_path):
         },
     ])
     value_long = pd.DataFrame([
-        ["20260616", "market", "market", "mkt_market_score", 70.0],
+        ["20260616", "market", "market", "mkt_market_score", 20.0],
         ["20260616", "stock", "000001", "stk_total_score", 82.0],
         ["20260616", "stock", "000001", "stk_liquidity_percentile", 90.0],
         ["20260616", "stock", "000001", "stk_amount_ratio_5d", 80.0],
@@ -80,6 +80,7 @@ def test_screening_engine_reads_gold_tables_and_writes_json(tmp_path):
 
     assert result.ok is True
     assert result.input_count == 2
+    assert result.after_hard_filter > 0  # 弱市仍产出候选，市场分层只在交易执行时拦截
     assert result.final[0]["code"] == "000001"
     assert result.final[0]["score"] > result.final[-1]["score"]
     assert result.traces

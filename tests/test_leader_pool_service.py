@@ -113,3 +113,36 @@ def test_leader_pool_uses_20cm_limit_progress_for_chinext(tmp_path: Path):
     assert 0.63 < row["limit_progress"] < 0.64
     assert not any("接近" in reason and "涨停" in reason for reason in row["reasons"])
     assert any("20cm涨停进度" in reason for reason in row["reasons"])
+
+
+def test_recent_one_day_leader_is_kept_with_source_date(tmp_path: Path):
+    screening_dir = tmp_path / "screening"
+    screening_dir.mkdir()
+    day1 = {
+        "trade_date": "20260617",
+        "final": [
+            {"code": "000001", "name": "历史龙头", "score": 90, "rank": 1, "metrics": {}, "context": {}},
+            {"code": "000002", "name": "普通候选", "score": 80, "rank": 4, "metrics": {}, "context": {}},
+        ],
+    }
+    day2 = {
+        "trade_date": "20260618",
+        "final": [
+            {"code": "000001", "name": "历史龙头", "score": 75, "rank": 6, "metrics": {}, "context": {}},
+            {"code": "000002", "name": "普通候选", "score": 78, "rank": 4, "metrics": {}, "context": {}},
+        ],
+    }
+    for payload in (day1, day2):
+        (screening_dir / f"screening_{payload['trade_date']}.json").write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+    result = LeaderPoolService(screening_dir=screening_dir).build_pool("20260618", lookback=10)
+
+    assert [row["code"] for row in result["rows"]] == ["000001"]
+    row = result["rows"][0]
+    assert row["pool_type"] == "近期龙头"
+    assert row["last_leader_date"] == "20260617"
+    assert row["source_date"] == "20260618"
+    assert row["leader_age_days"] == 1
+    assert row["leader_time_label"] == "上一交易日龙头"

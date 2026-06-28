@@ -19,7 +19,7 @@ def _to_float(value: Any, default: float = 0.0) -> float:
 
 
 class RealtimeOverlayService:
-    """Combine screening candidates with realtime quotes without touching gold tables."""
+    """Overlay realtime quotes on the requested day's screening candidates only."""
 
     def __init__(
         self,
@@ -68,11 +68,12 @@ class RealtimeOverlayService:
             "cancelled": sum(1 for r in overlay_rows if r["confirm_status"] == "cancelled"),
             "observe": sum(1 for r in overlay_rows if r["confirm_status"] == "observe"),
         }
+        screening_exists = self._screening_path(trade_date, profile).exists()
         payload = {
             "ok": bool(overlay_rows),
             "trade_date": trade_date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "source": "screening" if self._screening_path(trade_date, profile).exists() else "snapshot_trade_plans",
+            "source": "当日指标筛选" if screening_exists else "当日指标筛选未生成",
             "profile": profile or "",
             "thresholds": {
                 "min_open_gap_pct": self.min_open_gap_pct,
@@ -109,7 +110,7 @@ class RealtimeOverlayService:
                     return list(final)
             except Exception:
                 pass
-        return self._load_snapshot_plans(trade_date)
+        return []
 
     def _screening_path(self, trade_date: str, profile: str = "") -> Path:
         suffix = f"_{profile}" if profile else ""
@@ -117,29 +118,6 @@ class RealtimeOverlayService:
         if preferred.exists():
             return preferred
         return self.screening_dir / f"screening_{trade_date}.json"
-
-    def _load_snapshot_plans(self, trade_date: str) -> List[Dict[str, Any]]:
-        try:
-            snap = self.snapshot_reader.load(trade_date)
-        except Exception:
-            snap = None
-        rows = ((snap or {}).get("trade_plans") or {}).get("rows") or []
-        candidates = []
-        for idx, row in enumerate(rows, start=1):
-            code = normalize_stock_code(
-                row.get("股票代码") or row.get("stock_code") or row.get("代码") or "",
-                add_suffix=False,
-            )
-            if not code:
-                continue
-            candidates.append({
-                "code": code,
-                "name": row.get("股票名称") or row.get("名称") or row.get("name") or "",
-                "score": _to_float(row.get("综合分") or row.get("score"), 0.0),
-                "rank": idx,
-                "reasons": [str(row.get("模式") or row.get("pattern_type") or "交易计划候选")],
-            })
-        return candidates
 
     def _quote_map(self, codes: List[str]) -> Dict[str, Dict[str, Any]]:
         service = self._ensure_quote_service()

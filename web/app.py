@@ -384,6 +384,10 @@ def _factor_name_map() -> Dict[str, str]:
         "stk_amount_ratio_5d": "5日成交额比",
         "stk_new_high_20d": "20日强势位置",
         "stk_liquidity_percentile": "流动性分位",
+        "stk_sector_heat_score": "板块热度",
+        "stk_sector_persistence_score": "板块持续性",
+        "stk_sector_mainline_score": "主线强度",
+        "stk_sector_resonance_score": "板块共振",
         "stk_board_height": "连板高度",
         "stk_seal_time_quality": "封板时间质量",
         "stk_float_mv_fit": "流通市值适配",
@@ -1187,6 +1191,17 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
     for section in prepared:
         if section.get("name") == "ETL指标筛选":
             section["name"] = "指标筛选"
+
+    screening_section = _external_screening_section(date)
+    if screening_section is not None:
+        replaced = False
+        for index, section in enumerate(prepared):
+            if section.get("name") == "指标筛选":
+                prepared[index] = screening_section
+                replaced = True
+                break
+        if not replaced:
+            prepared.insert(0, screening_section)
     _enrich_candidate_indicator_sections(prepared, date)
 
     hotspot_rows = _factor_sector_rows(date, limit=20)
@@ -1271,6 +1286,29 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
     return prepared
 
 
+def _external_screening_section(date: str) -> Optional[Dict[str, Any]]:
+    """Build the indicator section from the standalone screening artifact."""
+    path = Path(WEB_DATA_DIR) / "screening" / f"screening_{date}.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    rows = [dict(row) for row in (payload.get("final") or []) if isinstance(row, dict)]
+    columns = ["rank", "code", "name", "score", "gold_rank", "reasons"]
+    return {
+        "name": "指标筛选",
+        "kind": "table",
+        "columns": columns,
+        "rows": rows,
+        "summary": (
+            f"当日独立筛选结果：输入 {int(payload.get('input_count') or 0)}，"
+            f"最终保留 {len(rows)}；市场强弱只控制交易，不删除候选。"
+        ),
+    }
+
+
 def _prepare_snapshot(snapshot: Optional[Dict[str, Any]], date: str) -> Optional[Dict[str, Any]]:
     if snapshot is None:
         return None
@@ -1305,7 +1343,9 @@ def _load_snapshot_cached(date: str, mtime_ns: int, size: int) -> Optional[Dict[
 
 
 @lru_cache(maxsize=96)
-def _load_prepared_snapshot_cached(date: str, mtime_ns: int, size: int) -> Optional[Dict[str, Any]]:
+def _load_prepared_snapshot_cached(
+    date: str, mtime_ns: int, size: int, screening_mtime_ns: int, screening_size: int,
+) -> Optional[Dict[str, Any]]:
     raw = _load_snapshot_cached(date, mtime_ns, size)
     return _prepare_snapshot(raw, date)
 
@@ -1323,7 +1363,13 @@ def _load_prepared_snapshot(date: Any) -> Optional[Dict[str, Any]]:
     stat = _snapshot_stat(text)
     if stat is None:
         return None
-    return _load_prepared_snapshot_cached(text, stat[0], stat[1])
+    screening_path = Path(WEB_DATA_DIR) / "screening" / f"screening_{text}.json"
+    try:
+        screening_stat = screening_path.stat()
+        screening_key = (int(screening_stat.st_mtime_ns), int(screening_stat.st_size))
+    except OSError:
+        screening_key = (0, 0)
+    return _load_prepared_snapshot_cached(text, stat[0], stat[1], screening_key[0], screening_key[1])
 
 
 def _list_dates() -> List[str]:
@@ -2302,7 +2348,7 @@ def api_realtime_overlay(
 @app.get("/api/leader-pool")
 def api_leader_pool(
     date: Optional[str] = None,
-    lookback: int = 5,
+    lookback: int = 10,
     limit: int = 30,
 ) -> Any:
     from core.realtime.leader_pool_service import LeaderPoolService
@@ -2321,7 +2367,7 @@ def api_leader_pool(
 @app.get("/api/intraday-strength")
 def api_intraday_strength(
     date: Optional[str] = None,
-    lookback: int = 5,
+    lookback: int = 10,
     limit: int = 30,
     stale_after_seconds: int = 90,
 ) -> Any:

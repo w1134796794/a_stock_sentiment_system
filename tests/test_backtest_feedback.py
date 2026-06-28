@@ -7,6 +7,14 @@ from backtest.backtest_engine import BacktestConfig, BacktestEngine, TradeRecord
 from backtest.attribution import build_attribution_frames
 from backtest.plan_source import build_backtest_plan_dir
 from desktop import backtest as backtest_view
+from core.screening.explanations import FACTOR_LABELS
+
+
+def test_internal_factor_ids_have_chinese_labels():
+    assert FACTOR_LABELS["tech_score"] == "技术综合分"
+    assert FACTOR_LABELS["stk_board_position"] == "打板身位"
+    assert FACTOR_LABELS["stk_sector_persistence_score"] == "板块持续性"
+    assert FACTOR_LABELS["stk_sector_resonance_score"] == "板块共振"
 
 
 def test_plan_source_keeps_only_top_three_for_backtest(tmp_path):
@@ -95,6 +103,10 @@ def test_backtest_view_distinguishes_closed_trades_and_execution_rows(tmp_path, 
         "20260627,000002,B,default,BUY,20.555,0,500,0,0\n",
         encoding="utf-8",
     )
+    (tmp_path / f"backtest_factor_feedback_{run}.csv").write_text(
+        "factor_id,factor_name,sample_count\ntech_score,tech_score,1\n",
+        encoding="utf-8",
+    )
 
     overview = backtest_view.backtest_overview(run)
 
@@ -102,6 +114,7 @@ def test_backtest_view_distinguishes_closed_trades_and_execution_rows(tmp_path, 
     assert overview["buy_count"] == 2
     assert overview["execution_count"] == 3
     assert overview["open_count"] == 1
+    assert overview["factor_feedback_rows"][0]["因子"] == "技术综合分"
     assert len(overview["trade_rows"]) == 2
     closed = next(row for row in overview["trade_rows"] if row["退出"] != "持仓中")
     opened = next(row for row in overview["trade_rows"] if row["退出"] == "持仓中")

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}龙头池 · 管理控制台{% endblock %}
 {% block page_title %}龙头池{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 因子候选池</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 近期因子龙头回看</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
@@ -13,9 +13,9 @@
   </select>
   {% endif %}
   <select id="lookback-select" class="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
-    <option value="3">近3日</option>
-    <option value="5" selected>近5日</option>
-    <option value="10">近10日</option>
+    <option value="5">近5日</option>
+    <option value="10" selected>近10日</option>
+    <option value="20">近20日</option>
   </select>
   <button id="refresh-btn" title="刷新"
           class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-semibold rounded-lg px-4 py-1.5">
@@ -27,14 +27,14 @@
 {% block content %}
 <section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
   <div class="lp-kpi"><div id="kpi-total" class="lp-kpi-v mono">--</div><div class="lp-kpi-l">入池</div></div>
-  <div class="lp-kpi"><div id="kpi-core" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">核心</div></div>
-  <div class="lp-kpi"><div id="kpi-watch" class="lp-kpi-v mono text-emerald-300">--</div><div class="lp-kpi-l">观察</div></div>
-  <div class="lp-kpi"><div id="kpi-cool" class="lp-kpi-v mono text-slate-400">--</div><div class="lp-kpi-l">冷却</div></div>
+  <div class="lp-kpi"><div id="kpi-core" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">当日龙头</div></div>
+  <div class="lp-kpi"><div id="kpi-recent" class="lp-kpi-v mono text-emerald-300">--</div><div class="lp-kpi-l">近期龙头</div></div>
+  <div class="lp-kpi"><div id="kpi-days" class="lp-kpi-v mono text-slate-300">--</div><div class="lp-kpi-l">覆盖交易日</div></div>
 </section>
 
 <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
   <div class="flex items-center gap-2 mb-4">
-    <h2 class="font-bold mr-auto">因子龙头池</h2>
+    <h2 class="font-bold mr-auto">近段龙头池</h2>
     <span id="pool-date" class="lp-pill mono">--</span>
     <span id="pool-updated" class="text-xs text-slate-500 mono">--</span>
   </div>
@@ -101,7 +101,7 @@
   }
   function typeClass(type) {
     if (type === '核心龙头') return 'core';
-    if (type === '强势观察') return 'strong';
+    if (type === '近期龙头') return 'strong';
     return '';
   }
 
@@ -129,8 +129,8 @@
     const counts = j.counts || {};
     document.getElementById('kpi-total').textContent = rows.length || 0;
     document.getElementById('kpi-core').textContent = counts['核心龙头'] || 0;
-    document.getElementById('kpi-watch').textContent = (counts['强势观察'] || 0) + (counts['候选观察'] || 0);
-    document.getElementById('kpi-cool').textContent = counts['冷却观察'] || 0;
+    document.getElementById('kpi-recent').textContent = counts['近期龙头'] || 0;
+    document.getElementById('kpi-days').textContent = j.lookback || 0;
     document.getElementById('pool-date').textContent = j.trade_date || '--';
     document.getElementById('pool-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
     if (!rows.length) {
@@ -153,11 +153,13 @@
         <div class="lp-metrics">
           <div class="lp-metric"><span>池排名</span><strong class="mono">#${esc(row.pool_rank || '--')}</strong></div>
           <div class="lp-metric"><span>评分</span><strong class="mono">${num(row.leader_score)}</strong></div>
-          <div class="lp-metric"><span>筛选名次</span><strong class="mono">${row.latest_rank ? '#' + row.latest_rank : '--'}</strong></div>
+          <div class="lp-metric"><span>来源名次</span><strong class="mono">${row.source_rank ? '#' + row.source_rank : '--'}</strong></div>
+          <div class="lp-metric"><span>龙头日期</span><strong class="mono">${esc(row.last_leader_date || '--')}</strong></div>
+          <div class="lp-metric"><span>龙头时效</span><strong>${esc(row.leader_time_label || '--')}</strong></div>
           <div class="lp-metric"><span>当日涨幅</span><strong class="${clsPct(row.pct_chg)}">${pct(row.pct_chg)}</strong></div>
           <div class="lp-metric"><span>涨停幅度</span><strong class="mono">${row.limit_pct == null ? '--' : num(row.limit_pct, 0) + 'cm'}</strong></div>
           <div class="lp-metric"><span>涨停进度</span><strong class="mono">${row.limit_progress == null ? '--' : Math.round(Number(row.limit_progress) * 100) + '%'}</strong></div>
-          <div class="lp-metric"><span>入选次数</span><strong class="mono">${esc(row.appearances || 0)}</strong></div>
+          <div class="lp-metric"><span>近段入选</span><strong class="mono">${esc(row.appearances || 0)}次</strong></div>
           <div class="lp-metric"><span>成交额</span><strong class="mono">${num(row.amount_ratio, 2)}x</strong></div>
           <div class="lp-metric"><span>技术</span><strong class="mono">${num(row.tech_score)}</strong></div>
           <div class="lp-metric"><span>流动性</span><strong class="mono">${num(row.liquidity_score)}</strong></div>

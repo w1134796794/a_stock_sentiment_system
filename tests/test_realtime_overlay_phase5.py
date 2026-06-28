@@ -61,3 +61,24 @@ def test_realtime_overlay_confirms_high_open_and_cancels_low_open(tmp_path):
     assert rows["300001"]["confirm_status"] == "observe"
     assert payload["counts"] == {"confirmed": 1, "cancelled": 1, "observe": 1}
     assert (tmp_path / "overlay_20260616.json").exists()
+
+
+def test_realtime_overlay_does_not_fallback_to_snapshot_plans(tmp_path):
+    class FakeSnapshotReader:
+        def latest(self):
+            return "20260616"
+
+        def load(self, trade_date):
+            return {"trade_plans": {"rows": [{"股票代码": "000001", "股票名称": "旧计划"}]}}
+
+    screening_dir = tmp_path / "screening"
+    screening_dir.mkdir()
+    service = RealtimeOverlayService(
+        FakeQuoteService(), screening_dir=screening_dir,
+        snapshot_reader=FakeSnapshotReader(), output_dir=tmp_path,
+    )
+
+    payload = service.build_overlay("20260616")
+
+    assert payload["rows"] == []
+    assert payload["source"] == "当日指标筛选未生成"

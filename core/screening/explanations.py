@@ -5,6 +5,11 @@ from typing import Any, Dict, Iterable, List, Optional
 
 
 FACTOR_LABELS: Dict[str, str] = {
+    "tech_score": "技术综合分",
+    "volume_score": "量能综合分",
+    "liquidity_score": "流动性分位",
+    "sector_resonance_score": "板块共振",
+    "board_score": "打板身位",
     "mkt_market_score": "市场综合分",
     "stk_total_score": "个股综合分",
     "stk_amount_ratio_5d": "成交额相对5日",
@@ -17,9 +22,18 @@ FACTOR_LABELS: Dict[str, str] = {
     "stk_sector_heat_score": "板块热度",
     "stk_sector_persistence_score": "板块持续性",
     "stk_sector_mainline_score": "主线强度",
+    "stk_board_position": "打板身位",
+    "stk_board_height": "连板高度",
+    "stk_seal_time_quality": "封板时间质量",
+    "stk_float_mv_fit": "流通市值适配",
 }
 
 FACTOR_NOTE: Dict[str, str] = {
+    "tech_score": "技术形态综合表现靠前",
+    "volume_score": "量能状态较好",
+    "liquidity_score": "流动性处于候选前列",
+    "sector_resonance_score": "所属板块形成共振",
+    "board_score": "涨停身位质量较好",
     "mkt_market_score": "市场环境可交易",
     "stk_total_score": "个股综合强度靠前",
     "stk_amount_ratio_5d": "资金关注度改善",
@@ -32,6 +46,10 @@ FACTOR_NOTE: Dict[str, str] = {
     "stk_sector_heat_score": "所属板块热度靠前",
     "stk_sector_persistence_score": "所属板块持续性较好",
     "stk_sector_mainline_score": "所属题材具备主线强度",
+    "stk_board_position": "涨停身位质量较好",
+    "stk_board_height": "连板高度具备辨识度",
+    "stk_seal_time_quality": "封板时间质量较好",
+    "stk_float_mv_fit": "流通市值适合短线交易",
 }
 
 

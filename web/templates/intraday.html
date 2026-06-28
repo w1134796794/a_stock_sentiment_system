@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}盘中转强 · 管理控制台{% endblock %}
 {% block page_title %}盘中转强{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 因子龙头池实时确认</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 近期龙头盘中转强观察</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
@@ -13,9 +13,9 @@
   </select>
   {% endif %}
   <select id="lookback-select" class="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
-    <option value="3">近3日</option>
-    <option value="5" selected>近5日</option>
-    <option value="10">近10日</option>
+    <option value="5">近5日</option>
+    <option value="10" selected>近10日</option>
+    <option value="20">近20日</option>
   </select>
   <span id="rt-clock" class="mono text-xs text-slate-500"></span>
   <button id="refresh-btn" title="刷新"
@@ -35,7 +35,7 @@
 
 <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
   <div class="flex items-center gap-2 mb-4">
-    <h2 class="font-bold mr-auto">实时转强确认</h2>
+    <h2 class="font-bold mr-auto">近期龙头转强确认</h2>
     <span id="pool-date" class="is-pill mono">--</span>
     <span id="pool-updated" class="text-xs text-slate-500 mono">--</span>
   </div>
@@ -149,7 +149,7 @@
         <div class="is-head">
           <a href="/stock/${esc(row.code)}?date=${esc(j.trade_date || initialDate)}" class="min-w-0 hover:text-emerald-300">
             <div class="is-name">${esc(nameOf(row))}</div>
-            <div class="is-code mono">${esc(row.code || '--')} · ${esc(row.pool_type || '--')}</div>
+            <div class="is-code mono">${esc(row.code || '--')} · ${esc(row.leader_time_label || row.pool_type || '--')}</div>
           </a>
           <span class="is-status ${esc(row.status || 'observe')}">${esc(row.status_text || '观察')}</span>
         </div>
@@ -163,7 +163,8 @@
           <div class="is-metric"><span>现价</span><strong class="mono">${px(row.last_price)}</strong></div>
           <div class="is-metric"><span>开盘后</span><strong class="${clsPct(row.intraday_lift_pct)}">${pct(row.intraday_lift_pct)}</strong></div>
           <div class="is-metric"><span>池排名</span><strong class="mono">#${esc(row.pool_rank || '--')}</strong></div>
-          <div class="is-metric"><span>筛选名次</span><strong class="mono">${row.latest_rank ? '#' + row.latest_rank : '--'}</strong></div>
+          <div class="is-metric"><span>来源名次</span><strong class="mono">${row.source_rank ? '#' + row.source_rank : '--'}</strong></div>
+          <div class="is-metric"><span>龙头日期</span><strong class="mono">${esc(row.last_leader_date || '--')}</strong></div>
         </div>
         <div class="is-reason">${esc(row.reason || '--')}</div>
         <div class="is-action">${esc(row.action || '')}</div>

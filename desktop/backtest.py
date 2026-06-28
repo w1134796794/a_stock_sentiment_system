@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from config.settings import OUTPUT_DIR
+from core.screening.explanations import FACTOR_LABELS
 
 RESULTS_DIR = Path(OUTPUT_DIR) / "backtest_results"
 _RUN_RE = re.compile(r"^backtest_(summary|nav|trades)_(\d{8}_\d{6})\.csv$")
@@ -314,8 +315,9 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
 
     factor_feedback_rows = []
     for r in load_table("factor_feedback", run):
+        factor_id = str(r.get("factor_id") or "")
         factor_feedback_rows.append({
-            "因子": r.get("factor_name") or r.get("factor_id") or "",
+            "因子": FACTOR_LABELS.get(factor_id) or r.get("factor_name") or factor_id,
             "样本": r.get("sample_count", 0),
             "总体胜率": _fmt_pct(r.get("win_rate")),
             "强项样本": r.get("strong_count", 0),

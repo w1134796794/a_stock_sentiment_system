@@ -38,8 +38,8 @@ def _pct_text(value: Any) -> str:
 class LeaderPoolService:
     """Build a factor-native leader pool from ``webdata/screening`` results.
 
-    龙头池在当前体系里不再是旧策略池，而是“近几日因子筛选反复出现、当日排名靠前、
-    且量价/强势位置/流动性评分较高”的候选集合。
+    龙头池在当前体系里不再是旧策略池，而是近段筛选中曾进入前 3 名的历史龙头集合；
+    当日排名、量价、强势位置和流动性仅用于更新龙头评分与盘中观察顺序。
     """
 
     def __init__(self, *, screening_dir: Optional[Path] = None) -> None:
@@ -51,7 +51,7 @@ class LeaderPoolService:
         self,
         trade_date: Optional[str] = None,
         *,
-        lookback: int = 5,
+        lookback: int = 10,
         limit: int = 30,
     ) -> Dict[str, Any]:
         dates = self._recent_dates(trade_date, lookback)
@@ -72,20 +72,29 @@ class LeaderPoolService:
                     "scores": [],
                     "ranks": [],
                     "latest": None,
+                    "last_item": None,
+                    "last_date": "",
+                    "leader_dates": [],
                 })
                 bucket["name"] = item.get("name") or bucket.get("name") or ""
                 bucket["appearances"] += 1
                 bucket["dates"].append(date)
                 bucket["scores"].append(_to_float(item.get("score")))
-                bucket["ranks"].append(int(_to_float(item.get("rank"), 999)))
+                item_rank = int(_to_float(item.get("rank"), 999))
+                bucket["ranks"].append(item_rank)
+                bucket["last_item"] = item
+                bucket["last_date"] = date
+                if item_rank <= 3:
+                    bucket["leader_dates"].append(date)
                 if date == target:
                     bucket["latest"] = item
 
-        rows = [self._build_pool_row(raw, target, max(len(dates), 1)) for raw in by_code.values()]
+        rows = [self._build_pool_row(raw, target, dates) for raw in by_code.values()]
         rows = [row for row in rows if row is not None]
         rows.sort(
             key=lambda row: (
                 row["pool_type_order"],
+                int(row.get("leader_age_days") or 0),
                 -_to_float(row.get("leader_score")),
                 int(row.get("latest_rank") or 999),
             )
@@ -109,20 +118,24 @@ class LeaderPoolService:
             "rows": selected,
         }
 
-    def _build_pool_row(self, raw: Dict[str, Any], target: str, lookback_days: int) -> Optional[Dict[str, Any]]:
+    def _build_pool_row(self, raw: Dict[str, Any], target: str, dates: List[str]) -> Optional[Dict[str, Any]]:
         latest = raw.get("latest")
-        if latest is None and raw.get("appearances", 0) < 2:
+        leader_dates = sorted(set(raw.get("leader_dates") or []))
+        if not leader_dates:
             return None
 
-        source = latest or {}
+        source = latest or raw.get("last_item") or {}
+        source_date = target if latest is not None else str(raw.get("last_date") or "")
         metrics = source.get("metrics") or {}
         context = source.get("context") or {}
         latest_rank = int(_to_float(source.get("rank"), 999)) if latest else None
+        source_rank_value = int(_to_float(source.get("rank"), 999)) if source else 999
+        source_rank = source_rank_value if source_rank_value < 999 else None
         latest_score = _to_float(source.get("score"), max(raw.get("scores") or [0.0]))
         best_rank = min(raw.get("ranks") or [999])
         avg_score = sum(raw.get("scores") or [0.0]) / max(len(raw.get("scores") or []), 1)
-        appearance_score = min(100.0, raw.get("appearances", 0) / max(lookback_days, 1) * 100.0)
-        rank_score = max(0.0, 100.0 - (float(latest_rank or best_rank or 999) - 1.0) * 9.0)
+        appearance_score = min(100.0, raw.get("appearances", 0) / max(len(dates), 1) * 100.0)
+        rank_score = max(0.0, 100.0 - (float(source_rank or best_rank or 999) - 1.0) * 9.0)
         tech_score = _to_float(metrics.get("tech_score"), _to_float(source.get("tech_score"), 50.0))
         liquidity = _to_float(metrics.get("stk_liquidity_percentile"), _to_float(context.get("liquidity_score"), 50.0))
         new_high = _to_float(metrics.get("stk_new_high_20d"), _to_float(context.get("new_high_ratio"), 0.0) * 100.0)
@@ -147,20 +160,23 @@ class LeaderPoolService:
         )
         leader_score = max(0.0, min(100.0, leader_score))
 
+        last_leader_date = leader_dates[-1] if leader_dates else ""
+        target_index = dates.index(target) if target in dates else max(len(dates) - 1, 0)
+        leader_index = dates.index(last_leader_date) if last_leader_date in dates else target_index
+        leader_age_days = max(target_index - leader_index, 0)
         if latest and (latest_rank or 999) <= 3:
             pool_type = "核心龙头"
             order = 0
-        elif latest and leader_score >= 75:
-            pool_type = "强势观察"
-            order = 1
-        elif latest:
-            pool_type = "候选观察"
-            order = 2
+            leader_time_label = "当日龙头"
         else:
-            pool_type = "冷却观察"
-            order = 3
+            pool_type = "近期龙头"
+            order = 1
+            leader_time_label = "上一交易日龙头" if leader_age_days == 1 else f"{leader_age_days}个交易日前龙头"
 
-        reasons = self._reasons(pool_type, latest_rank, leader_score, raw, context, metrics, code, name)
+        reasons = self._reasons(
+            pool_type, source_rank, source_date, target, last_leader_date,
+            leader_score, raw, context, metrics, code, name,
+        )
         return {
             "code": code,
             "name": name,
@@ -168,10 +184,17 @@ class LeaderPoolService:
             "pool_type_order": order,
             "leader_score": round(leader_score, 2),
             "latest_rank": latest_rank,
+            "source_rank": source_rank,
+            "source_date": source_date,
+            "is_today_candidate": latest is not None,
             "best_rank": best_rank if best_rank != 999 else None,
             "avg_score": round(avg_score, 2),
             "appearances": int(raw.get("appearances") or 0),
             "active_dates": raw.get("dates") or [],
+            "leader_dates": leader_dates,
+            "last_leader_date": last_leader_date,
+            "leader_age_days": leader_age_days,
+            "leader_time_label": leader_time_label,
             "latest_score": round(latest_score, 2),
             "pct_chg": round(pct_chg, 2),
             "limit_pct": round(limit_pct, 2),
@@ -189,7 +212,10 @@ class LeaderPoolService:
     @staticmethod
     def _reasons(
         pool_type: str,
-        latest_rank: Optional[int],
+        source_rank: Optional[int],
+        source_date: str,
+        target: str,
+        last_leader_date: str,
         leader_score: float,
         raw: Dict[str, Any],
         context: Dict[str, Any],
@@ -198,9 +224,12 @@ class LeaderPoolService:
         name: Any,
     ) -> List[str]:
         reasons: List[str] = []
-        if latest_rank:
-            reasons.append(f"当日因子筛选排名第 {latest_rank}")
+        if source_rank:
+            prefix = "当日" if source_date == target else source_date
+            reasons.append(f"{prefix}因子筛选排名第 {source_rank}")
         reasons.append(f"龙头池评分 {leader_score:.1f}，归类为{pool_type}")
+        if last_leader_date and last_leader_date != target:
+            reasons.append(f"最近一次龙头身份来自 {last_leader_date}")
         if raw.get("appearances", 0) >= 2:
             reasons.append(f"近 {len(raw.get('dates') or [])} 次进入候选，具备持续关注价值")
         pct_chg = _to_float(context.get("pct_chg"))
@@ -260,7 +289,7 @@ class IntradayStrengthService:
         self,
         trade_date: Optional[str] = None,
         *,
-        lookback: int = 5,
+        lookback: int = 10,
         limit: int = 30,
     ) -> Dict[str, Any]:
         pool = self.pool_service.build_pool(trade_date, lookback=lookback, limit=limit)
