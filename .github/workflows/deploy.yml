@@ -26,16 +26,16 @@ jobs:
           ssh ${{ secrets.ALIYUN_USER }}@${{ secrets.ALIYUN_HOST }} << 'EOF'
             set -e
             cd "${{ secrets.ALIYUN_APP_DIR }}"
-
-            git fetch origin
+            git config --global --add safe.directory "$PWD"
+            git fetch origin main
             git reset --hard origin/main
-
-            if [ ! -d ".venv" ]; then
-              python3 -m venv .venv
-            fi
-
+            if [ ! -d ".venv" ]; then python3 -m venv .venv; fi
             . .venv/bin/activate
-            pip install -r requirements.txt
+            pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+            # 调试：打印 systemctl 路径和 sudo 权限
+            which systemctl
+            sudo -l
 
             sudo systemctl restart a-stock
             sudo systemctl status a-stock --no-pager
