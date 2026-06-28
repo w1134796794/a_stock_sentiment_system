@@ -125,7 +125,7 @@ INDUSTRY_MAPPING_FILE = DATA_DIR / "Industry_Mapping.csv"
 # ============================================
 # 交易日历
 # ============================================
-TRADE_CALENDAR_FILE = DATA_DIR / "trade_calendar.csv"
+TRADE_CALENDAR_FILE = "trade_calendar.csv"
 
 # ============================================
 # 微信公众号配置
