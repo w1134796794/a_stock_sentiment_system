@@ -17,7 +17,7 @@ python-dotenv>=1.0.0
 fastapi>=0.110.0
 uvicorn>=0.27.0
 jinja2>=3.1.0
-pywebview>=5.0
+# pywebview>=5.0
 
 # ===== 打包成 exe（可选，仅构建机需要）=====
 # 构建：python scripts/build_manager.py  （产物在 dist/）

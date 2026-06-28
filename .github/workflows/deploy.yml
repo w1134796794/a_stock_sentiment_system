@@ -27,6 +27,9 @@ jobs:
             set -e
             cd "${{ secrets.ALIYUN_APP_DIR }}"
 
+            # 添加安全目录例外（解决 dubious ownership）
+            git config --global --add safe.directory "$PWD"
+
             git fetch origin
             git reset --hard origin/main
 
