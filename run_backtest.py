@@ -103,6 +103,10 @@ def save_backtest_results(result: dict, output_dir: str, metadata: dict | None =
             'plan_score': getattr(t, 'plan_score', 0),
             'plan_reason': getattr(t, 'plan_reason', ''),
             'factor_metrics_json': getattr(t, 'factor_metrics_json', ''),
+            'factor_context_json': getattr(t, 'factor_context_json', ''),
+            'open_gap_pct': getattr(t, 'open_gap_pct', 0),
+            'market_score': getattr(t, 'market_score', 0),
+            'amount_ratio': getattr(t, 'amount_ratio', 0),
         } for t in result['trade_history']])
 
         trades_file = output_path / f"backtest_trades_{timestamp}.csv"
@@ -150,6 +154,19 @@ def save_backtest_results(result: dict, output_dir: str, metadata: dict | None =
             logger.info(f"回测归因已保存: {path}")
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"回测归因报表生成失败: {exc}")
+
+    try:
+        from backtest.walk_forward import build_walk_forward_frames
+
+        folds, oos_summary = build_walk_forward_frames(result)
+        for name, frame in (("walk_forward", folds), ("walk_forward_summary", oos_summary)):
+            if frame is None or frame.empty:
+                continue
+            path = output_path / f"backtest_{name}_{timestamp}.csv"
+            frame.to_csv(path, index=False, encoding="utf-8-sig")
+            logger.info(f"滚动验证报表已保存: {path}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"滚动验证报表生成失败: {exc}")
 
 
 def run_risk_analysis_demo():

@@ -245,9 +245,12 @@ class ReplayEngine:
             if gap is None:
                 logger.debug(f"[{date}] {plan.name}({code}) 无法确认早盘是否高开，放弃买入")
                 continue
-            if gap <= 0:
+            if gap <= self.cfg.min_open_gap:
                 label = "低开" if gap < 0 else "平开"
                 logger.info(f"[{date}] {plan.name}({code}) {label}{gap:.2%}，未高开，放弃竞价买点")
+                continue
+            if gap > self.cfg.max_open_gap:
+                logger.info(f"[{date}] {plan.name}({code}) 高开{gap:.2%}超过{self.cfg.max_open_gap:.2%}，不追高")
                 continue
 
             position_pct = self.sizing_fn(plan) if self.sizing_fn else plan.position_pct

@@ -742,6 +742,10 @@ class BacktestController:
                     "plan_score": float(trade.get("plan_score") or 0),
                     "plan_reason": trade.get("plan_reason") or "",
                     "factor_metrics_json": trade.get("factor_metrics_json") or "",
+                    "factor_context_json": trade.get("factor_context_json") or "",
+                    "open_gap_pct": float(trade.get("open_gap_pct") or 0),
+                    "market_score": float(trade.get("market_score") or 0),
+                    "amount_ratio": float(trade.get("amount_ratio") or 0),
                     "stop_loss_price": entry_price * (1 - engine.config.stop_loss_pct),
                     "highest_price": entry_price,
                 }

@@ -1,6 +1,6 @@
 screening_profiles:
   default:
-    description: "Gold 默认筛选：先过滤市场与流动性，再按涨停强度、流动性、强势位置逐层收敛。"
+    description: "默认短线筛选：弱市空仓，按候选池分位综合量能、板块主线、流动性与技术强度。"
     candidate_source: factor_stock_wide
     missing:
       neutral_score: 50
@@ -8,8 +8,8 @@ screening_profiles:
       - name: "市场环境不弱"
         factor: mkt_market_score
         op: ">="
-        value: 10
-        reason: "市场综合分未进入极端风险区"
+        value: 50
+        reason: "市场综合分达到允许开仓区间"
       - name: "个股流动性合格"
         factor: stk_liquidity_percentile
         op: ">="
@@ -21,7 +21,7 @@ screening_profiles:
         factor: limit_progress
         op: ">="
         value: 0.95
-        min_keep: 30
+        min_keep: 8
         max_drop_ratio: 0.75
         reason: "当日涨幅接近对应板块涨停幅度"
       - priority: 2
@@ -29,21 +29,31 @@ screening_profiles:
         factor: stk_new_high_20d
         op: ">="
         value: 70
-        min_keep: 8
+        min_keep: 5
         max_drop_ratio: 0.70
         reason: "价格位置接近阶段强势区"
     ranking:
+      candidate_percentile: true
       weights:
-        tech_score: 0.50
-        stk_liquidity_percentile: 0.30
-        stk_new_high_20d: 0.20
+        tech_score: 0.20
+        stk_liquidity_percentile: 0.15
+        stk_new_high_20d: 0.05
+        stk_amount_ratio_5d: 0.20
+        stk_board_position: 0.15
+        stk_sector_resonance_score: 0.25
       penalties:
-        - name: "成交额极弱扣分"
-          factor: stk_amount_ratio_5d
-          below: 35
-          floor: 20
-          max_penalty: 2
+        - name: "成交额偏弱扣分"
+          factor: amount_ratio
+          below: 0.8
+          floor: 0.4
+          max_penalty: 10
           reason: "涨停但成交额相对5日偏弱，次日承接风险升高"
+        - name: "成交额过热扣分"
+          factor: amount_ratio
+          above: 1.5
+          ceiling: 3.0
+          max_penalty: 15
+          reason: "成交额相对5日过热，次日兑现压力升高"
       top_n: 10
 
   momentum_repair:

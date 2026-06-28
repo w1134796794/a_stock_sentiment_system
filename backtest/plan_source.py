@@ -172,6 +172,8 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
     for factor, value in factor_metrics.items():
         out[f"因子_{factor}"] = value
+    for key, value in raw_context.items():
+        out[f"原始_{key}"] = value
     return out
 
 

@@ -31,6 +31,13 @@ class BacktestConfig:
     max_sector_concentration: float = 0.4  # 单一板块最大仓位（仅风控开启时生效）
     max_plan_rank: int = 3  # 只执行每日候选前N名，后续候选仅观察
 
+    # 入场与市场分层
+    min_open_gap: float = 0.0  # 必须严格高开
+    max_open_gap: float = 0.03  # 高开超过3%不追
+    market_entry_threshold: float = 50.0  # 弱市停止开仓
+    market_strong_threshold: float = 70.0  # 强市才扩展到前N名
+    neutral_market_max_rank: int = 1  # 中性市场只买第1名
+
     # 风控闸门总开关：关闭后不施加组合层约束（单票/总仓/持仓数/板块集中度），
     # 仅保留现金/价格有效性等基础校验，用于对比"无风控"模拟结果。个股止损止盈
     # 属于交易计划的退出策略，始终生效，不受此开关影响。
@@ -70,6 +77,11 @@ class BacktestConfig:
             max_total_position=float(risk_config.max_total_position),
             max_positions=int(risk_config.max_positions),
             max_sector_concentration=float(risk_config.max_sector_concentration),
+            min_open_gap=float(risk_config.min_open_gap),
+            max_open_gap=float(risk_config.max_open_gap),
+            market_entry_threshold=float(risk_config.market_entry_threshold),
+            market_strong_threshold=float(risk_config.market_strong_threshold),
+            neutral_market_max_rank=int(risk_config.neutral_market_max_rank),
             risk_control=bool(risk_config.enabled if risk_control is None else risk_control),
             stop_loss_pct=float(risk_config.hard_stop_loss),
             trailing_stop=trailing_pct > 0,
@@ -109,6 +121,10 @@ class TradeRecord:
     plan_score: float = 0.0
     plan_reason: str = ""
     factor_metrics_json: str = ""
+    factor_context_json: str = ""
+    open_gap_pct: float = 0.0
+    market_score: float = 0.0
+    amount_ratio: float = 0.0
 
 
 class BacktestEngine:
@@ -126,6 +142,7 @@ class BacktestEngine:
         self.current_positions: Dict[str, Dict] = {}  # 当前持仓
         self.cash: float = self.config.initial_capital
         self.total_capital: float = self.config.initial_capital
+        self._last_entry_gap: Dict[str, float] = {}
 
     def export_state(self) -> Dict[str, Any]:
         """导出可落盘的账户状态，用于单日接力回测。"""
@@ -262,9 +279,19 @@ class BacktestEngine:
             # 只保留买入计划
             if '动作' in df.columns:
                 df = df[df['动作'] == '买入']
-            if self.config.max_plan_rank and self.config.max_plan_rank > 0 and '优先级' in df.columns:
+            market_score = 0.0
+            if '原始_mkt_market_score' in df.columns:
+                values = pd.to_numeric(df['原始_mkt_market_score'], errors='coerce').dropna()
+                market_score = float(values.iloc[0]) if not values.empty else 0.0
+            if market_score > 0 and market_score < self.config.market_entry_threshold:
+                logger.info(f"[{date}] 市场评分{market_score:.1f}，弱市停止开仓")
+                return pd.DataFrame()
+            effective_rank = self.config.max_plan_rank
+            if market_score > 0 and market_score < self.config.market_strong_threshold:
+                effective_rank = min(effective_rank, self.config.neutral_market_max_rank)
+            if effective_rank and effective_rank > 0 and '优先级' in df.columns:
                 rank = pd.to_numeric(df['优先级'], errors='coerce')
-                df = df[rank.notna() & (rank <= self.config.max_plan_rank)].copy()
+                df = df[rank.notna() & (rank <= effective_rank)].copy()
                 df['_rank'] = pd.to_numeric(df['优先级'], errors='coerce').fillna(999999)
                 sort_cols = ['_rank']
                 ascending = [True]
@@ -373,6 +400,14 @@ class BacktestEngine:
         plan_score = self._float(plan.get('综合评分'), 0.0)
         plan_reason = str(plan.get('理由') or '')
         factor_metrics_json = self._factor_metrics_json(plan)
+        factor_context_json = self._factor_context_json(plan)
+        factor_context = json.loads(factor_context_json or '{}')
+        open_gap = self._last_entry_gap.pop(stock_code, 0.0)
+        market_score = self._float(factor_context.get('mkt_market_score'))
+        amount_ratio = self._float(
+            factor_context.get('amount_ratio_5d'),
+            self._float(factor_context.get('amount_ratio')),
+        )
 
         self.current_positions[stock_code] = {
             'stock_name': stock_name,
@@ -388,6 +423,10 @@ class BacktestEngine:
             'plan_score': plan_score,
             'plan_reason': plan_reason,
             'factor_metrics_json': factor_metrics_json,
+            'factor_context_json': factor_context_json,
+            'open_gap_pct': open_gap,
+            'market_score': market_score,
+            'amount_ratio': amount_ratio,
             'stop_loss_price': entry_price * (1 - self.config.stop_loss_pct),
             'highest_price': entry_price  # 用于跟踪回撤
         }
@@ -418,6 +457,10 @@ class BacktestEngine:
             plan_score=plan_score,
             plan_reason=plan_reason,
             factor_metrics_json=factor_metrics_json,
+            factor_context_json=factor_context_json,
+            open_gap_pct=open_gap,
+            market_score=market_score,
+            amount_ratio=amount_ratio,
         )
         self.trade_history.append(trade_record)
 
@@ -460,10 +503,14 @@ class BacktestEngine:
         if gap is None:
             logger.info(f"{stock_name} 昨收价缺失，不能确认高开，放弃买入")
             return False, 0
-        if gap <= 0:
+        if gap <= self.config.min_open_gap:
             label = "低开" if gap < 0 else "平开"
             logger.info(f"{stock_name} {label}{gap:.2%}，未高开，放弃竞价买点")
             return False, 0
+        if gap > self.config.max_open_gap:
+            logger.info(f"{stock_name} 高开{gap:.2%}超过{self.config.max_open_gap:.2%}，不追高")
+            return False, 0
+        self._last_entry_gap[stock_code] = gap
 
         # 检查是否涨停开盘（无法买入）
         if prev_close and prev_close > 0:
@@ -530,6 +577,8 @@ class BacktestEngine:
             current_price = self._float(daily_bar.get('close'))
             if current_price <= 0:
                 continue
+            session_open = self._float(daily_bar.get('open'), current_price)
+            session_low = self._float(daily_bar.get('low'), current_price)
 
             # 最高价采用当日 high，而不是只看收盘价；触发仍按收盘确认，避免
             # 仅有 OHLC 时假设无法得知的日内高低点先后顺序。
@@ -547,9 +596,14 @@ class BacktestEngine:
             position['market_value'] = position['shares'] * current_price
 
             # ========== 1. 硬止损（必须执行）==========
-            if current_price <= position['stop_loss_price']:
-                stocks_to_sell.append((stock_code, current_price, 'stop_loss'))
-                logger.info(f"[{date}] {position['stock_name']} 触发硬止损: {current_price:.2f} (亏损{current_pnl_pct:.2%})")
+            stop_price = self._float(position.get('stop_loss_price'))
+            if session_open <= stop_price:
+                stocks_to_sell.append((stock_code, session_open, 'stop_loss_gap'))
+                logger.info(f"[{date}] {position['stock_name']} 跳空跌破止损线，按开盘价止损: {session_open:.2f}")
+                continue
+            if session_low <= stop_price:
+                stocks_to_sell.append((stock_code, stop_price, 'stop_loss'))
+                logger.info(f"[{date}] {position['stock_name']} 盘中触发硬止损: {stop_price:.2f}")
                 continue
 
             # ========== 2. 跟踪止损（移动止盈）==========
@@ -623,7 +677,7 @@ class BacktestEngine:
             holding_days=holding_days,
             hot_resonance=position['hot_resonance'],
             resonance_sectors=position['resonance_sectors'],
-            stop_loss_triggered=(reason == 'stop_loss'),
+            stop_loss_triggered=reason.startswith('stop_loss'),
             take_profit_triggered=(reason == 'trailing_stop'),
             entry_date=position.get('entry_date', ''),
             exit_reason=reason,
@@ -631,6 +685,10 @@ class BacktestEngine:
             plan_score=float(position.get('plan_score') or 0.0),
             plan_reason=str(position.get('plan_reason') or ''),
             factor_metrics_json=str(position.get('factor_metrics_json') or ''),
+            factor_context_json=str(position.get('factor_context_json') or ''),
+            open_gap_pct=float(position.get('open_gap_pct') or 0.0),
+            market_score=float(position.get('market_score') or 0.0),
+            amount_ratio=float(position.get('amount_ratio') or 0.0),
         )
 
         self.trade_history.append(trade_record)
@@ -753,6 +811,23 @@ class BacktestEngine:
             if key.startswith('因子_'):
                 metrics[key.replace('因子_', '', 1)] = cls._float(value)
         return json.dumps(metrics, ensure_ascii=False, sort_keys=True)
+
+    @classmethod
+    def _factor_context_json(cls, plan: pd.Series) -> str:
+        text = str(plan.get('原始指标') or '').strip()
+        if text and text.lower() not in ('nan', 'none'):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return json.dumps(parsed, ensure_ascii=False, sort_keys=True)
+            except Exception:
+                pass
+        context = {}
+        for key, value in plan.items():
+            key = str(key)
+            if key.startswith('原始_'):
+                context[key.replace('原始_', '', 1)] = cls._float(value)
+        return json.dumps(context, ensure_ascii=False, sort_keys=True)
 
     def _get_prev_close(self, stock_code: str, date: str) -> Optional[float]:
         """获取昨日收盘价（B-1：真实交易日历取前一交易日）"""

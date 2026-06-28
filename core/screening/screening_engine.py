@@ -420,7 +420,10 @@ class ScreeningEngine:
         return pd.to_numeric(col, errors="coerce").fillna(neutral_score)
 
     def _ranking_score(self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float) -> pd.Series:
-        weights = (cfg.get("ranking") or {}).get("weights") or {"stk_total_score": 1.0}
+        ranking_cfg = cfg.get("ranking") or {}
+        if bool(ranking_cfg.get("candidate_percentile")):
+            return self._candidate_percentile_score(df, cfg, neutral_score)
+        weights = ranking_cfg.get("weights") or {"stk_total_score": 1.0}
         total_weight = sum(max(float(w), 0.0) for w in weights.values())
         if total_weight <= 0:
             return pd.Series([neutral_score] * len(df), index=df.index)
@@ -432,6 +435,26 @@ class ScreeningEngine:
         score = score / total_weight
         penalty = self._ranking_penalty(df, cfg, neutral_score)
         return (score - penalty).clip(lower=0, upper=100)
+
+    def _candidate_percentile_score(
+        self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float,
+    ) -> pd.Series:
+        """Rank each factor inside the current candidate pool before weighting."""
+        weights = (cfg.get("ranking") or {}).get("weights") or {"stk_total_score": 1.0}
+        total_weight = sum(max(float(weight), 0.0) for weight in weights.values())
+        if total_weight <= 0 or df.empty:
+            return pd.Series([neutral_score] * len(df), index=df.index, dtype=float)
+        score = pd.Series(0.0, index=df.index, dtype=float)
+        for factor, weight in weights.items():
+            weight = max(float(weight), 0.0)
+            values = self._factor_series(df, factor, neutral_score)
+            if values.nunique(dropna=True) <= 1:
+                percentile = pd.Series(50.0, index=df.index, dtype=float)
+            else:
+                percentile = values.rank(method="average", pct=True) * 100.0
+            score += percentile * weight
+        penalty = self._ranking_penalty(df, cfg, neutral_score)
+        return (score / total_weight - penalty).clip(lower=0, upper=100)
 
     def _ranking_penalty(self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float) -> pd.Series:
         penalty = pd.Series([0.0] * len(df), index=df.index, dtype=float)

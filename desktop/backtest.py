@@ -361,6 +361,33 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
     for row in rank_feedback_rows:
         row.pop("_pnl", None)
 
+    walk_forward_rows = []
+    for r in load_table("walk_forward", run):
+        walk_forward_rows.append({
+            "折": int(float(r.get("fold") or 0)),
+            "训练区间": f"{r.get('train_start') or ''} - {r.get('train_end') or ''}",
+            "验证区间": f"{r.get('validation_start') or ''} - {r.get('validation_end') or ''}",
+            "入场组合": r.get("selected_profile") or "",
+            "训练样本": int(float(r.get("train_samples") or 0)),
+            "训练胜率": _fmt_pct(r.get("train_win_rate")),
+            "验证样本": int(float(r.get("validation_samples") or 0)),
+            "验证胜率": _fmt_pct(r.get("validation_win_rate")),
+            "验证盈亏": _fmt_money(r.get("validation_total_pnl")),
+            "验证止损率": _fmt_pct(r.get("validation_stop_rate")),
+        })
+    walk_summary_raw = load_table("walk_forward_summary", run)
+    walk_forward_summary = None
+    if walk_summary_raw:
+        r = walk_summary_raw[0]
+        walk_forward_summary = {
+            "折数": int(float(r.get("folds") or 0)),
+            "样本外样本": int(float(r.get("oos_samples") or 0)),
+            "样本外胜率": _fmt_pct(r.get("oos_win_rate")),
+            "样本外平均收益": _fmt_pct(r.get("oos_avg_return"), signed=True),
+            "样本外总盈亏": _fmt_money(r.get("oos_total_pnl")),
+            "样本外止损率": _fmt_pct(r.get("oos_stop_rate")),
+        }
+
     # 一行表示一笔持仓：卖出记录对应已平仓交易，未匹配卖出的买入记录对应当前持仓。
     open_lots: Dict[str, List[Dict[str, Any]]] = {}
     paired: List[Tuple[Dict[str, Any], Optional[Dict[str, Any]], int]] = []
@@ -448,6 +475,8 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "factor_feedback_rows": factor_feedback_rows,
         "rank_feedback_rows": rank_feedback_rows,
         "rank_suggestion": rank_suggestion,
+        "walk_forward_rows": walk_forward_rows,
+        "walk_forward_summary": walk_forward_summary,
         "transaction_view": True,
         "trade_rows": trade_rows,
         "trade_columns": ["买入日", "卖出日", "名称", "代码", "模式", "买入价", "卖出价",

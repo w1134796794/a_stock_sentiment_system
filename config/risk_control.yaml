@@ -14,6 +14,13 @@ max_total_position: 0.80         # 总仓位上限
 min_cash_ratio: 0.20             # 最小现金比例
 max_positions: 8                 # 最多同时持仓只数
 
+# ---- 入场与市场分层 ----
+min_open_gap: 0.0                # 必须严格高开
+max_open_gap: 0.03               # 高开超过 3% 不追
+market_entry_threshold: 50.0     # 弱市停止开仓
+market_strong_threshold: 70.0    # 强市才扩展至候选前 N 名
+neutral_market_max_rank: 1       # 中性市场只执行第 1 名
+
 # ---- 组合层：板块集中度 ----
 max_sector_concentration: 0.40   # 单一板块最大仓位
 max_correlated_positions: 3      # 相关板块最多持仓数

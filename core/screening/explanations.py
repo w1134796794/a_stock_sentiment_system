@@ -14,6 +14,9 @@ FACTOR_LABELS: Dict[str, str] = {
     "stk_pct_chg_1d": "当日涨跌幅强度",
     "stk_limit_progress": "涨停进度",
     "stk_sector_resonance_score": "板块共振",
+    "stk_sector_heat_score": "板块热度",
+    "stk_sector_persistence_score": "板块持续性",
+    "stk_sector_mainline_score": "主线强度",
 }
 
 FACTOR_NOTE: Dict[str, str] = {
@@ -26,6 +29,9 @@ FACTOR_NOTE: Dict[str, str] = {
     "stk_pct_chg_1d": "当日修复力度较强",
     "stk_limit_progress": "涨幅接近对应板块涨停幅度",
     "stk_sector_resonance_score": "板块联动较强",
+    "stk_sector_heat_score": "所属板块热度靠前",
+    "stk_sector_persistence_score": "所属板块持续性较好",
+    "stk_sector_mainline_score": "所属题材具备主线强度",
 }
 
 

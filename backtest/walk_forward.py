@@ -85,7 +85,7 @@ def _objective(frame: pd.DataFrame, min_samples: int) -> float:
 
 
 def build_walk_forward_frames(
-    result: Dict[str, Any], *, train_days: int = 60, validation_days: int = 20,
+    result: Dict[str, Any], *, train_days: int = 30, validation_days: int = 10,
     min_train_samples: int = 8,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return fold detail and one-row out-of-sample summary frames."""
@@ -100,6 +100,9 @@ def build_walk_forward_frames(
     ].copy()
     dates = sorted(usable["entry_date"].dropna().astype(str).unique())
     if len(dates) <= train_days:
+        train_days = max(8, int(len(dates) * 0.6))
+        validation_days = max(3, int(len(dates) * 0.25))
+    if len(dates) <= train_days:
         return pd.DataFrame(), pd.DataFrame()
 
     folds = []
@@ -113,7 +116,13 @@ def build_walk_forward_frames(
             break
         train = usable[usable["entry_date"].isin(train_dates)]
         valid = usable[usable["entry_date"].isin(valid_dates)]
-        scored = [(_objective(_select(train, profile), min_train_samples), profile) for profile in PROFILES]
+        selected_train = [(profile, _select(train, profile)) for profile in PROFILES]
+        max_available = max((len(selected) for _, selected in selected_train), default=0)
+        fold_min_samples = min(min_train_samples, max(3, max_available))
+        scored = [
+            (_objective(selected, fold_min_samples), profile)
+            for profile, selected in selected_train
+        ]
         scored.sort(key=lambda item: (item[0], item[1].name), reverse=True)
         best_score, best = scored[0]
         if best_score == float("-inf"):

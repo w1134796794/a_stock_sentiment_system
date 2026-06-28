@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from backtest.backtest_engine import BacktestEngine, TradeRecord
+from backtest.backtest_engine import BacktestConfig, BacktestEngine, TradeRecord
 from backtest.attribution import build_attribution_frames
 from backtest.plan_source import build_backtest_plan_dir
 from desktop import backtest as backtest_view
@@ -29,7 +29,10 @@ def test_plan_source_keeps_only_top_three_for_backtest(tmp_path):
         })
     payload = {
         "meta": {"date": "20260618", "engine": "etl"},
-        "etl": {"screening": {"profile": "default", "final": final}},
+        "etl": {
+            "screening": {"profile": "default", "final": final},
+            "gold_summary": {"market": {"market_score": 62, "width_score": 55, "emotion_score": 58}},
+        },
     }
     (snapshot_dir / "20260618.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
@@ -45,6 +48,7 @@ def test_plan_source_keeps_only_top_three_for_backtest(tmp_path):
     df = pd.read_csv(plan_dir / "交易计划_20260618.csv")
     assert list(df["优先级"]) == [1, 2, 3]
     assert "因子指标" in df.columns
+    assert list(df["原始_mkt_market_score"].unique()) == [62.0]
 
 
 def test_plan_source_supports_top_one_comparison(tmp_path):
@@ -177,6 +181,25 @@ def test_backtest_report_counts_only_closed_trades():
     assert report["buy_trades"] == 1
     assert report["closed_trades"] == 2
     assert report["win_rate"] == 0.5
+
+
+def test_market_regime_controls_daily_entry_rank(tmp_path):
+    engine = BacktestEngine(data_manager=None, config=BacktestConfig(max_plan_rank=3))
+
+    def write_plan(date, market_score):
+        pd.DataFrame([
+            {"动作": "买入", "代码": f"00000{rank}", "名称": str(rank), "优先级": rank,
+             "综合评分": 100 - rank, "原始_mkt_market_score": market_score}
+            for rank in (1, 2, 3)
+        ]).to_csv(tmp_path / f"交易计划_{date}.csv", index=False)
+
+    write_plan("20260601", 40)
+    write_plan("20260602", 60)
+    write_plan("20260603", 80)
+
+    assert engine._load_trade_plans("20260601", str(tmp_path)).empty
+    assert list(engine._load_trade_plans("20260602", str(tmp_path))["优先级"]) == [1]
+    assert list(engine._load_trade_plans("20260603", str(tmp_path))["优先级"]) == [1, 2, 3]
 
 
 def test_backtest_engine_state_roundtrip_for_daily_continuation():

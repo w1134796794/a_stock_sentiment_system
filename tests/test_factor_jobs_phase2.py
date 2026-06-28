@@ -5,6 +5,7 @@ import pytest
 
 from core.factors.jobs.gold_utils import percentile_score
 from core.factors.jobs.runner import FactorJobRunner
+from core.factors.jobs.stock_factor_job import _amount_ratio_target_score, _stock_sector_scores
 
 
 DUCKDB_MISSING = importlib.util.find_spec("duckdb") is None
@@ -59,6 +60,36 @@ def test_percentile_score_direction():
 
     assert higher_scores.iloc[2] > higher_scores.iloc[0]
     assert lower_scores.iloc[0] > lower_scores.iloc[2]
+
+
+def test_amount_ratio_target_penalizes_weak_and_hot_turnover():
+    assert _amount_ratio_target_score(1.0) == 100.0
+    assert _amount_ratio_target_score(0.5) < _amount_ratio_target_score(0.8)
+    assert _amount_ratio_target_score(2.5) < _amount_ratio_target_score(1.5)
+
+
+def test_stock_sector_scores_use_cached_concept_and_industry(tmp_path):
+    membership_dir = tmp_path / "sector" / "stock_sectors"
+    membership_dir.mkdir(parents=True)
+    pd.DataFrame([
+        {"ts_code": "885001.TI", "name": "AI应用", "type": "N"},
+        {"ts_code": "881001.TI", "name": "软件服务", "type": "I"},
+        {"ts_code": "889999.TI", "name": "特色板块", "type": "S"},
+    ]).to_csv(membership_dir / "000001.SZ.csv", index=False)
+    sector_scores = {
+        "885001": {"sector_name": "AI应用", "momentum_score": 90, "amount_score": 80,
+                   "amount_ratio_score": 85, "persistence_score": 75, "mainline_score": 88},
+        "881001": {"sector_name": "软件服务", "momentum_score": 70, "amount_score": 65,
+                   "amount_ratio_score": 75, "persistence_score": 80, "mainline_score": 72},
+        "889999": {"sector_name": "特色板块", "momentum_score": 100, "amount_score": 100,
+                   "amount_ratio_score": 100, "persistence_score": 100, "mainline_score": 100},
+    }
+
+    scores = _stock_sector_scores("000001", sector_scores, tmp_path)
+
+    assert scores["sector_resonance_score"] > 70
+    assert "AI应用" in scores["resonance_sectors"]
+    assert "特色板块" not in scores["resonance_sectors"]
 
 
 @pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")

@@ -49,6 +49,11 @@ _RISK_GROUP = "risk_control"
 _RISK_LABEL = "风控参数 (RiskConfig)"
 _RISK_DESCRIPTIONS = {
     "hard_stop_loss": "相对买入成本的硬止损比例。",
+    "min_open_gap": "允许入场的最小竞价高开比例，0 表示必须严格高开。",
+    "max_open_gap": "允许入场的最大竞价高开比例，超过后不追高。",
+    "market_entry_threshold": "低于该市场评分时停止新开仓。",
+    "market_strong_threshold": "达到该市场评分后才允许扩展至候选前 N 名。",
+    "neutral_market_max_rank": "中性市场每日最多执行到的候选名次。",
     "trailing_activation": "持仓最高涨幅达到该比例后，开始保护利润。",
     "trailing_stop": "激活后，相对持仓最高价回撤达到该比例时全部止盈。",
     "time_stop_days": "达到该持仓交易日数且收益仍低于阈值时退出。",

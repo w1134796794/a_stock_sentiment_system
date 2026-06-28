@@ -1,7 +1,11 @@
 """Stock-level batch factor job."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
+
+from config.settings import CACHE_DIR
 
 from core.factors.jobs.gold_utils import (
     FactorJobResult,
@@ -99,6 +103,87 @@ def _activity_ratio_score(value: float) -> float:
     return 20.0
 
 
+def _amount_ratio_target_score(value: float) -> float:
+    """成交额确认分：0.8-1.5 倍最优，过弱和过热均惩罚。"""
+    v = to_float(value, 0.0)
+    if v <= 0:
+        return 0.0
+    if v < 0.4:
+        return max(0.0, v / 0.4 * 20.0)
+    if v < 0.8:
+        return 20.0 + (v - 0.4) / 0.4 * 60.0
+    if v <= 1.5:
+        return 100.0
+    if v <= 2.2:
+        return 100.0 - (v - 1.5) / 0.7 * 45.0
+    if v <= 3.0:
+        return 55.0 - (v - 2.2) / 0.8 * 35.0
+    return max(0.0, 20.0 - (v - 3.0) * 5.0)
+
+
+def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE_DIR) -> dict:
+    """Map cached stock memberships to point-in-time sector factor scores."""
+    neutral = {
+        "sector_heat_score": 50.0,
+        "sector_persistence_score": 50.0,
+        "sector_mainline_score": 50.0,
+        "sector_resonance_score": 50.0,
+        "resonance_sectors": "",
+    }
+    if not sector_scores:
+        return neutral
+    code6 = str(code or "").split(".")[0].zfill(6)
+    membership_dir = Path(cache_dir) / "sector" / "stock_sectors"
+    files = list(membership_dir.glob(f"{code6}.*.csv"))
+    if not files:
+        return neutral
+    try:
+        memberships = pd.read_csv(files[0])
+    except Exception:
+        return neutral
+
+    matched = []
+    for row in memberships.to_dict("records"):
+        sector_type = str(row.get("type") or "").strip().upper()
+        if sector_type not in {"N", "I", "概念", "行业"}:
+            continue
+        sector_code = str(row.get("ts_code") or "").split(".")[0]
+        values = sector_scores.get(sector_code)
+        if not values:
+            continue
+        momentum = to_float(values.get("momentum_score"), 50.0)
+        amount = to_float(values.get("amount_score"), 50.0)
+        amount_ratio = to_float(values.get("amount_ratio_score"), 50.0)
+        matched.append({
+            "name": str(values.get("sector_name") or row.get("name") or sector_code),
+            "type": sector_type,
+            "heat": safe_weighted_score([(momentum, 0.55), (amount, 0.25), (amount_ratio, 0.20)]),
+            "persistence": to_float(values.get("persistence_score"), 50.0),
+            "mainline": to_float(values.get("mainline_score"), 50.0),
+        })
+    if not matched:
+        return neutral
+
+    matched.sort(key=lambda item: (item["mainline"], item["heat"]), reverse=True)
+    leaders = matched[:3]
+    heat = sum(item["heat"] for item in leaders) / len(leaders)
+    persistence = sum(item["persistence"] for item in leaders) / len(leaders)
+    mainline = sum(item["mainline"] for item in leaders) / len(leaders)
+    concept_best = max((item["mainline"] for item in matched if item["type"] in {"N", "概念"}), default=0.0)
+    industry_best = max((item["mainline"] for item in matched if item["type"] in {"I", "行业"}), default=0.0)
+    dual_resonance = min(concept_best, industry_best)
+    resonance = safe_weighted_score([
+        (heat, 0.30), (persistence, 0.25), (mainline, 0.35), (dual_resonance, 0.10),
+    ])
+    return {
+        "sector_heat_score": round(heat, 4),
+        "sector_persistence_score": round(persistence, 4),
+        "sector_mainline_score": round(mainline, 4),
+        "sector_resonance_score": round(resonance, 4),
+        "resonance_sectors": ",".join(item["name"] for item in leaders),
+    }
+
+
 class StockFactorJob:
     name = "stock_factor_job"
 
@@ -189,7 +274,7 @@ class StockFactorJob:
         today["amount_ratio"] = amount_ratio
         today["new_high_ratio"] = new_high_ratio
         today["vol_ratio_score"] = today["vol_ratio"].map(_activity_ratio_score)
-        today["amount_ratio_score"] = today["amount_ratio"].map(_activity_ratio_score)
+        today["amount_ratio_score"] = today["amount_ratio"].map(_amount_ratio_target_score)
         today["new_high_score"] = today["new_high_ratio"].map(lambda v: score_between(v, 0.85, 1.02))
         today["liquidity_score"] = percentile_score(today["amount_yuan"], higher_better=True)
         today["tech_score"] = [
@@ -200,7 +285,30 @@ class StockFactorJob:
             safe_weighted_score([(row.vol_ratio_score, 0.5), (row.amount_ratio_score, 0.5)])
             for row in today.itertuples()
         ]
-        today["sector_resonance_score"] = 50.0
+        sector_frame = read_table(
+            con, "factor_sector_wide", where="trade_date = ?", params=[str(trade_date)]
+        )
+        sector_scores = {
+            str(row.get("sector_code") or "").split(".")[0]: row
+            for row in sector_frame.to_dict("records")
+        } if not sector_frame.empty else {}
+        membership_dir = Path(CACHE_DIR) / "sector" / "stock_sectors"
+        cached_sector_codes = {
+            path.name.split(".")[0]
+            for path in membership_dir.glob("*.csv")
+        } if membership_dir.exists() else set()
+        sector_values = []
+        for _, row in today.iterrows():
+            code = str(row.get("code") or "")
+            if code in cached_sector_codes:
+                sector_values.append(_stock_sector_scores(code, sector_scores))
+            else:
+                sector_values.append(_stock_sector_scores("", {}))
+        for key in (
+            "sector_heat_score", "sector_persistence_score", "sector_mainline_score",
+            "sector_resonance_score", "resonance_sectors",
+        ):
+            today[key] = [item[key] for item in sector_values]
 
         board_height = []
         seal_time_score = []
@@ -234,10 +342,10 @@ class StockFactorJob:
 
         today["total_score"] = [
             safe_weighted_score([
-                (row.tech_score, 0.35),
+                (row.tech_score, 0.25),
                 (row.volume_score, 0.12),
-                (row.liquidity_score, 0.23),
-                (row.sector_resonance_score, 0.10),
+                (row.liquidity_score, 0.13),
+                (row.sector_resonance_score, 0.30),
                 (row.board_score, 0.20),
             ])
             for row in today.itertuples()
@@ -252,7 +360,11 @@ class StockFactorJob:
             "tech_score",
             "volume_score",
             "liquidity_score",
+            "sector_heat_score",
+            "sector_persistence_score",
+            "sector_mainline_score",
             "sector_resonance_score",
+            "resonance_sectors",
             "board_score",
             "board_height",
             "board_height_score",
@@ -307,6 +419,26 @@ class StockFactorJob:
                     factor_id="stk_liquidity_percentile", raw_value=row["amount_yuan"],
                     score=row["liquidity_score"], percentile=row["liquidity_score"],
                     direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_sector_heat_score", raw_value=row["sector_heat_score"],
+                    score=row["sector_heat_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_sector_persistence_score", raw_value=row["sector_persistence_score"],
+                    score=row["sector_persistence_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_sector_mainline_score", raw_value=row["sector_mainline_score"],
+                    score=row["sector_mainline_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_sector_resonance_score", raw_value=row["sector_resonance_score"],
+                    score=row["sector_resonance_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,

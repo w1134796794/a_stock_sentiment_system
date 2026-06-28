@@ -47,6 +47,13 @@ class RiskConfig:
     min_cash_ratio: float = 0.20              # 最小现金比例
     max_positions: int = 8                    # 最多同时持仓只数
 
+    # ---- 入场与市场分层 ----
+    min_open_gap: float = 0.0                 # 必须严格高开
+    max_open_gap: float = 0.03                # 高开超过 3% 不追
+    market_entry_threshold: float = 50.0      # 弱市停止开仓
+    market_strong_threshold: float = 70.0     # 强市才扩展到前 N 名
+    neutral_market_max_rank: int = 1          # 中性市场只执行第 1 名
+
     # ---- 组合层：板块集中度 ----
     max_sector_concentration: float = 0.40    # 单一板块最大仓位
     max_correlated_positions: int = 3         # 相关板块最多持仓数

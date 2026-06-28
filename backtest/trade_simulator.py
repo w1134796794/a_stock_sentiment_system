@@ -126,7 +126,7 @@ class TradeSimulator:
             return None
 
     def _check_open_gap(self, price_data: Dict) -> Dict:
-        """早盘竞价硬规则：开盘价必须严格高于昨收，否则不买入。"""
+        """早盘竞价硬规则：只接受 0%-3% 的高开。"""
         open_price = float(price_data.get('open') or 0)
         pre_close = float(price_data.get('pre_close') or 0)
         if open_price <= 0 or pre_close <= 0:
@@ -140,6 +140,11 @@ class TradeSimulator:
             return {
                 'passed': False,
                 'failed_reason': f'{label}{gap_ratio:.2%}，未高开，放弃竞价买点'
+            }
+        if gap_ratio > self.risk.max_open_gap:
+            return {
+                'passed': False,
+                'failed_reason': f'高开{gap_ratio:.2%}超过{self.risk.max_open_gap:.2%}，不追高'
             }
         return {'passed': True, 'failed_reason': None}
 
@@ -160,13 +165,12 @@ class TradeSimulator:
             if not condition:
                 continue
 
-            # 检查高开条件
+            # 高开范围由统一入口闸门检查，这里只保留“必须高开”的语义。
             if '高开' in condition:
-                # 解析高开范围，如 "高开3%-7%"
-                if gap_ratio < 0.03:  # 简化：至少高开3%
+                if gap_ratio <= self.risk.min_open_gap:
                     return {
                         'passed': False,
-                        'failed_reason': f'高开不足: {gap_ratio:.2%} < 3%'
+                        'failed_reason': f'未高开: {gap_ratio:.2%}'
                     }
 
         return {'passed': True, 'failed_reason': None}

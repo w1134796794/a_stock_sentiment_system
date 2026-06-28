@@ -199,6 +199,41 @@
 </section>
 {% endif %}
 
+{# ===== 严格样本外滚动验证 ===== #}
+{% if bt.walk_forward_rows %}
+<section class="card border border-slate-800 rounded-xl p-4 mb-6">
+  <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+    <h2 class="text-base font-bold">滚动训练 / 验证</h2>
+    {% if bt.walk_forward_summary %}
+    <div class="flex gap-3 text-xs text-slate-400 flex-wrap">
+      <span>样本外 {{ bt.walk_forward_summary['样本外样本'] }} 笔</span>
+      <span>胜率 <b class="text-slate-200 mono">{{ bt.walk_forward_summary['样本外胜率'] }}</b></span>
+      <span>平均收益 <b class="text-slate-200 mono">{{ bt.walk_forward_summary['样本外平均收益'] }}</b></span>
+      <span>总盈亏 <b class="mono {% if bt.walk_forward_summary['样本外总盈亏'].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}">{{ bt.walk_forward_summary['样本外总盈亏'] }}</b></span>
+    </div>
+    {% endif %}
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead><tr class="text-slate-400">
+        {% for c in ['折','训练区间','验证区间','入场组合','训练样本','训练胜率','验证样本','验证胜率','验证盈亏','验证止损率'] %}
+        <th class="text-left font-medium px-3 py-2 whitespace-nowrap">{{ c }}</th>
+        {% endfor %}
+      </tr></thead>
+      <tbody>
+        {% for r in bt.walk_forward_rows %}
+        <tr class="border-t border-slate-800">
+          {% for c in ['折','训练区间','验证区间','入场组合','训练样本','训练胜率','验证样本','验证胜率','验证盈亏','验证止损率'] %}
+          <td class="px-3 py-1.5 whitespace-nowrap {% if c == '验证盈亏' %}{% if r[c].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}{% endif %}">{{ r[c] }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
 {# ===== 逐笔交易 / 旧进程兼容成交记录 ===== #}
 {% set transaction_view = bt.transaction_view|default(false) %}
 <section class="card border border-slate-800 rounded-xl p-4">

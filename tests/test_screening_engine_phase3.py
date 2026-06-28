@@ -16,6 +16,18 @@ def test_screening_compare_value_ops():
     assert ScreeningEngine.compare_value(55, "between", [50, 60]) is True
 
 
+def test_candidate_percentile_score_avoids_absolute_score_saturation(tmp_path):
+    engine = ScreeningEngine(duckdb_path=tmp_path / "none.duckdb", output_dir=tmp_path)
+    frame = pd.DataFrame({"tech_score": [98.0, 99.0, 100.0]})
+    cfg = {"ranking": {"candidate_percentile": True, "weights": {"tech_score": 1.0}}}
+
+    score = engine._ranking_score(frame, cfg, 50.0)
+
+    assert score.iloc[0] < 40
+    assert 60 < score.iloc[1] < 70
+    assert score.iloc[2] == 100
+
+
 @pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
 def test_screening_engine_reads_gold_tables_and_writes_json(tmp_path):
     import duckdb  # type: ignore
