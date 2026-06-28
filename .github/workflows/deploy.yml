@@ -37,6 +37,6 @@ jobs:
             . .venv/bin/activate
             pip install -r requirements.txt
 
-            sudo systemctl restart a-stock-web
-            sudo systemctl status a-stock-web --no-pager
+            sudo systemctl restart a-stock
+            sudo systemctl status a-stock --no-pager
           EOF
