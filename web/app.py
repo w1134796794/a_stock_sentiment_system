@@ -50,6 +50,7 @@ from web.permissions import (
     visible_menu_groups,
 )
 from web.realtime_cache import RealtimePayloadCache
+from web.stock_profile import clear_stock_profile_cache, load_stock_profiles
 
 from config.settings import (
     SNAPSHOT_DIR,
@@ -298,6 +299,7 @@ COLUMN_LABELS: Dict[str, str] = {
     "final_position_pct": "风控后仓位%",
     # 板块热度（热点概念 / 热点行业 / 持续性）
     "rank": "排名",
+    "gold_rank": "因子原始排名",
     "pct_change": "涨跌幅",
     "limit_up_count": "涨停家数",
     "limit_cons_count": "连板数",
@@ -573,13 +575,10 @@ def _insert_column_after(columns: List[str], column: str, anchors: List[str]) ->
 def _merge_plan_fields_into_screening(row: Dict[str, Any], plan: Dict[str, Any]) -> bool:
     field_map = [
         ("模式类型", "模式类型"),
-        ("优先级", "优先级"),
         ("综合评分", "计划评分"),
-        ("建议仓位", "建议仓位"),
         ("入场区间", "入场区间"),
         ("止损", "止损"),
         ("止盈", "止盈"),
-        ("竞价条件", "竞价条件"),
         ("次日预期", "次日预期"),
         ("风险提示", "风险提示"),
     ]
@@ -614,6 +613,8 @@ def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: s
                 plans_by_code[code] = row
 
     factor_map = _factor_value_long_map(date, codes)
+    stock_profiles = load_stock_profiles(codes, Path(CACHE_DIR))
+    fallback_concepts = _stock_concept_map(date)
     if not factor_map and not screening_by_code and not plans_by_code:
         return
 
@@ -631,17 +632,39 @@ def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: s
             source = screening_by_code.get(code) or row
             if section.get("name") in {"指标筛选", "ETL指标筛选"}:
                 changed = _merge_plan_fields_into_screening(row, plans_by_code.get(code) or {}) or changed
+                profile = stock_profiles.get(code) or {}
+                industries = list(profile.get("industries") or [])
+                concepts = list(profile.get("concepts") or fallback_concepts.get(code) or [])
+                if industries:
+                    row["所属行业"] = industries
+                    changed = True
+                if concepts:
+                    row["所属概念"] = concepts
+                    changed = True
             tags = _candidate_indicator_tags(source, factor_map.get(code) or [])
             if tags:
                 row["命中指标"] = tags
                 changed = True
+            if section.get("name") in {"指标筛选", "ETL指标筛选"}:
+                for field in ("rank", "score", "优先级", "建议仓位", "竞价条件"):
+                    if field in row:
+                        row.pop(field, None)
+                        changed = True
         if changed:
             columns = list(section.get("columns") or [])
             if section.get("name") in {"指标筛选", "ETL指标筛选"}:
+                columns = [
+                    column for column in columns
+                    if column not in {"rank", "score", "优先级", "建议仓位", "竞价条件"}
+                ]
+                if any(isinstance(row, dict) and row.get("所属行业") for row in rows):
+                    columns = _insert_column_after(columns, "所属行业", ["name", "股票名称", "code"])
+                if any(isinstance(row, dict) and row.get("所属概念") for row in rows):
+                    columns = _insert_column_after(columns, "所属概念", ["所属行业", "name", "股票名称"])
                 anchor = "gold_rank"
                 for column in [
-                    "模式类型", "优先级", "计划评分", "建议仓位", "入场区间",
-                    "止损", "止盈", "竞价条件", "次日预期", "风险提示",
+                    "模式类型", "计划评分", "入场区间",
+                    "止损", "止盈", "次日预期", "风险提示",
                 ]:
                     if any(isinstance(row, dict) and str(row.get(column) or "").strip() for row in rows):
                         columns = _insert_column_after(columns, column, [anchor, "gold_rank", "score", "name"])
@@ -1399,6 +1422,7 @@ def _clear_data_caches() -> None:
     _load_snapshot_cached.cache_clear()
     _load_prepared_snapshot_cached.cache_clear()
     _stock_concept_map.cache_clear()
+    clear_stock_profile_cache()
     _sector_meta_map.cache_clear()
     _DATES_CACHE["expires_at"] = 0.0
     _DATES_CACHE["dates"] = []
