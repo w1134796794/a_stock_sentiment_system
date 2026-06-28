@@ -27,11 +27,22 @@ jobs:
             set -e
             cd "${{ secrets.ALIYUN_APP_DIR }}"
 
-            # 添加安全目录例外（解决 dubious ownership）
             git config --global --add safe.directory "$PWD"
 
             git fetch origin
-            git reset --hard origin/main
+
+            # 自动检测远程默认分支
+            if git rev-parse --verify origin/main >/dev/null 2>&1; then
+              BRANCH="main"
+            elif git rev-parse --verify origin/master >/dev/null 2>&1; then
+              BRANCH="master"
+            else
+              echo "Neither origin/main nor origin/master found"
+              exit 1
+            fi
+
+            echo "Resetting to origin/$BRANCH"
+            git reset --hard origin/$BRANCH
 
             if [ ! -d ".venv" ]; then
               python3 -m venv .venv
