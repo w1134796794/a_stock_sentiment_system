@@ -17,7 +17,7 @@ def test_internal_factor_ids_have_chinese_labels():
     assert FACTOR_LABELS["stk_sector_resonance_score"] == "板块共振"
 
 
-def test_plan_source_keeps_only_top_three_for_backtest(tmp_path):
+def test_plan_source_keeps_all_candidates_by_default(tmp_path):
     snapshot_dir = tmp_path / "snapshots"
     snapshot_dir.mkdir()
     output_dir = tmp_path / "webdata"
@@ -52,9 +52,9 @@ def test_plan_source_keeps_only_top_three_for_backtest(tmp_path):
     )
 
     assert file_count == 1
-    assert row_count == 3
+    assert row_count == 5
     df = pd.read_csv(plan_dir / "交易计划_20260618.csv")
-    assert list(df["优先级"]) == [1, 2, 3]
+    assert list(df["优先级"]) == [1, 2, 3, 4, 5]
     assert "因子指标" in df.columns
     assert list(df["原始_mkt_market_score"].unique()) == [62.0]
 
@@ -103,6 +103,11 @@ def test_backtest_view_distinguishes_closed_trades_and_execution_rows(tmp_path, 
         "20260627,000002,B,default,BUY,20.555,0,500,0,0\n",
         encoding="utf-8",
     )
+    (tmp_path / f"backtest_positions_{run}.csv").write_text(
+        "as_of_date,stock_code,stock_name,entry_date,entry_price,current_price,shares,cost_basis,market_value,unrealized_pnl,unrealized_pnl_pct,holding_days,plan_rank,plan_score,entry_signal\n"
+        "20260627,000002,B,20260627,20.555,21.5,500,10277.5,10750,472.5,0.045972,0,0,0,盘中转强\n",
+        encoding="utf-8",
+    )
     (tmp_path / f"backtest_factor_feedback_{run}.csv").write_text(
         "factor_id,factor_name,sample_count\ntech_score,tech_score,1\n",
         encoding="utf-8",
@@ -115,13 +120,17 @@ def test_backtest_view_distinguishes_closed_trades_and_execution_rows(tmp_path, 
     assert overview["execution_count"] == 3
     assert overview["open_count"] == 1
     assert overview["factor_feedback_rows"][0]["因子"] == "技术综合分"
-    assert len(overview["trade_rows"]) == 2
-    closed = next(row for row in overview["trade_rows"] if row["退出"] != "持仓中")
-    opened = next(row for row in overview["trade_rows"] if row["退出"] == "持仓中")
+    assert len(overview["trade_rows"]) == 3
+    closed = next(row for row in overview["trade_rows"] if row["动作"] == "卖出")
+    opened = next(row for row in overview["trade_rows"] if row["状态/退出"] == "持仓中")
     assert closed["买入价"] == "10.13"
     assert closed["卖出价"] == "11.24"
     assert opened["买入价"] == "20.55"
     assert opened["卖出价"] == ""
+    assert opened["现价"] == "21.50"
+    assert opened["盈亏"] == "+472"
+    assert opened["盈亏%"] == "+4.60%"
+    assert opened["买入信号"] == "盘中转强"
 
 
 def test_plan_source_prefers_external_screening_over_snapshot(tmp_path):
@@ -196,7 +205,7 @@ def test_backtest_report_counts_only_closed_trades():
     assert report["win_rate"] == 0.5
 
 
-def test_market_regime_controls_daily_entry_rank(tmp_path):
+def test_market_regime_stops_weak_market_without_rank_cutoff(tmp_path):
     engine = BacktestEngine(data_manager=None, config=BacktestConfig(max_plan_rank=3))
 
     def write_plan(date, market_score):
@@ -211,7 +220,7 @@ def test_market_regime_controls_daily_entry_rank(tmp_path):
     write_plan("20260603", 80)
 
     assert engine._load_trade_plans("20260601", str(tmp_path)).empty
-    assert list(engine._load_trade_plans("20260602", str(tmp_path))["优先级"]) == [1]
+    assert list(engine._load_trade_plans("20260602", str(tmp_path))["优先级"]) == [1, 2, 3]
     assert list(engine._load_trade_plans("20260603", str(tmp_path))["优先级"]) == [1, 2, 3]
 
 

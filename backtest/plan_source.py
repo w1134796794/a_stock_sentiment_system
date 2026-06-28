@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-DEFAULT_MAX_BACKTEST_RANK = 3
+DEFAULT_MAX_BACKTEST_RANK = 0
 
 
 def _code6(value: Any) -> str:

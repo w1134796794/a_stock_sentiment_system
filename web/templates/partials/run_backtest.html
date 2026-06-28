@@ -2,7 +2,6 @@
    需要在包含前设置 runner_redirect（完成后跳转的目标，如 '/backtest' 或 '/drawdown'）。 #}
 {% set current_user = request.state.user %}
 {% set is_admin = current_user and current_user.get('role') == 'admin' %}
-{% set suggested_rank = 3 %}
 {% if is_admin %}
 <section class="card border border-emerald-600/20 bg-emerald-500/[0.03] rounded-xl p-4 mb-6"
          id="bt-runner" data-redirect="{{ runner_redirect or '/backtest' }}">
@@ -47,15 +46,6 @@
         <label class="block text-[11px] text-slate-500 mb-0.5">初始资金</label>
         <input id="bt-cap" type="text" placeholder="100000"
                class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
-      </div>
-      <div>
-        <label class="block text-[11px] text-slate-500 mb-0.5">强市最多</label>
-        <select id="bt-max-rank"
-                class="h-[30px] mono bg-slate-900 border border-slate-700 rounded-md px-2 text-sm focus:outline-none focus:border-emerald-500">
-          <option value="1" {% if suggested_rank == 1 %}selected{% endif %}>前1名</option>
-          <option value="2" {% if suggested_rank == 2 %}selected{% endif %}>前2名</option>
-          <option value="3" {% if suggested_rank == 3 %}selected{% endif %}>前3名</option>
-        </select>
       </div>
       <div>
         <label class="block text-[11px] text-slate-500 mb-0.5">风控闸门</label>
@@ -118,7 +108,7 @@
     const riskOn = document.getElementById('bt-risk').checked;
     const body = {
       mode: mode(), initial_capital: val('bt-cap'), risk_control: riskOn,
-      max_plan_rank: Number(document.getElementById('bt-max-rank').value || 3)
+      max_plan_rank: 0
     };
     if (body.mode === 'daily') {
       body.trade_date = val('bt-day');

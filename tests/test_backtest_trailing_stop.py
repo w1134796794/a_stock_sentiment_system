@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backtest.backtest_engine import BacktestConfig, BacktestEngine
+from risk.risk_config import RiskConfig
 
 
 class DailyRows:
@@ -104,3 +105,29 @@ def test_hard_stop_loss_behavior_is_preserved():
     assert trade.exit_reason == "stop_loss"
     assert trade.stop_loss_triggered is True
     assert trade.take_profit_triggered is False
+
+
+def test_trailing_pullback_uses_profit_stages():
+    engine = BacktestEngine(None, BacktestConfig(
+        trailing_early_stop_pct=0.04,
+        trailing_mid_stop_pct=0.06,
+        trailing_stop_pct=0.10,
+    ))
+
+    assert engine._trailing_stop_distance(0.07) == 0.04
+    assert engine._trailing_stop_distance(0.15) == 0.06
+    assert engine._trailing_stop_distance(0.30) == 0.10
+
+
+def test_risk_projection_keeps_simulation_specific_strategy_thresholds():
+    config = BacktestConfig.from_risk_config(RiskConfig(
+        market_entry_threshold=50,
+        market_strong_threshold=70,
+        hard_stop_loss=0.05,
+        trailing_stop=0.08,
+    ))
+
+    assert config.market_entry_threshold == 60
+    assert config.market_strong_threshold == 65
+    assert config.stop_loss_pct == 0.04
+    assert config.trailing_stop_pct == 0.10

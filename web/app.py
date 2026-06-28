@@ -2684,7 +2684,7 @@ def api_backtest_run(payload: dict = Body(default={})) -> Any:
     ok, msg = BACKTEST_CONTROLLER.start(
         p.get("start_date"), p.get("end_date"), p.get("initial_capital"),
         risk_control=p.get("risk_control"),
-        max_plan_rank=p.get("max_plan_rank") or 3,
+        max_plan_rank=0,
         mode=p.get("mode") or "range",
         trade_date=p.get("trade_date"),
         reset_state=p.get("reset_state"))

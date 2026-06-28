@@ -1,6 +1,6 @@
 import pandas as pd
 
-from backtest.backtest_engine import BacktestEngine
+from backtest.backtest_engine import BacktestConfig, BacktestEngine
 from backtest.point_in_time import StaticPriceProvider
 from backtest.replay_engine import ReplayEngine, ReplayPlan
 from backtest.trade_simulator import TradeSimulator
@@ -22,6 +22,7 @@ def _plan():
         "模式": "指标筛选/default",
         "目标价": 10.2,
         "介入时机": "竞价",
+        "综合评分": 75,
     })
 
 
@@ -81,3 +82,53 @@ def test_trade_simulator_open_gap_gate():
     assert sim._check_open_gap({"open": 9.9, "pre_close": 10.0})["passed"] is False
     assert sim._check_open_gap({"open": 10.0, "pre_close": 10.0})["passed"] is False
     assert sim._check_open_gap({"open": 10.01, "pre_close": 10.0})["passed"] is True
+
+
+def test_backtest_engine_reduces_position_near_gap_ceiling():
+    engine = BacktestEngine(None, BacktestConfig(
+        reduced_position_gap=0.02,
+        high_gap_position_multiplier=0.75,
+    ))
+
+    assert engine._entry_gap_position_multiplier(0.0199) == 1.0
+    assert engine._entry_gap_position_multiplier(0.02) == 0.75
+    assert engine._entry_gap_position_multiplier(0.03) == 0.75
+
+
+def test_observation_candidate_buys_only_after_intraday_strength_trigger():
+    plan = _plan().copy()
+    plan["综合评分"] = 72
+    plan["因子_tech_score"] = 85
+    plan["因子_stk_sector_resonance_score"] = 65
+    plan["原始_amount_ratio"] = 1.2
+    dm = FakeDailyDataManager({
+        ("000001.SZ", "20260612"): {
+            "open": 10.1, "high": 10.25, "low": 10.0, "close": 10.2, "pre_close": 10.0
+        }
+    })
+    engine = BacktestEngine(dm, BacktestConfig(slippage=0))
+
+    can_buy, price = engine._check_buy_conditions(plan, "20260612", "000001", "平安银行")
+
+    assert can_buy is True
+    assert round(price, 3) == 10.201
+    assert engine._last_entry_signal["000001"] == "盘中转强"
+
+
+def test_observation_candidate_stays_unbought_without_trigger():
+    plan = _plan().copy()
+    plan["综合评分"] = 72
+    plan["因子_tech_score"] = 85
+    plan["因子_stk_sector_resonance_score"] = 65
+    plan["原始_amount_ratio"] = 1.2
+    dm = FakeDailyDataManager({
+        ("000001.SZ", "20260612"): {
+            "open": 10.1, "high": 10.15, "low": 10.0, "close": 10.12, "pre_close": 10.0
+        }
+    })
+    engine = BacktestEngine(dm, BacktestConfig(slippage=0))
+
+    can_buy, price = engine._check_buy_conditions(plan, "20260612", "000001", "平安银行")
+
+    assert can_buy is False
+    assert price == 0

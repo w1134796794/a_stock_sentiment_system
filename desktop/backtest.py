@@ -25,7 +25,9 @@ RESULTS_DIR = Path(OUTPUT_DIR) / "backtest_results"
 _RUN_RE = re.compile(r"^backtest_(summary|nav|trades)_(\d{8}_\d{6})\.csv$")
 
 # 这些列必须按字符串保留，不能数值化：否则 000062 之类带前导零的股票代码会变成 62。
-_STR_COLS = {"stock_code", "stock_name", "pattern_type", "action", "resonance_sectors"}
+_STR_COLS = {
+    "stock_code", "stock_name", "pattern_type", "action", "resonance_sectors", "entry_signal",
+}
 
 
 # ----------------------------------------------------------------------
@@ -102,6 +104,16 @@ def load_nav(run: str) -> List[Dict[str, Any]]:
 def load_trades(run: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for r in _read_csv(_path("trades", run)):
+        out.append({
+            k: (str(v).strip() if k in _STR_COLS else _num(v))
+            for k, v in r.items()
+        })
+    return out
+
+
+def load_positions(run: str) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for r in _read_csv(_path("positions", run)):
         out.append({
             k: (str(v).strip() if k in _STR_COLS else _num(v))
             for k, v in r.items()
@@ -282,6 +294,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
     summary = load_summary(run)
     nav = load_nav(run)
     trades = load_trades(run)
+    positions = load_positions(run)
 
     initial = summary.get("initial_capital") or (nav[0]["total_value"] if nav else 0)
     final = summary.get("final_capital") or (nav[-1]["total_value"] if nav else 0)
@@ -390,21 +403,19 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "样本外止损率": _fmt_pct(r.get("oos_stop_rate")),
         }
 
-    # 一行表示一笔持仓：卖出记录对应已平仓交易，未匹配卖出的买入记录对应当前持仓。
+    # 逐笔展示原始 BUY/SELL；FIFO 仅用于识别哪些 BUY 仍处于持仓中。
     open_lots: Dict[str, List[Dict[str, Any]]] = {}
-    paired: List[Tuple[Dict[str, Any], Optional[Dict[str, Any]], int]] = []
-    for trade in trades:
+    for index, trade in enumerate(trades):
         action = str(trade.get("action") or "").upper()
         code = str(trade.get("stock_code") or "")
         shares = int(float(trade.get("shares") or 0))
         if action == "BUY":
-            open_lots.setdefault(code, []).append({"trade": trade, "remaining": shares})
+            open_lots.setdefault(code, []).append({"index": index, "remaining": shares})
             continue
         if not action.startswith("SELL"):
             continue
 
         lots = open_lots.get(code) or []
-        buy = lots[0]["trade"] if lots else None
         remaining_to_match = shares
         while lots and remaining_to_match > 0:
             lot = lots[0]
@@ -413,44 +424,64 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             remaining_to_match -= matched
             if lot["remaining"] <= 0:
                 lots.pop(0)
-        paired.append((trade, buy, shares))
 
-    for lots in open_lots.values():
-        for lot in lots:
-            if int(lot.get("remaining") or 0) > 0:
-                paired.append((lot["trade"], None, int(lot["remaining"])))
+    open_buy_indices = {
+        int(lot["index"])
+        for lots in open_lots.values()
+        for lot in lots
+        if int(lot.get("remaining") or 0) > 0
+    }
+    position_map = {
+        (str(row.get("stock_code") or ""), str(row.get("entry_date") or "")): row
+        for row in positions
+    }
 
     trade_rows = []
-    for record, buy, display_shares in paired:
+    for index, record in enumerate(trades):
         action = str(record.get("action") or "").upper()
-        is_open = action == "BUY"
-        pnl = None if is_open else record.get("pnl")
-        pnl_pct = None if is_open else record.get("pnl_pct")
-        entry_date = record.get("entry_date") or (buy or {}).get("date") or record.get("date") or ""
-        exit_date = "" if is_open else record.get("date", "")
+        is_buy = action == "BUY"
+        is_sell = action.startswith("SELL")
+        is_open = is_buy and index in open_buy_indices
+        entry_date = str(record.get("entry_date") or record.get("date") or "")
+        code = str(record.get("stock_code") or "")
+        position = position_map.get((code, entry_date)) or (position_map.get((code, "")) if is_open else None)
+        pnl = position.get("unrealized_pnl") if is_open and position else record.get("pnl") if is_sell else None
+        pnl_pct = (
+            position.get("unrealized_pnl_pct") if is_open and position
+            else record.get("pnl_pct") if is_sell else None
+        )
+        action_label = "买入" if is_buy else "部分卖出" if action == "SELL_PARTIAL" else "卖出"
+        status = "持仓中" if is_open else "买入成交" if is_buy else str(record.get("exit_reason") or "卖出成交")
         trade_rows.append({
-            "买入日": entry_date,
-            "卖出日": exit_date,
+            "日期": record.get("date") or "",
+            "动作": action_label,
             "名称": record.get("stock_name", ""),
-            "代码": record.get("stock_code", ""),
+            "代码": code,
             "模式": record.get("pattern_type", ""),
-            "买入价": _fmt_price(record.get("entry_price") or (buy or {}).get("entry_price")),
-            "卖出价": "" if is_open else _fmt_price(record.get("exit_price"), blank_zero=True),
-            "股数": display_shares,
+            "买入价": _fmt_price(record.get("entry_price")),
+            "卖出价": _fmt_price(record.get("exit_price"), blank_zero=True) if is_sell else "",
+            "现价": _fmt_price(position.get("current_price"), blank_zero=True) if is_open and position else "",
+            "股数": int(float(record.get("shares") or 0)),
             "盈亏": (f"{float(pnl):+,.0f}" if isinstance(pnl, (int, float)) else ""),
             "盈亏%": (f"{float(pnl_pct) * 100:+.2f}%" if isinstance(pnl_pct, (int, float)) else ""),
-            "持仓天数": record.get("holding_days", ""),
+            "持仓天数": position.get("holding_days") if is_open and position else record.get("holding_days", ""),
             "止损": "是" if record.get("stop_loss_triggered") else "",
             "止盈": "是" if record.get("take_profit_triggered") else "",
             "排名": record.get("plan_rank", ""),
             "评分": (f"{float(record.get('plan_score')):.2f}"
                    if isinstance(record.get("plan_score"), (int, float)) else ""),
-            "退出": "持仓中" if is_open else record.get("exit_reason", ""),
-            "_sort_date": exit_date or entry_date,
+            "买入信号": position.get("entry_signal") if is_open and position else record.get("entry_signal", ""),
+            "状态/退出": status,
+            "_sort_date": str(record.get("date") or ""),
+            "_sort_index": index,
         })
-    trade_rows.sort(key=lambda row: str(row.get("_sort_date") or ""), reverse=True)
+    trade_rows.sort(key=lambda row: (row.get("_sort_date") or "", row.get("_sort_index") or 0), reverse=True)
     for row in trade_rows:
         row.pop("_sort_date", None)
+        row.pop("_sort_index", None)
+
+    has_position_snapshot = _path("positions", run).exists()
+    open_count = len(positions) if has_position_snapshot else len(open_buy_indices)
 
     base.update({
         "summary": summary,
@@ -466,7 +497,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "closed_count": len(closed),
         "buy_count": sum(1 for t in trades if str(t.get("action", "")).upper() == "BUY"),
         "execution_count": len(trades),
-        "open_count": sum(len(lots) for lots in open_lots.values()),
+        "open_count": open_count,
         "win_count": len(wins),
         "loss_count": len(losses),
         "nav_start": nav[0]["date"] if nav else "",
@@ -481,8 +512,9 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "walk_forward_summary": walk_forward_summary,
         "transaction_view": True,
         "trade_rows": trade_rows,
-        "trade_columns": ["买入日", "卖出日", "名称", "代码", "模式", "买入价", "卖出价",
-                          "股数", "盈亏", "盈亏%", "持仓天数", "止损", "止盈", "排名", "评分", "退出"],
+        "trade_columns": ["日期", "动作", "名称", "代码", "模式", "买入价", "卖出价", "现价",
+                          "股数", "盈亏", "盈亏%", "持仓天数", "止损", "止盈", "排名", "评分",
+                          "买入信号", "状态/退出"],
     })
     return base
 

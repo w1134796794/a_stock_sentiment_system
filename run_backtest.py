@@ -107,11 +107,61 @@ def save_backtest_results(result: dict, output_dir: str, metadata: dict | None =
             'open_gap_pct': getattr(t, 'open_gap_pct', 0),
             'market_score': getattr(t, 'market_score', 0),
             'amount_ratio': getattr(t, 'amount_ratio', 0),
+            'entry_signal': getattr(t, 'entry_signal', ''),
         } for t in result['trade_history']])
 
         trades_file = output_path / f"backtest_trades_{timestamp}.csv"
         trades_df.to_csv(trades_file, index=False, encoding="utf-8-sig")
         logger.info(f"交易记录已保存: {trades_file}")
+
+    # 保存截止日持仓快照，页面据此展示现价和未实现盈亏。
+    current_positions = result.get('current_positions') or {}
+    as_of_date = str(result.get('as_of_date') or '')
+    if not as_of_date and result.get('daily_nav'):
+        as_of_date = str(result['daily_nav'][-1].get('date') or '')
+    try:
+        from backtest.trade_calendar import TradeCalendar
+        calendar = TradeCalendar()
+    except Exception:
+        calendar = None
+    position_rows = []
+    for code, position in current_positions.items():
+        shares = int(float(position.get('shares') or 0))
+        entry_price = float(position.get('entry_price') or 0)
+        cost_basis = float(position.get('cost_basis') or 0)
+        market_value = float(position.get('market_value') or 0)
+        current_price = market_value / shares if shares > 0 else 0
+        unrealized_pnl = market_value - cost_basis
+        unrealized_pnl_pct = unrealized_pnl / cost_basis if cost_basis > 0 else 0
+        entry_date = str(position.get('entry_date') or '')
+        holding_days = (
+            calendar.holding_days(entry_date, as_of_date)
+            if calendar is not None and entry_date and as_of_date else 0
+        )
+        position_rows.append({
+            'as_of_date': as_of_date,
+            'stock_code': str(code).zfill(6),
+            'stock_name': position.get('stock_name') or '',
+            'entry_date': entry_date,
+            'entry_price': entry_price,
+            'current_price': current_price,
+            'shares': shares,
+            'cost_basis': cost_basis,
+            'market_value': market_value,
+            'unrealized_pnl': unrealized_pnl,
+            'unrealized_pnl_pct': unrealized_pnl_pct,
+            'holding_days': holding_days,
+            'plan_rank': position.get('plan_rank') or 0,
+            'plan_score': position.get('plan_score') or 0,
+            'entry_signal': position.get('entry_signal') or '',
+        })
+    positions_file = output_path / f"backtest_positions_{timestamp}.csv"
+    pd.DataFrame(position_rows, columns=[
+        'as_of_date', 'stock_code', 'stock_name', 'entry_date', 'entry_price',
+        'current_price', 'shares', 'cost_basis', 'market_value', 'unrealized_pnl',
+        'unrealized_pnl_pct', 'holding_days', 'plan_rank', 'plan_score', 'entry_signal',
+    ]).to_csv(positions_file, index=False, encoding="utf-8-sig")
+    logger.info(f"持仓快照已保存: {positions_file}")
 
     # 保存净值曲线
     if result.get('daily_nav'):
@@ -128,6 +178,8 @@ def save_backtest_results(result: dict, output_dir: str, metadata: dict | None =
         'max_drawdown': result.get('max_drawdown', 0),
         'win_rate': result.get('win_rate', 0),
         'profit_loss_ratio': result.get('profit_loss_ratio', 0),
+        'open_positions': len(current_positions),
+        'unrealized_pnl': sum(float(row.get('unrealized_pnl') or 0) for row in position_rows),
         'total_trades': result.get('total_trades', 0),
         'buy_trades': result.get('buy_trades', 0),
         'closed_trades': result.get('closed_trades', result.get('total_trades', 0)),

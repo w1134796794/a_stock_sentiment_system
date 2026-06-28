@@ -29,14 +29,22 @@ class BacktestConfig:
     max_total_position: float = 0.8  # 总仓位上限80%
     max_positions: int = 8  # 最多同时持仓只数（仅风控开启时生效）
     max_sector_concentration: float = 0.4  # 单一板块最大仓位（仅风控开启时生效）
-    max_plan_rank: int = 3  # 只执行每日候选前N名，后续候选仅观察
+    max_plan_rank: int = 0  # 0=不按名次截断，全部候选交给买点规则判断
 
     # 入场与市场分层
     min_open_gap: float = 0.0  # 必须严格高开
     max_open_gap: float = 0.03  # 高开超过3%不追
-    market_entry_threshold: float = 50.0  # 弱市停止开仓
-    market_strong_threshold: float = 70.0  # 强市才扩展到前N名
+    reduced_position_gap: float = 0.02  # 高开2%-3%仍可买，但降低追高风险
+    high_gap_position_multiplier: float = 0.75  # 高开2%-3%使用原计划75%仓位
+    market_entry_threshold: float = 60.0  # 模拟交易：60分以下停止开仓
+    market_strong_threshold: float = 65.0  # 模拟交易：65分以上扩展到前N名
     neutral_market_max_rank: int = 1  # 中性市场只买第1名
+    direct_entry_min_score: float = 74.0  # 达标候选可走竞价买点
+    intraday_strength_trigger_pct: float = 0.01  # 观察候选从开盘价上冲1%确认转强
+    intraday_min_tech_score: float = 80.0
+    intraday_min_sector_resonance: float = 60.0
+    intraday_min_amount_ratio: float = 0.80
+    intraday_max_amount_ratio: float = 1.50
 
     # 风控闸门总开关：关闭后不施加组合层约束（单票/总仓/持仓数/板块集中度），
     # 仅保留现金/价格有效性等基础校验，用于对比"无风控"模拟结果。个股止损止盈
@@ -44,12 +52,16 @@ class BacktestConfig:
     risk_control: bool = True
 
     # 硬止损
-    stop_loss_pct: float = 0.05  # 硬止损线5%
+    stop_loss_pct: float = 0.04  # 模拟交易硬止损线4%
 
     # 移动止盈（跟踪止损）
     trailing_stop: bool = True  # 启用跟踪止损
-    trailing_stop_pct: float = 0.08  # 从最高点回撤8%触发
+    trailing_stop_pct: float = 0.10  # 大趋势阶段从最高点回撤10%触发
     trailing_activation_pct: float = 0.05  # 盈利5%后启动跟踪止损
+    trailing_mid_profit_pct: float = 0.10  # 盈利10%进入中段
+    trailing_high_profit_pct: float = 0.20  # 盈利20%进入趋势段
+    trailing_early_stop_pct: float = 0.04  # 盈利5%-10%时回撤4%退出
+    trailing_mid_stop_pct: float = 0.06  # 盈利10%-20%时回撤6%退出
 
     # 时间止损
     time_stop_days: int = 5  # 持仓超过5天强制卖出
@@ -70,7 +82,8 @@ class BacktestConfig:
         risk_control: Optional[bool] = None,
     ) -> "BacktestConfig":
         """Project the unified RiskConfig into the active backtest engine."""
-        trailing_pct = max(float(risk_config.trailing_stop), 0.0)
+        defaults = cls()
+        trailing_pct = max(float(risk_config.trailing_stop), defaults.trailing_stop_pct, 0.0)
         return cls(
             initial_capital=float(initial_capital or risk_config.initial_capital),
             max_position_per_stock=float(risk_config.max_position_per_stock),
@@ -79,14 +92,15 @@ class BacktestConfig:
             max_sector_concentration=float(risk_config.max_sector_concentration),
             min_open_gap=float(risk_config.min_open_gap),
             max_open_gap=float(risk_config.max_open_gap),
-            market_entry_threshold=float(risk_config.market_entry_threshold),
-            market_strong_threshold=float(risk_config.market_strong_threshold),
+            # 入场和退出阈值是本轮历史样本验证后的模拟交易策略，不反向修改全局风控。
+            market_entry_threshold=defaults.market_entry_threshold,
+            market_strong_threshold=defaults.market_strong_threshold,
             neutral_market_max_rank=int(risk_config.neutral_market_max_rank),
             risk_control=bool(risk_config.enabled if risk_control is None else risk_control),
-            stop_loss_pct=float(risk_config.hard_stop_loss),
+            stop_loss_pct=min(float(risk_config.hard_stop_loss), defaults.stop_loss_pct),
             trailing_stop=trailing_pct > 0,
             trailing_stop_pct=trailing_pct,
-            trailing_activation_pct=max(float(risk_config.trailing_activation), 0.0),
+            trailing_activation_pct=max(float(risk_config.trailing_activation), defaults.trailing_activation_pct, 0.0),
             time_stop_days=int(risk_config.time_stop_days),
             time_stop_profit_threshold=float(risk_config.time_stop_profit_threshold),
             commission_rate=float(risk_config.commission_rate),
@@ -125,6 +139,7 @@ class TradeRecord:
     open_gap_pct: float = 0.0
     market_score: float = 0.0
     amount_ratio: float = 0.0
+    entry_signal: str = ""
 
 
 class BacktestEngine:
@@ -143,6 +158,7 @@ class BacktestEngine:
         self.cash: float = self.config.initial_capital
         self.total_capital: float = self.config.initial_capital
         self._last_entry_gap: Dict[str, float] = {}
+        self._last_entry_signal: Dict[str, str] = {}
 
     def export_state(self) -> Dict[str, Any]:
         """导出可落盘的账户状态，用于单日接力回测。"""
@@ -286,21 +302,10 @@ class BacktestEngine:
             if market_score > 0 and market_score < self.config.market_entry_threshold:
                 logger.info(f"[{date}] 市场评分{market_score:.1f}，弱市停止开仓")
                 return pd.DataFrame()
-            effective_rank = self.config.max_plan_rank
-            if market_score > 0 and market_score < self.config.market_strong_threshold:
-                effective_rank = min(effective_rank, self.config.neutral_market_max_rank)
-            if effective_rank and effective_rank > 0 and '优先级' in df.columns:
-                rank = pd.to_numeric(df['优先级'], errors='coerce')
-                df = df[rank.notna() & (rank <= effective_rank)].copy()
-                df['_rank'] = pd.to_numeric(df['优先级'], errors='coerce').fillna(999999)
-                sort_cols = ['_rank']
-                ascending = [True]
-                if '综合评分' in df.columns:
-                    df['_score'] = pd.to_numeric(df['综合评分'], errors='coerce').fillna(0)
-                    sort_cols.append('_score')
-                    ascending.append(False)
-                df = df.sort_values(sort_cols, ascending=ascending)
-                df = df.drop(columns=[c for c in ('_rank', '_score') if c in df.columns])
+            # 不再按固定名次截断；当资金或持仓数有限时，评分高者先接受买点校验。
+            if '综合评分' in df.columns:
+                df['_score'] = pd.to_numeric(df['综合评分'], errors='coerce').fillna(0)
+                df = df.sort_values('_score', ascending=False).drop(columns=['_score'])
             return df
         except Exception as e:
             logger.error(f"加载交易计划失败 {date}: {e}")
@@ -355,18 +360,32 @@ class BacktestEngine:
                         return
                     position_size = allowed
 
-        # 检查现金
-        if position_size > self.cash:
-            logger.warning(f"现金不足，跳过买入 {stock_name}")
-            return
-
         # 检查开盘情况是否满足买入条件
         can_buy, entry_price = self._check_buy_conditions(plan, date, stock_code, stock_name)
         if not can_buy:
+            self._last_entry_gap.pop(stock_code, None)
+            self._last_entry_signal.pop(stock_code, None)
+            return
+
+        entry_gap = self._last_entry_gap.get(stock_code, 0.0)
+        gap_multiplier = self._entry_gap_position_multiplier(entry_gap)
+        if gap_multiplier < 1.0:
+            position_size *= gap_multiplier
+            logger.info(
+                f"{stock_name} 高开{entry_gap:.2%}，模拟交易仓位降至原计划{gap_multiplier:.0%}"
+            )
+
+        # 入场确认和追高降仓后再检查现金。
+        if position_size > self.cash:
+            logger.warning(f"现金不足，跳过买入 {stock_name}")
+            self._last_entry_gap.pop(stock_code, None)
+            self._last_entry_signal.pop(stock_code, None)
             return
         
         if entry_price <= 0:
             logger.warning(f"{stock_name} 买入价格无效，跳过")
+            self._last_entry_gap.pop(stock_code, None)
+            self._last_entry_signal.pop(stock_code, None)
             return
 
         # 确保买入价格不超过对应板块涨停价。
@@ -403,6 +422,7 @@ class BacktestEngine:
         factor_context_json = self._factor_context_json(plan)
         factor_context = json.loads(factor_context_json or '{}')
         open_gap = self._last_entry_gap.pop(stock_code, 0.0)
+        entry_signal = self._last_entry_signal.pop(stock_code, "竞价买点")
         market_score = self._float(factor_context.get('mkt_market_score'))
         amount_ratio = self._float(
             factor_context.get('amount_ratio_5d'),
@@ -427,6 +447,7 @@ class BacktestEngine:
             'open_gap_pct': open_gap,
             'market_score': market_score,
             'amount_ratio': amount_ratio,
+            'entry_signal': entry_signal,
             'stop_loss_price': entry_price * (1 - self.config.stop_loss_pct),
             'highest_price': entry_price  # 用于跟踪回撤
         }
@@ -461,6 +482,7 @@ class BacktestEngine:
             open_gap_pct=open_gap,
             market_score=market_score,
             amount_ratio=amount_ratio,
+            entry_signal=entry_signal,
         )
         self.trade_history.append(trade_record)
 
@@ -518,6 +540,24 @@ class BacktestEngine:
             if lu_price is not None and open_price >= lu_price * 0.998:  # 考虑浮点误差
                 logger.info(f"{stock_name} 涨停开盘，无法买入")
                 return False, 0
+
+        plan_score = self._float(plan.get('综合评分'))
+        if plan_score < self.config.direct_entry_min_score:
+            if not self._intraday_strength_ready(plan):
+                logger.info(f"{stock_name} 评分{plan_score:.1f}未达到竞价买点，盘中转强条件不足")
+                return False, 0
+            trigger_price = open_price * (1 + self.config.intraday_strength_trigger_pct)
+            if high_price < trigger_price:
+                logger.info(
+                    f"{stock_name} 盘中最高价未触及转强价{trigger_price:.2f}，继续观察"
+                )
+                return False, 0
+            self._last_entry_signal[stock_code] = "盘中转强"
+            entry_price = trigger_price * (1 + self.config.slippage)
+            logger.info(f"{stock_name} 盘中触及转强价{trigger_price:.2f}，确认买入")
+            return True, entry_price
+
+        self._last_entry_signal[stock_code] = "竞价买点"
         
         # 根据介入时机判断买入价格
         # 竞价时段 (09:24:30-09:25:00)
@@ -549,6 +589,19 @@ class BacktestEngine:
             entry_price = open_price * (1 + self.config.slippage)
             return True, entry_price
 
+    def _intraday_strength_ready(self, plan: pd.Series) -> bool:
+        """Point-in-time factor gate used before waiting for the intraday trigger."""
+        tech_score = self._float(plan.get('因子_tech_score'))
+        sector_score = self._float(plan.get('因子_stk_sector_resonance_score'))
+        amount_ratio = self._float(plan.get('原始_amount_ratio'))
+        return (
+            tech_score >= self.config.intraday_min_tech_score
+            and sector_score >= self.config.intraday_min_sector_resonance
+            and self.config.intraday_min_amount_ratio
+            <= amount_ratio
+            <= self.config.intraday_max_amount_ratio
+        )
+
     def _calculate_position_size(self, plan: pd.Series) -> float:
         """计算仓位大小"""
         position_map = {
@@ -565,6 +618,13 @@ class BacktestEngine:
             position_pct *= 1.2
 
         return self.total_capital * position_pct
+
+    def _entry_gap_position_multiplier(self, gap: float) -> float:
+        """Reduce size near the upper edge of the allowed opening-gap range."""
+        value = self._float(gap)
+        if value >= self.config.reduced_position_gap:
+            return max(0.0, min(self.config.high_gap_position_multiplier, 1.0))
+        return 1.0
 
     def _check_stop_loss_take_profit(self, date: str):
         """检查退出：硬止损/时间止损保持不变，盈利只按高点回撤退出。"""
@@ -614,10 +674,12 @@ class BacktestEngine:
                 # 只有当盈利超过激活阈值后才启动跟踪止损
                 profit_pct = (position['highest_price'] - position['entry_price']) / position['entry_price']
 
-                if profit_pct >= self.config.trailing_activation_pct and drawdown_from_high >= self.config.trailing_stop_pct:
+                trailing_distance = self._trailing_stop_distance(profit_pct)
+                if profit_pct >= self.config.trailing_activation_pct and drawdown_from_high >= trailing_distance:
                     stocks_to_sell.append((stock_code, current_price, 'trailing_stop'))
                     logger.info(f"[{date}] {position['stock_name']} 触发跟踪止损: {current_price:.2f} "
-                               f"(最高点{position['highest_price']:.2f}, 回撤{drawdown_from_high:.2%})")
+                               f"(最高点{position['highest_price']:.2f}, 回撤{drawdown_from_high:.2%}, "
+                               f"阶段线{trailing_distance:.2%})")
                     continue
 
             # ========== 3. 时间止损 ==========
@@ -633,6 +695,15 @@ class BacktestEngine:
         # 执行全部卖出
         for stock_code, sell_price, reason in stocks_to_sell:
             self._execute_sell(stock_code, sell_price, date, reason)
+
+    def _trailing_stop_distance(self, peak_profit_pct: float) -> float:
+        """Return the pullback distance for the current profit stage."""
+        profit = max(self._float(peak_profit_pct), 0.0)
+        if profit >= self.config.trailing_high_profit_pct:
+            return max(self.config.trailing_stop_pct, 0.0)
+        if profit >= self.config.trailing_mid_profit_pct:
+            return max(self.config.trailing_mid_stop_pct, 0.0)
+        return max(self.config.trailing_early_stop_pct, 0.0)
 
     def _execute_sell(self, stock_code: str, sell_price: float, date: str, reason: str):
         """执行卖出"""
@@ -689,6 +760,7 @@ class BacktestEngine:
             open_gap_pct=float(position.get('open_gap_pct') or 0.0),
             market_score=float(position.get('market_score') or 0.0),
             amount_ratio=float(position.get('amount_ratio') or 0.0),
+            entry_signal=str(position.get('entry_signal') or ''),
         )
 
         self.trade_history.append(trade_record)
@@ -886,6 +958,8 @@ class BacktestEngine:
                 'resonance_stats': pd.DataFrame(),
                 'daily_nav': self.daily_nav,
                 'trade_history': self.trade_history,
+                'current_positions': self.current_positions,
+                'as_of_date': str(self.daily_nav[-1].get('date') if self.daily_nav else ''),
             }
 
         # 计算收益率
@@ -958,7 +1032,9 @@ class BacktestEngine:
             'pattern_stats': pattern_stats,
             'resonance_stats': resonance_stats,
             'daily_nav': self.daily_nav,
-            'trade_history': self.trade_history
+            'trade_history': self.trade_history,
+            'current_positions': self.current_positions,
+            'as_of_date': str(self.daily_nav[-1].get('date') if self.daily_nav else ''),
         }
 
         return report
