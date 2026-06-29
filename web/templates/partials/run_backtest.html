@@ -47,6 +47,33 @@
         <input id="bt-cap" type="text" placeholder="100000"
                class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
       </div>
+      <div class="relative">
+        <label class="block text-[11px] text-slate-500 mb-0.5">回测组合</label>
+        <details id="bt-enhancement-menu" class="relative">
+          <summary class="list-none cursor-pointer h-[30px] min-w-36 px-2 inline-flex items-center justify-between gap-2 rounded-md border border-slate-700 bg-slate-900 text-sm text-slate-300">
+            <span id="bt-enhancement-label">基线</span>
+            <span class="text-slate-500">⌄</span>
+          </summary>
+          <div class="absolute right-0 top-9 z-30 w-52 border border-slate-700 bg-slate-950 shadow-xl rounded-md p-2 space-y-1">
+            <div class="px-2 py-1 text-xs text-emerald-300">基线始终启用</div>
+            <label class="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-slate-800 rounded cursor-pointer">
+              <input type="checkbox" name="bt-enhancement" value="capital_flow" class="accent-emerald-500">资金流共识
+            </label>
+            <label class="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-slate-800 rounded cursor-pointer">
+              <input type="checkbox" name="bt-enhancement" value="attention" class="accent-emerald-500">市场热度共识
+            </label>
+            <label class="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-slate-800 rounded cursor-pointer">
+              <input type="checkbox" name="bt-enhancement" value="leader" class="accent-emerald-500">龙头资金确认
+            </label>
+            <label class="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-slate-800 rounded cursor-pointer">
+              <input type="checkbox" name="bt-enhancement" value="margin" class="accent-emerald-500">融资加速度
+            </label>
+            <label class="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-slate-800 rounded cursor-pointer">
+              <input type="checkbox" name="bt-enhancement" value="risk" class="accent-emerald-500">事件风险惩罚
+            </label>
+          </div>
+        </details>
+      </div>
       <div>
         <label class="block text-[11px] text-slate-500 mb-0.5">风控闸门</label>
         <label class="flex items-center gap-1.5 h-[30px] px-2 rounded-md border border-slate-700 bg-slate-900 cursor-pointer select-none">
@@ -83,6 +110,10 @@
   const dailyFields = document.getElementById('bt-daily-fields');
   const resetWrap = document.getElementById('bt-reset-wrap');
   const helpEl = document.getElementById('bt-help');
+  const enhancementLabel = document.getElementById('bt-enhancement-label');
+  const enhancementNames = {
+    capital_flow: '资金流', attention: '热度', leader: '龙头', margin: '融资', risk: '风险'
+  };
   const LABEL = { idle: '空闲', running: '运行中', done: '已完成', error: '失败' };
   let since = 0, timer = null;
 
@@ -99,6 +130,15 @@
   };
 
   function val(id) { const v = document.getElementById(id).value.trim(); return v || null; }
+  function enhancements() {
+    return Array.from(document.querySelectorAll('input[name="bt-enhancement"]:checked')).map(el => el.value);
+  }
+  document.querySelectorAll('input[name="bt-enhancement"]').forEach(el => el.addEventListener('change', () => {
+    const selected = enhancements();
+    enhancementLabel.textContent = selected.length
+      ? '基线 + ' + selected.map(key => enhancementNames[key]).join(' + ')
+      : '基线';
+  }));
   function busy(on) { btn.disabled = on; btn.textContent = on ? '运行中…' : '运行回测'; }
 
   window.btRun = async () => {
@@ -108,7 +148,7 @@
     const riskOn = document.getElementById('bt-risk').checked;
     const body = {
       mode: mode(), initial_capital: val('bt-cap'), risk_control: riskOn,
-      max_plan_rank: 0
+      max_plan_rank: 0, enhancements: enhancements()
     };
     if (body.mode === 'daily') {
       body.trade_date = val('bt-day');

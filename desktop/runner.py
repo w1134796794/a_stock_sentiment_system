@@ -363,7 +363,12 @@ class BacktestController:
               max_plan_rank: object = 0,
               mode: object = "range",
               trade_date: Optional[str] = None,
-              reset_state: object = False) -> Tuple[bool, str]:
+              reset_state: object = False,
+              enhancements: object = None) -> Tuple[bool, str]:
+        from core.screening.enhancements import enhancement_label, normalize_enhancements
+
+        selected_enhancements = normalize_enhancements(enhancements)
+        combination_label = enhancement_label(selected_enhancements)
         start_date = (str(start_date).strip() if start_date else "") or None
         end_date = (str(end_date).strip() if end_date else "") or None
         trade_date = (str(trade_date).strip() if trade_date else "") or None
@@ -402,19 +407,20 @@ class BacktestController:
                     "risk_control": risk_on,
                     "max_plan_rank": max_rank,
                     "reset_state": bool(reset_state),
+                    "enhancements": selected_enhancements,
                 }
                 self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.finished_at = None
                 self._thread = threading.Thread(
                     target=self._worker_daily,
-                    args=(target, capital, risk_on, bool(reset_state), max_rank),
+                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements),
                     daemon=True,
                     name="backtest-run-daily",
                 )
                 self._thread.start()
             mode_txt = "开启风控" if risk_on else "关闭风控"
             reset_txt = "重置接力账户" if reset_state else "承接上一交易日账户"
-            return True, f"已启动单日接力回测：{target}（全候选按买点成交，{mode_txt}，{reset_txt}）"
+            return True, f"已启动单日接力回测：{target}（{combination_label}，{mode_txt}，{reset_txt}）"
 
         # 默认区间：结束=今日，开始=结束前 90 天（交易日历会自动剔除非交易日）
         end = end_date or datetime.now().strftime("%Y%m%d")
@@ -434,16 +440,16 @@ class BacktestController:
             self.error = None
             self.params = {"mode": "range", "start_date": start, "end_date": end,
                            "initial_capital": capital, "risk_control": risk_on,
-                           "max_plan_rank": max_rank}
+                           "max_plan_rank": max_rank, "enhancements": selected_enhancements}
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(start, end, capital, risk_on, max_rank),
+                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements),
                 daemon=True, name="backtest-run"
             )
             self._thread.start()
         mode = "开启风控" if risk_on else "关闭风控"
-        return True, f"已启动回测：{start} ~ {end}（全候选按买点成交，{mode}）"
+        return True, f"已启动回测：{start} ~ {end}（{combination_label}，{mode}）"
 
     def status(self, since: int = 0) -> Dict:
         lines, nxt = self.buffer.read_from(since)
@@ -458,7 +464,8 @@ class BacktestController:
         }
 
     def _worker(self, start: str, end: str, capital: float,
-                risk_control: bool = True, max_plan_rank: int = 0) -> None:
+                risk_control: bool = True, max_plan_rank: int = 0,
+                enhancements: object = None) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -471,8 +478,11 @@ class BacktestController:
         sys.stderr = _StreamTee(old_err, self.buffer)
         try:
             mode_txt = "开启风控闸门" if risk_control else "关闭风控闸门（无风控）"
+            from core.screening.enhancements import enhancement_label, normalize_enhancements
+            selected_enhancements = normalize_enhancements(enhancements)
+            combination_label = enhancement_label(selected_enhancements)
             self.buffer.append_line(
-                f"=== 开始回测 · {start} ~ {end} · 初始资金 {capital:,.0f} · {mode_txt} ===")
+                f"=== 开始回测 · {start} ~ {end} · {combination_label} · 初始资金 {capital:,.0f} · {mode_txt} ===")
 
             from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
             from backtest.plan_source import build_backtest_plan_dir
@@ -491,6 +501,7 @@ class BacktestController:
                 start_date=start,
                 end_date=end,
                 max_rank=max_plan_rank,
+                enhancements=selected_enhancements,
             )
             if file_count <= 0:
                 self.buffer.append_line(f"!!! 当前数据快照中没有可回测的交易计划：{SNAPSHOT_DIR}")
@@ -526,22 +537,27 @@ class BacktestController:
                 "end_date": end,
                 "risk_control": risk_control,
                 "max_plan_rank": max_plan_rank,
+                "enhancements": selected_enhancements,
+                "enhancement_label": combination_label,
             })
-            from backtest.lhb_comparison import run_lhb_comparison, save_lhb_comparison
+            if not selected_enhancements:
+                from backtest.lhb_comparison import run_lhb_comparison, save_lhb_comparison
 
-            self.buffer.append_line("开始龙虎榜四组对照回测：无龙虎榜 / 净买入 / 机构 / 龙虎榜＋板块共振")
-            comparison = run_lhb_comparison(
-                data_manager=dm,
-                config=config,
-                start_date=start,
-                end_date=end,
-                snapshot_dir=Path(SNAPSHOT_DIR),
-                web_data_dir=Path(WEB_DATA_DIR),
-                baseline_result=result,
+                self.buffer.append_line("开始龙虎榜四组对照回测：无龙虎榜 / 净买入 / 机构 / 龙虎榜＋板块共振")
+                comparison = run_lhb_comparison(
+                    data_manager=dm,
+                    config=config,
+                    start_date=start,
+                    end_date=end,
+                    snapshot_dir=Path(SNAPSHOT_DIR),
+                    web_data_dir=Path(WEB_DATA_DIR),
+                    baseline_result=result,
+                )
+                comparison_path = save_lhb_comparison(comparison, Path(OUTPUT_DIR), run_id)
+                self.buffer.append_line(f"龙虎榜对照报表已保存：{comparison_path}")
+            state_path = self._save_rolling_state(
+                engine, "range", enhancements=selected_enhancements,
             )
-            comparison_path = save_lhb_comparison(comparison, Path(OUTPUT_DIR), run_id)
-            self.buffer.append_line(f"龙虎榜对照报表已保存：{comparison_path}")
-            state_path = self._save_rolling_state(engine, "range")
 
             self.buffer.append_line(f"接力账户状态已同步到 {state_path}，后续可用单日接力继续。")
             self.buffer.append_line("=== 回测完成，结果已保存，可在「模拟交易 / 回撤分析」查看 ===")
@@ -561,7 +577,7 @@ class BacktestController:
 
     def _worker_daily(self, trade_date: str, capital: float,
                       risk_control: bool = True, reset_state: bool = False,
-                      max_plan_rank: int = 0) -> None:
+                      max_plan_rank: int = 0, enhancements: object = None) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -574,8 +590,11 @@ class BacktestController:
         sys.stderr = _StreamTee(old_err, self.buffer)
         try:
             mode_txt = "开启风控闸门" if risk_control else "关闭风控闸门（无风控）"
+            from core.screening.enhancements import enhancement_label, normalize_enhancements
+            selected_enhancements = normalize_enhancements(enhancements)
+            combination_label = enhancement_label(selected_enhancements)
             self.buffer.append_line(
-                f"=== 开始单日接力回测 · {trade_date} · 初始资金 {capital:,.0f} · {mode_txt} ===")
+                f"=== 开始单日接力回测 · {trade_date} · {combination_label} · 初始资金 {capital:,.0f} · {mode_txt} ===")
 
             from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
             from backtest.plan_source import build_backtest_plan_dir
@@ -603,6 +622,7 @@ class BacktestController:
                 start_date=prev_date,
                 end_date=prev_date,
                 max_rank=max_plan_rank,
+                enhancements=selected_enhancements,
             )
             if file_count <= 0:
                 self.buffer.append_line(f"!!! 未找到上一交易日 {prev_date} 的交易计划，无法执行 {trade_date}。")
@@ -630,6 +650,14 @@ class BacktestController:
             else:
                 state = self._load_rolling_state()
                 if state:
+                    state_enhancements = normalize_enhancements(state.get("enhancements"))
+                    if state_enhancements != selected_enhancements:
+                        self.buffer.append_line(
+                            f"!!! 接力账户使用 {enhancement_label(state_enhancements)}，本次选择 {combination_label}，口径不一致。"
+                        )
+                        self.error = "接力账户增强组合不一致"
+                        self.state = "error"
+                        return
                     last_date = str(state.get("last_date") or "")
                     if last_date != prev_date:
                         self.buffer.append_line(
@@ -665,8 +693,12 @@ class BacktestController:
                 "state_source": state_source,
                 "risk_control": risk_control,
                 "max_plan_rank": max_plan_rank,
+                "enhancements": selected_enhancements,
+                "enhancement_label": combination_label,
             })
-            state_path = self._save_rolling_state(engine, "daily", state_source=state_source)
+            state_path = self._save_rolling_state(
+                engine, "daily", state_source=state_source, enhancements=selected_enhancements,
+            )
 
             self.buffer.append_line(f"接力账户状态已更新到 {trade_date}：{state_path}")
             self.buffer.append_line("=== 单日接力回测完成，结果已保存，可在「模拟交易 / 回撤分析」查看 ===")
@@ -700,12 +732,17 @@ class BacktestController:
             self.buffer.append_line(f"[提示] 接力状态读取失败，将尝试从历史批次引导: {exc}")
             return None
 
-    def _save_rolling_state(self, engine, mode: str, state_source: str = "") -> Path:
+    def _save_rolling_state(
+        self, engine, mode: str, state_source: str = "", enhancements: object = None,
+    ) -> Path:
+        from core.screening.enhancements import normalize_enhancements
+
         path = self._rolling_state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         state = engine.export_state()
         state["source_mode"] = mode
         state["state_source"] = state_source
+        state["enhancements"] = normalize_enhancements(enhancements)
         path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 

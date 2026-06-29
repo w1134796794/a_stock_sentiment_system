@@ -35,6 +35,15 @@ FACTOR_LABELS: Dict[str, str] = {
     "stk_lhb_composite_score": "龙虎榜综合分",
     "stk_lhb_crowding_risk": "龙虎榜拥挤安全度",
     "sec_lhb_resonance_score": "板块龙虎榜共振",
+    "stk_capital_flow_consensus": "多源资金流共识",
+    "stk_capital_flow_persistence": "资金流持续性",
+    "stk_attention_consensus": "双平台热度共识",
+    "stk_attention_crowding_risk": "热度拥挤安全度",
+    "stk_kpl_leader_quality": "开盘啦龙头质量",
+    "stk_margin_acceleration": "融资净买入加速度",
+    "stk_block_trade_risk": "大宗交易安全度",
+    "sec_capital_flow_score": "板块资金流强度",
+    "sec_flow_price_resonance": "板块量价资金共振",
 }
 
 FACTOR_NOTE: Dict[str, str] = {
@@ -68,6 +77,15 @@ FACTOR_NOTE: Dict[str, str] = {
     "stk_lhb_composite_score": "龙虎榜资金结构综合表现较好",
     "stk_lhb_crowding_risk": "龙虎榜席位集中风险较低",
     "sec_lhb_resonance_score": "板块上榜资金形成合力",
+    "stk_capital_flow_consensus": "同花顺与东方财富资金方向形成共识",
+    "stk_capital_flow_persistence": "五日资金流具备持续性",
+    "stk_attention_consensus": "双平台热度排名形成交叉确认",
+    "stk_attention_crowding_risk": "市场热度尚未形成明显拥挤",
+    "stk_kpl_leader_quality": "开盘啦标签与封单质量确认龙头辨识度",
+    "stk_margin_acceleration": "融资净买入边际改善",
+    "stk_block_trade_risk": "未出现显著折价大宗交易风险",
+    "sec_capital_flow_score": "所属板块获得资金净流入",
+    "sec_flow_price_resonance": "板块价格与资金方向共振",
 }
 
 

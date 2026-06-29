@@ -82,6 +82,18 @@ class SectorFactorJob:
 
         today["amount_ratio_score"] = ratio_scores
         today["persistence_score"] = persistence_scores
+        signal = read_table(
+            con, "factor_signal_sector_wide",
+            where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)],
+        )
+        if not signal.empty:
+            signal_keep = [
+                "sector_code", "sector_flow_score", "sector_flow_price_resonance", "net_amount_yuan",
+            ]
+            today = today.merge(
+                signal[[col for col in signal_keep if col in signal.columns]],
+                on="sector_code", how="left",
+            )
         lhb = read_table(
             con, "factor_lhb_sector_wide", where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)]
         )
@@ -102,6 +114,9 @@ class SectorFactorJob:
             "sector_lhb_resonance_score": 50.0,
             "signal_date": "",
             "effective_date": "",
+            "sector_flow_score": 50.0,
+            "sector_flow_price_resonance": 50.0,
+            "net_amount_yuan": 0.0,
         }
         for col, default in defaults.items():
             if col not in today.columns:
@@ -130,6 +145,9 @@ class SectorFactorJob:
             "amount_score",
             "amount_ratio_score",
             "persistence_score",
+            "sector_flow_score",
+            "sector_flow_price_resonance",
+            "net_amount_yuan",
             "lhb_stock_count",
             "sector_lhb_net_buy_ratio",
             "sector_lhb_breadth_score",
@@ -168,6 +186,16 @@ class SectorFactorJob:
                     trade_date=trade_date, entity_type="sector", entity_id=entity_id,
                     factor_id="sec_persistence_score", raw_value=row["persistence_score"],
                     score=row["persistence_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="sector", entity_id=entity_id,
+                    factor_id="sec_capital_flow_score", raw_value=row["net_amount_yuan"],
+                    score=row["sector_flow_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="sector", entity_id=entity_id,
+                    factor_id="sec_flow_price_resonance", raw_value=row["net_amount_yuan"],
+                    score=row["sector_flow_price_resonance"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="sector", entity_id=entity_id,

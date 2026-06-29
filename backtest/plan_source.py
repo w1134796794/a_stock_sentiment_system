@@ -9,6 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
+from core.screening.enhancements import enhancement_label, enhancement_slug, normalize_enhancements
+
 DEFAULT_MAX_BACKTEST_RANK = 0
 
 
@@ -79,11 +81,29 @@ def _rows_from_snapshot(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     ]
 
 
-def _rows_from_screening(payload: Dict[str, Any], *, lhb_scenario: str = "") -> List[Dict[str, Any]]:
+def _rows_from_screening(
+    payload: Dict[str, Any], *, lhb_scenario: str = "", enhancements: Optional[Iterable[str]] = None,
+) -> List[Dict[str, Any]]:
     screening = ((payload.get("etl") or {}).get("screening") or {})
     rows = []
-    selected = ((screening.get("scenarios") or {}).get(lhb_scenario) if lhb_scenario else None)
-    items = selected if isinstance(selected, list) else (screening.get("final") or [])
+    selected_enhancements = normalize_enhancements(enhancements)
+    if enhancements is not None and not lhb_scenario:
+        pool = screening.get("candidate_pool") or screening.get("final") or []
+        items = []
+        for item in pool:
+            candidate = dict(item)
+            base = _to_number(candidate.get("model_baseline_score"), _to_number(candidate.get("score")))
+            parts = dict(candidate.get("enhancements") or {})
+            candidate["score"] = round(base + sum(_to_number(parts.get(key)) for key in selected_enhancements), 4)
+            items.append(candidate)
+        items = sorted(items, key=lambda item: _to_number(item.get("score")), reverse=True)
+        top_n = max(1, len(screening.get("final") or []) or 10)
+        items = items[:top_n]
+        for rank, item in enumerate(items, start=1):
+            item["rank"] = rank
+    else:
+        selected = ((screening.get("scenarios") or {}).get(lhb_scenario) if lhb_scenario else None)
+        items = selected if isinstance(selected, list) else (screening.get("final") or [])
     for item in items:
         metrics = dict(item.get("metrics") or {})
         context = dict(item.get("context") or {})
@@ -100,6 +120,7 @@ def _rows_from_screening(payload: Dict[str, Any], *, lhb_scenario: str = "") -> 
             "筛选理由": "；".join(str(x) for x in (item.get("reasons") or [])[:5]),
             "惩罚理由": "；".join(str(x) for x in (item.get("penalty_reasons") or [])[:5]),
             "龙虎榜口径": lhb_scenario or "lhb_sector",
+            "回测增强组合": enhancement_label(selected_enhancements),
         }
         for factor, value in metrics.items():
             row[f"因子_{factor}"] = value
@@ -172,6 +193,7 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "惩罚理由": row.get("惩罚理由") or "",
         "因子指标": json.dumps(factor_metrics, ensure_ascii=False, sort_keys=True),
         "原始指标": json.dumps(raw_context, ensure_ascii=False, sort_keys=True),
+        "回测增强组合": row.get("回测增强组合") or "基线",
     }
     for factor, value in factor_metrics.items():
         out[f"因子_{factor}"] = value
@@ -187,6 +209,24 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return {}
 
 
+def _has_enhancement_data(screening: Dict[str, Any], selected: List[str]) -> bool:
+    if not selected:
+        return True
+    if int(_to_number(screening.get("enhancement_schema_version"), 0)) < 1:
+        return False
+    pool = screening.get("candidate_pool") or []
+    if not isinstance(pool, list):
+        return False
+    if not pool:
+        return True
+    return all(
+        isinstance(item, dict)
+        and isinstance(item.get("enhancements"), dict)
+        and all(key in item["enhancements"] for key in selected)
+        for item in pool
+    )
+
+
 def build_backtest_plan_dir(
     *,
     snapshot_dir: Path,
@@ -196,13 +236,14 @@ def build_backtest_plan_dir(
     end_date: str = "",
     max_rank: int = DEFAULT_MAX_BACKTEST_RANK,
     lhb_scenario: str = "",
+    enhancements: Optional[Iterable[str]] = None,
 ) -> Tuple[Path, int, int]:
     """Create a clean plan directory for BacktestEngine from current artifacts.
 
     Returns:
         (plan_dir, file_count, row_count)
     """
-    suffix = f"_{lhb_scenario}" if lhb_scenario else ""
+    suffix = f"_{lhb_scenario}" if lhb_scenario else f"_{enhancement_slug(enhancements)}"
     plan_dir = output_dir / f"backtest_trade_plans{suffix}"
     if plan_dir.exists():
         shutil.rmtree(plan_dir)
@@ -212,6 +253,8 @@ def build_backtest_plan_dir(
     end = str(end_date or "")
     file_count = 0
     row_count = 0
+    missing_enhancement_dates: List[str] = []
+    selected_enhancements = normalize_enhancements(enhancements)
 
     for path in sorted(Path(snapshot_dir).glob("*.json")):
         payload = _load_json(path)
@@ -224,15 +267,30 @@ def build_backtest_plan_dir(
             continue
 
         rows: List[Dict[str, Any]] = []
+        screening = {}
+        enhancement_source_found = False
         if screening_dir:
             screening_path = Path(screening_dir) / f"screening_{date}.json"
             screening = _load_json(screening_path)
+            enhancement_source_found = bool(screening)
+            if selected_enhancements and screening and not _has_enhancement_data(screening, selected_enhancements):
+                missing_enhancement_dates.append(date)
+                continue
             rows = _rows_from_screening(
                 {"etl": {"screening": screening}}, lhb_scenario=lhb_scenario,
+                enhancements=enhancements,
             )
         if not rows:
-            rows = _rows_from_screening(payload, lhb_scenario=lhb_scenario)
+            embedded = ((payload.get("etl") or {}).get("screening") or {})
+            enhancement_source_found = enhancement_source_found or bool(embedded)
+            if selected_enhancements and embedded and not _has_enhancement_data(embedded, selected_enhancements):
+                missing_enhancement_dates.append(date)
+                continue
+            rows = _rows_from_screening(payload, lhb_scenario=lhb_scenario, enhancements=enhancements)
         if not rows:
+            if selected_enhancements and not enhancement_source_found:
+                missing_enhancement_dates.append(date)
+                continue
             rows = _rows_from_snapshot(payload)
         _attach_market_context(rows, payload)
         if max_rank and max_rank > 0:
@@ -243,7 +301,9 @@ def build_backtest_plan_dir(
             screening_path = Path(screening_dir) / f"screening_{date}.json"
             screening = _load_json(screening_path)
             fallback_payload = {"etl": {"screening": screening}}
-            rows = _rows_from_screening(fallback_payload, lhb_scenario=lhb_scenario)
+            rows = _rows_from_screening(
+                fallback_payload, lhb_scenario=lhb_scenario, enhancements=enhancements,
+            )
             _attach_market_context(rows, payload)
             if max_rank and max_rank > 0:
                 rows = [row for row in rows if (_rank_value(row) or 999999) <= max_rank]
@@ -259,5 +319,13 @@ def build_backtest_plan_dir(
         df.to_csv(plan_dir / f"交易计划_{date}.csv", index=False, encoding="utf-8-sig")
         file_count += 1
         row_count += len(bt_rows)
+
+    if missing_enhancement_dates:
+        preview = ", ".join(missing_enhancement_dates[:8])
+        suffix_text = "..." if len(missing_enhancement_dates) > 8 else ""
+        raise ValueError(
+            f"所选增强组合缺少历史因子数据：{preview}{suffix_text}；"
+            "请先在‘生成数据’中批量重跑这些交易日"
+        )
 
     return plan_dir, file_count, row_count

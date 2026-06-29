@@ -2722,7 +2722,8 @@ def api_backtest_run(payload: dict = Body(default={})) -> Any:
         max_plan_rank=0,
         mode=p.get("mode") or "range",
         trade_date=p.get("trade_date"),
-        reset_state=p.get("reset_state"))
+        reset_state=p.get("reset_state"),
+        enhancements=p.get("enhancements"))
     return JSONResponse({"started": ok, "message": msg})
 
 

@@ -100,6 +100,7 @@ class DataManagerBase:
         (self.moneyflow_dir / "hsgt").mkdir(parents=True, exist_ok=True)
         (self.cache_dir / "top_list").mkdir(parents=True, exist_ok=True)
         (self.cache_dir / "cyq_perf").mkdir(parents=True, exist_ok=True)
+        (self.cache_dir / "signals").mkdir(parents=True, exist_ok=True)
 
     def _get_from_memory_cache(self, cache_key: str) -> Optional[pd.DataFrame]:
         """从内存缓存获取数据"""

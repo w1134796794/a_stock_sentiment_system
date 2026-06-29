@@ -163,6 +163,8 @@
           <div class="lp-metric"><span>成交额</span><strong class="mono">${num(row.amount_ratio, 2)}x</strong></div>
           <div class="lp-metric"><span>技术</span><strong class="mono">${num(row.tech_score)}</strong></div>
           <div class="lp-metric"><span>流动性</span><strong class="mono">${num(row.liquidity_score)}</strong></div>
+          <div class="lp-metric"><span>资金流共识</span><strong class="mono">${num(row.capital_flow_score)}</strong></div>
+          <div class="lp-metric"><span>龙头质量</span><strong class="mono">${num(row.kpl_leader_score)}</strong></div>
         </div>
         <div class="lp-reasons">${reasons || '<div class="lp-reason">通过当前因子筛选</div>'}</div>
         <div class="lp-action">${esc(row.action || '')}</div>

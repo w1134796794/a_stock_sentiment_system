@@ -770,6 +770,123 @@ factors:
     enabled: true
     params: {}
 
+  stk_capital_flow_consensus:
+    id: "SIG1"
+    name: "多源资金流共识"
+    category: "moneyflow"
+    sub_category: "capital_flow"
+    description: "同花顺与东方财富资金净流向的候选池分位共识，T日盘后供T+1使用"
+    data_source: "stock_capital_flow_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.30
+    enabled: true
+    params: {}
+
+  stk_capital_flow_persistence:
+    id: "SIG2"
+    name: "资金流持续性"
+    category: "moneyflow"
+    sub_category: "capital_flow"
+    description: "五日资金净流入的横截面分位评分"
+    data_source: "stock_capital_flow_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.10
+    enabled: true
+    params: {}
+
+  stk_attention_consensus:
+    id: "SIG3"
+    name: "双平台热度共识"
+    category: "moneyflow"
+    sub_category: "attention"
+    description: "同花顺与东方财富热榜排名的交叉确认"
+    data_source: "stock_attention_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.10
+    enabled: true
+    params: {}
+
+  stk_attention_crowding_risk:
+    id: "SIG4"
+    name: "热度拥挤风险"
+    category: "moneyflow"
+    sub_category: "attention"
+    description: "热度极高但资金流未确认时的追高风险"
+    data_source: "stock_attention_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.10
+    enabled: true
+    params: {}
+
+  stk_kpl_leader_quality:
+    id: "SIG5"
+    name: "开盘啦龙头质量"
+    category: "moneyflow"
+    sub_category: "leader"
+    description: "开盘啦涨停标签、状态和封单质量的确认分"
+    data_source: "stock_leader_signal_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
+    enabled: true
+    params: {}
+
+  stk_margin_acceleration:
+    id: "SIG6"
+    name: "融资净买入加速度"
+    category: "moneyflow"
+    sub_category: "margin"
+    description: "融资净买入相较上一交易日的横截面变化，仅作轻权重增强"
+    data_source: "stock_margin_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.05
+    enabled: true
+    params: {}
+
+  stk_block_trade_risk:
+    id: "SIG7"
+    name: "大宗交易折价风险"
+    category: "moneyflow"
+    sub_category: "event_risk"
+    description: "大额折价大宗交易形成的次日风险惩罚"
+    data_source: "stock_event_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.15
+    enabled: true
+    params: {}
+
+  sec_capital_flow_score:
+    id: "SIG8"
+    name: "板块资金流强度"
+    category: "sector"
+    sub_category: "capital_flow"
+    description: "同花顺板块净流入和涨幅的横截面强度"
+    data_source: "sector_capital_flow_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
+    enabled: true
+    params: {}
+
+  sec_flow_price_resonance:
+    id: "SIG9"
+    name: "板块量价资金共振"
+    category: "sector"
+    sub_category: "capital_flow"
+    description: "板块价格方向与资金净流入方向的一致性"
+    data_source: "sector_capital_flow_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
+    enabled: true
+    params: {}
+
   stk_lhb_net_buy_score:
     id: "LHB1"
     name: "龙虎榜净买入强度"

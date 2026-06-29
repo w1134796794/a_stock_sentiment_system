@@ -29,6 +29,7 @@ from core.data.data_manager_stock import StockDataManager
 from core.data.data_manager_sector import SectorDataManager
 from core.data.data_manager_concept import ConceptDataManager
 from core.data.data_manager_moneyflow import MoneyflowDataManager
+from core.data.data_manager_signals import ShortSignalDataManager
 
 logger = loguru.logger
 
@@ -39,6 +40,7 @@ class DataManager(
     SectorDataManager,
     ConceptDataManager,
     MoneyflowDataManager,
+    ShortSignalDataManager,
 ):
     """
     数据管理器统一入口

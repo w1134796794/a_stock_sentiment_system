@@ -20,6 +20,12 @@ from core.etl.schemas import (
     LIMIT_UP_POOL_SILVER_COLUMNS,
     SECTOR_DAILY_SILVER_COLUMNS,
     STOCK_DAILY_SILVER_COLUMNS,
+    STOCK_ATTENTION_SILVER_COLUMNS,
+    STOCK_CAPITAL_FLOW_SILVER_COLUMNS,
+    STOCK_EVENT_SILVER_COLUMNS,
+    STOCK_LEADER_SIGNAL_SILVER_COLUMNS,
+    STOCK_MARGIN_SILVER_COLUMNS,
+    SECTOR_CAPITAL_FLOW_SILVER_COLUMNS,
 )
 from core.utils.stock_code_utils import StockCodeUtils
 
@@ -347,6 +353,169 @@ def standardize_index_daily_frame(
             "ingested_at": ingested_at,
         })
     return _ensure_columns(pd.DataFrame(rows), INDEX_DAILY_SILVER_COLUMNS)
+
+
+def standardize_stock_capital_flow_frame(
+    df: Optional[pd.DataFrame], *, trade_date: str = "", effective_date: str = "", source: str = "",
+) -> pd.DataFrame:
+    """统一同花顺/东方财富个股资金流，Tushare 金额字段均为万元。"""
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        code = normalize_stock_code(pick(row, ("ts_code", "code")), add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date",), trade_date), trade_date)
+        rows.append({
+            "trade_date": td,
+            "effective_date": normalize_trade_date(effective_date, effective_date),
+            "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True),
+            "name": str(pick(row, ("name",), "") or ""),
+            "source": source,
+            "pct_chg": to_float(pick(row, ("pct_change", "pct_chg"), 0)),
+            "close": to_float(pick(row, ("latest", "close"), 0)),
+            "net_amount_yuan": normalize_amount_yuan(pick(row, ("net_amount",), 0), unit="wan_yuan"),
+            "net_5d_amount_yuan": normalize_amount_yuan(pick(row, ("net_d5_amount",), 0), unit="wan_yuan"),
+            "large_net_yuan": normalize_amount_yuan(pick(row, ("buy_lg_amount",), 0), unit="wan_yuan"),
+            "large_net_rate": to_float(pick(row, ("buy_lg_amount_rate",), 0)),
+            "extra_large_net_yuan": normalize_amount_yuan(pick(row, ("buy_elg_amount",), 0), unit="wan_yuan"),
+            "extra_large_net_rate": to_float(pick(row, ("buy_elg_amount_rate",), 0)),
+            "medium_net_yuan": normalize_amount_yuan(pick(row, ("buy_md_amount",), 0), unit="wan_yuan"),
+            "medium_net_rate": to_float(pick(row, ("buy_md_amount_rate",), 0)),
+            "small_net_yuan": normalize_amount_yuan(pick(row, ("buy_sm_amount",), 0), unit="wan_yuan"),
+            "small_net_rate": to_float(pick(row, ("buy_sm_amount_rate",), 0)),
+            "as_of_date": td,
+            "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), STOCK_CAPITAL_FLOW_SILVER_COLUMNS)
+
+
+def standardize_sector_capital_flow_frame(
+    df: Optional[pd.DataFrame], *, trade_date: str = "", effective_date: str = "", source: str = "ths",
+) -> pd.DataFrame:
+    """统一同花顺概念/行业资金流，原始金额单位为亿元。"""
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        sector_code = str(pick(row, ("ts_code", "sector_code"), "") or "").strip()
+        if not sector_code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date",), trade_date), trade_date)
+        rows.append({
+            "trade_date": td, "effective_date": effective_date, "sector_code": sector_code,
+            "sector_name": str(pick(row, ("name", "sector_name"), "") or ""),
+            "lead_stock": str(pick(row, ("lead_stock",), "") or ""),
+            "pct_chg": to_float(pick(row, ("pct_change", "pct_chg"), 0)),
+            "member_count": to_float(pick(row, ("company_num", "member_count"), 0)),
+            "net_buy_yuan": normalize_amount_yuan(pick(row, ("net_buy_amount",), 0), unit="yi_yuan"),
+            "net_sell_yuan": normalize_amount_yuan(pick(row, ("net_sell_amount",), 0), unit="yi_yuan"),
+            "net_amount_yuan": normalize_amount_yuan(pick(row, ("net_amount",), 0), unit="yi_yuan"),
+            "source": source, "as_of_date": td, "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), SECTOR_CAPITAL_FLOW_SILVER_COLUMNS)
+
+
+def standardize_stock_attention_frame(
+    df: Optional[pd.DataFrame], *, trade_date: str = "", effective_date: str = "", source: str = "",
+) -> pd.DataFrame:
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        code = normalize_stock_code(pick(row, ("ts_code", "code")), add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date",), trade_date), trade_date)
+        rows.append({
+            "trade_date": td, "effective_date": effective_date, "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True),
+            "name": str(pick(row, ("ts_name", "name"), "") or ""), "source": source,
+            "data_type": str(pick(row, ("data_type",), "") or ""),
+            "rank": to_float(pick(row, ("rank",), 0)), "hot": to_float(pick(row, ("hot",), 0)),
+            "pct_chg": to_float(pick(row, ("pct_change", "pct_chg"), 0)),
+            "current_price": to_float(pick(row, ("current_price",), 0)),
+            "concept": str(pick(row, ("concept",), "") or ""),
+            "rank_time": str(pick(row, ("rank_time",), "") or ""),
+            "rank_reason": str(pick(row, ("rank_reason",), "") or ""),
+            "as_of_date": td, "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), STOCK_ATTENTION_SILVER_COLUMNS)
+
+
+def standardize_stock_leader_signal_frame(
+    df: Optional[pd.DataFrame], *, trade_date: str = "", effective_date: str = "", source: str = "kpl",
+) -> pd.DataFrame:
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        code = normalize_stock_code(pick(row, ("ts_code", "code")), add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date",), trade_date), trade_date)
+        rows.append({
+            "trade_date": td, "effective_date": effective_date, "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True),
+            "name": str(pick(row, ("name",), "") or ""), "source": source,
+            "lu_time": normalize_time(pick(row, ("lu_time",), "")),
+            "open_time": normalize_time(pick(row, ("open_time",), "")),
+            "last_time": normalize_time(pick(row, ("last_time",), "")),
+            "lu_desc": str(pick(row, ("lu_desc",), "") or ""),
+            "tag": str(pick(row, ("tag",), "") or ""),
+            "theme": str(pick(row, ("theme",), "") or ""),
+            "status": str(pick(row, ("status",), "") or ""),
+            "bid_amount": to_float(pick(row, ("bid_amount",), 0)),
+            "bid_turnover": to_float(pick(row, ("bid_turnover",), 0)),
+            "lu_bid_vol": to_float(pick(row, ("lu_bid_vol",), 0)),
+            "pct_chg": to_float(pick(row, ("pct_chg",), 0)),
+            "bid_pct_chg": to_float(pick(row, ("bid_pct_chg",), 0)),
+            "rt_pct_chg": to_float(pick(row, ("rt_pct_chg",), 0)),
+            "limit_order": to_float(pick(row, ("limit_order",), 0)),
+            "as_of_date": td, "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), STOCK_LEADER_SIGNAL_SILVER_COLUMNS)
+
+
+def standardize_stock_margin_frame(
+    df: Optional[pd.DataFrame], *, trade_date: str = "", effective_date: str = "", source: str = "margin_detail",
+) -> pd.DataFrame:
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        code = normalize_stock_code(pick(row, ("ts_code", "code")), add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date",), trade_date), trade_date)
+        rows.append({
+            "trade_date": td, "effective_date": effective_date, "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True),
+            "rzye_yuan": to_float(pick(row, ("rzye",), 0)), "rqye_yuan": to_float(pick(row, ("rqye",), 0)),
+            "rzmre_yuan": to_float(pick(row, ("rzmre",), 0)), "rzche_yuan": to_float(pick(row, ("rzche",), 0)),
+            "rqyl": to_float(pick(row, ("rqyl",), 0)), "rqchl": to_float(pick(row, ("rqchl",), 0)),
+            "rqmcl": to_float(pick(row, ("rqmcl",), 0)), "rzrqye_yuan": to_float(pick(row, ("rzrqye",), 0)),
+            "source": source, "as_of_date": td, "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), STOCK_MARGIN_SILVER_COLUMNS)
+
+
+def standardize_stock_event_frame(
+    df: Optional[pd.DataFrame], *, trade_date: str = "", effective_date: str = "", source: str = "block_trade",
+) -> pd.DataFrame:
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        code = normalize_stock_code(pick(row, ("ts_code", "code")), add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date",), trade_date), trade_date)
+        rows.append({
+            "trade_date": td, "effective_date": effective_date, "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True), "event_type": "block_trade",
+            "price": to_float(pick(row, ("price",), 0)), "vol": to_float(pick(row, ("vol",), 0)),
+            "amount_yuan": normalize_amount_yuan(pick(row, ("amount",), 0), unit="wan_yuan"),
+            "buyer": str(pick(row, ("buyer",), "") or ""), "seller": str(pick(row, ("seller",), "") or ""),
+            "source": source, "as_of_date": td, "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), STOCK_EVENT_SILVER_COLUMNS)
 
 
 def standardize_lhb_daily_frame(

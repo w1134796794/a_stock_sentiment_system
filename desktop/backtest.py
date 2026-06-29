@@ -121,6 +121,32 @@ def load_positions(run: str) -> List[Dict[str, Any]]:
     return out
 
 
+_TRADE_TEXT_MAP = {
+    "buy": "买入成交",
+    "holding": "持仓中",
+    "stop_loss": "硬止损",
+    "stop_loss_gap": "跳空止损",
+    "trailing_stop": "回撤止盈",
+    "time_stop": "时间止损",
+    "take_profit": "止盈退出",
+    "partial_first": "第一次分批止盈",
+    "partial_second": "第二次分批止盈",
+    "end_of_backtest": "回测结束平仓",
+    "auction_entry": "竞价买点",
+    "intraday_strength": "盘中转强",
+}
+
+
+def _trade_text(value: Any, default: str = "") -> str:
+    text = str(value or "").strip()
+    return _TRADE_TEXT_MAP.get(text.lower(), text or default)
+
+
+def _pattern_text(value: Any) -> str:
+    text = str(value or "").strip()
+    return text.replace("/default", "/默认").replace("default", "默认")
+
+
 def load_table(kind: str, run: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for r in _read_csv(_path(kind, run)):
@@ -167,6 +193,9 @@ def runs_meta() -> List[Dict[str, Any]]:
             start = s.get("start_date") or ""
             end = s.get("end_date") or ""
             label += f" · 区间 {start}~{end}".rstrip("~")
+        combination = str(s.get("enhancement_label") or "").strip()
+        if combination:
+            label += f" · {combination}"
         if isinstance(ret, (int, float)):
             label += f" · 收益 {ret * 100:+.1f}%"
         meta.append({"run": run, "label": label})
@@ -465,13 +494,15 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             else record.get("pnl_pct") if is_sell else None
         )
         action_label = "买入" if is_buy else "部分卖出" if action == "SELL_PARTIAL" else "卖出"
-        status = "持仓中" if is_open else "买入成交" if is_buy else str(record.get("exit_reason") or "卖出成交")
+        status = "持仓中" if is_open else "买入成交" if is_buy else _trade_text(
+            record.get("exit_reason"), "卖出成交",
+        )
         trade_rows.append({
             "日期": record.get("date") or "",
             "动作": action_label,
             "名称": record.get("stock_name", ""),
             "代码": code,
-            "模式": record.get("pattern_type", ""),
+            "模式": _pattern_text(record.get("pattern_type", "")),
             "买入价": _fmt_price(record.get("entry_price")),
             "卖出价": _fmt_price(record.get("exit_price"), blank_zero=True) if is_sell else "",
             "现价": _fmt_price(position.get("current_price"), blank_zero=True) if is_open and position else "",
@@ -484,7 +515,9 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "排名": record.get("plan_rank", ""),
             "评分": (f"{float(record.get('plan_score')):.2f}"
                    if isinstance(record.get("plan_score"), (int, float)) else ""),
-            "买入信号": position.get("entry_signal") if is_open and position else record.get("entry_signal", ""),
+            "买入信号": _trade_text(
+                position.get("entry_signal") if is_open and position else record.get("entry_signal", ""),
+            ),
             "状态/退出": status,
             "_sort_date": str(record.get("date") or ""),
             "_sort_index": index,

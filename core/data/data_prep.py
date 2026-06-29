@@ -109,6 +109,7 @@ class DataPrep:
                 self._prefetch_sectors(ds, trade_date, prev_trade_date, sector_history_days)
                 self._prefetch_limit_up_concepts(ds, limit_up_codes, trade_date)
             self._prefetch_lhb(ds, trade_date)
+            self._prefetch_short_signals(ds, trade_date)
             if index_codes:
                 self._prefetch_index_daily(ds, index_codes, trade_date, index_lookbacks)
 
@@ -368,6 +369,34 @@ class DataPrep:
             for domain in ("top_list", "top_inst", "hm_detail")
         }
         logger.info(f"[DataPrep] 龙虎榜盘后预取 @ {date}: {counts}")
+
+    def _prefetch_short_signals(self, ds: MarketDataset, trade_date: str) -> None:
+        """一次性预取盘后短线增强数据，后续任务只消费本地银层。"""
+        date = str(trade_date)
+        sources = (
+            ("moneyflow_ths", "get_moneyflow_ths"),
+            ("moneyflow_dc", "get_moneyflow_dc"),
+            ("sector_moneyflow_ths", "get_sector_moneyflow_ths"),
+            ("ths_hot", "get_ths_hot"),
+            ("dc_hot", "get_dc_hot"),
+            ("kpl_list", "get_kpl_list"),
+            ("margin_detail", "get_margin_detail"),
+            ("block_trade", "get_block_trade"),
+        )
+        counts = {}
+        for domain, method_name in sources:
+            frame = pd.DataFrame()
+            try:
+                method = getattr(self.dm, method_name, None)
+                if method is not None:
+                    value = method(date)
+                    if isinstance(value, pd.DataFrame):
+                        frame = value
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[DataPrep] {domain} {date} 预取失败，按空数据降级: {exc}")
+            ds.put_call(call_key(domain, trade_date=date), frame, domain)
+            counts[domain] = len(frame)
+        logger.info(f"[DataPrep] 短线增强数据预取 @ {date}: {counts}")
 
     def _prefetch_sectors(self, ds: MarketDataset, trade_date: str, prev_trade_date: str,
                           history_days: int = 10) -> None:

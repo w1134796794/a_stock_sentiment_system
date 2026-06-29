@@ -159,6 +159,16 @@ class LeaderPoolService:
                 + (lhb_sector_score - 50.0) * 0.08
                 + (lhb_crowding_safety - 100.0) * 0.04
             )
+        capital_flow_score = _to_float(metrics.get("stk_capital_flow_consensus"), 50.0)
+        attention_score = _to_float(metrics.get("stk_attention_consensus"), 50.0)
+        kpl_leader_score = _to_float(metrics.get("stk_kpl_leader_quality"), 50.0)
+        event_risk_safety = _to_float(metrics.get("stk_block_trade_risk"), 100.0)
+        short_signal_adjustment = (
+            (capital_flow_score - 50.0) * 0.06
+            + (attention_score - 50.0) * 0.03
+            + (kpl_leader_score - 50.0) * 0.12
+            + (event_risk_safety - 100.0) * 0.04
+        )
         leader_score = (
             latest_score * 0.35
             + appearance_score * 0.16
@@ -169,6 +179,7 @@ class LeaderPoolService:
             + volume_score * 0.05
             + limit_bonus
             + lhb_leader_adjustment
+            + short_signal_adjustment
         )
         leader_score = max(0.0, min(100.0, leader_score))
 
@@ -221,6 +232,11 @@ class LeaderPoolService:
             "lhb_sector_score": round(lhb_sector_score, 2),
             "lhb_crowding_safety": round(lhb_crowding_safety, 2),
             "lhb_leader_adjustment": round(lhb_leader_adjustment, 2),
+            "capital_flow_score": round(capital_flow_score, 2),
+            "attention_score": round(attention_score, 2),
+            "kpl_leader_score": round(kpl_leader_score, 2),
+            "event_risk_safety": round(event_risk_safety, 2),
+            "short_signal_adjustment": round(short_signal_adjustment, 2),
             "lhb_signal_date": str((source.get("lhb") or {}).get("signal_date") or ""),
             "lhb_effective_date": str((source.get("lhb") or {}).get("effective_date") or ""),
             "action": "只在高开且实时转强时确认；低开直接放弃",
@@ -275,6 +291,12 @@ class LeaderPoolService:
                 reasons.append(f"盘后龙虎榜综合 {lhb_score:.1f} 分，接力风险上升")
             if sector_score >= 65:
                 reasons.append(f"龙虎榜板块共振 {sector_score:.1f} 分")
+        kpl_score = _to_float(metrics.get("stk_kpl_leader_quality"), 50.0)
+        flow_score = _to_float(metrics.get("stk_capital_flow_consensus"), 50.0)
+        if kpl_score >= 65:
+            reasons.append(f"开盘啦龙头质量 {kpl_score:.1f} 分，资金辨识度较高")
+        if flow_score >= 65:
+            reasons.append(f"多源资金流共识 {flow_score:.1f} 分")
         return reasons[:5]
 
     def _recent_dates(self, trade_date: Optional[str], lookback: int) -> List[str]:

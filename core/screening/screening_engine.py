@@ -12,6 +12,7 @@ from loguru import logger
 
 from core.screening.explanations import build_screening_reasons
 from core.screening.screening_models import FilterTrace, ScreeningResult
+from core.screening.enhancements import ENHANCEMENT_DEFINITIONS
 from core.utils.price_limit import get_price_limit_pct_points, limit_progress
 
 
@@ -115,8 +116,18 @@ class ScreeningEngine:
         result.after_priority_filter = int(len(working))
 
         result.scenarios = self._rank_scenarios(working, cfg, neutral_score, reasons)
-        final = result.scenarios.get("lhb_sector") or self._rank(working, cfg, neutral_score, reasons)
+        final = result.scenarios.get("enhanced_all") or result.scenarios.get("lhb_sector") or self._rank(
+            working, cfg, neutral_score, reasons,
+        )
         result.final = final
+        scenario_scores = self._scenario_scores(working, cfg, neutral_score)
+        baseline = scenario_scores["lhb_sector"]
+        result.candidate_pool = self._rank(
+            working, cfg, neutral_score, reasons,
+            score_series=baseline + self._enhancement_adjustment(working),
+            base_series=scenario_scores["no_lhb"], model_baseline_series=baseline,
+            top_n_override=100,
+        )
         result.rejected = rejected[:200]
         result.message = f"筛选完成，输入 {result.input_count}，最终 {len(final)}"
 
@@ -364,6 +375,8 @@ class ScreeningEngine:
         *,
         score_series: Optional[pd.Series] = None,
         base_series: Optional[pd.Series] = None,
+        model_baseline_series: Optional[pd.Series] = None,
+        top_n_override: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         if df.empty:
             return []
@@ -373,10 +386,14 @@ class ScreeningEngine:
             base_series = scenario_scores["no_lhb"]
             score_series = scenario_scores["lhb_sector"]
         ranked["_screening_base_score"] = base_series
+        if model_baseline_series is None:
+            model_baseline_series = score_series
+        ranked["_screening_model_baseline_score"] = model_baseline_series
         ranked["_screening_score"] = score_series
-        ranked["_lhb_adjustment"] = ranked["_screening_score"] - ranked["_screening_base_score"]
+        ranked["_lhb_adjustment"] = ranked["_screening_model_baseline_score"] - ranked["_screening_base_score"]
+        ranked["_signal_adjustment"] = ranked["_screening_score"] - ranked["_screening_model_baseline_score"]
         ranking_cfg = cfg.get("ranking") or {}
-        top_n = int(ranking_cfg.get("top_n") or 10)
+        top_n = int(top_n_override or ranking_cfg.get("top_n") or 10)
         ranked = ranked.sort_values(
             ["_screening_score", "_lhb_adjustment", "stk_total_score"],
             ascending=[False, False, False],
@@ -391,6 +408,13 @@ class ScreeningEngine:
             "stk_lhb_sector_resonance",
             "stk_lhb_composite_score",
             "stk_lhb_crowding_risk",
+            "stk_capital_flow_consensus",
+            "stk_capital_flow_persistence",
+            "stk_attention_consensus",
+            "stk_attention_crowding_risk",
+            "stk_kpl_leader_quality",
+            "stk_margin_acceleration",
+            "stk_block_trade_risk",
         ]))
         context_cols = [
             "pct_chg",
@@ -407,6 +431,14 @@ class ScreeningEngine:
             "institution_net_buy_ratio",
             "appearance_days_5d",
             "crowding_penalty_score",
+            "capital_flow_consensus_score",
+            "capital_flow_persistence_score",
+            "attention_score",
+            "attention_crowding_penalty",
+            "leader_quality_score",
+            "margin_score",
+            "event_risk_score",
+            "sector_flow_score",
         ]
         for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
             code = str(row.get("code") or "")
@@ -428,7 +460,9 @@ class ScreeningEngine:
                 "name": str(row.get("name") or ""),
                 "score": score,
                 "base_score": round(_to_float(row.get("_screening_base_score"), score), 4),
+                "model_baseline_score": round(_to_float(row.get("_screening_model_baseline_score"), score), 4),
                 "lhb_adjustment": round(_to_float(row.get("_lhb_adjustment"), 0.0), 4),
+                "signal_adjustment": round(_to_float(row.get("_signal_adjustment"), 0.0), 4),
                 "rank": rank,
                 "gold_rank": int(_to_float(row.get("rank"), rank)),
                 "reasons": build_screening_reasons(
@@ -448,6 +482,10 @@ class ScreeningEngine:
                     "effective_date": str(row.get("effective_date") or ""),
                     "adjustment": round(_to_float(row.get("_lhb_adjustment"), 0.0), 4),
                 },
+                "enhancements": {
+                    key: round(_to_float(row.get(str(definition["column"])), 0.0), 4)
+                    for key, definition in ENHANCEMENT_DEFINITIONS.items()
+                },
             })
         return final
 
@@ -459,15 +497,42 @@ class ScreeningEngine:
         reasons: Dict[str, List[str]],
     ) -> Dict[str, List[Dict[str, Any]]]:
         if df.empty:
-            return {key: [] for key in ("no_lhb", "net_buy", "institution", "lhb_sector")}
+            return {key: [] for key in ("no_lhb", "net_buy", "institution", "lhb_sector", "enhanced_all")}
         scores = self._scenario_scores(df, cfg, neutral_score)
         output: Dict[str, List[Dict[str, Any]]] = {}
         for scenario, score_series in scores.items():
             output[scenario] = self._rank(
                 df, cfg, neutral_score, reasons,
-                score_series=score_series, base_series=scores["no_lhb"],
+                score_series=score_series, base_series=scores["no_lhb"], model_baseline_series=score_series,
             )
+        output["enhanced_all"] = self._rank(
+            df, cfg, neutral_score, reasons,
+            score_series=scores["lhb_sector"] + self._enhancement_adjustment(df),
+            base_series=scores["no_lhb"], model_baseline_series=scores["lhb_sector"],
+        )
         return output
+
+    def _enhancement_adjustment(self, df: pd.DataFrame) -> pd.Series:
+        adjustment = pd.Series(0.0, index=df.index, dtype=float)
+        factor_switches = {
+            "capital_flow": "stk_capital_flow_consensus",
+            "attention": "stk_attention_consensus",
+            "leader": "stk_kpl_leader_quality",
+            "margin": "stk_margin_acceleration",
+            "risk": "stk_block_trade_risk",
+        }
+        for key, definition in ENHANCEMENT_DEFINITIONS.items():
+            enabled = True
+            try:
+                from core.factors.factor_registry import get_factor_registry
+
+                factor = get_factor_registry().get_factor(factor_switches[key])
+                enabled = factor is None or bool(factor.enabled)
+            except Exception:
+                pass
+            if enabled:
+                adjustment += self._factor_series(df, str(definition["column"]), 0.0)
+        return adjustment.clip(lower=-10.0, upper=10.0)
 
     @staticmethod
     def _factor_series(df: pd.DataFrame, factor: str, neutral_score: float) -> pd.Series:

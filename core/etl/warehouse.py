@@ -20,6 +20,12 @@ from core.etl.normalizers import (
     standardize_limit_up_pool_frame,
     standardize_sector_daily_frame,
     standardize_stock_daily_frame,
+    standardize_sector_capital_flow_frame,
+    standardize_stock_attention_frame,
+    standardize_stock_capital_flow_frame,
+    standardize_stock_event_frame,
+    standardize_stock_leader_signal_frame,
+    standardize_stock_margin_frame,
 )
 from core.etl.quality import QualityReport, build_quality_report
 
@@ -33,6 +39,12 @@ SILVER_DATE_PARTITION_COLUMN = {
     "lhb_daily_silver": "trade_date",
     "lhb_institution_silver": "trade_date",
     "lhb_hot_money_silver": "trade_date",
+    "stock_capital_flow_silver": "trade_date",
+    "sector_capital_flow_silver": "trade_date",
+    "stock_attention_silver": "trade_date",
+    "stock_leader_signal_silver": "trade_date",
+    "stock_margin_silver": "trade_date",
+    "stock_event_silver": "trade_date",
 }
 
 SILVER_CANONICAL_VARCHAR_COLUMNS = {
@@ -57,6 +69,20 @@ SILVER_CANONICAL_VARCHAR_COLUMNS = {
     "source",
     "as_of_date",
     "ingested_at",
+    "effective_date",
+    "data_type",
+    "concept",
+    "rank_time",
+    "rank_reason",
+    "lu_time",
+    "open_time",
+    "lu_desc",
+    "theme",
+    "status",
+    "lead_stock",
+    "event_type",
+    "buyer",
+    "seller",
 }
 
 
@@ -544,6 +570,77 @@ def _call_frame(ds: MarketDataset, prefix: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def _effective_date(trade_date: str) -> str:
+    try:
+        from core.utils.date_utils import get_next_trade_date
+
+        return str(get_next_trade_date(str(trade_date)))
+    except Exception:
+        return ""
+
+
+def _normalize_stock_capital_flow(ds: MarketDataset) -> pd.DataFrame:
+    effective = _effective_date(ds.trade_date)
+    frames = [
+        standardize_stock_capital_flow_frame(
+            _call_frame(ds, "moneyflow_ths|"), trade_date=ds.trade_date,
+            effective_date=effective, source="ths",
+        ),
+        standardize_stock_capital_flow_frame(
+            _call_frame(ds, "moneyflow_dc|"), trade_date=ds.trade_date,
+            effective_date=effective, source="dc",
+        ),
+    ]
+    return pd.concat(frames, ignore_index=True).drop_duplicates(
+        ["trade_date", "code", "source"], keep="last",
+    )
+
+
+def _normalize_sector_capital_flow(ds: MarketDataset) -> pd.DataFrame:
+    return standardize_sector_capital_flow_frame(
+        _call_frame(ds, "sector_moneyflow_ths|"), trade_date=ds.trade_date,
+        effective_date=_effective_date(ds.trade_date), source="ths",
+    )
+
+
+def _normalize_stock_attention(ds: MarketDataset) -> pd.DataFrame:
+    effective = _effective_date(ds.trade_date)
+    frames = [
+        standardize_stock_attention_frame(
+            _call_frame(ds, "ths_hot|"), trade_date=ds.trade_date,
+            effective_date=effective, source="ths",
+        ),
+        standardize_stock_attention_frame(
+            _call_frame(ds, "dc_hot|"), trade_date=ds.trade_date,
+            effective_date=effective, source="dc",
+        ),
+    ]
+    return pd.concat(frames, ignore_index=True).drop_duplicates(
+        ["trade_date", "code", "source"], keep="last",
+    )
+
+
+def _normalize_stock_leader_signal(ds: MarketDataset) -> pd.DataFrame:
+    return standardize_stock_leader_signal_frame(
+        _call_frame(ds, "kpl_list|"), trade_date=ds.trade_date,
+        effective_date=_effective_date(ds.trade_date), source="kpl",
+    )
+
+
+def _normalize_stock_margin(ds: MarketDataset) -> pd.DataFrame:
+    return standardize_stock_margin_frame(
+        _call_frame(ds, "margin_detail|"), trade_date=ds.trade_date,
+        effective_date=_effective_date(ds.trade_date), source="margin_detail",
+    )
+
+
+def _normalize_stock_event(ds: MarketDataset) -> pd.DataFrame:
+    return standardize_stock_event_frame(
+        _call_frame(ds, "block_trade|"), trade_date=ds.trade_date,
+        effective_date=_effective_date(ds.trade_date), source="block_trade",
+    )
+
+
 def _normalize_lhb_daily(ds: MarketDataset) -> pd.DataFrame:
     return standardize_lhb_daily_frame(
         _call_frame(ds, "top_list|"), trade_date=ds.trade_date,
@@ -575,6 +672,12 @@ def build_silver_frames(ds: MarketDataset) -> Dict[str, pd.DataFrame]:
         "lhb_daily_silver": _normalize_lhb_daily(ds),
         "lhb_institution_silver": _normalize_lhb_institution(ds),
         "lhb_hot_money_silver": _normalize_lhb_hot_money(ds),
+        "stock_capital_flow_silver": _normalize_stock_capital_flow(ds),
+        "sector_capital_flow_silver": _normalize_sector_capital_flow(ds),
+        "stock_attention_silver": _normalize_stock_attention(ds),
+        "stock_leader_signal_silver": _normalize_stock_leader_signal(ds),
+        "stock_margin_silver": _normalize_stock_margin(ds),
+        "stock_event_silver": _normalize_stock_event(ds),
     }
 
 

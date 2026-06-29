@@ -136,6 +136,44 @@ LHB_HOT_MONEY_SILVER_COLUMNS = [
     "ingested_at",
 ]
 
+STOCK_CAPITAL_FLOW_SILVER_COLUMNS = [
+    "trade_date", "effective_date", "code", "ts_code", "name", "source",
+    "pct_chg", "close", "net_amount_yuan", "net_5d_amount_yuan",
+    "large_net_yuan", "large_net_rate", "extra_large_net_yuan",
+    "extra_large_net_rate", "medium_net_yuan", "medium_net_rate",
+    "small_net_yuan", "small_net_rate", "as_of_date", "ingested_at",
+]
+
+SECTOR_CAPITAL_FLOW_SILVER_COLUMNS = [
+    "trade_date", "effective_date", "sector_code", "sector_name", "lead_stock",
+    "pct_chg", "member_count", "net_buy_yuan", "net_sell_yuan",
+    "net_amount_yuan", "source", "as_of_date", "ingested_at",
+]
+
+STOCK_ATTENTION_SILVER_COLUMNS = [
+    "trade_date", "effective_date", "code", "ts_code", "name", "source",
+    "data_type", "rank", "hot", "pct_chg", "current_price", "concept",
+    "rank_time", "rank_reason", "as_of_date", "ingested_at",
+]
+
+STOCK_LEADER_SIGNAL_SILVER_COLUMNS = [
+    "trade_date", "effective_date", "code", "ts_code", "name", "source",
+    "lu_time", "open_time", "last_time", "lu_desc", "tag", "theme",
+    "status", "bid_amount", "bid_turnover", "lu_bid_vol", "pct_chg",
+    "bid_pct_chg", "rt_pct_chg", "limit_order", "as_of_date", "ingested_at",
+]
+
+STOCK_MARGIN_SILVER_COLUMNS = [
+    "trade_date", "effective_date", "code", "ts_code", "rzye_yuan",
+    "rqye_yuan", "rzmre_yuan", "rzche_yuan", "rqyl", "rqchl", "rqmcl",
+    "rzrqye_yuan", "source", "as_of_date", "ingested_at",
+]
+
+STOCK_EVENT_SILVER_COLUMNS = [
+    "trade_date", "effective_date", "code", "ts_code", "event_type", "price",
+    "vol", "amount_yuan", "buyer", "seller", "source", "as_of_date", "ingested_at",
+]
+
 QUALITY_TABLES = [
     "stock_daily_silver",
     "sector_daily_silver",
@@ -145,4 +183,10 @@ QUALITY_TABLES = [
     "lhb_daily_silver",
     "lhb_institution_silver",
     "lhb_hot_money_silver",
+    "stock_capital_flow_silver",
+    "sector_capital_flow_silver",
+    "stock_attention_silver",
+    "stock_leader_signal_silver",
+    "stock_margin_silver",
+    "stock_event_silver",
 ]

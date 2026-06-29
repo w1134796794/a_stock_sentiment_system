@@ -128,6 +128,7 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
         "sector_persistence_score": 50.0,
         "sector_mainline_score": 50.0,
         "sector_resonance_score": 50.0,
+        "sector_flow_score": 50.0,
         "resonance_sectors": "",
     }
     if not sector_scores:
@@ -160,6 +161,7 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
             "heat": safe_weighted_score([(momentum, 0.55), (amount, 0.25), (amount_ratio, 0.20)]),
             "persistence": to_float(values.get("persistence_score"), 50.0),
             "mainline": to_float(values.get("mainline_score"), 50.0),
+            "flow": to_float(values.get("sector_flow_score"), 50.0),
         })
     if not matched:
         return neutral
@@ -169,6 +171,7 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
     heat = sum(item["heat"] for item in leaders) / len(leaders)
     persistence = sum(item["persistence"] for item in leaders) / len(leaders)
     mainline = sum(item["mainline"] for item in leaders) / len(leaders)
+    sector_flow = sum(item["flow"] for item in leaders) / len(leaders)
     concept_best = max((item["mainline"] for item in matched if item["type"] in {"N", "概念"}), default=0.0)
     industry_best = max((item["mainline"] for item in matched if item["type"] in {"I", "行业"}), default=0.0)
     dual_resonance = min(concept_best, industry_best)
@@ -180,6 +183,7 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
         "sector_persistence_score": round(persistence, 4),
         "sector_mainline_score": round(mainline, 4),
         "sector_resonance_score": round(resonance, 4),
+        "sector_flow_score": round(sector_flow, 4),
         "resonance_sectors": ",".join(item["name"] for item in leaders),
     }
 
@@ -307,6 +311,7 @@ class StockFactorJob:
         for key in (
             "sector_heat_score", "sector_persistence_score", "sector_mainline_score",
             "sector_resonance_score", "resonance_sectors",
+            "sector_flow_score",
         ):
             today[key] = [item[key] for item in sector_values]
 
@@ -337,6 +342,46 @@ class StockFactorJob:
         lhb_values = [lhb_by_code.get(str(code), lhb_defaults) for code in today["code"].astype(str)]
         for key, default in lhb_defaults.items():
             today[key] = [item.get(key, default) for item in lhb_values]
+
+        signal_frame = read_table(
+            con, "factor_signal_stock_wide",
+            where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)],
+        )
+        signal_columns = [
+            "code", "capital_flow_consensus_score", "capital_flow_persistence_score",
+            "capital_flow_adjustment", "attention_score", "attention_crowding_penalty",
+            "attention_adjustment", "leader_quality_score", "leader_adjustment",
+            "margin_score", "margin_adjustment", "event_risk_score", "risk_adjustment",
+            "flow_source_count", "attention_source_count", "kpl_present",
+            "signal_date", "effective_date",
+        ]
+        if not signal_frame.empty:
+            signal_frame = signal_frame[[col for col in signal_columns if col in signal_frame.columns]].copy()
+            signal_frame["code"] = signal_frame["code"].astype(str).str.zfill(6)
+            signal_frame = signal_frame.rename(columns={
+                "signal_date": "short_signal_date", "effective_date": "short_effective_date",
+            })
+            today = today.merge(signal_frame.drop_duplicates("code", keep="last"), on="code", how="left")
+        signal_defaults = {
+            "capital_flow_consensus_score": 50.0, "capital_flow_persistence_score": 50.0,
+            "capital_flow_adjustment": 0.0, "attention_score": 50.0,
+            "attention_crowding_penalty": 0.0, "attention_adjustment": 0.0,
+            "leader_quality_score": 50.0, "leader_adjustment": 0.0,
+            "margin_score": 50.0, "margin_adjustment": 0.0,
+            "event_risk_score": 0.0, "risk_adjustment": 0.0,
+            "flow_source_count": 0.0, "attention_source_count": 0.0, "kpl_present": 0.0,
+        }
+        for column, default in signal_defaults.items():
+            if column not in today.columns:
+                today[column] = default
+            else:
+                today[column] = pd.to_numeric(today[column], errors="coerce").fillna(default)
+        today["short_signal_date"] = today.get("short_signal_date", "")
+        today["short_effective_date"] = today.get("short_effective_date", "")
+        today["capital_flow_adjustment"] = (
+            today["capital_flow_adjustment"]
+            + (pd.to_numeric(today["sector_flow_score"], errors="coerce").fillna(50.0) - 50.0) / 50.0 * 1.5
+        ).clip(-5.5, 5.5)
 
         board_height = []
         seal_time_score = []
@@ -378,6 +423,11 @@ class StockFactorJob:
             ])
             for row in today.itertuples()
         ]
+        today["signal_total_adjustment"] = today[[
+            "capital_flow_adjustment", "attention_adjustment", "leader_adjustment",
+            "margin_adjustment", "risk_adjustment",
+        ]].sum(axis=1).clip(-10.0, 10.0)
+        today["enhanced_total_score"] = (today["total_score"] + today["signal_total_adjustment"]).clip(0, 100)
         today["rank"] = today["total_score"].rank(method="dense", ascending=False).astype(int)
 
         wide = today[[
@@ -392,6 +442,7 @@ class StockFactorJob:
             "sector_persistence_score",
             "sector_mainline_score",
             "sector_resonance_score",
+            "sector_flow_score",
             "resonance_sectors",
             "board_score",
             "board_height",
@@ -413,6 +464,25 @@ class StockFactorJob:
             "appearance_days_5d",
             "signal_date",
             "effective_date",
+            "short_signal_date",
+            "short_effective_date",
+            "capital_flow_consensus_score",
+            "capital_flow_persistence_score",
+            "capital_flow_adjustment",
+            "attention_score",
+            "attention_crowding_penalty",
+            "attention_adjustment",
+            "leader_quality_score",
+            "leader_adjustment",
+            "margin_score",
+            "margin_adjustment",
+            "event_risk_score",
+            "risk_adjustment",
+            "flow_source_count",
+            "attention_source_count",
+            "kpl_present",
+            "signal_total_adjustment",
+            "enhanced_total_score",
             "total_score",
             "rank",
             "pct_chg",
@@ -541,6 +611,42 @@ class StockFactorJob:
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_lhb_crowding_risk", raw_value=row["crowding_penalty_score"],
                     score=100.0 - to_float(row["crowding_penalty_score"]), direction="lower_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_capital_flow_consensus", raw_value=row["capital_flow_adjustment"],
+                    score=row["capital_flow_consensus_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_capital_flow_persistence", raw_value=row["capital_flow_persistence_score"],
+                    score=row["capital_flow_persistence_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_attention_consensus", raw_value=row["attention_source_count"],
+                    score=row["attention_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_attention_crowding_risk", raw_value=row["attention_crowding_penalty"],
+                    score=100.0 - to_float(row["attention_crowding_penalty"]) * 10.0,
+                    direction="lower_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_kpl_leader_quality", raw_value=row["kpl_present"],
+                    score=row["leader_quality_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_margin_acceleration", raw_value=row["margin_adjustment"],
+                    score=row["margin_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_block_trade_risk", raw_value=row["event_risk_score"],
+                    score=100.0 - to_float(row["event_risk_score"]), direction="lower_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,

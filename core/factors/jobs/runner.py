@@ -12,6 +12,7 @@ from core.factors.jobs.market_factor_job import MarketFactorJob
 from core.factors.jobs.lhb_factor_job import LHBFactorJob
 from core.factors.jobs.sector_factor_job import SectorFactorJob
 from core.factors.jobs.stock_factor_job import StockFactorJob
+from core.factors.jobs.short_signal_factor_job import ShortSignalFactorJob
 
 
 class FactorJobRunner:
@@ -20,6 +21,7 @@ class FactorJobRunner:
     JOBS = {
         "market": MarketFactorJob,
         "lhb": LHBFactorJob,
+        "signals": ShortSignalFactorJob,
         "sector": SectorFactorJob,
         "stock": StockFactorJob,
     }
@@ -32,7 +34,7 @@ class FactorJobRunner:
         self.duckdb_path = Path(duckdb_path)
 
     def run(self, trade_date: str, *, jobs: Optional[Iterable[str]] = None) -> List[FactorJobResult]:
-        selected = list(jobs or ("market", "lhb", "sector", "stock"))
+        selected = list(jobs or ("market", "lhb", "signals", "sector", "stock"))
         results: List[FactorJobResult] = []
         connect_started = time.monotonic()
         logger.info(f"[Phase2] 打开因子仓库: {self.duckdb_path}")

@@ -24,7 +24,7 @@ logger = loguru.logger
 @dataclass
 class BacktestConfig:
     """回测配置"""
-    initial_capital: float = 100000.0  # 初始资金
+    initial_capital: float = 1000000.0  # 初始资金
     max_position_per_stock: float = 0.2  # 单票最大仓位20%
     max_total_position: float = 0.8  # 总仓位上限80%
     max_positions: int = 8  # 最多同时持仓只数（仅风控开启时生效）
@@ -37,9 +37,12 @@ class BacktestConfig:
     reduced_position_gap: float = 0.02  # 高开2%-3%仍可买，但降低追高风险
     high_gap_position_multiplier: float = 0.75  # 高开2%-3%使用原计划75%仓位
     market_entry_threshold: float = 60.0  # 模拟交易：60分以下停止开仓
-    market_strong_threshold: float = 65.0  # 模拟交易：65分以上扩展到前N名
+    market_strong_threshold: float = 65.0  # 65分以上进入中性可交易区
+    market_hot_threshold: float = 70.0  # 70分以上按强市处理
     neutral_market_max_rank: int = 1  # 中性市场只买第1名
     direct_entry_min_score: float = 74.0  # 达标候选可走竞价买点
+    neutral_market_min_score: float = 80.0  # 60-65分市场只交易高确信候选
+    active_market_min_score: float = 76.0  # 65-70分市场提高买点质量门槛
     intraday_strength_trigger_pct: float = 0.01  # 观察候选从开盘价上冲1%确认转强
     intraday_min_tech_score: float = 80.0
     intraday_min_sector_resonance: float = 60.0
@@ -272,6 +275,16 @@ class BacktestEngine:
             for _, plan in plans_df.iterrows():
                 self._execute_buy(plan, date)
 
+            # 开盘建仓全部完成后，再统一处理当日硬止损。这样不会把盘中止损
+            # 回笼的现金用于同一开盘时刻后续候选，避免时间穿越。
+            new_positions = [
+                (code, str(position.get('entry_signal') or '竞价买点'))
+                for code, position in self.current_positions.items()
+                if str(position.get('entry_date') or '') == str(date)
+            ]
+            for stock_code, entry_signal in new_positions:
+                self._check_entry_day_stop(stock_code, date, entry_signal)
+
         # 4. 计算当日净值
         self._calculate_daily_nav(date)
 
@@ -302,6 +315,23 @@ class BacktestEngine:
             if market_score > 0 and market_score < self.config.market_entry_threshold:
                 logger.info(f"[{date}] 市场评分{market_score:.1f}，弱市停止开仓")
                 return pd.DataFrame()
+            if market_score > 0:
+                score_col = df['综合评分'] if '综合评分' in df.columns else pd.Series(0.0, index=df.index)
+                score_values = pd.to_numeric(score_col, errors='coerce').fillna(0)
+                if market_score < self.config.market_strong_threshold:
+                    before = len(df)
+                    df = df[score_values >= self.config.neutral_market_min_score]
+                    logger.info(
+                        f"[{date}] 市场评分{market_score:.1f}，中性偏弱仅保留评分"
+                        f"{self.config.neutral_market_min_score:.0f}以上候选: {before}->{len(df)}"
+                    )
+                elif market_score < self.config.market_hot_threshold:
+                    before = len(df)
+                    df = df[score_values >= self.config.active_market_min_score]
+                    logger.info(
+                        f"[{date}] 市场评分{market_score:.1f}，中性市场保留评分"
+                        f"{self.config.active_market_min_score:.0f}以上候选: {before}->{len(df)}"
+                    )
             # 不再按固定名次截断；当资金或持仓数有限时，评分高者先接受买点校验。
             if '综合评分' in df.columns:
                 df['_score'] = pd.to_numeric(df['综合评分'], errors='coerce').fillna(0)
@@ -449,7 +479,8 @@ class BacktestEngine:
             'amount_ratio': amount_ratio,
             'entry_signal': entry_signal,
             'stop_loss_price': entry_price * (1 - self.config.stop_loss_pct),
-            'highest_price': entry_price  # 用于跟踪回撤
+            'highest_price': entry_price,  # 用于跟踪回撤
+            'last_close': self._float((self._get_stock_daily_bar(stock_code, date) or {}).get('close'), entry_price),
         }
 
         logger.info(f"[{date}] 买入 {stock_name}({stock_code}): {shares}股 @ {entry_price:.2f}, 成本:{actual_cost+commission:.2f}")
@@ -485,6 +516,30 @@ class BacktestEngine:
             entry_signal=entry_signal,
         )
         self.trade_history.append(trade_record)
+
+    def _check_entry_day_stop(self, stock_code: str, date: str, entry_signal: str) -> None:
+        """竞价成交后立即执行当日硬止损，避免把日内大跌拖成次日跳空亏损。"""
+        position = self.current_positions.get(stock_code)
+        if not position:
+            return
+        daily_bar = self._get_stock_daily_bar(stock_code, date)
+        if not daily_bar:
+            return
+        stop_price = self._float(position.get('stop_loss_price'))
+        session_low = self._float(daily_bar.get('low'))
+        session_close = self._float(daily_bar.get('close'))
+        if stop_price <= 0:
+            return
+        # 盘中转强使用日内 high 确认，无法从日 K 判断最低价发生在触发前还是触发后；
+        # 只有收盘已跌破止损线时，才能确定触发后必然再次向下穿越止损价。
+        triggered = session_close <= stop_price if entry_signal == "盘中转强" else session_low <= stop_price
+        if not triggered:
+            return
+        logger.info(
+            f"[{date}] {position['stock_name']} 买入当日触发硬止损: {stop_price:.2f} "
+            f"(信号={entry_signal}, 最低={session_low:.2f}, 收盘={session_close:.2f})"
+        )
+        self._execute_sell(stock_code, stop_price, date, 'stop_loss')
 
     def _check_buy_conditions(self, plan: pd.Series, date: str, stock_code: str, stock_name: str) -> Tuple[bool, float]:
         """
@@ -634,6 +689,7 @@ class BacktestEngine:
             daily_bar = self._get_stock_daily_bar(stock_code, date)
             if not daily_bar:
                 continue
+            self._apply_corporate_action_adjustment(stock_code, position, daily_bar, date)
             current_price = self._float(daily_bar.get('close'))
             if current_price <= 0:
                 continue
@@ -654,6 +710,7 @@ class BacktestEngine:
 
             # 更新市值
             position['market_value'] = position['shares'] * current_price
+            position['last_close'] = current_price
 
             # ========== 1. 硬止损（必须执行）==========
             stop_price = self._float(position.get('stop_loss_price'))
@@ -695,6 +752,33 @@ class BacktestEngine:
         # 执行全部卖出
         for stock_code, sell_price, reason in stocks_to_sell:
             self._execute_sell(stock_code, sell_price, date, reason)
+
+    def _apply_corporate_action_adjustment(
+        self, stock_code: str, position: Dict, daily_bar: Dict, date: str,
+    ) -> None:
+        """按官方前收价修正除权除息造成的价格断点，保持持仓价值连续。"""
+        official_pre_close = self._float(daily_bar.get('pre_close'))
+        reference_close = self._float(position.get('last_close'))
+        if reference_close <= 0:
+            reference_close = self._float(self._get_prev_close(stock_code, date))
+        if official_pre_close <= 0 or reference_close <= 0:
+            return
+        ratio = official_pre_close / reference_close
+        if abs(ratio - 1.0) <= 0.001 or not 0.2 <= ratio <= 5.0:
+            return
+        if str(position.get('last_adjustment_date') or '') == str(date):
+            return
+
+        old_shares = self._float(position.get('shares'))
+        position['entry_price'] = self._float(position.get('entry_price')) * ratio
+        position['highest_price'] = self._float(position.get('highest_price')) * ratio
+        position['stop_loss_price'] = self._float(position.get('stop_loss_price')) * ratio
+        position['shares'] = old_shares / ratio if ratio > 0 else old_shares
+        position['last_adjustment_date'] = str(date)
+        logger.info(
+            f"[{date}] {position.get('stock_name') or stock_code} 检测到除权除息价格调整: "
+            f"昨收{reference_close:.2f} -> 前收{official_pre_close:.2f}, 比例{ratio:.6f}"
+        )
 
     def _trailing_stop_distance(self, peak_profit_pct: float) -> float:
         """Return the pullback distance for the current profit stage."""

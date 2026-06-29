@@ -131,3 +131,43 @@ def test_risk_projection_keeps_simulation_specific_strategy_thresholds():
     assert config.market_strong_threshold == 65
     assert config.stop_loss_pct == 0.04
     assert config.trailing_stop_pct == 0.10
+
+
+def test_entry_day_auction_buy_executes_hard_stop_immediately():
+    dm = DailyRows({
+        ("000001.SZ", "20260623"): {
+            "open": 10.1, "high": 10.2, "low": 9.3, "close": 9.4, "pre_close": 10.0,
+        },
+    })
+    engine = BacktestEngine(dm, BacktestConfig(
+        commission_rate=0, stamp_duty_rate=0, slippage=0,
+    ))
+    engine.current_positions["000001"] = _position()
+
+    engine._check_entry_day_stop("000001", "20260623", "竞价买点")
+
+    assert "000001" not in engine.current_positions
+    assert engine.trade_history[-1].exit_reason == "stop_loss"
+    assert engine.trade_history[-1].holding_days == 1
+
+
+def test_corporate_action_price_break_keeps_position_value_continuous():
+    dm = DailyRows({
+        ("000001.SZ", "20260623"): {
+            "open": 7.1, "high": 7.5, "low": 6.9, "close": 7.3, "pre_close": 7.0,
+        },
+    })
+    engine = BacktestEngine(dm, BacktestConfig(
+        time_stop_days=999, commission_rate=0, stamp_duty_rate=0, slippage=0,
+    ))
+    position = _position()
+    position["last_close"] = 10.0
+    engine.current_positions["000001"] = position
+
+    engine._check_stop_loss_take_profit("20260623")
+
+    adjusted = engine.current_positions["000001"]
+    assert adjusted["entry_price"] == 7.0
+    assert round(adjusted["stop_loss_price"], 6) == 6.65
+    assert round(adjusted["shares"], 6) == round(1000 / 0.7, 6)
+    assert adjusted["market_value"] > 10000

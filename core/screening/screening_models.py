@@ -44,9 +44,11 @@ class ScreeningResult:
     after_priority_filter: int = 0
     final: List[Dict[str, Any]] = field(default_factory=list)
     scenarios: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    candidate_pool: List[Dict[str, Any]] = field(default_factory=list)
     rejected: List[Dict[str, Any]] = field(default_factory=list)
     traces: List[FilterTrace] = field(default_factory=list)
     output_path: str = ""
+    enhancement_schema_version: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -60,7 +62,9 @@ class ScreeningResult:
             "final_count": len(self.final),
             "final": self.final,
             "scenarios": self.scenarios,
+            "candidate_pool": self.candidate_pool,
             "rejected": self.rejected,
             "traces": [trace.to_dict() for trace in self.traces],
             "output_path": self.output_path,
+            "enhancement_schema_version": self.enhancement_schema_version,
         }
