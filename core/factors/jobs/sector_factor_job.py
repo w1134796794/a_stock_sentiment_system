@@ -9,6 +9,7 @@ from core.factors.jobs.gold_utils import (
     make_long_record,
     percentile_score,
     read_recent_trade_dates,
+    read_table,
     safe_weighted_score,
     score_between,
     to_float,
@@ -81,6 +82,34 @@ class SectorFactorJob:
 
         today["amount_ratio_score"] = ratio_scores
         today["persistence_score"] = persistence_scores
+        lhb = read_table(
+            con, "factor_lhb_sector_wide", where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)]
+        )
+        if not lhb.empty:
+            keep = [
+                "sector_code", "lhb_stock_count", "sector_lhb_net_buy_ratio",
+                "sector_lhb_breadth_score", "sector_lhb_net_buy_score",
+                "sector_lhb_institution_score", "sector_lhb_resonance_score",
+                "signal_date", "effective_date",
+            ]
+            today = today.merge(lhb[[col for col in keep if col in lhb.columns]], on="sector_code", how="left")
+        defaults = {
+            "lhb_stock_count": 0.0,
+            "sector_lhb_net_buy_ratio": 0.0,
+            "sector_lhb_breadth_score": 50.0,
+            "sector_lhb_net_buy_score": 50.0,
+            "sector_lhb_institution_score": 50.0,
+            "sector_lhb_resonance_score": 50.0,
+            "signal_date": "",
+            "effective_date": "",
+        }
+        for col, default in defaults.items():
+            if col not in today.columns:
+                today[col] = default
+            elif isinstance(default, float):
+                today[col] = pd.to_numeric(today[col], errors="coerce").fillna(default)
+            else:
+                today[col] = today[col].fillna(default)
         today["mainline_score"] = [
             safe_weighted_score([
                 (row.momentum_score, 0.45),
@@ -101,6 +130,14 @@ class SectorFactorJob:
             "amount_score",
             "amount_ratio_score",
             "persistence_score",
+            "lhb_stock_count",
+            "sector_lhb_net_buy_ratio",
+            "sector_lhb_breadth_score",
+            "sector_lhb_net_buy_score",
+            "sector_lhb_institution_score",
+            "sector_lhb_resonance_score",
+            "signal_date",
+            "effective_date",
             "mainline_score",
             "rank",
         ]].copy()
@@ -131,6 +168,11 @@ class SectorFactorJob:
                     trade_date=trade_date, entity_type="sector", entity_id=entity_id,
                     factor_id="sec_persistence_score", raw_value=row["persistence_score"],
                     score=row["persistence_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="sector", entity_id=entity_id,
+                    factor_id="sec_lhb_resonance_score", raw_value=row["sector_lhb_net_buy_ratio"],
+                    score=row["sector_lhb_resonance_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="sector", entity_id=entity_id,

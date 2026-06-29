@@ -26,6 +26,10 @@ htmlcov/
 /webdata/screening/
 /webdata/snapshots/
 /webdata/warehouse/
+/webdata/backtest_trade_plans_institution/
+/webdata/backtest_trade_plans_lhb_sector/
+/webdata/backtest_trade_plans_net_buy/
+/webdata/backtest_trade_plans_no_lhb/
 /webdata/config_overrides.json
 
 # Mutable runtime databases must stay outside Git. The application initializes

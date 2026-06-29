@@ -114,7 +114,8 @@ class ScreeningEngine:
         working = self._apply_priority_filters(working, cfg, neutral_score, reasons, rejected, result)
         result.after_priority_filter = int(len(working))
 
-        final = self._rank(working, cfg, neutral_score, reasons)
+        result.scenarios = self._rank_scenarios(working, cfg, neutral_score, reasons)
+        final = result.scenarios.get("lhb_sector") or self._rank(working, cfg, neutral_score, reasons)
         result.final = final
         result.rejected = rejected[:200]
         result.message = f"筛选完成，输入 {result.input_count}，最终 {len(final)}"
@@ -360,16 +361,37 @@ class ScreeningEngine:
         cfg: Dict[str, Any],
         neutral_score: float,
         reasons: Dict[str, List[str]],
+        *,
+        score_series: Optional[pd.Series] = None,
+        base_series: Optional[pd.Series] = None,
     ) -> List[Dict[str, Any]]:
         if df.empty:
             return []
         ranked = df.copy()
-        ranked["_screening_score"] = self._ranking_score(ranked, cfg, neutral_score)
+        if score_series is None or base_series is None:
+            scenario_scores = self._scenario_scores(ranked, cfg, neutral_score)
+            base_series = scenario_scores["no_lhb"]
+            score_series = scenario_scores["lhb_sector"]
+        ranked["_screening_base_score"] = base_series
+        ranked["_screening_score"] = score_series
+        ranked["_lhb_adjustment"] = ranked["_screening_score"] - ranked["_screening_base_score"]
         ranking_cfg = cfg.get("ranking") or {}
         top_n = int(ranking_cfg.get("top_n") or 10)
-        ranked = ranked.sort_values(["_screening_score", "stk_total_score"], ascending=[False, False]).head(top_n)
+        ranked = ranked.sort_values(
+            ["_screening_score", "_lhb_adjustment", "stk_total_score"],
+            ascending=[False, False, False],
+        ).head(top_n)
         final: List[Dict[str, Any]] = []
-        metric_cols = list((ranking_cfg.get("weights") or {}).keys())
+        metric_cols = list(dict.fromkeys(list((ranking_cfg.get("weights") or {}).keys()) + [
+            "stk_lhb_net_buy_score",
+            "stk_lhb_institution_score",
+            "stk_lhb_institution_consensus",
+            "stk_lhb_hot_money_quality",
+            "stk_lhb_repeat_persistence",
+            "stk_lhb_sector_resonance",
+            "stk_lhb_composite_score",
+            "stk_lhb_crowding_risk",
+        ]))
         context_cols = [
             "pct_chg",
             "vol_ratio",
@@ -380,10 +402,18 @@ class ScreeningEngine:
             "limit_progress_score",
             "liquidity_score",
             "sector_resonance_score",
+            "lhb_present",
+            "lhb_net_buy_ratio",
+            "institution_net_buy_ratio",
+            "appearance_days_5d",
+            "crowding_penalty_score",
         ]
         for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
             code = str(row.get("code") or "")
             metrics = {col: _to_float(row.get(col), 50.0) for col in metric_cols}
+            lhb_present = bool(_to_float(row.get("lhb_present"), 0.0))
+            if not lhb_present:
+                metrics = {key: value for key, value in metrics.items() if not key.startswith("stk_lhb_")}
             context = {
                 col: _to_float(row.get(col), 0.0)
                 for col in context_cols
@@ -397,6 +427,8 @@ class ScreeningEngine:
                 "ts_code": str(row.get("ts_code") or ""),
                 "name": str(row.get("name") or ""),
                 "score": score,
+                "base_score": round(_to_float(row.get("_screening_base_score"), score), 4),
+                "lhb_adjustment": round(_to_float(row.get("_lhb_adjustment"), 0.0), 4),
                 "rank": rank,
                 "gold_rank": int(_to_float(row.get("rank"), rank)),
                 "reasons": build_screening_reasons(
@@ -410,8 +442,32 @@ class ScreeningEngine:
                 "penalty_reasons": penalty_reasons,
                 "metrics": metrics,
                 "context": context,
+                "lhb": {
+                    "present": lhb_present,
+                    "signal_date": str(row.get("signal_date") or ""),
+                    "effective_date": str(row.get("effective_date") or ""),
+                    "adjustment": round(_to_float(row.get("_lhb_adjustment"), 0.0), 4),
+                },
             })
         return final
+
+    def _rank_scenarios(
+        self,
+        df: pd.DataFrame,
+        cfg: Dict[str, Any],
+        neutral_score: float,
+        reasons: Dict[str, List[str]],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        if df.empty:
+            return {key: [] for key in ("no_lhb", "net_buy", "institution", "lhb_sector")}
+        scores = self._scenario_scores(df, cfg, neutral_score)
+        output: Dict[str, List[Dict[str, Any]]] = {}
+        for scenario, score_series in scores.items():
+            output[scenario] = self._rank(
+                df, cfg, neutral_score, reasons,
+                score_series=score_series, base_series=scores["no_lhb"],
+            )
+        return output
 
     @staticmethod
     def _factor_series(df: pd.DataFrame, factor: str, neutral_score: float) -> pd.Series:
@@ -420,6 +476,9 @@ class ScreeningEngine:
         return pd.to_numeric(col, errors="coerce").fillna(neutral_score)
 
     def _ranking_score(self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float) -> pd.Series:
+        return self._scenario_scores(df, cfg, neutral_score)["lhb_sector"]
+
+    def _base_ranking_score(self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float) -> pd.Series:
         ranking_cfg = cfg.get("ranking") or {}
         if bool(ranking_cfg.get("candidate_percentile")):
             return self._candidate_percentile_score(df, cfg, neutral_score)
@@ -435,6 +494,72 @@ class ScreeningEngine:
         score = score / total_weight
         penalty = self._ranking_penalty(df, cfg, neutral_score)
         return (score - penalty).clip(lower=0, upper=100)
+
+    def _scenario_scores(
+        self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float,
+    ) -> Dict[str, pd.Series]:
+        base = self._base_ranking_score(df, cfg, neutral_score)
+        lhb_cfg = cfg.get("lhb_enhancement") or {}
+        if not bool(lhb_cfg.get("enabled", True)):
+            return {key: base.copy() for key in ("no_lhb", "net_buy", "institution", "lhb_sector")}
+        active = self._factor_series(df, "lhb_present", 0.0) > 0
+
+        def enabled(factor: str) -> bool:
+            try:
+                from core.factors.factor_registry import get_factor_registry
+
+                definition = get_factor_registry().get_factor(factor)
+                return bool(definition.enabled) if definition is not None else True
+            except Exception:
+                return True
+
+        def delta(factor: str, bonus: float, penalty: float) -> pd.Series:
+            if not enabled(factor):
+                return pd.Series(0.0, index=df.index, dtype=float)
+            values = self._factor_series(df, factor, neutral_score)
+            positive = ((values - 50.0) / 50.0).clip(lower=0, upper=1) * max(float(bonus), 0.0)
+            negative = ((50.0 - values) / 50.0).clip(lower=0, upper=1) * max(float(penalty), 0.0)
+            return (positive - negative).where(active, 0.0)
+
+        components = lhb_cfg.get("components") or {}
+        net_cfg = components.get("net_buy") or {}
+        inst_cfg = components.get("institution") or {}
+        consensus_cfg = components.get("institution_consensus") or {}
+        hot_cfg = components.get("hot_money_quality") or {}
+        repeat_cfg = components.get("repeat_persistence") or {}
+        sector_cfg = components.get("sector_resonance") or {}
+        net = delta("stk_lhb_net_buy_score", net_cfg.get("max_bonus", 2.5), net_cfg.get("max_penalty", 3.0))
+        institution = delta(
+            "stk_lhb_institution_score", inst_cfg.get("max_bonus", 2.5), inst_cfg.get("max_penalty", 2.5)
+        )
+        consensus = delta(
+            "stk_lhb_institution_consensus", consensus_cfg.get("max_bonus", 1.0), consensus_cfg.get("max_penalty", 1.0)
+        )
+        hot_money = delta(
+            "stk_lhb_hot_money_quality", hot_cfg.get("max_bonus", 0.8), hot_cfg.get("max_penalty", 0.8)
+        )
+        repeat = delta(
+            "stk_lhb_repeat_persistence", repeat_cfg.get("max_bonus", 0.8), repeat_cfg.get("max_penalty", 0.8)
+        )
+        sector = delta(
+            "stk_lhb_sector_resonance", sector_cfg.get("max_bonus", 2.0), sector_cfg.get("max_penalty", 2.0)
+        )
+        if enabled("stk_lhb_crowding_risk"):
+            crowding = (
+                self._factor_series(df, "crowding_penalty_score", 0.0).clip(lower=0, upper=100)
+                / 100.0 * _to_float(lhb_cfg.get("max_crowding_penalty"), 3.0)
+            ).where(active, 0.0)
+        else:
+            crowding = pd.Series(0.0, index=df.index, dtype=float)
+        full = net + institution + consensus + hot_money + repeat + sector - crowding
+        cap = max(_to_float(lhb_cfg.get("max_total_adjustment"), 8.0), 0.0)
+        full = full.clip(lower=-cap, upper=cap)
+        return {
+            "no_lhb": base.clip(lower=0, upper=100),
+            "net_buy": (base + net).clip(lower=0, upper=100),
+            "institution": (base + institution + consensus).clip(lower=0, upper=100),
+            "lhb_sector": (base + full).clip(lower=0, upper=100),
+        }
 
     def _candidate_percentile_score(
         self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float,

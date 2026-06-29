@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional
 
 # 因子大类中文标签（与 FactorCategory.value 对应）
@@ -18,6 +19,7 @@ CATEGORY_LABELS: Dict[str, str] = {
     "sector": "板块",
     "stock_tech": "个股技术",
     "moneyflow": "资金流",
+    "lhb": "龙虎榜",
     "cross_cycle": "跨周期",
 }
 
@@ -45,7 +47,8 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
     cat_order = list(CATEGORY_LABELS.keys())
     groups: Dict[str, Dict[str, Any]] = {}
     for f in reg._factors.values():  # noqa: SLF001 - 面板只读访问
-        cat = f.category.value
+        # 龙虎榜属于资金行为，但在操作层面需要独立开关和观察，避免藏在资金流分组里。
+        cat = "lhb" if f.sub_category == "lhb" else f.category.value
         path = f"factor_registry.factors.{f.factor_id}.enabled"
         groups.setdefault(cat, {
             "category": cat,

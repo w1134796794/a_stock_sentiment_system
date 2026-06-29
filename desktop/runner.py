@@ -520,13 +520,27 @@ class BacktestController:
             self.buffer.append_text("\n" + report + "\n")
 
             from run_backtest import save_backtest_results  # 复用同一套 CSV 落盘逻辑
-            save_backtest_results(result, OUTPUT_DIR, metadata={
+            run_id = save_backtest_results(result, OUTPUT_DIR, metadata={
                 "run_mode": "range",
                 "start_date": start,
                 "end_date": end,
                 "risk_control": risk_control,
                 "max_plan_rank": max_plan_rank,
             })
+            from backtest.lhb_comparison import run_lhb_comparison, save_lhb_comparison
+
+            self.buffer.append_line("开始龙虎榜四组对照回测：无龙虎榜 / 净买入 / 机构 / 龙虎榜＋板块共振")
+            comparison = run_lhb_comparison(
+                data_manager=dm,
+                config=config,
+                start_date=start,
+                end_date=end,
+                snapshot_dir=Path(SNAPSHOT_DIR),
+                web_data_dir=Path(WEB_DATA_DIR),
+                baseline_result=result,
+            )
+            comparison_path = save_lhb_comparison(comparison, Path(OUTPUT_DIR), run_id)
+            self.buffer.append_line(f"龙虎榜对照报表已保存：{comparison_path}")
             state_path = self._save_rolling_state(engine, "range")
 
             self.buffer.append_line(f"接力账户状态已同步到 {state_path}，后续可用单日接力继续。")

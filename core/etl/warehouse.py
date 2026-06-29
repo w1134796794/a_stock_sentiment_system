@@ -13,6 +13,9 @@ from core.data.market_dataset import MarketDataset
 from core.etl.normalizers import (
     normalize_stock_code,
     standardize_index_daily_frame,
+    standardize_lhb_daily_frame,
+    standardize_lhb_hot_money_frame,
+    standardize_lhb_institution_frame,
     standardize_limit_down_pool_frame,
     standardize_limit_up_pool_frame,
     standardize_sector_daily_frame,
@@ -27,6 +30,9 @@ SILVER_DATE_PARTITION_COLUMN = {
     "index_daily_silver": "trade_date",
     "limit_up_pool_silver": "trade_date",
     "limit_down_pool_silver": "trade_date",
+    "lhb_daily_silver": "trade_date",
+    "lhb_institution_silver": "trade_date",
+    "lhb_hot_money_silver": "trade_date",
 }
 
 SILVER_CANONICAL_VARCHAR_COLUMNS = {
@@ -40,6 +46,12 @@ SILVER_CANONICAL_VARCHAR_COLUMNS = {
     "sector_type",
     "index_code",
     "index_name",
+    "seat_name",
+    "seat_type",
+    "actor_name",
+    "reason",
+    "tag",
+    "side",
     "first_time",
     "last_time",
     "source",
@@ -525,6 +537,34 @@ def _normalize_limit_down_tables(ds: MarketDataset) -> pd.DataFrame:
     return out
 
 
+def _call_frame(ds: MarketDataset, prefix: str) -> pd.DataFrame:
+    for key, value in (ds.calls or {}).items():
+        if str(key).startswith(prefix) and isinstance(value, pd.DataFrame):
+            return value
+    return pd.DataFrame()
+
+
+def _normalize_lhb_daily(ds: MarketDataset) -> pd.DataFrame:
+    return standardize_lhb_daily_frame(
+        _call_frame(ds, "top_list|"), trade_date=ds.trade_date,
+        as_of_date=ds.trade_date, source="top_list",
+    )
+
+
+def _normalize_lhb_institution(ds: MarketDataset) -> pd.DataFrame:
+    return standardize_lhb_institution_frame(
+        _call_frame(ds, "top_inst|"), trade_date=ds.trade_date,
+        as_of_date=ds.trade_date, source="top_inst",
+    )
+
+
+def _normalize_lhb_hot_money(ds: MarketDataset) -> pd.DataFrame:
+    return standardize_lhb_hot_money_frame(
+        _call_frame(ds, "hm_detail|"), trade_date=ds.trade_date,
+        as_of_date=ds.trade_date, source="hm_detail",
+    )
+
+
 def build_silver_frames(ds: MarketDataset) -> Dict[str, pd.DataFrame]:
     return {
         "stock_daily_silver": _normalize_stock_tables(ds),
@@ -532,6 +572,9 @@ def build_silver_frames(ds: MarketDataset) -> Dict[str, pd.DataFrame]:
         "index_daily_silver": _normalize_index_tables(ds),
         "limit_up_pool_silver": _normalize_limit_up_tables(ds),
         "limit_down_pool_silver": _normalize_limit_down_tables(ds),
+        "lhb_daily_silver": _normalize_lhb_daily(ds),
+        "lhb_institution_silver": _normalize_lhb_institution(ds),
+        "lhb_hot_money_silver": _normalize_lhb_hot_money(ds),
     }
 
 

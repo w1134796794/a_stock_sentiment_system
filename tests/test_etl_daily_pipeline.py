@@ -61,8 +61,6 @@ def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path):
         web_data_dir=tmp_path / "webdata",
         snapshot_dir=tmp_path / "snapshots",
         app_db_path=tmp_path / "app.sqlite",
-        kb_db_path=tmp_path / "kb.sqlite",
-        ingest_kb=False,
     )
 
     result = pipeline.run("20260616", "20260615")
@@ -74,3 +72,4 @@ def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path):
     assert result.snapshot_paths.get("json")
     assert (tmp_path / "snapshots" / "20260616.json").exists()
     assert (tmp_path / "webdata" / "screening" / "screening_20260616.json").exists()
+    assert not (tmp_path / "kb.sqlite").exists()

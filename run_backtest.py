@@ -64,12 +64,30 @@ def run_backtest_demo():
     print("\n" + report)
 
     # 6. 保存详细结果
-    save_backtest_results(result, OUTPUT_DIR)
+    run_id = save_backtest_results(result, OUTPUT_DIR)
+    from backtest.lhb_comparison import run_lhb_comparison, save_lhb_comparison
+
+    comparison = run_lhb_comparison(
+        data_manager=dm,
+        config=config,
+        start_date=start_date,
+        end_date=end_date,
+        snapshot_dir=Path(SNAPSHOT_DIR),
+        web_data_dir=Path(WEB_DATA_DIR),
+        baseline_result=result,
+    )
+    save_lhb_comparison(comparison, Path(OUTPUT_DIR), run_id)
 
     logger.info("回测完成！")
 
 
-def save_backtest_results(result: dict, output_dir: str, metadata: dict | None = None):
+def save_backtest_results(
+    result: dict,
+    output_dir: str,
+    metadata: dict | None = None,
+    *,
+    timestamp: str | None = None,
+):
     """保存回测结果到文件"""
     import pandas as pd
     from pathlib import Path
@@ -77,7 +95,7 @@ def save_backtest_results(result: dict, output_dir: str, metadata: dict | None =
     output_path = Path(output_dir) / "backtest_results"
     output_path.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 保存交易记录
     if result.get('trade_history'):
@@ -219,6 +237,8 @@ def save_backtest_results(result: dict, output_dir: str, metadata: dict | None =
             logger.info(f"滚动验证报表已保存: {path}")
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"滚动验证报表生成失败: {exc}")
+
+    return timestamp
 
 
 def run_risk_analysis_demo():

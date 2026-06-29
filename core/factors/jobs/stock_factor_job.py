@@ -310,6 +310,34 @@ class StockFactorJob:
         ):
             today[key] = [item[key] for item in sector_values]
 
+        lhb_frame = read_table(
+            con, "factor_lhb_stock_wide", where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)]
+        )
+        lhb_by_code = (
+            lhb_frame.assign(code=lhb_frame["code"].astype(str).str.split(".").str[0].str.zfill(6))
+            .drop_duplicates("code", keep="last").set_index("code").to_dict("index")
+            if not lhb_frame.empty else {}
+        )
+        lhb_defaults = {
+            "lhb_present": 0.0,
+            "lhb_net_buy_score": 50.0,
+            "institution_net_buy_score": 50.0,
+            "institution_consensus_score": 50.0,
+            "hot_money_quality_score": 50.0,
+            "repeat_persistence_score": 50.0,
+            "sector_lhb_resonance_score": 50.0,
+            "crowding_penalty_score": 0.0,
+            "lhb_composite_score": 50.0,
+            "lhb_net_buy_ratio": 0.0,
+            "institution_net_buy_ratio": 0.0,
+            "appearance_days_5d": 0.0,
+            "signal_date": "",
+            "effective_date": "",
+        }
+        lhb_values = [lhb_by_code.get(str(code), lhb_defaults) for code in today["code"].astype(str)]
+        for key, default in lhb_defaults.items():
+            today[key] = [item.get(key, default) for item in lhb_values]
+
         board_height = []
         seal_time_score = []
         float_mv_fit_score = []
@@ -371,6 +399,20 @@ class StockFactorJob:
             "seal_time_score",
             "float_mv",
             "float_mv_fit_score",
+            "lhb_present",
+            "lhb_net_buy_score",
+            "institution_net_buy_score",
+            "institution_consensus_score",
+            "hot_money_quality_score",
+            "repeat_persistence_score",
+            "sector_lhb_resonance_score",
+            "crowding_penalty_score",
+            "lhb_composite_score",
+            "lhb_net_buy_ratio",
+            "institution_net_buy_ratio",
+            "appearance_days_5d",
+            "signal_date",
+            "effective_date",
             "total_score",
             "rank",
             "pct_chg",
@@ -459,6 +501,46 @@ class StockFactorJob:
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_board_position", raw_value=row["board_height"], score=row["board_score"],
                     direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_lhb_net_buy_score", raw_value=row["lhb_net_buy_ratio"],
+                    score=row["lhb_net_buy_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_lhb_institution_score", raw_value=row["institution_net_buy_ratio"],
+                    score=row["institution_net_buy_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_lhb_institution_consensus", raw_value=row["institution_consensus_score"],
+                    score=row["institution_consensus_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_lhb_hot_money_quality", raw_value=row["hot_money_quality_score"],
+                    score=row["hot_money_quality_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_lhb_repeat_persistence", raw_value=row["appearance_days_5d"],
+                    score=row["repeat_persistence_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_lhb_sector_resonance", raw_value=row["sector_lhb_resonance_score"],
+                    score=row["sector_lhb_resonance_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_lhb_composite_score", raw_value=row["lhb_composite_score"],
+                    score=row["lhb_composite_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_lhb_crowding_risk", raw_value=row["crowding_penalty_score"],
+                    score=100.0 - to_float(row["crowding_penalty_score"]), direction="lower_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,

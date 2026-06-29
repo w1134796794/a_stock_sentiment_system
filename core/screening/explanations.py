@@ -26,6 +26,15 @@ FACTOR_LABELS: Dict[str, str] = {
     "stk_board_height": "连板高度",
     "stk_seal_time_quality": "封板时间质量",
     "stk_float_mv_fit": "流通市值适配",
+    "stk_lhb_net_buy_score": "龙虎榜净买入强度",
+    "stk_lhb_institution_score": "机构净买入强度",
+    "stk_lhb_institution_consensus": "机构席位共识",
+    "stk_lhb_hot_money_quality": "游资席位质量",
+    "stk_lhb_repeat_persistence": "龙虎榜资金持续性",
+    "stk_lhb_sector_resonance": "龙虎榜板块共振",
+    "stk_lhb_composite_score": "龙虎榜综合分",
+    "stk_lhb_crowding_risk": "龙虎榜拥挤安全度",
+    "sec_lhb_resonance_score": "板块龙虎榜共振",
 }
 
 FACTOR_NOTE: Dict[str, str] = {
@@ -50,6 +59,15 @@ FACTOR_NOTE: Dict[str, str] = {
     "stk_board_height": "连板高度具备辨识度",
     "stk_seal_time_quality": "封板时间质量较好",
     "stk_float_mv_fit": "流通市值适合短线交易",
+    "stk_lhb_net_buy_score": "龙虎榜净买入相对成交额较强",
+    "stk_lhb_institution_score": "机构资金方向偏正面",
+    "stk_lhb_institution_consensus": "机构席位买卖方向较一致",
+    "stk_lhb_hot_money_quality": "活跃席位历史质量较好",
+    "stk_lhb_repeat_persistence": "近5日上榜资金具有持续性",
+    "stk_lhb_sector_resonance": "同板块龙虎榜资金形成共振",
+    "stk_lhb_composite_score": "龙虎榜资金结构综合表现较好",
+    "stk_lhb_crowding_risk": "龙虎榜席位集中风险较低",
+    "sec_lhb_resonance_score": "板块上榜资金形成合力",
 }
 
 

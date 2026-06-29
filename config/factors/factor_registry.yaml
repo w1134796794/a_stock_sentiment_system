@@ -770,6 +770,97 @@ factors:
     enabled: true
     params: {}
 
+  stk_lhb_net_buy_score:
+    id: "LHB1"
+    name: "龙虎榜净买入强度"
+    category: "moneyflow"
+    sub_category: "lhb"
+    description: "龙虎榜净买入额相对个股当日成交额的标准化评分"
+    data_source: "top_list"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.25
+    enabled: true
+    params: {}
+
+  stk_lhb_institution_score:
+    id: "LHB2"
+    name: "机构净买入强度"
+    category: "moneyflow"
+    sub_category: "lhb"
+    description: "机构专用席位净买入额相对个股成交额的标准化评分"
+    data_source: "top_inst"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
+    enabled: true
+    params: {}
+
+  stk_lhb_institution_consensus:
+    id: "LHB3"
+    name: "机构席位共识"
+    category: "moneyflow"
+    sub_category: "lhb"
+    description: "机构买入席位与卖出席位的方向一致程度"
+    data_source: "top_inst"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.10
+    enabled: true
+    params: {}
+
+  stk_lhb_hot_money_quality:
+    id: "LHB4"
+    name: "游资席位质量"
+    category: "moneyflow"
+    sub_category: "lhb"
+    description: "按历史信誉与买卖方向加权的游资席位质量"
+    data_source: "hm_detail"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.10
+    enabled: true
+    params: {}
+
+  stk_lhb_repeat_persistence:
+    id: "LHB5"
+    name: "龙虎榜资金持续性"
+    category: "moneyflow"
+    sub_category: "lhb"
+    description: "近5个交易日上榜频率与净买入持续性的组合评分"
+    data_source: "top_list"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.15
+    enabled: true
+    params: {}
+
+  stk_lhb_sector_resonance:
+    id: "LHB6"
+    name: "龙虎榜板块共振"
+    category: "moneyflow"
+    sub_category: "lhb"
+    description: "同概念或行业内上榜数量、净买入和机构方向的共振评分"
+    data_source: "factor_lhb_sector_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.20
+    enabled: true
+    params: {}
+
+  stk_lhb_crowding_risk:
+    id: "LHB7"
+    name: "龙虎榜拥挤风险"
+    category: "moneyflow"
+    sub_category: "lhb"
+    description: "席位过度集中、高换手和重复上榜形成的接力风险惩罚"
+    data_source: "top_inst"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.15
+    enabled: true
+    params: {}
+
   # 市场级资金流因子（Layer4 跨周期使用，保留）
   E3_north_flow:
     id: "E3"

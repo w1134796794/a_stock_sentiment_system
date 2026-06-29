@@ -148,6 +148,17 @@ class LeaderPoolService:
         limit_pct = get_price_limit_pct_points(code, name) or 10.0
         limit_ratio = limit_progress(pct_chg, code, name)
         limit_bonus = 5.0 if limit_ratio >= 0.95 else 0.0
+        lhb_present = bool(_to_float(context.get("lhb_present"), 0.0))
+        lhb_score = _to_float(metrics.get("stk_lhb_composite_score"), 50.0)
+        lhb_sector_score = _to_float(metrics.get("stk_lhb_sector_resonance"), 50.0)
+        lhb_crowding_safety = _to_float(metrics.get("stk_lhb_crowding_risk"), 100.0)
+        lhb_leader_adjustment = 0.0
+        if lhb_present:
+            lhb_leader_adjustment = (
+                (lhb_score - 50.0) * 0.18
+                + (lhb_sector_score - 50.0) * 0.08
+                + (lhb_crowding_safety - 100.0) * 0.04
+            )
         leader_score = (
             latest_score * 0.35
             + appearance_score * 0.16
@@ -157,6 +168,7 @@ class LeaderPoolService:
             + new_high * 0.08
             + volume_score * 0.05
             + limit_bonus
+            + lhb_leader_adjustment
         )
         leader_score = max(0.0, min(100.0, leader_score))
 
@@ -204,6 +216,13 @@ class LeaderPoolService:
             "tech_score": round(tech_score, 2),
             "liquidity_score": round(liquidity, 2),
             "new_high_score": round(new_high, 2),
+            "lhb_present": lhb_present,
+            "lhb_score": round(lhb_score, 2),
+            "lhb_sector_score": round(lhb_sector_score, 2),
+            "lhb_crowding_safety": round(lhb_crowding_safety, 2),
+            "lhb_leader_adjustment": round(lhb_leader_adjustment, 2),
+            "lhb_signal_date": str((source.get("lhb") or {}).get("signal_date") or ""),
+            "lhb_effective_date": str((source.get("lhb") or {}).get("effective_date") or ""),
             "action": "只在高开且实时转强时确认；低开直接放弃",
             "reasons": reasons,
             "candidate_reasons": source.get("reasons") or [],
@@ -247,6 +266,15 @@ class LeaderPoolService:
         tech = _to_float(metrics.get("tech_score"), 0.0)
         if tech >= 80:
             reasons.append(f"技术强度 {tech:.1f} 分，处于强势区")
+        if bool(_to_float(context.get("lhb_present"), 0.0)):
+            lhb_score = _to_float(metrics.get("stk_lhb_composite_score"), 50.0)
+            sector_score = _to_float(metrics.get("stk_lhb_sector_resonance"), 50.0)
+            if lhb_score >= 60:
+                reasons.append(f"盘后龙虎榜综合 {lhb_score:.1f} 分，资金认可增强")
+            elif lhb_score < 45:
+                reasons.append(f"盘后龙虎榜综合 {lhb_score:.1f} 分，接力风险上升")
+            if sector_score >= 65:
+                reasons.append(f"龙虎榜板块共振 {sector_score:.1f} 分")
         return reasons[:5]
 
     def _recent_dates(self, trade_date: Optional[str], lookback: int) -> List[str]:

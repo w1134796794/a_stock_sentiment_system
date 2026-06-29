@@ -10,8 +10,6 @@ from typing import Any, Dict, List
 from config.settings import (
     BASE_DIR,
     FACTOR_DB_PATH,
-    KB_DB_PATH,
-    LLM_CONFIG,
     OUTPUT_DIR,
     SNAPSHOT_DIR,
     TUSHARE_TOKEN,
@@ -40,9 +38,6 @@ def health_items() -> List[Dict[str, Any]]:
     latest = reader.latest()
 
     token_ok = bool((TUSHARE_TOKEN or "").strip())
-    ai_key = (LLM_CONFIG.get("api_key") or "").strip()
-    ai_ok = bool(ai_key) and ai_key != "your-api-key-here"
-
     items: List[Dict[str, Any]] = [
         {
             "title": "Tushare Token",
@@ -50,13 +45,6 @@ def health_items() -> List[Dict[str, Any]]:
             "value": "已配置" if token_ok else "未配置",
             "detail": "数据更新需要 Tushare 历史数据接口；可在「参数配置」或 .env 中设置 TUSHARE_TOKEN。",
             "badge": "正常" if token_ok else "缺失",
-        },
-        {
-            "title": "AI 解读 / 问答",
-            "status": _ok(ai_ok),
-            "value": "已配置" if ai_ok else "未配置（降级为离线词法检索）",
-            "detail": "配置 DEEPSEEK_API_KEY 或 DASHSCOPE_API_KEY 后启用 AI 每日解读与问答。",
-            "badge": "正常" if ai_ok else "可选",
         },
         {
             "title": "最新数据快照",
@@ -76,7 +64,7 @@ def health_items() -> List[Dict[str, Any]]:
             "title": "数据目录",
             "status": _ok(Path(WEB_DATA_DIR).exists()),
             "value": str(WEB_DATA_DIR),
-            "detail": f"数据产物：{WEB_DATA_DIR} · 知识库：{KB_DB_PATH} · 兼容输出：{OUTPUT_DIR}",
+            "detail": f"数据产物：{WEB_DATA_DIR} · 兼容输出：{OUTPUT_DIR}",
             "badge": "存在" if Path(WEB_DATA_DIR).exists() else "缺失",
         },
     ]

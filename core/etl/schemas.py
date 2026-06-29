@@ -79,10 +79,70 @@ LIMIT_UP_POOL_SILVER_COLUMNS = [
 
 LIMIT_DOWN_POOL_SILVER_COLUMNS = LIMIT_UP_POOL_SILVER_COLUMNS.copy()
 
+LHB_DAILY_SILVER_COLUMNS = [
+    "trade_date",
+    "code",
+    "ts_code",
+    "name",
+    "close",
+    "pct_chg",
+    "turnover_rate",
+    "amount_yuan",
+    "listed_sell_yuan",
+    "listed_buy_yuan",
+    "listed_amount_yuan",
+    "net_buy_yuan",
+    "net_buy_rate",
+    "listed_amount_rate",
+    "float_mv_yuan",
+    "reason",
+    "source",
+    "as_of_date",
+    "ingested_at",
+]
+
+LHB_INSTITUTION_SILVER_COLUMNS = [
+    "trade_date",
+    "code",
+    "ts_code",
+    "seat_name",
+    "seat_type",
+    "is_institution",
+    "buy_yuan",
+    "sell_yuan",
+    "net_buy_yuan",
+    "buy_rate",
+    "sell_rate",
+    "side",
+    "reason",
+    "source",
+    "as_of_date",
+    "ingested_at",
+]
+
+LHB_HOT_MONEY_SILVER_COLUMNS = [
+    "trade_date",
+    "code",
+    "ts_code",
+    "name",
+    "actor_name",
+    "seat_name",
+    "tag",
+    "buy_yuan",
+    "sell_yuan",
+    "net_buy_yuan",
+    "source",
+    "as_of_date",
+    "ingested_at",
+]
+
 QUALITY_TABLES = [
     "stock_daily_silver",
     "sector_daily_silver",
     "index_daily_silver",
     "limit_up_pool_silver",
     "limit_down_pool_silver",
+    "lhb_daily_silver",
+    "lhb_institution_silver",
+    "lhb_hot_money_silver",
 ]

@@ -13,6 +13,9 @@ import pandas as pd
 
 from core.etl.schemas import (
     INDEX_DAILY_SILVER_COLUMNS,
+    LHB_DAILY_SILVER_COLUMNS,
+    LHB_HOT_MONEY_SILVER_COLUMNS,
+    LHB_INSTITUTION_SILVER_COLUMNS,
     LIMIT_DOWN_POOL_SILVER_COLUMNS,
     LIMIT_UP_POOL_SILVER_COLUMNS,
     SECTOR_DAILY_SILVER_COLUMNS,
@@ -142,9 +145,15 @@ def normalize_pct(value: Any, *, ratio: bool = False) -> float:
 
 
 def _ensure_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    text_columns = {"reason", "tag", "side", "actor_name", "seat_name"}
     for col in columns:
         if col not in df.columns:
-            df[col] = "" if col.endswith(("code", "name", "date", "source", "at", "exchange", "type")) else 0.0
+            if col == "is_institution":
+                df[col] = False
+            elif col in text_columns or col.endswith(("code", "name", "date", "source", "at", "exchange", "type")):
+                df[col] = ""
+            else:
+                df[col] = 0.0
     return df[columns].copy()
 
 
@@ -338,3 +347,113 @@ def standardize_index_daily_frame(
             "ingested_at": ingested_at,
         })
     return _ensure_columns(pd.DataFrame(rows), INDEX_DAILY_SILVER_COLUMNS)
+
+
+def standardize_lhb_daily_frame(
+    df: Optional[pd.DataFrame],
+    *,
+    trade_date: str = "",
+    as_of_date: str = "",
+    source: str = "top_list",
+) -> pd.DataFrame:
+    """Normalize the daily Dragon-Tiger list summary; Tushare amounts are yuan."""
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        code = normalize_stock_code(pick(row, ("code", "ts_code", "股票代码", "代码")), add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date", "date", "日期"), trade_date), trade_date)
+        rows.append({
+            "trade_date": td,
+            "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True),
+            "name": str(pick(row, ("name", "ts_name", "股票名称", "名称"), "") or ""),
+            "close": to_float(pick(row, ("close", "收盘价"), 0)),
+            "pct_chg": normalize_pct(pick(row, ("pct_chg", "pct_change", "涨跌幅"), 0)),
+            "turnover_rate": to_float(pick(row, ("turnover_rate", "换手率"), 0)),
+            "amount_yuan": normalize_amount_yuan(pick(row, ("amount_yuan", "amount", "成交额"), 0)),
+            "listed_sell_yuan": normalize_amount_yuan(pick(row, ("listed_sell_yuan", "l_sell", "龙虎榜卖出额"), 0)),
+            "listed_buy_yuan": normalize_amount_yuan(pick(row, ("listed_buy_yuan", "l_buy", "龙虎榜买入额"), 0)),
+            "listed_amount_yuan": normalize_amount_yuan(pick(row, ("listed_amount_yuan", "l_amount", "龙虎榜成交额"), 0)),
+            "net_buy_yuan": normalize_amount_yuan(pick(row, ("net_buy_yuan", "net_amount", "龙虎榜净买入"), 0)),
+            "net_buy_rate": to_float(pick(row, ("net_buy_rate", "net_rate", "净买入占比"), 0)),
+            "listed_amount_rate": to_float(pick(row, ("listed_amount_rate", "amount_rate", "龙虎榜成交占比"), 0)),
+            "float_mv_yuan": normalize_amount_yuan(pick(row, ("float_mv_yuan", "float_values", "流通市值"), 0)),
+            "reason": str(pick(row, ("reason", "上榜原因"), "") or ""),
+            "source": source,
+            "as_of_date": normalize_trade_date(as_of_date or td, td),
+            "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), LHB_DAILY_SILVER_COLUMNS)
+
+
+def standardize_lhb_institution_frame(
+    df: Optional[pd.DataFrame],
+    *,
+    trade_date: str = "",
+    as_of_date: str = "",
+    source: str = "top_inst",
+) -> pd.DataFrame:
+    """Normalize LHB seat details and explicitly identify institution-only seats."""
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        code = normalize_stock_code(pick(row, ("code", "ts_code", "股票代码", "代码")), add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date", "date", "日期"), trade_date), trade_date)
+        seat_name = str(pick(row, ("seat_name", "exalter", "营业部名称", "机构名称"), "") or "").strip()
+        is_institution = "机构专用" in seat_name or seat_name in {"机构", "机构席位"}
+        rows.append({
+            "trade_date": td,
+            "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True),
+            "seat_name": seat_name,
+            "seat_type": "institution" if is_institution else "broker_seat",
+            "is_institution": bool(is_institution),
+            "buy_yuan": normalize_amount_yuan(pick(row, ("buy_yuan", "buy", "买入额"), 0)),
+            "sell_yuan": normalize_amount_yuan(pick(row, ("sell_yuan", "sell", "卖出额"), 0)),
+            "net_buy_yuan": normalize_amount_yuan(pick(row, ("net_buy_yuan", "net_buy", "净买入额"), 0)),
+            "buy_rate": to_float(pick(row, ("buy_rate", "买入占比"), 0)),
+            "sell_rate": to_float(pick(row, ("sell_rate", "卖出占比"), 0)),
+            "side": str(pick(row, ("side", "方向"), "") or ""),
+            "reason": str(pick(row, ("reason", "上榜原因"), "") or ""),
+            "source": source,
+            "as_of_date": normalize_trade_date(as_of_date or td, td),
+            "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), LHB_INSTITUTION_SILVER_COLUMNS)
+
+
+def standardize_lhb_hot_money_frame(
+    df: Optional[pd.DataFrame],
+    *,
+    trade_date: str = "",
+    as_of_date: str = "",
+    source: str = "hm_detail",
+) -> pd.DataFrame:
+    """Normalize named hot-money activity and its associated brokerage seat."""
+    rows = []
+    ingested_at = now_iso()
+    for row in _rows(df):
+        code = normalize_stock_code(pick(row, ("code", "ts_code", "股票代码", "代码")), add_suffix=False)
+        if not code:
+            continue
+        td = normalize_trade_date(pick(row, ("trade_date", "date", "日期"), trade_date), trade_date)
+        rows.append({
+            "trade_date": td,
+            "code": code,
+            "ts_code": normalize_stock_code(code, add_suffix=True),
+            "name": str(pick(row, ("name", "ts_name", "股票名称", "名称"), "") or ""),
+            "actor_name": str(pick(row, ("actor_name", "hm_name", "游资名称"), "") or "").strip(),
+            "seat_name": str(pick(row, ("seat_name", "hm_orgs", "营业部名称"), "") or "").strip(),
+            "tag": str(pick(row, ("tag", "标签"), "") or ""),
+            "buy_yuan": normalize_amount_yuan(pick(row, ("buy_yuan", "buy_amount", "买入额"), 0)),
+            "sell_yuan": normalize_amount_yuan(pick(row, ("sell_yuan", "sell_amount", "卖出额"), 0)),
+            "net_buy_yuan": normalize_amount_yuan(pick(row, ("net_buy_yuan", "net_amount", "净买入额"), 0)),
+            "source": source,
+            "as_of_date": normalize_trade_date(as_of_date or td, td),
+            "ingested_at": ingested_at,
+        })
+    return _ensure_columns(pd.DataFrame(rows), LHB_HOT_MONEY_SILVER_COLUMNS)

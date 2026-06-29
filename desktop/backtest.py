@@ -403,6 +403,20 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "样本外止损率": _fmt_pct(r.get("oos_stop_rate")),
         }
 
+    lhb_comparison_rows = []
+    for r in load_table("lhb_comparison", run):
+        lhb_comparison_rows.append({
+            "口径": r.get("scenario_name") or r.get("scenario") or "",
+            "候选覆盖": f"{int(float(r.get('executed_buys') or 0))}/{int(float(r.get('candidate_rows') or 0))}",
+            "成交覆盖率": _fmt_pct(r.get("coverage_rate")),
+            "已平仓": int(float(r.get("closed_trades") or 0)),
+            "胜率": _fmt_pct(r.get("win_rate")),
+            "平均收益": _fmt_pct(r.get("avg_return"), signed=True),
+            "总收益": _fmt_pct(r.get("total_return"), signed=True),
+            "止损率": _fmt_pct(r.get("stop_loss_rate")),
+            "最大回撤": _fmt_pct(r.get("max_drawdown"), signed=True),
+        })
+
     # 逐笔展示原始 BUY/SELL；FIFO 仅用于识别哪些 BUY 仍处于持仓中。
     open_lots: Dict[str, List[Dict[str, Any]]] = {}
     for index, trade in enumerate(trades):
@@ -510,6 +524,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "rank_suggestion": rank_suggestion,
         "walk_forward_rows": walk_forward_rows,
         "walk_forward_summary": walk_forward_summary,
+        "lhb_comparison_rows": lhb_comparison_rows,
         "transaction_view": True,
         "trade_rows": trade_rows,
         "trade_columns": ["日期", "动作", "名称", "代码", "模式", "买入价", "卖出价", "现价",

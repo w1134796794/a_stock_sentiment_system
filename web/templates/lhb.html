@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}龙虎榜 · {{ date }}{% endblock %}
+{% block page_title %}龙虎榜{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date }} · 盘后席位数据</div>{% endblock %}
+
+{% block header_extra %}
+  {% if dates %}
+  <label class="text-sm text-slate-400" for="lhb-date">交易日</label>
+  <select id="lhb-date" onchange="location.href='/data/lhb/'+this.value"
+          class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+    {% for d in dates %}
+      <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if lhb.error %}
+  <div class="border border-rose-900/60 bg-rose-950/20 rounded-lg px-4 py-3 text-sm text-rose-300">龙虎榜数据读取失败：{{ lhb.error }}</div>
+{% elif not lhb.has_data %}
+  <div class="border border-slate-800 bg-slate-900/55 rounded-lg p-10 text-center">
+    <div class="text-lg font-semibold">{{ date }} 暂无龙虎榜数据</div>
+    <div class="text-sm text-slate-500 mt-2">请先在“生成数据”中重新生成该交易日，页面不会临时请求行情接口。</div>
+  </div>
+{% else %}
+<div class="space-y-4" data-testid="lhb-page">
+  <section class="lhb-summary" aria-label="龙虎榜概览">
+    <div class="metric"><span>上榜股票</span><strong class="mono">{{ lhb.summary.stock_count }}</strong><small>净买入 {{ lhb.summary.positive_count }} 只</small></div>
+    <div class="metric"><span>龙虎榜净额</span><strong class="mono {{ 'positive' if lhb.summary.total_net_yuan > 0 else 'negative' }}">{{ lhb.summary.total_net_yuan|compact_money(true) }}</strong><small>当日上榜汇总</small></div>
+    <div class="metric"><span>机构净额</span><strong class="mono {{ 'positive' if lhb.summary.institution_net_yuan > 0 else 'negative' }}">{{ lhb.summary.institution_net_yuan|compact_money(true) }}</strong><small>机构专用席位</small></div>
+    <div class="metric"><span>知名游资</span><strong class="mono">{{ lhb.summary.actor_count }}</strong><small>{{ lhb.summary.official_actor_events }} 条官方明细</small></div>
+  </section>
+
+  <section class="lhb-toolbar">
+    <div class="lhb-tabs" role="tablist" aria-label="龙虎榜展示方式">
+      <button type="button" class="lhb-tab active" role="tab" aria-selected="true" data-tab="stocks" onclick="switchLhbTab('stocks', this)">
+        按股票 <span class="mono">{{ lhb.stocks|length }}</span>
+      </button>
+      <button type="button" class="lhb-tab" role="tab" aria-selected="false" data-tab="actors" onclick="switchLhbTab('actors', this)">
+        按知名游资 <span class="mono">{{ lhb.actors|length }}</span>
+      </button>
+    </div>
+    <label class="lhb-search">
+      <span>搜索</span>
+      <input id="lhb-search" type="search" autocomplete="off" placeholder="股票、代码、游资或营业部" oninput="filterLhb(this.value)">
+    </label>
+  </section>
+
+  <section id="lhb-panel-stocks" class="lhb-panel space-y-2" role="tabpanel" data-panel="stocks">
+    {% for stock in lhb.stocks %}
+    {% set net_class = 'positive' if stock.net_buy_yuan > 0 else ('negative' if stock.net_buy_yuan < 0 else '') %}
+    <details class="stock-item lhb-item" data-search="{{ stock.search_text }}" {% if loop.index <= 2 %}open{% endif %}>
+      <summary>
+        <div class="stock-title">
+          <strong>{{ stock.name }}</strong>
+          <span class="mono">{{ stock.code }}</span>
+          <span class="pct {{ 'positive' if stock.pct_chg > 0 else ('negative' if stock.pct_chg < 0 else '') }}">{{ '%+.2f'|format(stock.pct_chg) }}%</span>
+        </div>
+        <div class="stock-metrics">
+          <span>净额 <b class="mono {{ net_class }}">{{ stock.net_buy_yuan|compact_money(true) }}</b></span>
+          <span>机构 <b class="mono {{ 'positive' if stock.institution_net_yuan > 0 else ('negative' if stock.institution_net_yuan < 0 else '') }}">{{ stock.institution_net_yuan|compact_money(true) }}</b></span>
+          <span>资金评分 <b class="mono">{{ '%.1f'|format(stock.composite_score) }}</b></span>
+          <span>席位 <b class="mono">{{ stock.seats|length }}</b></span>
+        </div>
+      </summary>
+      <div class="stock-detail">
+        <div class="stock-context">
+          <span class="context-label">上榜原因</span>
+          <span>{{ stock.reason_text or '未披露' }}</span>
+        </div>
+        {% if stock.seats %}
+        <div class="seat-table-wrap">
+          <table class="seat-table">
+            <thead><tr><th>营业部 / 身份</th><th>买入</th><th>卖出</th><th>净额</th></tr></thead>
+            <tbody>
+              {% for seat in stock.seats %}
+              <tr>
+                <td>
+                  <div class="seat-name">{{ seat.seat_name }}</div>
+                  <div class="seat-meta">
+                    <span class="seat-kind {{ 'actor' if seat.actor_name else ('institution' if seat.is_institution else '') }}">{{ seat.seat_type_label }}</span>
+                    {% if seat.actor_name %}<span class="actor-name">{{ seat.actor_name }}{% if seat.actor_tag %} · {{ seat.actor_tag }}{% endif %}</span>{% endif %}
+                    {% if seat.actor_name %}<span>{{ seat.source_label }}</span>{% endif %}
+                  </div>
+                </td>
+                <td class="mono positive">{{ seat.buy_yuan|compact_money }}</td>
+                <td class="mono negative">{{ seat.sell_yuan|compact_money }}</td>
+                <td class="mono {{ 'positive' if seat.net_buy_yuan > 0 else ('negative' if seat.net_buy_yuan < 0 else '') }}">{{ seat.net_buy_yuan|compact_money(true) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+          <div class="empty-inline">该股票暂无营业部席位明细。</div>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+    <div class="lhb-filter-empty hidden">没有匹配的股票。</div>
+  </section>
+
+  <section id="lhb-panel-actors" class="lhb-panel hidden space-y-3" role="tabpanel" data-panel="actors">
+    {% if lhb.actors %}
+      <div class="source-note">
+        “官方游资明细”来自本地已落库的游资接口；“席位识别”依据本地知名营业部名录匹配，仅作为观察线索。
+      </div>
+      {% for actor in lhb.actors %}
+      <details class="actor-item lhb-item" data-search="{{ actor.search_text }}" {% if loop.first %}open{% endif %}>
+        <summary class="actor-header" title="展开或收起 {{ actor.name }}">
+          <div class="actor-identity">
+            <div><strong>{{ actor.name }}</strong>{% if actor.tag %}<span class="actor-tag">{{ actor.tag }}</span>{% endif %}</div>
+            <p>{{ actor.style or actor.note or '暂无风格说明' }}</p>
+          </div>
+          <div class="actor-stats">
+            <span>评级 <b>{{ actor.label }}</b></span>
+            {% if actor.score is not none %}<span>信誉 <b class="mono">{{ '%.0f'|format(actor.score) }}</b></span>{% endif %}
+            <span>净额 <b class="mono {{ 'positive' if actor.net_buy_yuan > 0 else ('negative' if actor.net_buy_yuan < 0 else '') }}">{{ actor.net_buy_yuan|compact_money(true) }}</b></span>
+            <span class="source-badge">{{ actor.sources }}</span>
+          </div>
+        </summary>
+        <div class="actor-tree">
+          {% for stock in actor.stocks %}
+          <div class="actor-stock">
+            <div class="actor-stock-main">
+              <div><strong>{{ stock.name }}</strong> <span class="mono">{{ stock.code }}</span></div>
+              <div class="stock-flow">
+                <span class="pct {{ 'positive' if stock.pct_chg > 0 else ('negative' if stock.pct_chg < 0 else '') }}">{{ '%+.2f'|format(stock.pct_chg) }}%</span>
+                <b class="mono {{ 'positive' if stock.net_buy_yuan > 0 else ('negative' if stock.net_buy_yuan < 0 else '') }}">{{ stock.net_buy_yuan|compact_money(true) }}</b>
+              </div>
+            </div>
+            <div class="actor-seats">
+              {% for seat in stock.seats %}
+              <div class="actor-seat-row">
+                <span>{{ seat.seat_name }}</span>
+                <b class="mono {{ 'positive' if seat.net_buy_yuan > 0 else ('negative' if seat.net_buy_yuan < 0 else '') }}">{{ seat.net_buy_yuan|compact_money(true) }}</b>
+                <em>{{ seat.source_label }}</em>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
+      <div class="lhb-filter-empty hidden">没有匹配的知名游资。</div>
+    {% else %}
+      <div class="border border-slate-800 rounded-lg p-10 text-center text-slate-400">
+        当日没有官方游资明细，也没有营业部命中本地知名游资名录。
+      </div>
+    {% endif %}
+  </section>
+</div>
+
+<style>
+  .positive { color:#fb7185; }
+  .negative { color:#34d399; }
+  .lhb-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; }
+  .metric { min-width:0; min-height:92px; padding:1rem; border:1px solid #1e293b; border-radius:8px; background:rgba(15,23,42,.68); }
+  .metric span,.metric small { display:block; color:#64748b; font-size:.75rem; }
+  .metric strong { display:block; margin:.28rem 0 .18rem; font-size:1.35rem; letter-spacing:0; }
+  .lhb-toolbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.55rem; border:1px solid #1e293b; border-radius:8px; background:rgba(15,23,42,.72); }
+  .lhb-tabs { display:flex; gap:.35rem; }
+  .lhb-tab { min-height:36px; padding:.45rem .85rem; border:1px solid transparent; border-radius:7px; color:#94a3b8; font-size:.875rem; }
+  .lhb-tab span { margin-left:.35rem; font-size:.72rem; color:#64748b; }
+  .lhb-tab:hover { color:#e2e8f0; background:#1e293b; }
+  .lhb-tab.active { color:#6ee7b7; border-color:rgba(16,185,129,.35); background:rgba(16,185,129,.12); font-weight:600; }
+  .lhb-tab.active span { color:#34d399; }
+  .lhb-search { display:flex; align-items:center; gap:.5rem; color:#64748b; font-size:.75rem; }
+  .lhb-search input { width:min(320px,32vw); height:36px; border:1px solid #334155; border-radius:7px; background:#020617; padding:0 .75rem; color:#e2e8f0; font-size:.82rem; outline:none; }
+  .lhb-search input:focus { border-color:#10b981; }
+  .stock-item,.actor-item { border:1px solid #1e293b; border-radius:8px; background:rgba(15,23,42,.66); overflow:hidden; }
+  .stock-item[open] { border-color:rgba(16,185,129,.45); }
+  .stock-item summary { min-height:58px; display:grid; grid-template-columns:minmax(220px,1fr) minmax(480px,2fr); align-items:center; gap:1rem; padding:.7rem 1rem; cursor:pointer; list-style:none; }
+  .stock-item summary::-webkit-details-marker { display:none; }
+  .stock-item summary:hover { background:rgba(30,41,59,.52); }
+  .stock-title { display:flex; align-items:center; gap:.6rem; min-width:0; }
+  .stock-title strong { font-size:.98rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stock-title .mono { color:#64748b; font-size:.72rem; }
+  .pct { font-family:'JetBrains Mono',monospace; font-size:.78rem; font-weight:700; }
+  .stock-metrics { display:grid; grid-template-columns:repeat(4,minmax(100px,1fr)); gap:.45rem; }
+  .stock-metrics span { display:flex; justify-content:space-between; gap:.4rem; padding:.32rem .5rem; border:1px solid #243247; border-radius:6px; color:#64748b; font-size:.72rem; white-space:nowrap; }
+  .stock-metrics b { color:inherit; }
+  .stock-detail { border-top:1px solid #1e293b; }
+  .stock-context { display:flex; align-items:center; gap:.7rem; padding:.65rem 1rem; color:#94a3b8; font-size:.78rem; background:rgba(2,6,23,.28); }
+  .context-label { color:#64748b; flex:0 0 auto; }
+  .effective { margin-left:auto; color:#38bdf8; white-space:nowrap; }
+  .seat-table-wrap { overflow-x:auto; }
+  .seat-table { width:100%; min-width:760px; border-collapse:collapse; table-layout:fixed; }
+  .seat-table th { padding:.55rem 1rem; color:#64748b; font-size:.7rem; text-align:right; font-weight:500; }
+  .seat-table th:first-child { width:58%; text-align:left; }
+  .seat-table td { padding:.62rem 1rem; border-top:1px solid rgba(30,41,59,.72); text-align:right; font-size:.78rem; }
+  .seat-table td:first-child { text-align:left; }
+  .seat-name { color:#cbd5e1; overflow-wrap:anywhere; }
+  .seat-meta { display:flex; flex-wrap:wrap; gap:.45rem; margin-top:.22rem; color:#475569; font-size:.68rem; }
+  .seat-kind { color:#94a3b8; }
+  .seat-kind.actor { color:#fbbf24; }
+  .seat-kind.institution { color:#60a5fa; }
+  .actor-name { color:#fbbf24; }
+  .empty-inline,.lhb-filter-empty { padding:1.5rem; color:#64748b; font-size:.82rem; text-align:center; }
+  .source-note { padding:.7rem 1rem; border:1px solid #1e293b; border-radius:8px; color:#64748b; font-size:.75rem; }
+  .actor-header { display:grid; grid-template-columns:minmax(180px,1fr) minmax(320px,auto) 18px; align-items:center; gap:1rem; padding:.9rem 1rem; border-bottom:1px solid #1e293b; background:rgba(30,41,59,.4); cursor:pointer; list-style:none; }
+  .actor-header::-webkit-details-marker { display:none; }
+  .actor-header::after { content:"›"; color:#64748b; font-size:1.35rem; line-height:1; transform:rotate(0deg); transition:transform .15s,color .15s; }
+  .actor-header:hover { background:rgba(51,65,85,.48); }
+  .actor-header:hover::after { color:#6ee7b7; }
+  .actor-item[open] { border-color:rgba(16,185,129,.4); }
+  .actor-item[open] .actor-header::after { transform:rotate(90deg); }
+  .actor-item:not([open]) .actor-header { border-bottom-color:transparent; }
+  .actor-identity { min-width:0; }
+  .actor-identity strong { font-size:1rem; }
+  .actor-identity p { margin-top:.25rem; color:#64748b; font-size:.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .actor-tag,.source-badge { display:inline-flex; margin-left:.5rem; padding:.15rem .4rem; border:1px solid #334155; border-radius:5px; color:#94a3b8; font-size:.68rem; font-style:normal; }
+  .actor-stats { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:.7rem; color:#64748b; font-size:.72rem; }
+  .actor-stats b { color:#cbd5e1; }
+  .actor-tree { padding:.3rem 1rem .7rem 1.8rem; }
+  .actor-stock { position:relative; display:grid; grid-template-columns:minmax(220px,.8fr) minmax(420px,2fr); gap:1rem; padding:.65rem 0 .65rem 1rem; border-left:1px solid #334155; }
+  .actor-stock::before { content:""; position:absolute; left:0; top:1.45rem; width:.7rem; border-top:1px solid #334155; }
+  .actor-stock-main { display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
+  .actor-stock-main .mono { color:#64748b; font-size:.7rem; }
+  .stock-flow { display:flex; align-items:center; gap:.65rem; }
+  .actor-seats { display:grid; gap:.35rem; }
+  .actor-seat-row { display:grid; grid-template-columns:minmax(260px,1fr) 90px 82px; align-items:center; gap:.55rem; min-height:30px; padding:.3rem .55rem; border:1px solid #243247; border-radius:6px; color:#94a3b8; font-size:.72rem; }
+  .actor-seat-row span { overflow-wrap:anywhere; }
+  .actor-seat-row b { text-align:right; }
+  .actor-seat-row em { color:#475569; font-style:normal; text-align:right; }
+  .hidden { display:none !important; }
+  @media (max-width:1100px) {
+    .lhb-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .stock-item summary { grid-template-columns:1fr; }
+    .actor-stock { grid-template-columns:1fr; }
+  }
+  @media (max-width:720px) {
+    body aside { width:56px !important; }
+    body aside .nav-link { justify-content:center; padding:.55rem; }
+    body aside .nav-link span,
+    body aside .nav-group,
+    body aside > div:first-child > div,
+    body aside > div:last-child { display:none; }
+    body header > div { padding-left:.75rem !important; padding-right:.75rem !important; }
+    body main { padding-left:.75rem !important; padding-right:.75rem !important; }
+    .lhb-summary { grid-template-columns:1fr 1fr; }
+    .lhb-toolbar { align-items:stretch; flex-direction:column; }
+    .lhb-search input { width:100%; }
+    .lhb-search { width:100%; }
+    .stock-metrics { grid-template-columns:1fr 1fr; }
+    .stock-context { align-items:flex-start; flex-direction:column; }
+    .effective { margin-left:0; }
+    .actor-stats { justify-content:flex-start; }
+    .actor-header { grid-template-columns:minmax(0,1fr) 18px; align-items:start; }
+    .actor-header .actor-stats { grid-column:1 / -1; grid-row:2; }
+    .actor-header::after { grid-column:2; grid-row:1; }
+    .actor-tree { padding-left:1rem; }
+    .actor-stock-main { align-items:flex-start; flex-direction:column; }
+    .actor-seat-row { grid-template-columns:minmax(0,1fr) auto; }
+    .actor-seat-row em { grid-column:1 / -1; text-align:left; }
+  }
+  @media (max-width:480px) {
+    .lhb-summary { grid-template-columns:1fr; }
+    .lhb-tabs { width:100%; }
+    .lhb-tab { flex:1; padding-left:.4rem; padding-right:.4rem; }
+    .stock-metrics { grid-template-columns:1fr; }
+  }
+</style>
+
+<script>
+  let activeLhbTab = 'stocks';
+  function switchLhbTab(tab, button) {
+    activeLhbTab = tab;
+    document.querySelectorAll('.lhb-tab').forEach(item => {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('.lhb-panel').forEach(panel => {
+      panel.classList.toggle('hidden', panel.dataset.panel !== tab);
+    });
+    filterLhb(document.getElementById('lhb-search').value);
+  }
+  function filterLhb(value) {
+    const query = (value || '').trim().toLowerCase();
+    const panel = document.querySelector(`[data-panel="${activeLhbTab}"]`);
+    if (!panel) return;
+    let visible = 0;
+    panel.querySelectorAll('.lhb-item').forEach(item => {
+      const hit = !query || (item.dataset.search || '').includes(query);
+      item.classList.toggle('hidden', !hit);
+      if (hit) visible += 1;
+    });
+    const empty = panel.querySelector('.lhb-filter-empty');
+    if (empty) empty.classList.toggle('hidden', visible !== 0);
+  }
+</script>
+{% endif %}
+{% endblock %}

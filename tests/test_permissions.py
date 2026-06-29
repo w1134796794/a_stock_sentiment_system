@@ -33,8 +33,10 @@ def test_role_permission_matrix_controls_menu_and_route(isolated_auth_db):
     viewer = {"role": "viewer"}
 
     assert can_access_path(viewer, "/realtime") is True
+    assert can_access_path(viewer, "/data/lhb/20260626") is True
     assert can_access_path(viewer, "/run") is False
     assert "realtime" in _visible_keys(viewer)
+    assert "lhb" in _visible_keys(viewer)
     assert "run" not in _visible_keys(viewer)
 
     update_permission_matrix(

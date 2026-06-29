@@ -58,10 +58,8 @@ class ETLDailyPipeline:
         web_data_dir: Optional[Path] = None,
         snapshot_dir: Optional[Path] = None,
         app_db_path: Optional[Path] = None,
-        kb_db_path: Optional[Path] = None,
-        ingest_kb: bool = True,
     ):
-        from config.settings import APP_DB_PATH, FACTOR_DB_PATH, KB_DB_PATH, SNAPSHOT_DIR, WEB_DATA_DIR
+        from config.settings import APP_DB_PATH, FACTOR_DB_PATH, SNAPSHOT_DIR, WEB_DATA_DIR
 
         self.dm = data_manager
         self.data_prep = DataPrep(data_manager)
@@ -69,8 +67,6 @@ class ETLDailyPipeline:
         self.web_data_dir = Path(web_data_dir or WEB_DATA_DIR)
         self.snapshot_dir = Path(snapshot_dir or SNAPSHOT_DIR)
         self.app_db_path = Path(app_db_path or APP_DB_PATH)
-        self.kb_db_path = Path(kb_db_path or KB_DB_PATH)
-        self.ingest_kb = bool(ingest_kb)
 
     def run(self, trade_date: str, prev_trade_date: str = "", *, profile: str = "default") -> ETLDailyResult:
         from snapshot import SnapshotWriter
@@ -161,8 +157,6 @@ class ETLDailyPipeline:
         logger.info(f"[数据生成][Phase5] 页面快照开始: {trade_date}")
         data_dict = self.build_snapshot_data(result)
         result.snapshot_paths = SnapshotWriter(self.snapshot_dir, self.app_db_path, self.duckdb_path).write(data_dict)
-        if self.ingest_kb:
-            self._ingest_kb(data_dict, self.kb_db_path)
         logger.info(
             f"[数据生成][Phase5] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
         )
@@ -311,19 +305,6 @@ class ETLDailyPipeline:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[数据生成] {label} 读取失败，继续预取其他数据: {e}")
             return pd.DataFrame()
-
-    @staticmethod
-    def _ingest_kb(data_dict: Dict[str, Any], kb_db_path: Path) -> None:
-        try:
-            from kb.embeddings import get_embedder
-            from kb.ingest import ingest_snapshot
-            from kb.store import KBStore
-            from snapshot.writer import build_snapshot
-
-            ingest_snapshot(build_snapshot(data_dict), KBStore(kb_db_path), get_embedder())
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[数据生成] 知识库灌库失败（不影响主流程）: {e}")
-
 
 def _f(value: Any, default: float = 0.0) -> float:
     try:

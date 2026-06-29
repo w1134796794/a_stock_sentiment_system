@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, quote
 
 from fastapi import Body, FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from web.auth_store import (
@@ -54,7 +54,6 @@ from web.stock_profile import clear_stock_profile_cache, load_stock_profiles
 
 from config.settings import (
     SNAPSHOT_DIR,
-    KB_DB_PATH,
     APP_DB_PATH,
     WINRATE_PATH,
     TUSHARE_TOKEN,
@@ -105,6 +104,23 @@ def _money(value: Any, signed: bool = False) -> str:
 
 
 templates.env.filters["money"] = _money
+
+
+def _compact_money(value: Any, signed: bool = False) -> str:
+    """把大额资金压缩为万/亿，保留买卖方向。"""
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return "--"
+    prefix = "+" if signed and amount > 0 else ""
+    if abs(amount) >= 100_000_000:
+        return f"{prefix}{amount / 100_000_000:.2f}亿"
+    if abs(amount) >= 10_000:
+        return f"{prefix}{amount / 10_000:.0f}万"
+    return f"{prefix}{amount:.0f}"
+
+
+templates.env.filters["compact_money"] = _compact_money
 
 
 def _num2(value: Any) -> Any:
@@ -1430,7 +1446,7 @@ def _clear_data_caches() -> None:
 # ----------------------------------------------------------------------
 # 数据浏览分类：优先展示指标筛选和板块强度结果。
 # signals=True 仅作为旧快照兼容读取，不再是默认主路径。
-# 注：候选池、板块热度与涨停数据分别由数据浏览页承载。
+# 注：候选池、板块热度、涨停数据与龙虎榜分别由数据浏览页承载。
 # ----------------------------------------------------------------------
 DATA_CATEGORIES: List[Dict[str, Any]] = [
     {"key": "strategy", "label": "指标筛选", "signals": True, "names": ["ETL指标筛选", "指标筛选"]},
@@ -1438,8 +1454,7 @@ DATA_CATEGORIES: List[Dict[str, Any]] = [
      "names": ["热点概念", "热点行业", "概念持续性", "行业持续性", "主线主题"]},
     {"key": "limitup", "label": "涨停数据", "signals": False,
      "names": ["涨停梯队", "概念连板梯队"]},
-    {"key": "capital", "label": "龙虎榜资金", "signals": False,
-     "names": ["龙虎榜", "资金流向", "筹码结构"]},
+    {"key": "lhb", "label": "龙虎榜", "signals": False, "names": []},
 ]
 _CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
 
@@ -2601,7 +2616,13 @@ def data_index(cat: str) -> Any:
     """数据浏览分类入口：跳转到最新交易日。"""
     if cat not in _CATEGORY_BY_KEY:
         return RedirectResponse(url="/")
-    latest = _latest_date()
+    if cat == "lhb":
+        from web.lhb_view import list_lhb_dates
+
+        lhb_dates = list_lhb_dates()
+        latest = lhb_dates[0] if lhb_dates else _latest_date()
+    else:
+        latest = _latest_date()
     return RedirectResponse(url=f"/data/{cat}/{latest}" if latest else "/")
 
 
@@ -2611,6 +2632,21 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
     category = _CATEGORY_BY_KEY.get(cat)
     if category is None:
         return HTMLResponse('<div class="p-6 text-slate-400">无此分类</div>', status_code=404)
+    if cat == "lhb":
+        from web.lhb_view import build_lhb_view, list_lhb_dates
+
+        lhb_dates = list_lhb_dates()
+        return templates.TemplateResponse(
+            request,
+            "lhb.html",
+            {
+                "category": category,
+                "cat": cat,
+                "date": date,
+                "dates": lhb_dates or _list_dates(),
+                "lhb": build_lhb_view(date),
+            },
+        )
     snapshot = _load_prepared_snapshot(date)
     return templates.TemplateResponse(
         request,
@@ -2623,22 +2659,6 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
             "sections": (snapshot or {}).get("sections", []),
             "snapshot": snapshot,
         },
-    )
-
-
-@app.get("/ask", response_class=HTMLResponse)
-def ask_index(request: Request) -> Any:
-    """问 AI 入口：默认以最新交易日为上下文。"""
-    latest = _latest_date()
-    if latest:
-        return RedirectResponse(url=f"/ask/{latest}")
-    return templates.TemplateResponse(request, "ask.html", {"date": None, "dates": []})
-
-
-@app.get("/ask/{date}", response_class=HTMLResponse)
-def ask_page(request: Request, date: str) -> Any:
-    return templates.TemplateResponse(
-        request, "ask.html", {"date": date, "dates": _list_dates()}
     )
 
 
@@ -2740,52 +2760,3 @@ def api_snapshot(date: str) -> Any:
     if snapshot is None:
         return JSONResponse({"error": "not found", "date": date}, status_code=404)
     return JSONResponse(snapshot)
-
-
-# ----------------------------------------------------------------------
-# P3：AI 每日解读 + 问答
-# ----------------------------------------------------------------------
-@app.get("/report/{date}/brief", response_class=HTMLResponse)
-def brief_fragment(request: Request, date: str) -> Any:
-    """HTMX 片段：当日 AI 解读（缓存优先；未配置 key 时返回提示）。"""
-    from kb.brief import generate_brief
-
-    snapshot = _load_snapshot(date)
-    if snapshot is None:
-        return HTMLResponse('<div class="text-slate-500 text-sm">无快照</div>')
-    result = generate_brief(snapshot, KB_DB_PATH)
-    return templates.TemplateResponse(request, "partials/brief.html", {"brief": result})
-
-
-@app.get("/api/daily-brief/{date}")
-def api_daily_brief(date: str, force: bool = False) -> Any:
-    from kb.brief import generate_brief
-
-    snapshot = _load_snapshot(date)
-    if snapshot is None:
-        return JSONResponse({"error": "not found", "date": date}, status_code=404)
-    return JSONResponse(generate_brief(snapshot, KB_DB_PATH, force=force))
-
-
-@app.post("/api/chat")
-def api_chat(payload: dict = Body(...)) -> Any:
-    """RAG 问答，SSE 流式返回。body: {question, date?}"""
-    from kb.embeddings import get_embedder
-    from kb.llm_client import get_llm_client
-    from kb.qa import build_chat_messages
-
-    question = (payload or {}).get("question", "").strip()
-    date = (payload or {}).get("date")
-    if not question:
-        return JSONResponse({"error": "empty question"}, status_code=400)
-
-    messages, _debug = build_chat_messages(
-        question, KB_DB_PATH, APP_DB_PATH, embedder=get_embedder(), date=date)
-    client = get_llm_client()
-
-    def event_stream():
-        for piece in client.chat_stream(messages):
-            yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")

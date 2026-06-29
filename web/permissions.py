@@ -73,6 +73,14 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>'),
             },
             {
+                "key": "lhb",
+                "label": "龙虎榜",
+                "href": "/data/lhb",
+                "prefix": "/data/lhb",
+                "roles": ALL_ROLES,
+                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"/><path d="M4 7h7l2 2h7v8h-7l-2-2H4"/><path d="M8 11h8"/></svg>'),
+            },
+            {
                 "key": "dragon",
                 "label": "龙头池",
                 "href": "/dragon",
@@ -192,7 +200,6 @@ ADMIN_PAGE_PREFIXES = (
     "/config",
     "/factors",
     "/logs",
-    "/ask",
     "/api/docs",
     "/openapi.json",
 )
@@ -212,10 +219,11 @@ FORCED_ADMIN_KEYS = frozenset({"users", "permissions", "run", "config", "factors
 
 PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "overview": ("/", "/api/overview"),
-    "report": ("/report", "/api/etl/analysis", "/api/daily-brief"),
+    "report": ("/report", "/api/etl/analysis"),
     "strategy": ("/data/strategy", "/api/etl/screening"),
     "sector": ("/data/sector",),
     "limitup": ("/data/limitup",),
+    "lhb": ("/data/lhb",),
     "dragon": ("/dragon", "/api/leader-pool"),
     "intraday": ("/intraday", "/api/intraday-strength"),
     "realtime": ("/realtime", "/api/realtime"),

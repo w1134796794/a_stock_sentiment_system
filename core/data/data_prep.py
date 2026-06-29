@@ -108,6 +108,7 @@ class DataPrep:
             if prefetch_sectors:
                 self._prefetch_sectors(ds, trade_date, prev_trade_date, sector_history_days)
                 self._prefetch_limit_up_concepts(ds, limit_up_codes, trade_date)
+            self._prefetch_lhb(ds, trade_date)
             if index_codes:
                 self._prefetch_index_daily(ds, index_codes, trade_date, index_lookbacks)
 
@@ -329,6 +330,44 @@ class DataPrep:
                 logger.info(f"[DataPrep] limit_down 预取：{len(df)} 行 @ {trade_date}")
         except Exception as e:
             logger.warning(f"[DataPrep] limit_down 预取失败（将回退 dm）：{e}")
+
+    def _prefetch_lhb(self, ds: MarketDataset, trade_date: str) -> None:
+        """Fetch all post-close LHB sources once; downstream consumers stay local-only."""
+        date = str(trade_date)
+
+        def fetch(domain: str, key: str, fn) -> None:
+            try:
+                value = fn()
+                ds.put_call(key, value if isinstance(value, pd.DataFrame) else pd.DataFrame(), domain)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[DataPrep] {domain} {date} 预取失败，按空数据降级: {exc}")
+                ds.put_call(key, pd.DataFrame(), domain)
+
+        if hasattr(self.dm, "get_top_list"):
+            fetch("top_list", call_key("top_list", trade_date=date), lambda: self.dm.get_top_list(date))
+        if hasattr(self.dm, "get_top_inst"):
+            fetch(
+                "top_inst",
+                call_key("top_inst", trade_date=date, ts_code=None),
+                lambda: self.dm.get_top_inst(date),
+            )
+        try:
+            from core.data.lhb_data import HotMoneyDataProvider
+
+            provider = HotMoneyDataProvider(self.dm)
+            fetch("hm_detail", call_key("hm_detail", trade_date=date), lambda: provider.get_hm_detail(date))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[DataPrep] hm_detail {date} 初始化失败，按空数据降级: {exc}")
+            ds.put_call(call_key("hm_detail", trade_date=date), pd.DataFrame(), "hm_detail")
+
+        counts = {
+            domain: sum(
+                len(value) for key, value in ds.calls.items()
+                if str(key).startswith(f"{domain}|") and isinstance(value, pd.DataFrame)
+            )
+            for domain in ("top_list", "top_inst", "hm_detail")
+        }
+        logger.info(f"[DataPrep] 龙虎榜盘后预取 @ {date}: {counts}")
 
     def _prefetch_sectors(self, ds: MarketDataset, trade_date: str, prev_trade_date: str,
                           history_days: int = 10) -> None:

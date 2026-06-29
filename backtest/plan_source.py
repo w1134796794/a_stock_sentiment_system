@@ -79,10 +79,12 @@ def _rows_from_snapshot(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     ]
 
 
-def _rows_from_screening(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _rows_from_screening(payload: Dict[str, Any], *, lhb_scenario: str = "") -> List[Dict[str, Any]]:
     screening = ((payload.get("etl") or {}).get("screening") or {})
     rows = []
-    for item in screening.get("final") or []:
+    selected = ((screening.get("scenarios") or {}).get(lhb_scenario) if lhb_scenario else None)
+    items = selected if isinstance(selected, list) else (screening.get("final") or [])
+    for item in items:
         metrics = dict(item.get("metrics") or {})
         context = dict(item.get("context") or {})
         row = {
@@ -97,6 +99,7 @@ def _rows_from_screening(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             "风险提示": "实时行情为取消/观察时不主动买入",
             "筛选理由": "；".join(str(x) for x in (item.get("reasons") or [])[:5]),
             "惩罚理由": "；".join(str(x) for x in (item.get("penalty_reasons") or [])[:5]),
+            "龙虎榜口径": lhb_scenario or "lhb_sector",
         }
         for factor, value in metrics.items():
             row[f"因子_{factor}"] = value
@@ -192,13 +195,15 @@ def build_backtest_plan_dir(
     start_date: str = "",
     end_date: str = "",
     max_rank: int = DEFAULT_MAX_BACKTEST_RANK,
+    lhb_scenario: str = "",
 ) -> Tuple[Path, int, int]:
     """Create a clean plan directory for BacktestEngine from current artifacts.
 
     Returns:
         (plan_dir, file_count, row_count)
     """
-    plan_dir = output_dir / "backtest_trade_plans"
+    suffix = f"_{lhb_scenario}" if lhb_scenario else ""
+    plan_dir = output_dir / f"backtest_trade_plans{suffix}"
     if plan_dir.exists():
         shutil.rmtree(plan_dir)
     plan_dir.mkdir(parents=True, exist_ok=True)
@@ -222,9 +227,11 @@ def build_backtest_plan_dir(
         if screening_dir:
             screening_path = Path(screening_dir) / f"screening_{date}.json"
             screening = _load_json(screening_path)
-            rows = _rows_from_screening({"etl": {"screening": screening}})
+            rows = _rows_from_screening(
+                {"etl": {"screening": screening}}, lhb_scenario=lhb_scenario,
+            )
         if not rows:
-            rows = _rows_from_screening(payload)
+            rows = _rows_from_screening(payload, lhb_scenario=lhb_scenario)
         if not rows:
             rows = _rows_from_snapshot(payload)
         _attach_market_context(rows, payload)
@@ -236,7 +243,7 @@ def build_backtest_plan_dir(
             screening_path = Path(screening_dir) / f"screening_{date}.json"
             screening = _load_json(screening_path)
             fallback_payload = {"etl": {"screening": screening}}
-            rows = _rows_from_screening(fallback_payload)
+            rows = _rows_from_screening(fallback_payload, lhb_scenario=lhb_scenario)
             _attach_market_context(rows, payload)
             if max_rank and max_rank > 0:
                 rows = [row for row in rows if (_rank_value(row) or 999999) <= max_rank]

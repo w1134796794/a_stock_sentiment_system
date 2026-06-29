@@ -50,6 +50,17 @@ screening_profiles:
           max_penalty: 15
           reason: "成交额相对5日过热，次日兑现压力升高"
       top_n: 10
+    lhb_enhancement:
+      enabled: true
+      max_total_adjustment: 8
+      max_crowding_penalty: 3
+      components:
+        net_buy: {max_bonus: 2.5, max_penalty: 3.0}
+        institution: {max_bonus: 2.5, max_penalty: 2.5}
+        institution_consensus: {max_bonus: 1.0, max_penalty: 1.0}
+        hot_money_quality: {max_bonus: 0.8, max_penalty: 0.8}
+        repeat_persistence: {max_bonus: 0.8, max_penalty: 0.8}
+        sector_resonance: {max_bonus: 2.0, max_penalty: 2.0}
 
   momentum_repair:
     description: "量价修复候选筛选：强调市场可进攻、量价修复和阶段新高位置。"
