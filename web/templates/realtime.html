@@ -4,6 +4,7 @@
 {% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 当日指标筛选确认 · 板块行情</div>{% endblock %}
 
 {% block header_extra %}
+  <span id="session-pill" class="rt-pill mr-2">{{ market_session.reason }}</span>
   <span id="rt-clock" class="mono text-xs text-slate-500 mr-2"></span>
   <button id="refresh-all" title="刷新实时确认"
           class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg px-4 py-1.5">
@@ -102,9 +103,13 @@
 
 <script>
   const tradeDate = {{ (date or '')|tojson }};
+  const initialMarketSession = {{ (market_session or {})|tojson }};
   const defaultSectorCodes = [];
   const autoRefreshMs = 5000;
   let refreshing = false;
+  let marketSession = initialMarketSession;
+  let autoRefreshTimer = null;
+  let nextOpenTimer = null;
   const els = {
     overlayCards: document.getElementById('overlay-cards'),
     overlayEmpty: document.getElementById('overlay-empty'),
@@ -155,6 +160,40 @@
     const d = new Date();
     document.getElementById('rt-clock').textContent = d.toLocaleTimeString('zh-CN', { hour12:false });
   }
+  function applyMarketSession(session) {
+    if (!session || typeof session !== 'object') return;
+    marketSession = session;
+    const pill = document.getElementById('session-pill');
+    pill.textContent = session.reason || (session.is_open ? '交易中' : '暂停刷新');
+    pill.className = 'rt-pill mr-2 ' + (session.is_open ? 'ok' : '');
+    pill.title = session.is_open
+      ? `${session.refresh_window || '交易日 09:30-15:00'} 自动刷新中`
+      : `自动刷新已暂停${session.next_open_at ? '，下次开启 ' + session.next_open_at.replace('T', ' ') : ''}`;
+
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+    if (nextOpenTimer) {
+      clearTimeout(nextOpenTimer);
+      nextOpenTimer = null;
+    }
+    if (session.is_open) {
+      autoRefreshTimer = setInterval(() => {
+        const closeAt = Date.parse(marketSession.market_close_at || '');
+        if (Number.isFinite(closeAt) && Date.now() > closeAt) {
+          applyMarketSession({ ...marketSession, is_open: false, reason: '已收盘' });
+          return;
+        }
+        if (document.visibilityState === 'visible') refreshAll(true);
+      }, autoRefreshMs);
+    } else if (session.next_open_at) {
+      const delay = Date.parse(session.next_open_at) - Date.now();
+      if (delay > 0 && delay <= 2147483647) {
+        nextOpenTimer = setTimeout(() => window.location.reload(), delay + 1000);
+      }
+    }
+  }
   function stockName(row) {
     const name = String(row.display_name || row.name || '').trim();
     return name || String(row.code || '--');
@@ -188,6 +227,7 @@
     const pill = document.getElementById('health-pill');
     try {
       const j = await fetchJson('/api/realtime/health', 5000);
+      applyMarketSession(j.session || initialMarketSession);
       const q = j.quotes || {};
       const s = j.sectors || {};
       document.getElementById('health-quotes').textContent = q.available ? (q.provider || '可用') : '不可用';
@@ -293,9 +333,7 @@
   document.getElementById('sector-source').addEventListener('change', loadSectors);
 
   setClock();
+  applyMarketSession(initialMarketSession);
   refreshAll();
-  setInterval(() => {
-    if (document.visibilityState === 'visible') refreshAll(true);
-  }, autoRefreshMs);
 </script>
 {% endblock %}

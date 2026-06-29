@@ -1707,6 +1707,7 @@ def realtime_page(request: Request) -> Any:
         {
             "date": latest,
             "default_codes": _default_realtime_codes(snapshot),
+            "market_session": _current_realtime_session(),
         },
     )
 
@@ -2127,6 +2128,7 @@ def _build_realtime_overlay_payload(
     )
     snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    payload["session"] = _current_realtime_session()
     return payload
 
 
@@ -2189,7 +2191,14 @@ def _build_realtime_health_payload(*, probe: bool = False) -> Dict[str, Any]:
         "ok": True,
         "quotes": _get_realtime_quote_service().health(probe=probe),
         "sectors": _get_realtime_sector_service().health(probe=probe),
+        "session": _current_realtime_session(),
     }
+
+
+def _current_realtime_session() -> Dict[str, Any]:
+    from core.realtime.trading_session import realtime_session_status
+
+    return realtime_session_status()
 
 
 def _data_generation_running() -> bool:
@@ -2210,7 +2219,7 @@ def _get_cached_realtime_payload(key: tuple, loader) -> Any:
 
 
 def _refresh_realtime_defaults() -> None:
-    if _data_generation_running():
+    if _data_generation_running() or not _current_realtime_session()["is_open"]:
         return
     trade_date = _latest_date()
     jobs = [
@@ -2234,10 +2243,15 @@ def _refresh_realtime_defaults() -> None:
 def _realtime_refresh_loop() -> None:
     logger.info("Realtime cache worker started, interval=%ss", _REALTIME_REFRESH_SECONDS)
     while not _REALTIME_REFRESH_STOP.is_set():
-        started = time.monotonic()
-        _refresh_realtime_defaults()
-        elapsed = time.monotonic() - started
-        _REALTIME_REFRESH_STOP.wait(max(_REALTIME_REFRESH_SECONDS - elapsed, 0.5))
+        session = _current_realtime_session()
+        if session["is_open"]:
+            started = time.monotonic()
+            _refresh_realtime_defaults()
+            elapsed = time.monotonic() - started
+            wait_seconds = max(_REALTIME_REFRESH_SECONDS - elapsed, 0.5)
+        else:
+            wait_seconds = min(max(session["seconds_until_next_open"], 1), 3600)
+        _REALTIME_REFRESH_STOP.wait(wait_seconds)
     logger.info("Realtime cache worker stopped")
 
 
@@ -2344,6 +2358,7 @@ def api_realtime_health(probe: bool = False) -> Any:
     )
     payload["cache"] = _REALTIME_PAYLOAD_CACHE.stats()
     payload["refresh_seconds"] = _REALTIME_REFRESH_SECONDS
+    payload["session"] = _current_realtime_session()
     return JSONResponse(payload)
 
 
