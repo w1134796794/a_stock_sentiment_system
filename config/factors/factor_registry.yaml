@@ -926,19 +926,6 @@ factors:
     enabled: true
     params: {}
 
-  stk_lhb_hot_money_quality:
-    id: "LHB4"
-    name: "游资席位质量"
-    category: "moneyflow"
-    sub_category: "lhb"
-    description: "按历史信誉与买卖方向加权的游资席位质量"
-    data_source: "hm_detail"
-    output_type: "float"
-    value_range: [0.0, 100.0]
-    default_weight: 0.10
-    enabled: true
-    params: {}
-
   stk_lhb_repeat_persistence:
     id: "LHB5"
     name: "龙虎榜资金持续性"

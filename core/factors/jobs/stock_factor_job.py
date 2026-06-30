@@ -328,7 +328,6 @@ class StockFactorJob:
             "lhb_net_buy_score": 50.0,
             "institution_net_buy_score": 50.0,
             "institution_consensus_score": 50.0,
-            "hot_money_quality_score": 50.0,
             "repeat_persistence_score": 50.0,
             "sector_lhb_resonance_score": 50.0,
             "crowding_penalty_score": 0.0,
@@ -454,7 +453,6 @@ class StockFactorJob:
             "lhb_net_buy_score",
             "institution_net_buy_score",
             "institution_consensus_score",
-            "hot_money_quality_score",
             "repeat_persistence_score",
             "sector_lhb_resonance_score",
             "crowding_penalty_score",
@@ -586,11 +584,6 @@ class StockFactorJob:
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_lhb_institution_consensus", raw_value=row["institution_consensus_score"],
                     score=row["institution_consensus_score"], direction="higher_better",
-                ),
-                make_long_record(
-                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_lhb_hot_money_quality", raw_value=row["hot_money_quality_score"],
-                    score=row["hot_money_quality_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,

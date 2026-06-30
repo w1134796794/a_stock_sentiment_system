@@ -59,4 +59,4 @@ def test_build_factor_state_structure():
     lhb_group = next((group for group in st["factor_groups"] if group["category"] == "lhb"), None)
     assert lhb_group is not None
     assert lhb_group["label"] == "龙虎榜"
-    assert len(lhb_group["factors"]) == 7
+    assert len(lhb_group["factors"]) == 6

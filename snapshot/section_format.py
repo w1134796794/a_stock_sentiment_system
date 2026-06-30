@@ -185,9 +185,7 @@ def format_concept_hierarchy(data: Dict[str, Any]) -> Dict[str, Any]:
 def _seat_desc(seat: Dict[str, Any]) -> str:
     net = _f(seat.get("net_amount"))
     side = "买" if net > 0 else "卖"
-    return (f"{seat.get('hm_name', '')}"
-            f"[{seat.get('label', '')}{_f(seat.get('score')):.0f}]"
-            f"{side}{net / 1e4:+.0f}万")
+    return f"{seat.get('hm_name', '')}{side}{net / 1e4:+.0f}万"
 
 
 def _seats_summary(seats: List[Dict[str, Any]], top: int = 4) -> str:
@@ -209,8 +207,6 @@ def format_lhb(data: Dict[str, Any]) -> Dict[str, Any]:
     available = bool(data.get("available"))
     stock_profiles = data.get("stock_profiles") or {}
     sector_profiles = data.get("sector_profiles") or {}
-    rep_ver = data.get("reputation_version", "")
-
     if not available or not stock_profiles:
         return {
             "name": "龙虎榜", "kind": "table",
@@ -218,22 +214,14 @@ def format_lhb(data: Dict[str, Any]) -> Dict[str, Any]:
             "rows": [{"提示": "今日无游资明细数据（账户积分不足 / 当日无龙虎榜 / 已降级跳过）"}],
         }
 
-    # ---- 子表一：上榜个股（按信誉加权净买入排序）----
+    # ---- 子表一：上榜个股（按实际净买入排序）----
     stock_rows: List[Dict[str, Any]] = []
     for prof in stock_profiles.values():
         seats = prof.get("seats") or []
         total_net = sum(_f(s.get("net_amount")) for s in seats)
-        rep_net = sum(_f(s.get("net_amount")) * (_f(s.get("score"), 50.0) - 50.0) / 50.0
-                      for s in seats)
-        has_bad = any(_f(s.get("net_amount")) > 0 and s.get("label") == "黑" for s in seats)
-        has_good = any(_f(s.get("net_amount")) > 0 and s.get("label") == "白" for s in seats)
-        flag = "黑买入⚠" if has_bad else ("白买入" if has_good else "中性")
-        # —— 席位结构（去金额、看构成）——
+        # —— 席位结构 ——
         buy_seats = sum(1 for s in seats if _f(s.get("net_amount")) > 0)
         sell_seats = sum(1 for s in seats if _f(s.get("net_amount")) < 0)
-        w = sum(1 for s in seats if s.get("label") == "白")
-        g = sum(1 for s in seats if s.get("label") == "灰")
-        k = sum(1 for s in seats if s.get("label") == "黑")
         buy_amt = sum(_f(s.get("buy_amount")) for s in seats)
         sell_amt = sum(_f(s.get("sell_amount")) for s in seats)
         tot_amt = buy_amt + sell_amt
@@ -245,28 +233,24 @@ def format_lhb(data: Dict[str, Any]) -> Dict[str, Any]:
             "股票代码": prof.get("ts_code", ""),
             "股票名称": prof.get("ts_name", ""),
             "净买入(万)": _wan(total_net),
-            "信誉加权净(万)": _wan(rep_net),
-            "买方信誉": flag,
-            "净向": "净买" if rep_net > 0 else ("净卖" if rep_net < 0 else "持平"),
+            "净向": "净买" if total_net > 0 else ("净卖" if total_net < 0 else "持平"),
             "买席": buy_seats,
             "卖席": sell_seats,
-            "信誉构成": f"白{w}/灰{g}/黑{k}",
             "买盘占比": round(buy_amt / tot_amt * 100, 1) if tot_amt > 0 else 0,
             "机构": inst,
             "席位数": len(seats),
             "主要席位": _seats_summary(seats, top=4),
-            "_rep": rep_net,
+            "_net": total_net,
         })
-    stock_rows.sort(key=lambda x: x.get("_rep", 0.0), reverse=True)
+    stock_rows.sort(key=lambda x: x.get("_net", 0.0), reverse=True)
     stock_rows = stock_rows[:40]
     for r in stock_rows:
-        r.pop("_rep", None)
+        r.pop("_net", None)
 
-    stock_cols = ["股票代码", "股票名称", "净向", "买方信誉", "买席", "卖席",
-                  "信誉构成", "买盘占比", "机构", "席位数", "主要席位",
-                  "净买入(万)", "信誉加权净(万)"]
+    stock_cols = ["股票代码", "股票名称", "净向", "买席", "卖席",
+                  "买盘占比", "机构", "席位数", "主要席位", "净买入(万)"]
     blocks = [{
-        "title": f"上榜个股（按信誉加权净买入排序 · {trade_date}）",
+        "title": f"上榜个股（按净买入排序 · {trade_date}）",
         "columns": stock_cols, "rows": stock_rows,
     }]
 
@@ -280,7 +264,6 @@ def format_lhb(data: Dict[str, Any]) -> Dict[str, Any]:
                 "板块": sp.get("sector", ""),
                 "上榜票数": sp.get("stock_count", 0),
                 "涉及游资数": sp.get("distinct_hm_count", 0),
-                "白名单游资": sp.get("good_hm_count", 0),
                 "合计净买入(万)": _wan(net_total),
                 "共识度": _consensus_level(distinct, net_total),
                 "_d": distinct, "_n": net_total,
@@ -291,15 +274,14 @@ def format_lhb(data: Dict[str, Any]) -> Dict[str, Any]:
             r.pop("_n", None)
         blocks.append({
             "title": "板块游资共识度（多游资同买 = 主线确认）",
-            "columns": ["板块", "上榜票数", "涉及游资数", "白名单游资", "合计净买入(万)", "共识度"],
+            "columns": ["板块", "上榜票数", "涉及游资数", "合计净买入(万)", "共识度"],
             "rows": sec_rows,
         })
 
     return {
         "name": "龙虎榜", "kind": "table",
         "columns": stock_cols, "rows": stock_rows, "blocks": blocks,
-        "note": (f"信誉加权净 = Σ 各席位净买入 ×(信誉-50)/50；红/黑买入为风险信号，白买入为龙头确认。"
-                 f"信誉名录版本 {rep_ver}。"),
+        "note": "游资名称、席位和买卖金额来自已落库的龙虎榜明细，不使用人工信誉评分。",
     }
 
 

@@ -7,7 +7,6 @@ from typing import Any, Dict, Iterable, List
 import pandas as pd
 
 from config.settings import CACHE_DIR
-from core.analysis.hm_reputation import HotMoneyReputationRegistry
 from core.factors.jobs.gold_utils import (
     FactorJobResult,
     now_iso,
@@ -27,8 +26,7 @@ STOCK_COLUMNS = [
     "lhb_net_buy_ratio", "lhb_net_buy_score", "institution_buy_yuan",
     "institution_sell_yuan", "institution_net_buy_yuan", "institution_net_buy_ratio",
     "institution_net_buy_score", "institution_buy_seats", "institution_sell_seats",
-    "institution_consensus_score", "hot_money_net_buy_yuan", "hot_money_quality_score",
-    "good_hot_money_buyers", "repeat_persistence_score", "seat_concentration",
+    "institution_consensus_score", "hot_money_net_buy_yuan", "repeat_persistence_score", "seat_concentration",
     "crowding_penalty_score", "sector_lhb_resonance_score", "lhb_composite_score",
     "computed_at",
 ]
@@ -36,7 +34,7 @@ STOCK_COLUMNS = [
 SECTOR_COLUMNS = [
     "trade_date", "signal_date", "effective_date", "sector_code", "sector_name",
     "sector_type", "lhb_stock_count", "lhb_net_buy_yuan", "institution_net_buy_yuan",
-    "hot_money_net_buy_yuan", "good_hot_money_buyers", "sector_amount_yuan",
+    "hot_money_net_buy_yuan", "sector_amount_yuan",
     "sector_lhb_net_buy_ratio", "sector_lhb_breadth_score", "sector_lhb_net_buy_score",
     "sector_lhb_institution_score", "sector_lhb_resonance_score", "computed_at",
 ]
@@ -69,27 +67,6 @@ def _dedupe_seats(frame: pd.DataFrame) -> pd.DataFrame:
     work = frame.copy()
     keys = [col for col in ("trade_date", "code", "seat_name", "buy_yuan", "sell_yuan") if col in work.columns]
     return work.drop_duplicates(keys, keep="first") if keys else work
-
-
-def _hot_money_quality(rows: pd.DataFrame, registry: HotMoneyReputationRegistry) -> tuple[float, int]:
-    if rows.empty:
-        return 50.0, 0
-    weighted = 0.0
-    total_weight = 0.0
-    good_buyers = set()
-    for row in rows.to_dict("records"):
-        lookup = registry.lookup(
-            hm_name=str(row.get("actor_name") or ""),
-            org_text=str(row.get("seat_name") or ""),
-        )
-        net = to_float(row.get("net_buy_yuan"))
-        weight = abs(net)
-        directional = 50.0 + (lookup.score - 50.0) * (1.0 if net > 0 else -1.0 if net < 0 else 0.0)
-        weighted += max(0.0, min(100.0, directional)) * weight
-        total_weight += weight
-        if net > 0 and lookup.label == "白":
-            good_buyers.add(lookup.name)
-    return (weighted / total_weight if total_weight > 0 else 50.0), len(good_buyers)
 
 
 def _concentration(rows: pd.DataFrame) -> float:
@@ -207,7 +184,6 @@ class LHBFactorJob:
         if not stock_daily.empty:
             stock_daily["code"] = stock_daily["code"].astype(str).str.split(".").str[0].str.zfill(6)
         stock_map = stock_daily.drop_duplicates("code").set_index("code").to_dict("index") if not stock_daily.empty else {}
-        registry = HotMoneyReputationRegistry.load()
         computed_at = now_iso()
         rows = []
         for code in sorted(codes):
@@ -228,7 +204,6 @@ class LHBFactorJob:
             inst_total = inst_buy_seats + inst_sell_seats
             inst_consensus = 50.0 + ((inst_buy_seats - inst_sell_seats) / inst_total * 50.0 if inst_total else 0.0)
             hot_net = float(pd.to_numeric(hot_rows.get("net_buy_yuan"), errors="coerce").fillna(0).sum()) if not hot_rows.empty else 0.0
-            hot_quality, good_buyers = _hot_money_quality(hot_rows, registry)
             app_days = int(appearance.get(code, 0))
             pos_days = int(positive_days.get(code, 0))
             repeat_score = safe_weighted_score([
@@ -264,8 +239,6 @@ class LHBFactorJob:
                 "institution_sell_seats": inst_sell_seats,
                 "institution_consensus_score": inst_consensus,
                 "hot_money_net_buy_yuan": hot_net,
-                "hot_money_quality_score": hot_quality,
-                "good_hot_money_buyers": good_buyers,
                 "repeat_persistence_score": repeat_score,
                 "seat_concentration": concentration,
                 "crowding_penalty_score": crowding,
@@ -317,7 +290,6 @@ class LHBFactorJob:
                 "lhb_net_buy_yuan": net,
                 "institution_net_buy_yuan": inst_net,
                 "hot_money_net_buy_yuan": hot_net,
-                "good_hot_money_buyers": int(group.drop_duplicates("code")["good_hot_money_buyers"].sum()),
                 "sector_amount_yuan": amount,
                 "sector_lhb_net_buy_ratio": ratio,
                 "sector_lhb_breadth_score": breadth_score,
@@ -339,7 +311,6 @@ class LHBFactorJob:
             (row.get("lhb_net_buy_score"), 0.25),
             (row.get("institution_net_buy_score"), 0.20),
             (row.get("institution_consensus_score"), 0.10),
-            (row.get("hot_money_quality_score"), 0.10),
             (row.get("repeat_persistence_score"), 0.15),
             (row.get("sector_lhb_resonance_score"), 0.20),
         ])

@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 
 from config.settings import (
     BASE_DIR,
+    CACHE_DIR,
     FACTOR_DB_PATH,
     OUTPUT_DIR,
     SNAPSHOT_DIR,
@@ -284,7 +285,7 @@ def _strict_limit_counts(date: str) -> Dict[str, Any]:
 
 
 def _limitup_cache_overlay(date: str) -> Dict[str, Any]:
-    path = Path(BASE_DIR) / "data" / "cache" / "summary" / "limit_up_stocks.csv"
+    path = Path(CACHE_DIR) / "summary" / "limit_up_stocks.csv"
     if not date or not path.exists():
         return {}
     rows: List[Dict[str, Any]] = []

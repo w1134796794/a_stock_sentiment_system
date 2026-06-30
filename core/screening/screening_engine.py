@@ -403,7 +403,6 @@ class ScreeningEngine:
             "stk_lhb_net_buy_score",
             "stk_lhb_institution_score",
             "stk_lhb_institution_consensus",
-            "stk_lhb_hot_money_quality",
             "stk_lhb_repeat_persistence",
             "stk_lhb_sector_resonance",
             "stk_lhb_composite_score",
@@ -590,7 +589,6 @@ class ScreeningEngine:
         net_cfg = components.get("net_buy") or {}
         inst_cfg = components.get("institution") or {}
         consensus_cfg = components.get("institution_consensus") or {}
-        hot_cfg = components.get("hot_money_quality") or {}
         repeat_cfg = components.get("repeat_persistence") or {}
         sector_cfg = components.get("sector_resonance") or {}
         net = delta("stk_lhb_net_buy_score", net_cfg.get("max_bonus", 2.5), net_cfg.get("max_penalty", 3.0))
@@ -599,9 +597,6 @@ class ScreeningEngine:
         )
         consensus = delta(
             "stk_lhb_institution_consensus", consensus_cfg.get("max_bonus", 1.0), consensus_cfg.get("max_penalty", 1.0)
-        )
-        hot_money = delta(
-            "stk_lhb_hot_money_quality", hot_cfg.get("max_bonus", 0.8), hot_cfg.get("max_penalty", 0.8)
         )
         repeat = delta(
             "stk_lhb_repeat_persistence", repeat_cfg.get("max_bonus", 0.8), repeat_cfg.get("max_penalty", 0.8)
@@ -616,7 +611,7 @@ class ScreeningEngine:
             ).where(active, 0.0)
         else:
             crowding = pd.Series(0.0, index=df.index, dtype=float)
-        full = net + institution + consensus + hot_money + repeat + sector - crowding
+        full = net + institution + consensus + repeat + sector - crowding
         cap = max(_to_float(lhb_cfg.get("max_total_adjustment"), 8.0), 0.0)
         full = full.clip(lower=-cap, upper=cap)
         return {

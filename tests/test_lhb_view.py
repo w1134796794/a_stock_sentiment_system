@@ -59,9 +59,13 @@ def test_lhb_view_groups_stocks_and_known_hot_money(tmp_path):
             "institution_net_buy_yuan": 0.0, "lhb_composite_score": 35.0,
         },
     ])
-    empty_hot = pd.DataFrame(columns=[
-        "trade_date", "code", "ts_code", "name", "actor_name", "seat_name",
-        "buy_yuan", "sell_yuan", "net_buy_yuan",
+    hot_money = pd.DataFrame([
+        {
+            "trade_date": "20260626", "code": "600001", "ts_code": "600001.SH",
+            "name": "示例科技", "actor_name": "测试游资",
+            "seat_name": "华泰证券股份有限公司上海武定路证券营业部",
+            "buy_yuan": 5_000_000.0, "sell_yuan": 1_000_000.0, "net_buy_yuan": 4_000_000.0,
+        },
     ])
     stock_daily = pd.DataFrame([
         {"trade_date": "20260626", "code": "600001", "name": "示例科技"},
@@ -71,7 +75,7 @@ def test_lhb_view_groups_stocks_and_known_hot_money(tmp_path):
     with duckdb.connect(str(db_path)) as con:
         _write_table(con, "lhb_daily_silver", daily)
         _write_table(con, "lhb_institution_silver", seats)
-        _write_table(con, "lhb_hot_money_silver", empty_hot)
+        _write_table(con, "lhb_hot_money_silver", hot_money)
         _write_table(con, "factor_lhb_stock_wide", factors)
         _write_table(con, "stock_daily_silver", stock_daily)
 
@@ -83,7 +87,7 @@ def test_lhb_view_groups_stocks_and_known_hot_money(tmp_path):
     assert result["stocks"][0]["name"] == "示例科技"
     assert result["stocks"][0]["institution_net_yuan"] == 1_500_000.0
     known_seat = next(row for row in result["stocks"][0]["seats"] if row["actor_name"])
-    assert known_seat["actor_name"] == "章盟主"
-    assert known_seat["source_label"] == "席位识别"
-    assert result["actors"][0]["name"] == "章盟主"
+    assert known_seat["actor_name"] == "测试游资"
+    assert known_seat["source_label"] == "官方游资明细"
+    assert result["actors"][0]["name"] == "测试游资"
     assert result["actors"][0]["stocks"][0]["code"] == "600001"

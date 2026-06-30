@@ -58,7 +58,6 @@ screening_profiles:
         net_buy: {max_bonus: 2.5, max_penalty: 3.0}
         institution: {max_bonus: 2.5, max_penalty: 2.5}
         institution_consensus: {max_bonus: 1.0, max_penalty: 1.0}
-        hot_money_quality: {max_bonus: 0.8, max_penalty: 0.8}
         repeat_persistence: {max_bonus: 0.8, max_penalty: 0.8}
         sector_resonance: {max_bonus: 2.0, max_penalty: 2.0}
 

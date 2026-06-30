@@ -8,7 +8,6 @@ from typing import Any, Dict, Iterable, List
 import pandas as pd
 
 from config.settings import FACTOR_DB_PATH
-from core.analysis.hm_reputation import HotMoneyReputationRegistry
 
 
 _TABLES = (
@@ -103,13 +102,12 @@ def _build_lhb_view_cached(
         empty["error"] = str(exc)
         return empty
 
-    registry = HotMoneyReputationRegistry.load()
     daily_rows, reasons = _primary_daily_rows(daily)
     factor_rows = _rows_by_code(factors)
     stock_names = _stock_name_map(stock_daily)
-    seats_by_code = _aggregate_seats(institution, registry)
-    actor_events = _fallback_actor_events(seats_by_code)
-    explicit_events = _merge_hot_money(hot_money, seats_by_code, actor_events, registry)
+    seats_by_code = _aggregate_seats(institution)
+    actor_events: List[Dict[str, Any]] = []
+    explicit_events = _merge_hot_money(hot_money, seats_by_code, actor_events)
 
     codes = set(daily_rows) | set(factor_rows) | set(seats_by_code)
     stocks = []
@@ -155,7 +153,7 @@ def _build_lhb_view_cached(
         _number(row.get("composite_score")),
         _number(row.get("net_buy_yuan")),
     ), reverse=True)
-    actors = _build_actor_groups(actor_events, registry, daily_rows, factor_rows, stock_names)
+    actors = _build_actor_groups(actor_events, daily_rows, factor_rows, stock_names)
     total_net = sum(_number(row.get("net_buy_yuan")) for row in stocks)
     institution_net = sum(_number(row.get("institution_net_yuan")) for row in stocks)
     return {
@@ -229,10 +227,7 @@ def _stock_name_map(frame: pd.DataFrame) -> Dict[str, str]:
     }
 
 
-def _aggregate_seats(
-    frame: pd.DataFrame,
-    registry: HotMoneyReputationRegistry,
-) -> Dict[str, List[Dict[str, Any]]]:
+def _aggregate_seats(frame: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
     if frame.empty:
         return {}
     work = frame.copy()
@@ -254,9 +249,6 @@ def _aggregate_seats(
             "sell_yuan": 0.0,
             "net_buy_yuan": 0.0,
             "actor_name": "",
-            "actor_score": None,
-            "actor_tag": "",
-            "actor_label": "",
             "source_label": "营业部明细",
         })
         item["buy_yuan"] += _number(row.get("buy_yuan"))
@@ -266,33 +258,15 @@ def _aggregate_seats(
 
     result: Dict[str, List[Dict[str, Any]]] = {}
     for item in grouped.values():
-        lookup = registry.lookup_by_org(item["seat_name"])
-        if lookup.matched and lookup.name != "机构专用":
-            item.update(_actor_fields(lookup, "席位识别"))
-        item["seat_type_label"] = "机构" if item["is_institution"] else ("知名游资" if item["actor_name"] else "营业部")
+        item["seat_type_label"] = "机构" if item["is_institution"] else "营业部"
         result.setdefault(item["code"], []).append(item)
     return result
-
-
-def _fallback_actor_events(seats_by_code: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    events = []
-    for code, seats in seats_by_code.items():
-        for seat in seats:
-            if not seat.get("actor_name"):
-                continue
-            events.append({
-                **seat,
-                "code": code,
-                "source_label": "席位识别",
-            })
-    return events
 
 
 def _merge_hot_money(
     frame: pd.DataFrame,
     seats_by_code: Dict[str, List[Dict[str, Any]]],
     actor_events: List[Dict[str, Any]],
-    registry: HotMoneyReputationRegistry,
 ) -> int:
     if frame.empty:
         return 0
@@ -306,8 +280,7 @@ def _merge_hot_money(
     for row in work.to_dict("records"):
         code = _code(row.get("code"))
         seat_name = _text(row.get("seat_name")) or "未披露席位"
-        lookup = registry.lookup(_text(row.get("actor_name")), seat_name)
-        actor_name = lookup.name if lookup.matched else (_text(row.get("actor_name")) or "未识别游资")
+        actor_name = _text(row.get("actor_name")) or "未识别游资"
         if actor_name == "机构专用":
             continue
         event = {
@@ -319,7 +292,7 @@ def _merge_hot_money(
             "net_buy_yuan": _number(row.get("net_buy_yuan"), _number(row.get("buy_yuan")) - _number(row.get("sell_yuan"))),
             "seat_type_label": "知名游资",
             "source_label": "官方游资明细",
-            **_actor_fields(lookup, "官方游资明细", actor_name=actor_name),
+            "actor_name": actor_name,
         }
         key = (code, actor_name, seat_name)
         actor_events[:] = [old for old in actor_events if (old.get("code"), old.get("actor_name"), old.get("seat_name")) != key]
@@ -329,7 +302,7 @@ def _merge_hot_money(
         seats = seats_by_code.setdefault(code, [])
         existing = next((item for item in seats if item.get("seat_name") == seat_name), None)
         if existing:
-            existing.update({key: value for key, value in event.items() if key.startswith("actor_") or key == "source_label"})
+            existing.update({"actor_name": actor_name, "source_label": "官方游资明细"})
             existing["seat_type_label"] = "知名游资"
         else:
             seats.append(dict(event))
@@ -338,7 +311,6 @@ def _merge_hot_money(
 
 def _build_actor_groups(
     events: Iterable[Dict[str, Any]],
-    registry: HotMoneyReputationRegistry,
     daily_rows: Dict[str, Dict[str, Any]],
     factor_rows: Dict[str, Dict[str, Any]],
     stock_names: Dict[str, str],
@@ -348,14 +320,8 @@ def _build_actor_groups(
         actor_name = _text(event.get("actor_name"))
         if not actor_name:
             continue
-        lookup = registry.lookup_by_name(actor_name)
         actor = grouped.setdefault(actor_name, {
             "name": actor_name,
-            "score": lookup.score if lookup.matched else event.get("actor_score"),
-            "label": lookup.label if lookup.matched else (_text(event.get("actor_label")) or "未评级"),
-            "tag": lookup.tag if lookup.matched else _text(event.get("actor_tag")),
-            "style": lookup.style if lookup.matched else "",
-            "note": lookup.note if lookup.matched else "",
             "buy_yuan": 0.0,
             "sell_yuan": 0.0,
             "net_buy_yuan": 0.0,
@@ -394,23 +360,12 @@ def _build_actor_groups(
         actor["stocks"] = stocks
         actor["sources"] = " / ".join(sorted(value for value in actor["sources"] if value))
         actor["search_text"] = " ".join([
-            actor["name"], actor.get("tag") or "", actor.get("style") or "",
+            actor["name"],
             " ".join(f"{row['name']} {row['code']}" for row in stocks),
         ]).lower()
         actors.append(actor)
     actors.sort(key=lambda row: abs(_number(row.get("net_buy_yuan"))), reverse=True)
     return actors
-
-
-def _actor_fields(lookup: Any, source_label: str, *, actor_name: str = "") -> Dict[str, Any]:
-    return {
-        "actor_name": actor_name or (lookup.name if lookup.matched else ""),
-        "actor_score": lookup.score if lookup.matched else None,
-        "actor_tag": lookup.tag if lookup.matched else "",
-        "actor_label": lookup.label if lookup.matched else "未评级",
-        "source_label": source_label,
-    }
-
 
 def _code(value: Any) -> str:
     text = _text(value).split(".")[0]

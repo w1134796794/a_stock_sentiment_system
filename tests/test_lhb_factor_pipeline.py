@@ -117,7 +117,7 @@ def test_screening_lhb_is_optional_adjustment_and_builds_four_scenarios(tmp_path
         {
             "tech_score": 70.0, "stk_total_score": 70.0, "lhb_present": 1,
             "stk_lhb_net_buy_score": 90.0, "stk_lhb_institution_score": 80.0,
-            "stk_lhb_institution_consensus": 80.0, "stk_lhb_hot_money_quality": 70.0,
+            "stk_lhb_institution_consensus": 80.0,
             "stk_lhb_repeat_persistence": 70.0, "stk_lhb_sector_resonance": 85.0,
             "crowding_penalty_score": 10.0,
         },

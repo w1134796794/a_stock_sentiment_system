@@ -229,7 +229,7 @@
     {%- endif -%}
   {% endmacro %}
 
-  {# ---------- 资金卡：龙虎榜 / 资金流向（去金额，主看结构/信誉/相对占比） ---------- #}
+  {# ---------- 资金卡：龙虎榜 / 资金流向 ---------- #}
   {% macro render_capital_cards(columns, rows, name) %}
   {% if not rows %}
     <div class="text-slate-500 text-sm py-4">无数据</div>
@@ -244,22 +244,19 @@
         </div>
 
         {% if is_lhb %}
-          {# ===== 龙虎榜：买方信誉 + 净买卖方向 + 席位结构 ===== #}
-          {% set flag = r.get('买方信誉') %}
+          {# ===== 龙虎榜：净买卖方向 + 席位结构 ===== #}
           {% set netdir = r.get('净向') %}
-          {% if not netdir and r.get('信誉加权净(万)') is not none %}
-            {% set rn = r.get('信誉加权净(万)') | float(0) %}
+          {% if not netdir and r.get('净买入(万)') is not none %}
+            {% set rn = r.get('净买入(万)') | float(0) %}
             {% set netdir = '净买' if rn > 0 else ('净卖' if rn < 0 else '') %}
           {% endif %}
           <div class="cap-tags">
-            {% if flag %}<span class="cap-flag {% if '黑' in flag %}bad{% elif '白' in flag %}good{% else %}neu{% endif %}">{{ flag }}</span>{% endif %}
             {% if netdir %}<span class="cap-dir {% if netdir == '净买' %}up{% elif netdir == '净卖' %}down{% endif %}">{{ netdir }}</span>{% endif %}
             {% if r.get('机构') %}<span class="cap-inst {% if r.get('机构') == '机构买' %}up{% else %}down{% endif %}">{{ r.get('机构') }}</span>{% endif %}
           </div>
           <div class="cap-sub">
             {% if r.get('买席') is not none %}<span>买<b class="up">{{ r.get('买席') }}</b> / 卖<b class="down">{{ r.get('卖席') }}</b> 席</span>
             {% elif r.get('席位数') is not none %}<span class="mono">{{ r.get('席位数') }} 席</span>{% endif %}
-            {% if r.get('信誉构成') %}<span class="cap-rep mono">{{ r.get('信誉构成') }}</span>{% endif %}
           </div>
           {% set br = r.get('买盘占比') %}
           {% if br is not none and br != '' %}

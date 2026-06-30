@@ -80,7 +80,7 @@
                   <div class="seat-name">{{ seat.seat_name }}</div>
                   <div class="seat-meta">
                     <span class="seat-kind {{ 'actor' if seat.actor_name else ('institution' if seat.is_institution else '') }}">{{ seat.seat_type_label }}</span>
-                    {% if seat.actor_name %}<span class="actor-name">{{ seat.actor_name }}{% if seat.actor_tag %} · {{ seat.actor_tag }}{% endif %}</span>{% endif %}
+                    {% if seat.actor_name %}<span class="actor-name">{{ seat.actor_name }}</span>{% endif %}
                     {% if seat.actor_name %}<span>{{ seat.source_label }}</span>{% endif %}
                   </div>
                 </td>
@@ -104,18 +104,16 @@
   <section id="lhb-panel-actors" class="lhb-panel hidden space-y-3" role="tabpanel" data-panel="actors">
     {% if lhb.actors %}
       <div class="source-note">
-        “官方游资明细”来自本地已落库的游资接口；“席位识别”依据本地知名营业部名录匹配，仅作为观察线索。
+        游资名称、关联股票、营业部及买卖金额均来自本地已落库的 Tushare 游资明细。
       </div>
       {% for actor in lhb.actors %}
       <details class="actor-item lhb-item" data-search="{{ actor.search_text }}" {% if loop.first %}open{% endif %}>
         <summary class="actor-header" title="展开或收起 {{ actor.name }}">
           <div class="actor-identity">
-            <div><strong>{{ actor.name }}</strong>{% if actor.tag %}<span class="actor-tag">{{ actor.tag }}</span>{% endif %}</div>
-            <p>{{ actor.style or actor.note or '暂无风格说明' }}</p>
+            <div><strong>{{ actor.name }}</strong></div>
+            <p>{{ actor.sources }}</p>
           </div>
           <div class="actor-stats">
-            <span>评级 <b>{{ actor.label }}</b></span>
-            {% if actor.score is not none %}<span>信誉 <b class="mono">{{ '%.0f'|format(actor.score) }}</b></span>{% endif %}
             <span>净额 <b class="mono {{ 'positive' if actor.net_buy_yuan > 0 else ('negative' if actor.net_buy_yuan < 0 else '') }}">{{ actor.net_buy_yuan|compact_money(true) }}</b></span>
             <span class="source-badge">{{ actor.sources }}</span>
           </div>
@@ -147,7 +145,7 @@
       <div class="lhb-filter-empty hidden">没有匹配的知名游资。</div>
     {% else %}
       <div class="border border-slate-800 rounded-lg p-10 text-center text-slate-400">
-        当日没有官方游资明细，也没有营业部命中本地知名游资名录。
+        当日没有官方游资明细。
       </div>
     {% endif %}
   </section>

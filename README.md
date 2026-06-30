@@ -293,9 +293,6 @@ python core/analysis/sector_analysis_orchestrator.py
 # 概念-行业交叉验证
 python core/analysis/concept_industry_validator.py
 
-# LHB（龙虎榜）分析
-python core/analysis/lhb_analyzer.py
-
 # 筹码结构分析
 python core/analysis/chip_structure_analyzer.py
 ```
@@ -366,7 +363,6 @@ a_stock_sentiment_system/
 │   │   ├── emotion_cycle_ml.py       # ML增强情绪分类
 │   │   ├── sector_analysis_orchestrator.py  # 板块轮动编排器
 │   │   ├── concept_industry_validator.py    # 概念-行业交叉验证
-│   │   ├── lhb_analyzer.py           # 龙虎榜分析
 │   │   ├── chip_structure_analyzer.py # 筹码结构分析
 │   │   ├── moneyflow_analyzer.py     # 资金流分析
 │   │   └── ...
@@ -472,4 +468,3 @@ a_stock_sentiment_system/
    ↓
 8. [可选] 知识库灌入 + AI解读
 ```
-
