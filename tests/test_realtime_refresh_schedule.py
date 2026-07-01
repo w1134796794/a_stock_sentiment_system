@@ -20,7 +20,7 @@ def test_default_refresh_skips_all_jobs_when_market_is_closed(monkeypatch):
     assert calls == []
 
 
-def test_default_refresh_runs_jobs_when_market_is_open(monkeypatch):
+def test_default_refresh_only_runs_candidate_overlay_when_market_is_open(monkeypatch):
     calls = []
     monkeypatch.setattr(web_app, "_data_generation_running", lambda: False)
     monkeypatch.setattr(
@@ -37,4 +37,4 @@ def test_default_refresh_runs_jobs_when_market_is_open(monkeypatch):
 
     web_app._refresh_realtime_defaults()
 
-    assert [key[0] for key in calls] == ["overlay", "sectors", "health"]
+    assert [key[0] for key in calls] == ["overlay"]

@@ -104,21 +104,41 @@ def _activity_ratio_score(value: float) -> float:
 
 
 def _amount_ratio_target_score(value: float) -> float:
-    """成交额确认分：0.8-1.5 倍最优，过弱和过热均惩罚。"""
+    """成交额确认分：温和放量最优，避免 0.8-1.5 全部封顶。"""
     v = to_float(value, 0.0)
     if v <= 0:
         return 0.0
     if v < 0.4:
-        return max(0.0, v / 0.4 * 20.0)
+        return max(0.0, v / 0.4 * 15.0)
     if v < 0.8:
-        return 20.0 + (v - 0.4) / 0.4 * 60.0
+        return 15.0 + (v - 0.4) / 0.4 * 60.0
+    if v < 1.15:
+        return 75.0 + (v - 0.8) / 0.35 * 25.0
     if v <= 1.5:
-        return 100.0
+        return 100.0 - (v - 1.15) / 0.35 * 15.0
     if v <= 2.2:
-        return 100.0 - (v - 1.5) / 0.7 * 45.0
+        return 85.0 - (v - 1.5) / 0.7 * 40.0
     if v <= 3.0:
-        return 55.0 - (v - 2.2) / 0.8 * 35.0
-    return max(0.0, 20.0 - (v - 3.0) * 5.0)
+        return 45.0 - (v - 2.2) / 0.8 * 30.0
+    return max(0.0, 15.0 - (v - 3.0) * 5.0)
+
+
+def _new_high_position_score(value: float) -> float:
+    """阶段位置分：接近或温和突破新高最优，过度乖离不再持续封顶。"""
+    v = to_float(value, 0.0)
+    if v <= 0:
+        return 0.0
+    if v < 0.85:
+        return max(0.0, v / 0.85 * 20.0)
+    if v < 0.95:
+        return 20.0 + (v - 0.85) / 0.10 * 50.0
+    if v < 1.02:
+        return 70.0 + (v - 0.95) / 0.07 * 30.0
+    if v <= 1.10:
+        return 100.0 - (v - 1.02) / 0.08 * 20.0
+    if v <= 1.20:
+        return 80.0 - (v - 1.10) / 0.10 * 25.0
+    return max(20.0, 55.0 - (v - 1.20) * 100.0)
 
 
 def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE_DIR) -> dict:
@@ -279,7 +299,7 @@ class StockFactorJob:
         today["new_high_ratio"] = new_high_ratio
         today["vol_ratio_score"] = today["vol_ratio"].map(_activity_ratio_score)
         today["amount_ratio_score"] = today["amount_ratio"].map(_amount_ratio_target_score)
-        today["new_high_score"] = today["new_high_ratio"].map(lambda v: score_between(v, 0.85, 1.02))
+        today["new_high_score"] = today["new_high_ratio"].map(_new_high_position_score)
         today["liquidity_score"] = percentile_score(today["amount_yuan"], higher_better=True)
         today["tech_score"] = [
             safe_weighted_score([(row.pct_score, 0.55), (row.new_high_score, 0.45)])
@@ -408,7 +428,7 @@ class StockFactorJob:
                 (row.board_height_score, 0.50),
                 (row.seal_time_score, 0.30),
                 (row.float_mv_fit_score, 0.20),
-            ])
+            ]) if row.board_height > 0 else 50.0
             for row in today.itertuples()
         ]
 

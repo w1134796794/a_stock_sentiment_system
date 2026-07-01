@@ -31,11 +31,14 @@ screening_profiles:
       candidate_percentile: true
       weights:
         tech_score: 0.20
-        stk_liquidity_percentile: 0.15
-        stk_new_high_20d: 0.05
+        stk_liquidity_percentile: 0.05
+        stk_new_high_20d: 0.15
         stk_amount_ratio_5d: 0.20
-        stk_board_position: 0.15
-        stk_sector_resonance_score: 0.25
+        stk_vol_ratio_5d: 0.05
+        stk_board_position: 0.10
+        stk_sector_mainline_score: 0.10
+        stk_sector_persistence_score: 0.05
+        stk_sector_resonance_score: 0.10
       penalties:
         - name: "成交额偏弱扣分"
           factor: amount_ratio

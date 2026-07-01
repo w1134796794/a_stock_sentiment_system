@@ -63,7 +63,7 @@
     {% set name_prefs = ['sector_name', '板块名称', '概念名称', '股票名称', 'stock_name', '名称', 'name'] %}
     {% set code_prefs = ['sector_code', '板块代码', '股票代码', 'stock_code', 'code', '代码', 'ts_code'] %}
     {% set metric_prefs = ['模式类型', 'pattern_type', '板块类型', '类型', 'type', '置信度', 'confidence',
-                           '主线主题评分', '当日主线评分', '近10日上榜天数',
+                           '主线主题评分', '涨停家数', 'limit_up_count', '当日主线评分', '近10日上榜天数',
                            '综合评分', 'composite_score', 'mainline_score', '动量评分', 'momentum_score',
                            '成交额评分', 'amount_score', '持续性评分', 'persistence_score', '涨跌幅', 'pct_change',
                            '最新排名', '排名', 'rank', '涨停家数', 'limit_up_count'] %}
@@ -165,7 +165,9 @@
           {% for r in rows %}
           {% if r.get('连板数') == level %}
           {% set zb = r.get('炸板次数') or 0 %}
-          <div class="ech-card{% if zb > 0 %} zha{% endif %}">
+          <a class="ech-card{% if zb > 0 %} zha{% endif %}"
+             href="{{ r.get('_detail_url') }}"
+             title="查看 {{ r.get('股票名称') }} 日K线">
             <div class="ech-card-top">
               <span class="ech-name">{{ r.get('股票名称') }}</span>
               <span class="ech-pct mono">{{ r.get('涨幅%') | num2 }}<small>%</small></span>
@@ -178,7 +180,7 @@
               <span class="mono">{{ r.get('首次涨停时间') }}</span>
               {% if zb > 0 %}<span class="ech-zha">炸 {{ zb }}</span>{% endif %}
             </div>
-          </div>
+          </a>
           {% endif %}
           {% endfor %}
         </div>
@@ -196,23 +198,43 @@
     <div class="ech-cpt-grid">
       {% for r in rows %}
       {% set mb = r.get('最高连板') or 0 %}
-      <div class="ech-cpt">
-        <div class="ech-cpt-head">
-          <span class="ech-cpt-name">{{ r.get('概念名称') }}</span>
-          <span class="ech-badge ech-b{{ mb if mb <= 5 else 5 }}">{{ mb }}<small>板</small></span>
-        </div>
-        <div class="ech-cpt-stats">
-          <span class="ech-cpt-zt"><b class="mono">{{ r.get('涨停总数') | num2 }}</b> 涨停</span>
-          {% if r.get('龙头股') %}<span class="ech-cpt-lead">龙头 {{ r.get('龙头股') }}</span>{% endif %}
-        </div>
-        {% if r.get('梯队分布') %}
-        <div class="ech-cpt-dist">
-          {% for seg in r.get('梯队分布').split(',') %}
-            {% if seg.strip() %}<span class="ech-seg">{{ seg.strip() }}</span>{% endif %}
+      <details class="ech-cpt">
+        <summary class="ech-cpt-summary" title="展开涨停明细">
+          <div class="ech-cpt-head">
+            <span class="ech-cpt-name">{{ r.get('概念名称') }}</span>
+            <span class="ech-cpt-head-right">
+              <span class="ech-badge ech-b{{ mb if mb <= 5 else 5 }}">{{ mb }}<small>板</small></span>
+              <span class="ech-cpt-caret" aria-hidden="true">›</span>
+            </span>
+          </div>
+          <div class="ech-cpt-stats">
+            <span class="ech-cpt-zt"><b class="mono">{{ r.get('涨停总数') | num2 }}</b> 涨停</span>
+            {% if r.get('龙头股') %}<span class="ech-cpt-lead">龙头 {{ r.get('龙头股') }}</span>{% endif %}
+          </div>
+          {% if r.get('梯队分布') %}
+          <div class="ech-cpt-dist">
+            {% for seg in r.get('梯队分布').split(',') %}
+              {% if seg.strip() %}<span class="ech-seg">{{ seg.strip() }}</span>{% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+        </summary>
+        {% if r.get('_stocks') %}
+        <div class="ech-cpt-stocks">
+          {% for stock in r.get('_stocks') %}
+          <a class="ech-cpt-stock" href="{{ stock.get('_detail_url') }}" title="查看 {{ stock.get('股票名称') }} 日K线">
+            <span class="ech-cpt-stock-main">
+              <b>{{ stock.get('股票名称') }}</b>
+              <small class="mono">{{ stock.get('股票代码') }}</small>
+            </span>
+            <span class="ech-cpt-stock-board mono">{{ stock.get('连板数') }}板</span>
+            <span class="ech-cpt-stock-pct mono">{{ stock.get('涨幅%') | num2 }}%</span>
+            <span class="ech-cpt-stock-time mono">{{ stock.get('首次涨停时间') or '--' }}</span>
+          </a>
           {% endfor %}
         </div>
         {% endif %}
-      </div>
+      </details>
       {% endfor %}
     </div>
   {% endif %}
@@ -493,8 +515,10 @@
   .ech-tier-n { font-size:.66rem; color:#64748b; white-space:nowrap; }
   .ech-cards { display:flex; flex-wrap:wrap; gap:.5rem; flex:1 1 auto; }
   .ech-card { width:152px; border:1px solid rgba(51,65,85,.6); border-radius:.55rem;
-              background:rgba(15,23,42,.55); padding:.45rem .6rem; transition:border-color .15s; }
+              background:rgba(15,23,42,.55); padding:.45rem .6rem; transition:border-color .15s;
+              display:block; color:inherit; text-decoration:none; }
   .ech-card:hover { border-color:rgba(16,185,129,.45); }
+  .ech-card:focus-visible { outline:2px solid rgba(52,211,153,.8); outline-offset:2px; }
   .ech-card.zha { border-color:rgba(251,146,60,.4); background:rgba(120,53,15,.14); }
   .ech-card-top { display:flex; align-items:baseline; justify-content:space-between; gap:.3rem; }
   .ech-name { font-weight:700; color:#e2e8f0; font-size:.84rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -520,7 +544,14 @@
   .ech-cpt-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:.7rem; padding-right:.25rem; }
   .ech-cpt { border:1px solid rgba(51,65,85,.6); border-radius:.65rem; background:rgba(15,23,42,.5); padding:.7rem .8rem; }
   .ech-cpt:hover { border-color:rgba(16,185,129,.4); }
+  .ech-cpt[open] { border-color:rgba(16,185,129,.4); }
+  .ech-cpt-summary { cursor:pointer; list-style:none; }
+  .ech-cpt-summary::-webkit-details-marker { display:none; }
+  .ech-cpt-summary:focus-visible { outline:2px solid rgba(52,211,153,.8); outline-offset:4px; border-radius:.35rem; }
   .ech-cpt-head { display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+  .ech-cpt-head-right { display:flex; align-items:center; gap:.45rem; }
+  .ech-cpt-caret { color:#64748b; font-size:1.15rem; line-height:1; transition:transform .15s; }
+  .ech-cpt[open] .ech-cpt-caret { transform:rotate(90deg); color:#6ee7b7; }
   .ech-cpt-name { font-weight:700; color:#e2e8f0; font-size:.95rem; }
   .ech-cpt-stats { display:flex; flex-wrap:wrap; align-items:center; gap:.3rem .8rem; margin-top:.45rem; font-size:.74rem; color:#94a3b8; }
   .ech-cpt-zt b { color:#ff5d5d; font-size:1rem; margin-right:.15rem; }
@@ -528,6 +559,23 @@
   .ech-cpt-dist { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.55rem; }
   .ech-seg { font-size:.68rem; color:#cbd5e1; background:rgba(2,6,23,.55); border:1px solid rgba(51,65,85,.6);
              border-radius:.35rem; padding:.1rem .45rem; font-family:'JetBrains Mono', monospace; }
+  .ech-cpt-stocks { margin-top:.7rem; padding-top:.35rem; border-top:1px solid rgba(51,65,85,.55); }
+  .ech-cpt-stock { display:grid; grid-template-columns:minmax(0,1fr) auto auto auto; align-items:center; gap:.55rem;
+                   color:inherit; text-decoration:none; padding:.45rem .15rem; border-bottom:1px solid rgba(51,65,85,.35); }
+  .ech-cpt-stock:last-child { border-bottom:0; }
+  .ech-cpt-stock:hover b { color:#6ee7b7; }
+  .ech-cpt-stock:focus-visible { outline:2px solid rgba(52,211,153,.8); outline-offset:1px; border-radius:.25rem; }
+  .ech-cpt-stock-main { display:flex; min-width:0; align-items:baseline; gap:.4rem; }
+  .ech-cpt-stock-main b { color:#e2e8f0; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ech-cpt-stock-main small { color:#64748b; font-size:.62rem; flex:0 0 auto; }
+  .ech-cpt-stock-board { color:#fcd34d; font-size:.68rem; }
+  .ech-cpt-stock-pct { color:#ff5d5d; font-size:.7rem; font-weight:700; }
+  .ech-cpt-stock-time { color:#64748b; font-size:.64rem; }
+  @media (max-width: 720px) {
+    .ech-cpt-grid { grid-template-columns:1fr; }
+    .ech-cpt-stock { grid-template-columns:minmax(0,1fr) auto auto; }
+    .ech-cpt-stock-time { display:none; }
+  }
 </style>
 {% endif %}
 

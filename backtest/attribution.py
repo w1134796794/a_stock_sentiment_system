@@ -121,9 +121,17 @@ def build_attribution_frames(result: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
         grouped = raw.groupby(["factor_id", "factor_name"], dropna=False)
         rows = []
         for (factor_id, factor_name), g in grouped:
-            weak = g[g["score"] < 45]
-            strong = g[g["score"] >= 75]
-            mid = g[(g["score"] >= 45) & (g["score"] < 75)]
+            unique_scores = int(g["score"].nunique(dropna=True))
+            weak_cut = float(g["score"].quantile(1.0 / 3.0)) if unique_scores >= 3 else float("nan")
+            strong_cut = float(g["score"].quantile(2.0 / 3.0)) if unique_scores >= 3 else float("nan")
+            if unique_scores >= 3 and strong_cut > weak_cut:
+                weak = g[g["score"] <= weak_cut]
+                strong = g[g["score"] >= strong_cut]
+                mid = g[(g["score"] > weak_cut) & (g["score"] < strong_cut)]
+            else:
+                weak = g.iloc[0:0]
+                strong = g.iloc[0:0]
+                mid = g
             rows.append({
                 "factor_id": factor_id,
                 "factor_name": factor_name,
@@ -134,6 +142,8 @@ def build_attribution_frames(result: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
                 "stop_loss_rate": _rate(g["stop_loss"]),
                 "take_profit_rate": _rate(g["take_profit"]),
                 "avg_score": _mean(g["score"]),
+                "weak_score_cut": weak_cut,
+                "strong_score_cut": strong_cut,
                 "strong_count": int(len(strong)),
                 "strong_total_pnl": _sum(strong["pnl"]),
                 "strong_avg_pnl_pct": _mean(strong["pnl_pct"]),

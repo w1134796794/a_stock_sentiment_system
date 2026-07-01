@@ -5,7 +5,11 @@ import pytest
 
 from core.factors.jobs.gold_utils import percentile_score
 from core.factors.jobs.runner import FactorJobRunner
-from core.factors.jobs.stock_factor_job import _amount_ratio_target_score, _stock_sector_scores
+from core.factors.jobs.stock_factor_job import (
+    _amount_ratio_target_score,
+    _new_high_position_score,
+    _stock_sector_scores,
+)
 
 
 DUCKDB_MISSING = importlib.util.find_spec("duckdb") is None
@@ -63,9 +67,17 @@ def test_percentile_score_direction():
 
 
 def test_amount_ratio_target_penalizes_weak_and_hot_turnover():
-    assert _amount_ratio_target_score(1.0) == 100.0
+    assert _amount_ratio_target_score(1.15) == 100.0
+    assert _amount_ratio_target_score(1.0) < _amount_ratio_target_score(1.15)
     assert _amount_ratio_target_score(0.5) < _amount_ratio_target_score(0.8)
     assert _amount_ratio_target_score(2.5) < _amount_ratio_target_score(1.5)
+
+
+def test_new_high_position_score_does_not_saturate_after_breakout():
+    assert _new_high_position_score(1.02) == 100.0
+    assert _new_high_position_score(1.06) < 100.0
+    assert _new_high_position_score(1.15) < _new_high_position_score(1.06)
+    assert _new_high_position_score(0.90) < _new_high_position_score(0.98)
 
 
 def test_stock_sector_scores_use_cached_concept_and_industry(tmp_path):
@@ -127,7 +139,7 @@ def test_phase2_factor_jobs_write_gold_tables(tmp_path):
         ).fetchall()
     )
     non_lu_board = con.execute(
-        "SELECT board_height_score, seal_time_score, float_mv, float_mv_fit_score "
+        "SELECT board_height_score, seal_time_score, float_mv, float_mv_fit_score, board_score "
         "FROM factor_stock_wide WHERE code = '000001'"
     ).fetchone()
     con.close()
@@ -154,4 +166,5 @@ def test_phase2_factor_jobs_write_gold_tables(tmp_path):
     assert non_lu_board[1] == 50.0        # 无封板时间 -> 中性
     assert non_lu_board[2] == 4000000.0   # 流通市值取自 stock_daily_silver.circ_mv
     assert 37.0 < non_lu_board[3] < 40.0  # 400亿大盘 -> 适配分明显低于中性
+    assert non_lu_board[4] == 50.0        # 非涨停票不再用市值制造伪身位差异
     assert {"stk_board_height", "stk_seal_time_quality", "stk_float_mv_fit", "stk_board_position"} <= board_factor_ids

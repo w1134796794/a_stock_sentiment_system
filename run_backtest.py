@@ -226,9 +226,15 @@ def save_backtest_results(
         logger.warning(f"回测归因报表生成失败: {exc}")
 
     try:
-        from backtest.walk_forward import build_walk_forward_frames
+        from backtest.walk_forward import build_monthly_walk_forward_frames
 
-        folds, oos_summary = build_walk_forward_frames(result)
+        folds, oos_summary = build_monthly_walk_forward_frames(
+            result,
+            start_date=str((metadata or {}).get("start_date") or ""),
+            end_date=str((metadata or {}).get("end_date") or ""),
+            train_months=3,
+            validation_months=1,
+        )
         for name, frame in (("walk_forward", folds), ("walk_forward_summary", oos_summary)):
             if frame is None or frame.empty:
                 continue

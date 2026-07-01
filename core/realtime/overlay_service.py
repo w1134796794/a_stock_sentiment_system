@@ -157,6 +157,7 @@ class RealtimeOverlayService:
             "name": quote.get("name") or candidate.get("name") or "",
             "screening_rank": candidate.get("rank"),
             "screening_score": candidate.get("score"),
+            "resonance_sectors": candidate.get("resonance_sectors") or "",
             "received_at": quote.get("received_at") or quote.get("time") or "",
             "last_price": last_price,
             "open_price": open_price,

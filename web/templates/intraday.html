@@ -153,6 +153,7 @@
           </a>
           <span class="is-status ${esc(row.status || 'observe')}">${esc(row.status_text || '观察')}</span>
         </div>
+        ${renderStockSectorTags(row)}
         <div class="is-metrics">
           <div class="is-metric"><span>转强分</span><strong class="mono">${num(row.turn_score)}</strong></div>
           <div class="is-metric"><span>池分</span><strong class="mono">${num(row.leader_score)}</strong></div>

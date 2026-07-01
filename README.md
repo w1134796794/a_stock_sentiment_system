@@ -1,470 +1,1509 @@
-# A股情绪周期与板块轮动量�化系统 V2
+# A股短线复盘与因子筛选系统
 
-基于情绪周期识别、板块轮动追踪、概念-行业交叉验证的短线交易辅助系统。
+> 面向 A 股短线复盘、候选股筛选、盘中确认和模拟交易验证的一体化系统。
+>
+> 当前 `main` 分支以“数据预取 -> 标准化仓库 -> 因子计算 -> 指标筛选 -> 实时确认 -> 模拟交易 -> 归因反馈”为唯一产品主线，不再依赖旧的四策略选股流程。
 
-## 🎯 核心架构：五层复盘流水线
+## 1. 系统定位
 
-```
-Layer 1: 看大盘（定仓位）   →  MarketEnvAnalyzer
-Layer 2: 看板块（定方向）   →  SectorAnalysisOrchestrator
-Layer 3: 看个股（定标的）   →  StockSelectionLayer
-Layer 4: 定计划（定执行）   →  TradePlanLayer
-Layer 5: 盘后总结          →  ReviewAnalyzer
-```
+本项目解决的不是单一的“选股”问题，而是把短线复盘拆成一条可重复、可追溯、可回测的数据链路：
 
-### 1. 数据层 (Data Layer)
-- **双源备份**: Tushare(历史数据) + AkShare(实时情绪)
-- **本地缓存**: 自动避免重复API调用，支持盘中/盘后增量更新
-- **智能交易日判断**: 非交易日自动关联最近交易日数据
-- **同花顺板块数据**: 集成同花顺概念/行业/特色指数数据(ths_index/ths_daily/ths_member)
-- **模块化数据管理**: 按市场/股票/板块/概念/资金流分模块，便于维护和扩展
+1. 盘后一次性获取当日和必要历史数据。
+2. 统一股票代码、板块代码、交易日期、金额单位和数据来源。
+3. 将大盘、情绪、板块、个股、资金流、龙虎榜等信息指标化。
+4. 使用可配置的硬过滤、优先过滤、分位排名和加减分生成候选股。
+5. 次日只对已经生成的候选股和近期龙头做实时行情确认。
+6. 使用真实历史日线、交易成本、T+1、止损和移动止盈规则进行模拟交易。
+7. 通过排名归因、因子归因、退出归因和滚动验证反哺参数，而不是凭单次收益手工调参。
 
-### 2. 情绪周期引擎 (Emotion Cycle Engine)
-- **五阶段模型**: 冰点期 → 回暖期 → 上升期 → 高潮期 → 退潮期
-- **多维度评分**: 涨停家数、跌停家数、炸板率、昨日涨停溢价率
-- **动态策略**: 根据情绪周期自动生成仓位建议和禁忌操作
-- **周期切换预警**: 识别情绪拐点，提前调整策略
-- **ML增强**: 机器学习辅助情绪周期分类
+系统适用于：
 
-### 3. 板块轮动追踪器 (Sector Rotation Tracker)
-- **多因子动态权重模型**:
-  - 强度因子(30%): 涨停家数、连板数
-  - 资金因子(25%): 成交额变化率、换手率
-  - 趋势因子(25%): 排名动量、涨停趋势、持续性评分
-  - 市场适配(20%): 根据周期动态调整
-- **板块生命周期**: 萌芽期 → 加速期 → 高潮期 → 衰退期
-- **轮动图谱**: 构建资金迁移路径，预判接力板块
-- **T+1板块预判**: 基于历史板块轮动规律，预判次日可能接力的板块
+- 每日盘后市场复盘。
+- 短线候选股排序和交易计划生成。
+- 热点板块、主线持续性、涨停梯队和龙虎榜观察。
+- 候选股与近期龙头的盘中转强确认。
+- 区间回测和按日接力模拟交易。
+- 多用户只读访问、订阅到期控制和后台管理。
 
-### 4. 概念-行业交叉验证 (Concept-Industry Validation)
-- **双轨制分析**: 概念维度(短线热点) + 行业维度(中线趋势)
-- **共振识别**: 概念热 + 行业热 = 强信号，重仓参与
-- **背离预警**: 概念热 + 行业冷 = 纯炒作，谨慎参与
-- **行业集中度**: 分析概念成分股的行业分布，识别真正龙头
-- **反向板块查询**: 通过股票代码直接查询所属所有板块，区分行业(I)与概念(N)
+系统不包含：
 
-### 5. 模式识别 (Pattern Recognition) — 四层优先级过滤管线
+- 券商自动下单。
+- 收益承诺或投资建议。
+- 依赖大模型才能运行的核心分析链路。
+- 人工编造的游资信誉、白名单、黑名单或主观风格评分。
 
-所有策略统一采用 **L0 → L1 → L2 → L3 → L4** 四层管线架构：
+## 2. 当前设计原则
 
-| 层级 | 名称 | 职责 | 成本 |
-|------|------|------|------|
-| L0 | 硬性排除 | 一字板、尾盘板、流通市值、首/连板判定 | 极低 |
-| L1 | 前身验证 | 龙头身份、回调质量、调整期形态 | 中 |
-| L2 | 技术确认 | 量能、封单、高开gap、资金态度 | 中高 |
-| L3 | 质量指标 | 涨停时间、开板次数、市值上限 | 低 |
-| L4 | 评分生成 | 板块地位、置信度计算、信号输出 | — |
+### 2.1 历史数据预取，页面只读结果
 
-L2/L3 层采用**弹性评分 + 累计扣分**机制，替代硬过滤，提高容错性。
+除实时行情外，计算所需的数据应在“生成数据”阶段提前获取并缓存。普通数据浏览页读取本地 JSON、SQLite、DuckDB 或缓存文件，不应因为多个用户打开页面而重复调用 Tushare。
 
-**信号优先级**: 弱转强(100) > 二板定龙(85) > 龙二波(70) > 首板突破(50)
+当前主流程还会在候选股生成后预热：
 
-#### 5.1 首板突破 (First Board Breakout)
-按突破→时间→量能→筹码→市值→板块效应的顺序进行四层过滤。
-- **买点**: 涨停价（打板买入）
-- **止损**: 涨停价下方7%
-- **止盈**: 涨停价上方10%
-- **仓位**: light
+- 当日候选股的日线数据。
+- 上一交易日计划股在当日的日线数据。
 
-#### 5.2 二板定龙 (Second Board Dragon)
-二连板确认龙头地位，按首板质量→资金确认→质量指标→板块地位四层过滤。
-严格模式加强首板硬逻辑、动态gap阈值和封板速度检查。
-- **买点**: 二板涨停价
-- **止损**: 二板涨停价下方7%
-- **止盈**: 二板涨停价上方15%
-- **仓位**: medium（龙头）/ light（跟风）
+这样回测、交易计划和次日确认可以优先读取本地缓存，降低接口频率超限和网络抖动的影响。
 
-#### 5.3 弱转强 (Weak to Strong)
-昨日弱势（烂板/炸板/尾盘板）→ 今日超预期强势。含完整龙头池管理。
-- **龙头候选池**: 自动识别趋势龙头/连板龙头/空间龙头入池
-- **龙头走弱池**: 监控烂板、断板、尾盘板、趋势回调
-- **转强监控**: 动态gap阈值、竞价量弹性评分、高开低走回退检测
-- **买点**: 今日涨停价（打板确认）
-- **止损**: 今日涨停价下方5%
-- **止盈**: 今日涨停价上方10-15%
-- **仓位**: medium
+### 2.2 计算层与展示层分离
 
-#### 5.4 龙二波 (Dragon Second Wave)
-龙头充分调整后开启第二波，按双轨制第一波判断（连板/涨幅/涨停次数）。
-- **动态阈值**: 量能/封单阈值根据连板高度、调整天数、板块热度自适应
-- **衰减记忆**: 调整天数越短 → 阈值越宽松
-- **买点**: 转强当日涨停价
-- **止损**: 涨停价下方7%
-- **止盈**: 前高附近或涨幅15-20%
-- **仓位**: medium
+- 数据获取失败由数据层记录和降级。
+- 因子任务只读取标准化表。
+- 筛选引擎只读取因子表。
+- 页面只读取筛选结果、快照和只读查询结果。
+- 实时模块只叠加实时价格，不重算盘后因子。
 
-### 6. 快照系统 (Snapshot) — P0
-收盘跑批时，喂给 Excel 的 `data_dict` 同步落结构化产物：
-- `webdata/snapshots/{date}.json`：整页 JSON 快照（前端直读）
-- `webdata/app.sqlite`：结构化索引（每日快照 / 交易计划 / 信号）
-- **零侵入设计**: 在报表生成处旁挂写入，失败不影响 Excel 产出
+### 2.3 选股和交易是两套决策
 
-### 7. Web 看板 (Web Dashboard) — P1
-基于 FastAPI + Jinja2 的只读看板，浏览每日快照：
-- 市场情绪概览 + 仓位建议
-- 18-section 结构化快照浏览
-- AI 解读（可选，依赖大模型 API）
-- 启动: `python run_web.py`
+候选股质量高，不等于次日任何价格都可以买。系统明确区分：
 
-### 8. 知识库层 (Knowledge Base) — P2-P3
-把历史每日快照沉淀为可检索、可问答的记忆：
-- `store.py` — SQLite 块存储（文本 + 可选向量 BLOB）
-- `chunker.py` — 快照 → 文本块
-- `embeddings.py` — 可选云嵌入（缺省降级为零依赖中文词法检索）
-- `tools.py` — 定量只读查询（基于 app.sqlite），供 LLM 调用
-- `retriever.py` — 元数据过滤 + 向量/词法混合检索
-- `brief.py` — 每日 AI 解读（结构化 → 叙事）
-- `winrate.py` — 周期×模式胜率矩阵
+- **选股层**：回答“哪些股票值得进入观察池”。
+- **买点层**：回答“次日是否出现允许成交的开盘或盘中信号”。
+- **组合层**：回答“当前市场、现金、持仓数和板块集中度是否允许开仓”。
+- **退出层**：回答“何时止损、何时按高点回落保护利润”。
 
-### 9. 风控回测 (Risk & Backtest)
-- **完整回测框架**: 逐日分发→标准化→估值→撮合→模拟→评测
-- **风控模块**: 仓位管理、凯利公式、回撤熔断、风险审查
-- **Point-in-Time 数据**: 消除前视偏差
-- **Walk-Forward**: 滚动窗口训练/测试
+### 2.4 严格遵守时间可得性
 
-### 10. 多因子评分 (Multi-Factor Scoring)
-- 板块内个股排名评分
-- 龙头/跟风地位判断
-- 板块席位分配
+盘后才能知道的数据，只能参与下一交易日决策：
 
-## 🖥 桌面管理工具（推荐入口）
+- `T` 日收盘后生成的候选股用于 `T+1`。
+- `T` 日龙虎榜只能参与 `T+1` 的排序和交易。
+- 回测在交易日 `T+1` 读取上一交易日 `T` 的交易计划。
+- 因子计算不允许偷看未来日线或未来榜单。
 
-把"运行分析 / 看结果 / 管配置 / 查日志"收进一个**双击即用的本机窗口**，无需手动开
-Web 服务、也无需浏览器。底层仍复用 FastAPI + Jinja2 看板，但用 [pywebview] 套了一层
-原生窗口：内嵌服务只监听 `127.0.0.1` 的随机空闲端口，对外不可见（类似 Tauri/Electron
-"壳里跑本地页面"的做法）。
+### 2.5 涨跌停以官方名单为准
 
-```bash
-# 源码方式启动（开发/日常都可用）
-python run_manager.py
+正式涨停、跌停家数和股票集合来自 Tushare `limit_list_d`，不得使用 `pct_chg >= 9.5/19.5/29.5` 或 `pct_chg <= -9.5/-19.5/-29.5` 之类的硬编码推断。
+
+动态涨跌停幅度仍用于以下场景：
+
+- 计算个股距离涨停的进度。
+- 判断主板、ST、创业板、科创板、北交所的理论涨停价。
+- 判断涨停开盘是否不可成交。
+
+当前动态幅度规则为：普通主板 10%、ST 5%、创业板和科创板 20%、北交所 30%。它不替代官方涨跌停名单。
+
+### 2.6 客观数据优先
+
+龙虎榜、机构、游资、资金流等因子只来自可追溯数据。项目不再使用手工维护的游资信誉分、风格分和主观名单。
+
+## 3. 总体架构
+
+```mermaid
+flowchart LR
+    A["Tushare 盘后数据"] --> B["DataPrep 预取"]
+    A2["本地交易日历和历史缓存"] --> B
+    B --> C["MarketDataset 内存数据集"]
+    C --> D["Phase 1 Silver 标准化"]
+    D --> E["DuckDB / Parquet / CSV"]
+    E --> F["Phase 2 因子任务"]
+    F --> G["大盘 / 龙虎榜 / 资金信号 / 板块 / 个股因子"]
+    G --> H["Phase 3 指标筛选"]
+    H --> I["Phase 4 分析摘要"]
+    I --> J["Phase 5 JSON 快照和 SQLite 索引"]
+    J --> K["Web 数据浏览"]
+    H --> L["T+1 交易计划"]
+    R["easyquotation / pqquotation / adata / TDX"] --> M["实时行情缓存"]
+    L --> M
+    M --> N["实时确认 / 龙头池 / 盘中转强"]
+    L --> O["模拟交易"]
+    E --> O
+    O --> P["排名 / 因子 / 退出 / 滚动验证归因"]
+    P --> Q["参数评估"]
 ```
 
-窗口左侧为 Codex++ 风格导航，包含：
+主入口：
 
-| 页面 | 路由 | 作用 |
-|------|------|------|
-| 概览 | `/` | 健康检查（Tushare Token / AI Key / 最新快照 / 龙头池 / 数据目录）+ 关键产物统计 + 快速操作 |
-| 明日计划 | `/report` | 跳转到最新一日的结构化快照看板 |
-| 龙头池 | `/dragon` | 解析 `dragon_pools.json`，表格展示龙头池 / 走弱池 |
-| 运行分析 | `/run` | 一键执行"收盘分析"（可指定日期），**实时回显日志**（轮询增量，不卡窗口） |
-| 参数配置 | `/config` | 可视化编辑 settings / 策略 / YAML / 风控参数，写入覆盖文件，支持单项/整组重置 |
-| 日志 | `/logs` | 查看 `logs/system.log` 末尾若干行，可选自动刷新 |
-| 关于 | `/about` | 版本与数据目录位置 |
+- Web 产品入口：`run_web.py`
+- 页面数据生成：`core/etl/daily_pipeline.py`
+- 模拟交易入口：`run_backtest.py` 或 Web 的“模拟交易”页面
+- 桌面封装入口：`run_manager.py`
 
-> 「运行分析」在工具进程内**直接调用** `main.SentimentSystem`（等价于 `python main.py`），
-> 通过线程 + 日志缓冲把 loguru/print 输出增量推给前端，因此打包成 exe 后无需外部
-> Python 解释器。
+`main.py` 和部分旧 Layer 配置仍保留用于历史工具兼容，但不是当前 Web 产品的主执行链路。
 
-### 打包成 exe（可选）
+## 4. 目录与模块职责
 
-```bash
-pip install pyinstaller
-python scripts/build_manager.py        # 等价: pyinstaller packaging/manager.spec --noconfirm
-```
-
-产物在 `dist/A股情绪系统管理工具/`（单目录 onedir，含 exe 与 `_internal` 依赖，整目录分发）。
-把该目录放到项目数据目录旁运行其中的 exe——打包后 `settings.BASE_DIR` 解析为 **exe 所在目录**，
-因此 `webdata/ logs/ output/ dragon_pools.json / .env` 都应与 exe 同级。
-
-[pywebview]: https://pywebview.flowrl.com/
-
-## 🛠 安装与配置
-
-### 步骤1: 安装依赖
-```bash
-cd a_stock_sentiment_system
-pip install -r requirements.txt
-```
-
-桌面管理工具 / Web 看板依赖已包含在 `requirements.txt` 中
-（`fastapi` / `uvicorn` / `jinja2` / `pywebview`）。如仅用旧版只读 Web 看板，可单独装:
-```bash
-pip install fastapi uvicorn jinja2 python-multipart
-```
-
-### 步骤2: 配置API Token
-编辑 `config/settings.py`:
-```python
-TUSHARE_TOKEN = "你的tushare_token_here"
-```
-
-### 步骤3: 配置大模型（可选）
-在项目根目录创建 `.env`:
-```bash
-# 阿里云通义千问（推荐，支持嵌入+对话）
-DASHSCOPE_API_KEY = sk-xxxx
-
-# 或者 DeepSeek
-DEEPSEEK_API_KEY = sk-xxxx
-```
-
-## 🚀 常用命令
-
-### 桌面管理工具（推荐）
-
-```bash
-# 双击即用的本机窗口：运行分析 / 看结果 / 管配置 / 查日志
-python run_manager.py
-
-# 打包成 exe（产物在 dist/）
-python scripts/build_manager.py
-```
-
-### 日常运行
-
-```bash
-# 当日收盘分析（默认今天）
-python main.py
-
-# 指定日期分析
-python main.py --date 20260528
-
-# 定时任务调度（每日15:40自动执行）
-python scheduler.py
-```
-
-### Web 看板
-
-```bash
-# 启动 Web 看板（默认 http://127.0.0.1:8000）
-python run_web.py
-
-# 自定义端口
-python run_web.py --port 9000
-
-# 开发模式（热重载）
-python run_web.py --reload
-```
-
-### 回测
-
-```bash
-# 运行策略回测
-python run_backtest.py
-```
-
-### 知识库
-
-```bash
-# 构建胜率矩阵
-python scripts/build_winrate.py
-
-# 灌入历史快照到知识库
-python -c "from kb.ingest import ingest_all; ingest_all()"
-```
-
-### 报告与发布
-
-```bash
-# 生成最终报告
-python scripts/generate_final_report.py
-
-# 发布到微信公众号
-python scripts/publish_to_wechat.py --preview
-python scripts/publish_to_wechat.py --publish
-python scripts/publish_to_wechat.py --date 20260528 --preview
-
-# 重建快照 section
-python scripts/rebuild_snapshot_sections.py
-```
-
-### 工具与检查
-
-```bash
-# 查看回测交易记录
-python check_trades.py
-
-# 因子结果回填
-python scripts/backfill_factor_results.py
-
-# 更新交易日历
-python scripts/update_trade_calendar.py
-```
-
-### 模块单独测试
-
-```bash
-# 情绪周期引擎
-python core/analysis/emotion_cycle_engine.py
-
-# 板块轮动追踪器
-python core/analysis/sector_analysis_orchestrator.py
-
-# 概念-行业交叉验证
-python core/analysis/concept_industry_validator.py
-
-# 筹码结构分析
-python core/analysis/chip_structure_analyzer.py
-```
-
-### 代码检查
-
-```bash
-# 语法编译检查
-python -m py_compile core/pattern/dragon_second_wave.py
-python -m py_compile core/pattern/weak_to_strong.py
-python -m py_compile core/pattern/second_board_dragon.py
-python -m py_compile core/pattern/pattern_recognition.py
-
-# Ruff Lint（需安装 ruff）
-ruff check core main.py
-
-# Ruff 格式化
-ruff format core main.py
-```
-
-## 📊 输出文件
-
-| 文件 | 说明 |
-|------|------|
-| `output/短线情绪分析报告_YYYYMMDD_HHMMSS.xlsx` | 每日情绪分析报告（多Sheet） |
-| `output/交易计划_YYYYMMDD.xlsx` | 次日可执行的交易计划 |
-| `output/散户决策报告_YYYYMMDD.txt` | 隔夜预判、三阶过滤、剧本推演 |
-| `webdata/snapshots/YYYYMMDD.json` | 结构化快照（Web看板消费） |
-| `webdata/app.sqlite` | 结构化索引DB |
-| `webdata/kb.sqlite` | 知识库块存储 |
-| `dragon_pools.json` | 龙头池状态持久化 |
-
-## 🧠 交易逻辑整合
-
-### 决策流程
-1. **看情绪**: 当前处于什么周期？冰点/回暖/上升/高潮/退潮？
-2. **看板块**: 哪些概念板块评分高？信号类型是共振还是背离？
-3. **看验证**: 概念热度是否有行业支撑？集中度如何？
-4. **盯模式**: 在这些板块中，谁是"首板突破"？谁是"弱转强"？
-5. **定计划**: 根据情绪周期确定仓位，根据信号优先级确定标的
-
-### 仓位管理
-| 情绪周期 | 建议仓位 | 禁忌操作 |
-|---------|---------|---------|
-| 冰点期 | 0-20% | 追高、重仓、格局、补仓 |
-| 回暖期 | 20-40% | 追高、重仓、格局 |
-| 上升期 | 40-70% | 无（积极做多） |
-| 高潮期 | 30-50% | 追高、重仓、格局 |
-| 退潮期 | 0-20% | 追高、打板、格局、补仓 |
-
-## ⚠️ 免责声明
-
-本系统仅供学习研究使用，不构成投资建议。股市有风险，投资需谨慎。
-
-## 📁 项目结构
-
-```
+```text
 a_stock_sentiment_system/
-├── config/                          # 配置层
-│   ├── settings.py                  # 主配置（Tushare Token、路径、大模型API）
-│   ├── emotion_cycle_config.yaml    # 情绪周期参数
-│   ├── sector_tracker_config.yaml   # 板块追踪参数
-│   ├── risk_control.yaml            # 风控参数
-│   └── factors/                     # 因子配置
-├── core/
-│   ├── analysis/                    # 分析引擎
-│   │   ├── emotion_cycle_engine.py   # 情绪周期识别引擎
-│   │   ├── emotion_cycle_ml.py       # ML增强情绪分类
-│   │   ├── sector_analysis_orchestrator.py  # 板块轮动编排器
-│   │   ├── concept_industry_validator.py    # 概念-行业交叉验证
-│   │   ├── chip_structure_analyzer.py # 筹码结构分析
-│   │   ├── moneyflow_analyzer.py     # 资金流分析
-│   │   └── ...
-│   ├── data/                        # 数据层
-│   │   ├── data_manager_main.py      # DataManager 入口（多继承集成）
-│   │   ├── data_manager_stock.py     # 个股数据（日线/分时/竞价）
-│   │   ├── data_manager_market.py    # 市场数据（daily_basic/指数）
-│   │   ├── data_manager_sector.py    # 板块数据（同花顺ths_index/ths_member）
-│   │   ├── data_manager_moneyflow.py # 资金流数据
-│   │   └── industry_mapper.py        # 行业映射（东财+同花顺）
-│   ├── pipeline/                    # 五层流水线
-│   │   ├── review_pipeline.py        # 流水线编排器
-│   │   ├── layer1_market_env.py      # 看大盘·定仓位
-│   │   ├── layer2_sector_analysis.py # 看板块·定方向
-│   │   ├── layer3_stock_selection.py # 看个股·定标的
-│   │   ├── layer4_trade_plan.py      # 定计划·定执行
-│   │   └── layer5_review.py          # 盘后总结
-│   ├── pattern/                     # 模式识别策略
-│   │   ├── pattern_recognition.py    # 聚合策略调度
-│   │   ├── first_board_breakout.py   # 首板突破
-│   │   ├── second_board_dragon.py    # 二板定龙
-│   │   ├── weak_to_strong.py         # 弱转强（含龙头池管理）
-│   │   ├── dragon_second_wave.py     # 龙二波
-│   │   ├── signal_priority.py        # 信号优先级与互斥
-│   │   └── base.py                   # 统一契约与注册中心
-│   ├── execution/                   # 执行层
-│   │   └── retail_trader_support_v2.py  # 散户决策支持V2
-│   ├── report/                      # 报告层
-│   │   └── report_generator_v2.py   # 报告生成器V2
-│   ├── publish/                     # 发布层
-│   │   ├── wechat_publisher.py      # 微信公众号发布
-│   │   └── report_formatter.py      # 报告格式化（HTML）
-│   ├── stock_ranking/               # 多因子排序
-│   │   ├── multi_factor_scorer.py   # 多因子评分
-│   │   └── sector_position.py       # 板块席位
-│   └── utils/                       # 工具类
-├── backtest/                        # 回测框架
-│   ├── backtest_engine.py            # 回测引擎
-│   ├── replay_engine.py              # 行情回放引擎
-│   ├── performance_analyzer.py       # 绩效分析
-│   └── walk_forward.py               # 滚动窗口优化
-├── risk/                            # 风控模块
-│   ├── risk_manager.py              # 风控管理器
-│   ├── position_sizer.py            # 仓位计算
-│   ├── kelly_sizer.py               # 凯利公式
-│   └── circuit_breaker.py           # 回撤熔断
-├── snapshot/                        # 快照层 (P0)
-│   ├── writer.py                     # 快照写入
-│   ├── reader.py                     # 快照读取
-│   └── serialize.py                  # 序列化工具
-├── kb/                              # 知识库层 (P2-P3)
-│   ├── store.py                      # SQLite块存储
-│   ├── chunker.py                    # 文本分块
-│   ├── embeddings.py                 # 向量嵌入
-│   ├── retriever.py                  # 混合检索
-│   ├── ingest.py                     # 快照灌库
-│   ├── llm_client.py                 # LLM客户端
-│   ├── brief.py                      # AI每日解读
-│   └── tools.py                      # 定量查询工具
-├── web/                             # Web看板 (P1) / 桌面工具页面
-│   ├── app.py                        # FastAPI应用（含概览/龙头池/运行/日志/关于 路由+API）
-│   ├── templates/                    # Jinja2模板（base 侧边栏壳 + 各页面）
-│   └── static/                       # 静态资源
-├── desktop/                         # 桌面管理工具（pywebview 壳）
-│   ├── manager.py                    # 启动内嵌服务 + 打开原生窗口
-│   ├── runner.py                     # 进程内执行收盘分析 + 实时日志缓冲
-│   └── status.py                     # 概览健康检查 / 龙头池 / 日志读取
-├── packaging/                       # PyInstaller 打包
-│   └── manager.spec                  # 单目录 exe 打包配置
-├── scripts/                         # 辅助脚本
-│   ├── build_manager.py             # 一键打包桌面工具为 exe
-│   ├── build_winrate.py             # 构建胜率矩阵
-│   ├── generate_final_report.py     # 生成最终报告
-│   └── publish_to_wechat.py         # 微信公众号发布
-├── webdata/                         # Web/KB数据存储
-│   ├── snapshots/                    # 每日JSON快照
-│   ├── app.sqlite                    # 结构化索引
-│   └── kb.sqlite                     # 知识库
-├── main.py                          # 主程序入口
-├── run_manager.py                   # ★ 桌面管理工具入口（双击即用）
-├── run_web.py                       # Web服务入口（旧版只读看板）
-├── run_backtest.py                  # 回测入口
-├── scheduler.py                     # 定时任务调度
-└── requirements.txt                 # 依赖列表
+├─ backtest/                    # 模拟交易、计划转换、归因、滚动验证
+├─ config/
+│  ├─ factors/                  # 因子注册表与分层配置
+│  ├─ screening_profiles.yaml   # 指标筛选 profile
+│  ├─ risk_control.yaml         # 组合、退出、成本等统一风控配置
+│  ├─ settings.py               # 路径、Token、可覆盖运行配置
+│  └─ config_registry.py        # Web 参数配置元数据
+├─ core/
+│  ├─ data/                     # 数据源、缓存、DataPrep、MarketDataset
+│  ├─ etl/                      # Silver 标准化、质量检查、每日五阶段流水线
+│  ├─ factors/jobs/             # 当前使用的批量因子任务
+│  ├─ realtime/                 # 实时行情、板块行情、龙头池、盘中转强
+│  ├─ screening/                # 筛选引擎、解释、Gold 摘要
+│  └─ utils/                    # 日期、代码、涨跌停幅度等公共逻辑
+├─ desktop/                     # Web/桌面共用的任务控制器和状态聚合
+├─ scripts/                     # 独立运行数据、因子、筛选、实时叠加的脚本
+├─ snapshot/                    # 页面快照写入器
+├─ tests/                       # 当前主链路回归测试
+├─ web/
+│  ├─ app.py                    # FastAPI 页面、API、中间件、后台实时任务
+│  ├─ auth_store.py             # SQLite 用户、会话、登录日志
+│  ├─ permissions.py            # 菜单、页面和 API 权限矩阵
+│  ├─ realtime_cache.py         # 线程安全实时缓存和并发折叠
+│  ├─ templates/                # Jinja2 页面
+│  └─ static/                   # CSS、JS、静态资源
+├─ webdata/                     # 本地运行数据库与页面产物，默认不提交生成数据
+├─ run_web.py                   # Web 启动入口
+├─ run_backtest.py              # 回测命令行入口
+└─ README.md
 ```
 
-## 📈 数据流程
+## 5. 数据时间模型
 
+### 5.1 交易日约定
+
+系统统一使用 `YYYYMMDD`，例如 `20260629`。标准化层将字符串、整数或带分隔符日期统一为该格式。
+
+交易日判断优先读取本地交易日历。实时刷新窗口由 `core/realtime/trading_session.py` 计算：
+
+- 仅交易日。
+- 09:30 到 15:00。
+- 当前实现将午间休市也包含在该连续窗口内。
+- 非交易日、开盘前和收盘后不自动请求实时数据。
+
+### 5.2 日度决策时点
+
+假设 `T=20260629`：
+
+1. `T` 日收盘后运行“生成数据”。
+2. 生成 `T` 日 Silver、因子、筛选结果和页面快照。
+3. `screening_20260629.json` 表示 `T` 日盘后可知的候选信息。
+4. `T+1` 日盘前和盘中读取该候选集。
+5. `T+1` 日开盘必须满足高开和成交规则，或满足盘中转强规则后才成交。
+
+### 5.3 价格和金额单位
+
+- 股票代码在内部标准格式中使用 `000001.SZ`、`600000.SH` 等后缀形式。
+- 页面可显示六位代码，但查询和关联前会统一标准化。
+- Silver 金额字段统一到明确的元单位字段，例如 `amount_yuan`、`net_amount_yuan`。
+- 原始来源单位在标准化时转换，不在因子公式中临时猜测。
+- 页面交易价格统一显示两位小数，内部计算保留浮点精度。
+
+## 6. 数据来源
+
+### 6.1 Tushare 盘后数据
+
+主要使用：
+
+| 数据域 | 典型接口 | 用途 |
+| --- | --- | --- |
+| 股票日线 | `daily` / 全市场日线封装 | 开高低收、涨跌幅、成交量、成交额 |
+| 股票基础 | `stock_basic` | 股票名称、市场和基础信息 |
+| 每日指标 | `daily_basic` | 换手率、流通市值等 |
+| 指数日线 | `index_daily` | 上证、深证、创业板趋势和量能 |
+| 涨跌停名单 | `limit_list_d` | 官方涨停、跌停集合和连板属性 |
+| 最强板块 | `limit_cpt_list` | 当日强势概念辅助数据 |
+| 同花顺板块 | `ths_index` / `ths_daily` | 行业、概念板块行情和历史强度 |
+| 资金流 | `moneyflow_summary`、`moneyflow_ths`、`moneyflow_dc` | 市场、个股和多源资金流共识 |
+| 热度 | `ths_hot`、`dc_hot` | 双平台关注度共识和拥挤风险 |
+| 龙头标签 | `kpl_list` | 开盘啦涨停与龙头质量确认 |
+| 融资 | `margin_detail` | 融资净买入变化 |
+| 大宗交易 | `block_trade` | 折价和事件风险 |
+| 龙虎榜个股 | `top_list` | 上榜原因、买卖额和净买入 |
+| 机构席位 | `top_inst` | 机构买卖、席位数和净买入 |
+| 知名游资 | `hm_list` / `hm_detail` | 官方游资名称、营业部和每日交易明细 |
+
+龙虎榜知名游资明细通常需要较高积分权限。接口无权限或无数据时，龙虎榜因子按缺失或中性降级，不阻断主流程。
+
+### 6.2 实时行情来源
+
+实时个股和板块行情通过本地已安装的行情包获取，当前支持：
+
+- `easyquotation`
+- `pqquotation`
+- `adata`
+- `eltdx` 兜底
+
+不同环境的数据可用性取决于网络、包版本、上游站点策略和本地缓存。服务器与本地即使代码相同，若 Python 包、网络出口或缓存不同，实时价格也可能不同。
+
+### 6.3 本地历史数据
+
+以下内容也属于计算输入：
+
+- 交易日历。
+- 已缓存的历史日线。
+- 历史涨停、跌停、板块和龙虎榜数据。
+- 前序交易日的 Silver 和因子表。
+- 前序筛选结果与龙头日期。
+
+## 7. 每日数据生成五阶段
+
+页面“生成数据”和 `core/etl/daily_pipeline.py` 执行同一条主链路。
+
+### 7.1 Phase 1：预取和 Silver 标准化
+
+`DataPrep.build()` 一次性构造只读 `MarketDataset`，主要预取：
+
+1. 当日全市场股票日线。
+2. 股票基础信息。
+3. 当日 `daily_basic`。
+4. 最近 16 个交易日涨停池。
+5. 当日官方跌停池。
+6. 行业、概念板块列表和近 10 日板块日线。
+7. 当日及必要历史的板块最强榜和资金流。
+8. 上证、深证、创业板指数的趋势和量能窗口。
+9. 龙虎榜个股、机构和知名游资明细。
+10. 多源资金流、热榜、KPL、融资和大宗交易信号。
+
+主路径不再对全市场逐股循环请求历史日线，而是优先使用全市场日线、缓存和已有 Silver 窗口。这是控制 Tushare 频率和服务器内存的重要设计。
+
+标准化结果写入 DuckDB，同时尝试落 Parquet；Parquet 不可用时降级为 CSV。质量报告单独写入 `webdata/etl_quality/`。
+
+### 7.2 Phase 2：批量因子计算
+
+任务固定按依赖顺序运行：
+
+1. `market`
+2. `lhb`
+3. `signals`
+4. `sector`
+5. `stock`
+
+原因：
+
+- 个股因子需要市场、板块、龙虎榜和短线增强因子。
+- 板块因子需要资金流和龙虎榜板块聚合。
+- 因子任务只读 Silver 表，不直接请求网页或行情接口。
+
+### 7.3 Phase 3：指标筛选
+
+`ScreeningEngine` 从 `factor_stock_wide` 读取候选源，执行：
+
+1. 硬过滤。
+2. 按优先级执行可降级过滤。
+3. 在候选池内部计算分位分数。
+4. 执行目标区间惩罚。
+5. 叠加龙虎榜和可选增强项。
+6. 输出 Top N、淘汰项、执行轨迹和解释文本。
+
+结果写入：
+
+```text
+webdata/screening/screening_YYYYMMDD.json
 ```
-1. 数据采集 (Tushare/AkShare)
-   ↓
-2. 情绪周期分析 (Layer 1)
-   ↓
-3. 板块轮动分析 (Layer 2)
-   ↓
-4. 个股筛选 + 模式识别 (Layer 3)
-   ↓
-5. 交易计划生成 (Layer 4)
-   ↓
-6. 盘后总结 (Layer 5)
-   ↓
-7. 报告生成 (Excel + 快照JSON + Web看板)
-   ↓
-8. [可选] 知识库灌入 + AI解读
+
+### 7.4 Phase 4：分析摘要
+
+Phase 4 汇总大盘、板块、个股和筛选结果，生成页面直接使用的分析摘要：
+
+```text
+webdata/screening/analysis_YYYYMMDD.json
 ```
+
+该摘要避免概览和交易计划页面临时拼接大量表。
+
+### 7.5 Phase 5：页面快照
+
+将最终结果写入：
+
+- 每日完整 JSON 快照。
+- `app.sqlite` 中的结构化索引。
+- `factors.duckdb` 中的定量表。
+
+典型文件：
+
+```text
+webdata/snapshots/YYYYMMDD.json
+```
+
+快照包含：
+
+- 元信息和交易日。
+- 市场情绪和综合评分。
+- 交易计划。
+- 指标筛选结果。
+- 板块和涨停数据。
+- 已启用因子标识。
+- 数据质量和生成信息。
+
+### 7.6 失败与降级策略
+
+- 单个非核心数据源失败时记录警告，并以空表或中性因子继续。
+- 核心股票日线或关键仓库写入失败时，阶段结果标记失败。
+- DuckDB 写入失败时允许文件落盘，但质量页会显示异常。
+- 页面应展示已经完成的最近数据，不应因某个辅助接口失败而整体不可用。
+- 历史页面的数据不会自动等于最新代码重新计算后的结果，需要重新跑对应交易日。
+
+## 8. 数据仓库设计
+
+### 8.1 Bronze / 原始缓存
+
+原始缓存位于 `CACHE_DIR`，默认是 `data/cache/`。它保留接口返回的日级数据，减少重复请求。
+
+常见子目录包括：
+
+- `market/`
+- `sector/`
+- `concept/`
+- `moneyflow/`
+- `lhb/`
+- `summary/`
+
+原始缓存允许保留来源字段，但不能直接作为跨模块业务口径。
+
+### 8.2 Silver / 标准化表
+
+Silver 表是数据计算的统一入口：
+
+| 表 | 含义 |
+| --- | --- |
+| `stock_daily_silver` | 全市场标准日线和日度基础字段 |
+| `sector_daily_silver` | 行业、概念板块标准日线 |
+| `index_daily_silver` | 指数标准日线 |
+| `limit_up_pool_silver` | 官方涨停池 |
+| `limit_down_pool_silver` | 官方跌停池 |
+| `lhb_daily_silver` | 龙虎榜个股汇总 |
+| `lhb_institution_silver` | 机构席位交易 |
+| `lhb_hot_money_silver` | 知名游资交易明细 |
+| `stock_capital_flow_silver` | 多源个股资金流 |
+| `sector_capital_flow_silver` | 板块资金流 |
+| `stock_attention_silver` | 同花顺、东方财富热度 |
+| `stock_leader_signal_silver` | KPL 龙头与涨停信号 |
+| `stock_margin_silver` | 融资明细 |
+| `stock_event_silver` | 大宗交易等事件信号 |
+
+写入策略按交易日分区替换：先删除目标交易日，再插入本批次标准化数据。日期列和代码列在写入前统一类型，避免 DuckDB 中 INTEGER 与 VARCHAR 比较错误。
+
+### 8.3 Gold / 因子表
+
+| 表 | 粒度 | 用途 |
+| --- | --- | --- |
+| `factor_market_wide` | 交易日 | 大盘环境和市场总分 |
+| `factor_sector_wide` | 交易日、板块 | 热度、持续性、主线和资金共振 |
+| `factor_stock_wide` | 交易日、股票 | 个股筛选主表 |
+| `factor_value_long` | 交易日、实体、因子 | 页面展示命中因子和归因 |
+| `factor_lhb_stock_wide` | 交易日、股票 | 龙虎榜个股因子 |
+| `factor_lhb_sector_wide` | 交易日、板块 | 龙虎榜板块共振 |
+| `factor_signal_stock_wide` | 交易日、股票 | 资金流、热度、KPL、融资、事件增强 |
+| `factor_signal_sector_wide` | 交易日、板块 | 板块资金流增强 |
+
+宽表用于高效筛选，长表用于通用展示、命中指标说明和回测归因。
+
+### 8.4 SQLite
+
+`webdata/app.sqlite` 同时承担：
+
+- 用户和会话管理。
+- 登录日志。
+- 角色权限覆盖。
+- 页面快照和结构化索引。
+
+它是运行期可写数据库。部署时目录所有者必须与 systemd 服务用户一致。
+
+## 9. 因子体系
+
+### 9.1 大盘环境因子
+
+当前市场总分由四个维度等权合成：
+
+```text
+market_score = 25% * trend_score
+             + 25% * volume_score
+             + 25% * width_score
+             + 25% * emotion_score
+```
+
+主要输入：
+
+- `mkt_avg_pct_chg`：全市场或代表性趋势强度。
+- `mkt_amount_ratio_5d`：成交额相对近 5 日。
+- `mkt_width_up_ratio`：上涨股票占比。
+- `mkt_limit_up_count`：官方涨停家数。
+- `mkt_limit_down_count`：官方跌停家数。
+- `mkt_market_score`：市场综合分。
+
+概览中的涨停、跌停必须来自官方 Silver 表。市场量能来自全市场日线成交额汇总及历史对比。
+
+### 9.2 板块因子
+
+板块只保留“概念”和“行业”，过滤特色板块。主要因子包括：
+
+- 当日涨跌幅和动量。
+- 成交额横截面分位。
+- 近 5 日成交额强度。
+- 热点持续性。
+- 资金流强度。
+- 价格与资金方向共振。
+- 龙虎榜板块共振。
+- 主线评分。
+
+页面中“热点概念”和“主线主题”不是同义词：
+
+- **热点概念**：强调当日强度排名。
+- **主线主题**：强调近多日持续活跃、当日仍有确认、资金和个股形成共振。
+
+因此，当日排名靠前的板块不一定进入主线；主线也不会直接复制热点列表。
+
+### 9.3 个股基础因子
+
+主要包括：
+
+- `stk_pct_chg_1d`：当日涨跌幅强度。
+- `stk_limit_progress`：相对所属市场理论涨停幅度的进度。
+- `stk_vol_ratio_5d`：成交量相对近 5 日均值。
+- `stk_amount_ratio_5d`：成交额相对近 5 日均值。
+- `stk_new_high_20d`：20 日强势位置。
+- `stk_liquidity_percentile`：全市场流动性分位。
+- `stk_board_height`：连板高度。
+- `stk_seal_time_quality`：封板时间和炸板质量。
+- `stk_float_mv_fit`：流通市值适配。
+- `stk_board_position`：打板身位综合分。
+
+### 9.4 板块到个股的映射因子
+
+- `stk_sector_heat_score`：所属板块当日热度。
+- `stk_sector_persistence_score`：所属板块持续性。
+- `stk_sector_mainline_score`：所属板块主线程度。
+- `stk_sector_resonance_score`：个股强度与板块强度共振。
+
+个股页面会展示所属行业、概念及命中的板块相关因子，避免只看一个接近 100 的总分。
+
+### 9.5 短线资金和事件增强
+
+- `stk_capital_flow_consensus`：同花顺与东方财富资金流共识。
+- `stk_capital_flow_persistence`：资金流持续性。
+- `stk_attention_consensus`：双平台热度共识。
+- `stk_attention_crowding_risk`：热度过高但资金未确认的拥挤风险。
+- `stk_kpl_leader_quality`：开盘啦龙头和涨停质量。
+- `stk_margin_acceleration`：融资净买入加速度。
+- `stk_block_trade_risk`：大宗交易折价风险。
+
+增强因子不是强制入池门槛。它们用于加减分、同分排序和回测分组比较。
+
+### 9.6 龙虎榜因子
+
+原始层保存：
+
+- 每日龙虎榜个股。
+- 机构交易。
+- 知名游资席位明细。
+
+因子层生成：
+
+- `stk_lhb_net_buy_score`：龙虎榜净买入强度。
+- `stk_lhb_institution_score`：机构净买入强度。
+- `stk_lhb_institution_consensus`：机构席位方向共识。
+- `stk_lhb_repeat_persistence`：近 5 日上榜和净买入持续性。
+- `stk_lhb_sector_resonance`：龙虎榜与所属板块共振。
+- `stk_lhb_composite_score`：客观龙虎榜综合分。
+- `stk_lhb_crowding_risk`：席位集中、重复上榜和高换手形成的风险。
+
+使用原则：
+
+- 普通候选股不上榜也可以入选。
+- 龙虎榜主要用于排序增强，不作为硬门槛。
+- 龙头池中的龙虎榜权重更高，用于确认资金认可和接力风险。
+- `T` 日榜单只影响 `T+1`。
+- 不使用人工信誉名单或主观游资风格。
+
+### 9.7 因子注册表与因子面板
+
+`config/factors/factor_registry.yaml` 保存因子名称、分类、说明、值域、默认权重、启用状态和参数。
+
+因子面板按以下类别展示：
+
+- 大盘环境。
+- 情绪周期。
+- 板块。
+- 个股技术。
+- 资金流。
+- 龙虎榜。
+- 跨周期。
+
+注意：注册表是配置目录，Gold 因子任务的实际输出表才是当前计算事实。旧注册项即使仍在 YAML 中，也只有被当前任务读取或产出时才真正参与筛选。
+
+## 10. 默认指标筛选逻辑
+
+配置文件：`config/screening_profiles.yaml`。
+
+### 10.1 候选源
+
+默认 profile 从 `factor_stock_wide` 读取目标交易日股票，不再读取旧四策略结果。
+
+### 10.2 硬过滤
+
+硬过滤不可放宽。默认规则：
+
+```text
+stk_liquidity_percentile >= 35
+```
+
+即成交额横截面至少达到基础流动性要求。
+
+### 10.3 优先过滤
+
+优先过滤按顺序执行，但必须保证每日有足够候选，避免某个严格阈值使整日结果为空。
+
+优先级 1：
+
+```text
+limit_progress >= 0.95
+min_keep = 8
+max_drop_ratio = 0.75
+```
+
+优先级 2：
+
+```text
+stk_new_high_20d >= 70
+min_keep = 5
+max_drop_ratio = 0.70
+```
+
+若某条优先规则导致保留数量低于 `min_keep`，或一次删除比例超过 `max_drop_ratio`，引擎会放宽该层并记录 trace，而不是生成空结果。
+
+### 10.4 候选池分位排名
+
+默认不直接拿高度压缩在 90 到 100 的绝对分相加，而是在当日候选池内部转换为分位后加权：
+
+| 因子 | 权重 |
+| --- | ---: |
+| 技术综合分 `tech_score` | 20% |
+| 流动性分位 `stk_liquidity_percentile` | 5% |
+| 20 日强势位置 `stk_new_high_20d` | 15% |
+| 5 日成交额比 `stk_amount_ratio_5d` | 20% |
+| 5 日成交量比 `stk_vol_ratio_5d` | 5% |
+| 打板身位 `stk_board_position` | 10% |
+| 主线强度 `stk_sector_mainline_score` | 10% |
+| 板块持续性 `stk_sector_persistence_score` | 5% |
+| 板块共振 `stk_sector_resonance_score` | 10% |
+
+成交额评分在 1.15 倍附近达到峰值，区间内不再全部固定为 100；20 日位置在温和突破时最优，过度乖离会降分；非涨停股票的打板身位固定为中性 50，不再由流通市值制造伪身位差异。分位排名因此既保留横截面差异，也避免绝对分集中在 100 附近。
+
+### 10.5 成交额目标区间惩罚
+
+成交额不是越大越好：
+
+- `amount_ratio < 0.8`：成交额偏弱，线性扣分，最大扣 10 分。
+- `amount_ratio > 1.5`：成交额过热，线性扣分，最大扣 15 分。
+- 目标是保留有承接但不过热的量能区间。
+
+“接近涨停但成交额相对 5 日偏弱”是风险扣分项，不再只作为提示文本。
+
+### 10.6 龙虎榜增强
+
+默认开启，单票总调整绝对值最多 8 分，拥挤风险最多额外扣 3 分。组成包括：
+
+- 净买入。
+- 机构净买入。
+- 机构共识。
+- 上榜持续性。
+- 板块共振。
+
+### 10.7 输出数量与解释
+
+默认输出 Top 10。每条结果包含：
+
+- 股票名称和代码。
+- 行业和概念。
+- 候选排名、总分和计划评分。
+- 主要筛选理由。
+- 命中的因子及其原始值、分数和排名含义。
+- 成交额惩罚和龙虎榜调整。
+- 每一步过滤 trace。
+
+输出 JSON 同时保留：
+
+- `final`：最终候选。
+- `candidate_pool`：参与排序的候选。
+- `rejected`：硬过滤淘汰项。
+- `traces`：过滤执行和降级记录。
+- `scenarios`：增强因子对照结果。
+
+## 11. 页面数据产品
+
+### 11.1 概览
+
+概览展示：
+
+- 情绪周期和市场综合评分。
+- 上证、深证、创业板表现。
+- 官方涨停、跌停数量。
+- 上涨、下跌和平盘家数。
+- 全市场成交额及相对历史量能状态。
+- 小票、中票、大票分群情绪。
+- 连板晋级率和高位晋级情况。
+- 当日指标候选数量。
+
+概览是每日快照的结果，不会因代码更新自动重算历史日期。服务器与本地概览不同，通常是因为 `WEB_DATA_DIR` 中快照、DuckDB 或缓存不同，而不是页面模板不同。
+
+### 11.2 交易计划
+
+交易计划由筛选结果直接生成，不再有旧策略 Tab。计划包含：
+
+- 候选股票。
+- 计划评分。
+- 建议仓位。
+- 入场条件。
+- 止损和移动止盈说明。
+- 次日预期与风险提示。
+- 筛选理由和命中指标。
+
+计划只是 `T+1` 的观察清单，实际成交仍需次日买点确认。
+
+### 11.3 指标筛选
+
+仅展示指标筛选结果。折叠标题显示股票名称和代码，详情不重复代码和名称。详情重点展示：
+
+- 行业和概念。
+- 计划相关的入场、退出、风险信息。
+- 筛选理由。
+- 命中因子。
+
+### 11.4 板块热度
+
+- 只展示概念和行业。
+- 折叠标题显示板块名称和代码。
+- 详情不重复板块名称、代码、交易日和计算时间。
+- 展示动量、成交额、量能、持续性、主线和命中因子。
+- “热点概念”和“主线主题”分开计算。
+
+### 11.5 涨停数据
+
+- 涨停股票来自官方涨停池。
+- 按连板高度展示梯队。
+- 展示首次封板时间、炸板次数、行业等。
+- 概念连板梯队依赖本地股票到概念成员缓存。
+
+若服务器没有概念连板梯队，应先检查 `CACHE_DIR/concept/members/` 和板块元数据是否已经生成，而不是修改涨停统计口径。
+
+### 11.6 龙虎榜
+
+提供两个标签页：
+
+- 按股票展示：个股榜单、机构、游资席位和金额。
+- 按知名游资展示：游资 -> 股票 -> 营业部明细，支持收起和展开。
+
+展示内容全部来自官方数据字段，不显示人工信誉等级。
+
+## 12. 实时行情设计
+
+### 12.1 为什么使用后台缓存
+
+多个用户同时访问时，不能让每个浏览器都直接触发行情接口。Web 进程启动后创建后台线程：
+
+1. 每 5 秒刷新默认实时载荷。
+2. 只在交易日 09:30 到 15:00 工作。
+3. 缓存默认 TTL 为 `max(刷新间隔 * 3, 15 秒)`。
+4. 并发请求同一个 key 时只允许一个加载器访问上游，其余请求等待同一结果。
+5. 新请求失败时可返回尚可使用的旧缓存，并标记 stale。
+6. 数据生成任务运行期间优先返回缓存，避免行情与跑批争抢资源。
+
+环境变量：
+
+```env
+REALTIME_REFRESH_SECONDS=5
+REALTIME_CACHE_TTL_SECONDS=15
+```
+
+### 12.2 缓存内容
+
+后台默认预热：
+
+- 当日或最新交易计划候选的实时确认结果。
+- 同花顺概念和行业板块行情。
+- 实时数据源健康状态。
+
+单只股票详情可按需请求，但候选列表和多人共用页面应优先使用批量缓存。
+
+### 12.3 实时确认状态
+
+基础状态：
+
+- `确认`：高开且实时强度满足确认条件。
+- `观察`：未满足确认、行情缺失或行情过期。
+- `取消`：低开或盘中跌幅触发取消线。
+
+盘后筛选分不会被实时价格重算。实时层只决定计划是否确认、继续观察或取消。
+
+### 12.4 单进程限制
+
+当前缓存是进程内存缓存。部署时推荐单个 Uvicorn Web 进程。如果启动多个 worker，每个进程都会各自刷新一次行情，无法达到全站只请求一次的目标。
+
+需要横向扩容时，应把实时刷新器独立成一个服务，并将缓存迁移到 Redis。
+
+## 13. 龙头池和盘中转强
+
+### 13.1 龙头池来源
+
+龙头池读取最近 10 个交易日的候选池，但候选名次不参与龙头评分和身份判定。它保留：
+
+- 当日通过独立地位证据门槛的核心龙头。
+- 各主线板块中通过门槛的板块龙头，同一板块只保留评分最高代表。
+- 最近 10 日曾被正式识别、当前仍值得观察的近期龙头。
+
+每只股票记录：
+
+- 来源日期。
+- 最后一次成为龙头的日期。
+- 距今交易日数。
+- 入选次数。
+- 最佳排名和最近排名。
+- 当前是否仍是当日候选。
+
+### 13.2 龙头评分
+
+独立龙头评分由以下维度组成：
+
+```text
+30% 板块地位：主线、持续性、个股板块共振
+25% 市场辨识度：真实身位、封板质量、KPL、涨停进度、热度
+20% 身份持续性：过去正式龙头事件和连续辨识度
+15% 资金认可：龙虎榜、机构、多源资金流
+10% 接力安全：量能健康、拥挤安全和事件风险
+```
+
+身份门槛同时要求：
+
+- 至少具备涨停、连板、KPL、强热度或强板块中的显著涨幅之一。
+- 核心龙头评分不低于 72，板块地位不低于 62，市场辨识度不低于 60，至少三个维度形成证据。
+- 板块龙头评分不低于 64，板块地位不低于 62，至少两个维度形成证据。
+- 严重量能失衡或安全度不足时不授予龙头身份。
+
+候选名次仅在页面显示为“观察顺序”，不能创造龙头身份。近期龙头继承的也是过去正式通过证据门槛的事件，并显示“上一交易日龙头”或“N 个交易日前龙头”。
+
+### 13.3 盘中转强
+
+盘中转强页面观察近期龙头，而实时行情页面观察当日指标筛选结果。两者用途不同：
+
+- **实时行情**：确认最新交易计划能否执行。
+- **盘中转强**：观察近期龙头是否重新获得价格和资金强度。
+
+未取得实时行情时保持观察，不使用虚构价格。
+
+## 14. 模拟交易设计
+
+### 14.1 数据源
+
+当前回测计划只来自：
+
+```text
+webdata/snapshots/*.json 中的 trade_plans
+webdata/screening/screening_*.json
+```
+
+`backtest/plan_source.py` 将 JSON 结果转换为回测所需的临时计划文件。旧四策略计划不再是主数据源。
+
+### 14.2 时间对齐
+
+回测在交易日 `T` 加载上一交易日 `T-1` 生成的计划：
+
+```text
+T-1 收盘后选股 -> T 日判断开盘和盘中买点 -> T+1 起允许卖出
+```
+
+缺少上一交易日计划、当日日线或前收价时，该股票跳过，不使用随机价格兜底。
+
+### 14.3 候选范围
+
+默认 `max_plan_rank=0`，表示不按固定名次截断。所有候选先按评分排序，再逐只执行买点、现金、持仓数和组合风控校验。
+
+因此系统不是“固定只买前三名”，也不是“所有候选都买”。是否成交由后续条件共同决定。
+
+### 14.4 市场分层
+
+当前回测引擎实际使用：
+
+| 市场分 | 新开仓规则 |
+| --- | --- |
+| `< 60` | 停止开仓 |
+| `60 - 65` | 只保留计划评分不低于 80 的高确信候选 |
+| `65 - 70` | 只保留计划评分不低于 76 的候选 |
+| `>= 70` | 所有候选进入买点检查 |
+
+这里的阈值以 `backtest/backtest_engine.py` 为实际执行口径。`risk_control.yaml` 中的全局市场阈值可用于页面配置和其他模块，但当前回测通过 `from_risk_config()` 保留了上述已验证策略阈值。
+
+### 14.5 开盘买入规则
+
+硬条件：
+
+1. 必须有有效开盘价和前收价。
+2. 必须严格高开，即开盘涨幅 `> 0%`。
+3. 高开不得超过 `3%`。
+4. 低开、平开或高开超过 3% 直接放弃竞价买点。
+5. 接近理论涨停价开盘视为无法成交。
+6. 高开 2% 到 3% 时，仓位乘以 75%。
+
+价格包含 0.2% 买入滑点。
+
+### 14.6 竞价买点和盘中转强
+
+- 计划评分 `>= 74`：允许走竞价或计划目标价买点。
+- 计划评分 `< 74`：必须先满足盘中转强前置条件。
+
+盘中转强前置条件：
+
+```text
+tech_score >= 80
+stk_sector_resonance_score >= 60
+0.80 <= amount_ratio <= 1.50
+```
+
+然后当日最高价必须触及：
+
+```text
+开盘价 * 1.01
+```
+
+触及后按转强价加滑点成交。该逻辑让非前三名候选也有机会成交，但必须出现更明确的盘中确认。
+
+### 14.7 仓位和组合约束
+
+默认值：
+
+- 初始资金：100 万。
+- 单票最大仓位：20%。
+- 总仓位上限：80%。
+- 最多同时持仓：8 只。
+- 单一板块最大仓位：40%。
+- 至少保留 20% 现金。
+
+计划仓位基础映射：
+
+- 轻仓：10%。
+- 中性：15%。
+- 重仓：20%。
+
+热点共振可放大计划仓位，但最终仍受组合上限约束。
+
+### 14.8 止损和移动止盈
+
+当前没有固定止盈价。退出顺序：
+
+1. 硬止损。
+2. 分阶段高点回落止盈。
+3. 时间止损。
+
+硬止损：
+
+- 实际回测线为买入成本下方 4%。
+- 若次日开盘已经跳空跌破止损价，按开盘价成交并标记“跳空止损”。
+- 若盘中最低价触及止损价，按止损价成交。
+- 遵守 T+1，买入当日不做正常卖出撮合。
+
+移动止盈：
+
+| 持仓最高盈利 | 从最高点回落 |
+| --- | ---: |
+| 5% 到 10% | 4% 退出 |
+| 10% 到 20% | 6% 退出 |
+| 20% 以上 | 10% 退出 |
+
+只要股票持续创新高就继续持有，不设置固定 10%、20% 止盈。
+
+时间止损：
+
+- 持仓达到 5 个交易日。
+- 当前收益仍低于 2%。
+- 触发退出。
+
+### 14.9 撮合和成本
+
+- 买卖滑点：0.2%。
+- 佣金：0.03%。
+- 印花税：卖出时 0.1%。
+- 最小持仓：1 个交易日。
+- 使用真实历史 OHLC，不使用随机模拟价格。
+- 除权除息时根据官方 `pre_close` 对买入价、最高价、止损价和股数做连续性修正。
+
+OHLC 无法知道日内高低点先后顺序，因此移动止盈以当日最高价更新峰值，但使用收盘价确认高点回落，避免虚构日内路径。
+
+### 14.10 未平仓收益
+
+回测结束时仍持有的股票按最后有效收盘价进行盯市：
+
+- 计入期末总资产和总收益率。
+- 在持仓明细中显示浮动盈亏。
+- 不计入已完成交易胜率。
+
+### 14.11 “逐笔记录”和“交易笔数”
+
+- **逐笔记录**：每次买入和每次卖出各占一行。
+- **交易笔数**：一组完整买入和卖出形成一笔已平仓交易。
+- 仍持仓股票只有买入行，不计为已平仓交易。
+
+因此逐笔记录数量通常大于已完成交易笔数，二者不应直接相等。
+
+### 14.12 区间重算和单日接力
+
+支持两种运行方式：
+
+- **区间重算**：从初始资金开始，按日期重新执行整个区间。
+- **单日接力**：读取上一次保存的账户状态，只运行指定交易日，例如直接运行 `20260623` 并承接 `20260622` 的现金和持仓。
+
+单日接力应连续执行交易日；若中间缺日或需要重置，使用页面的重置状态选项。
+
+## 15. 回测对照与因子反哺
+
+### 15.1 可选增强组合
+
+回测页面支持选择基线和增强项组合，例如：
+
+- 基线。
+- 基线 + 资金流共识。
+- 基线 + 热度共识。
+- 基线 + 龙头质量。
+- 基线 + 龙虎榜。
+- 多个增强项组合。
+
+增强组合只改变回测使用的候选排序或准入增强，不重写原始筛选文件。
+
+### 15.2 龙虎榜四组比较
+
+建议固定比较：
+
+1. 不使用龙虎榜。
+2. 仅净买入。
+3. 机构净买入。
+4. 龙虎榜 + 板块共振。
+
+重点指标：
+
+- 覆盖率。
+- 胜率。
+- 平均收益。
+- 止损率。
+- 最大回撤。
+- 总盈亏和资金占用。
+
+### 15.3 排名归因
+
+按候选排名统计：
+
+- 样本数。
+- 胜率。
+- 总盈亏。
+- 止损率。
+- 移动止盈率。
+
+排名只用于归因，不应根据同一批历史样本直接固定“只买第几名”。
+
+### 15.4 因子归因
+
+对每个命中因子比较强项和弱项样本：
+
+- 强项样本总盈亏和胜率。
+- 弱项样本总盈亏和止损率。
+- 强弱差。
+- 结论：正向、弱项导致止损或中性观察。
+
+### 15.5 退出归因
+
+退出原因统一中文展示：
+
+- 硬止损。
+- 跳空止损。
+- 移动止盈。
+- 时间止损。
+- 持仓中。
+
+通过退出归因区分“选股错误”和“交易管理错误”。如果高质量候选大量触发跳空止损，问题更可能出在隔夜风险和买点；如果高盈利股票过早退出，问题更可能出在移动止盈参数。
+
+### 15.6 滚动训练和验证
+
+系统提供按月 walk-forward 结果，默认使用 3 个完整月份训练，下 1 个月做样本外验证：
+
+1. 训练窗口只比较预先声明的入场组合。
+2. 验证月不参与组合选择。
+3. 每次向前滚动 1 个月并重新训练。
+4. 入场组合包含不按名次截断的全候选方案，同时保留前 3 名作为对照组。
+
+参数只有在多个验证折中方向一致、样本量足够、最大回撤可接受时才值得进入默认配置。禁止只根据某一批 97 笔或 125 笔交易反复调参。
+
+## 16. Web 页面与权限
+
+### 16.1 菜单
+
+当前菜单由 `web/permissions.py` 统一定义，`base.html` 循环渲染当前用户可见项，不再写死。
+
+| 分组 | 页面 |
+| --- | --- |
+| 常用 | 概览、交易计划 |
+| 数据浏览 | 指标筛选、板块热度、涨停数据、龙虎榜、龙头池、盘中转强、实时行情 |
+| 回测 | 模拟交易、回撤分析 |
+| 系统 | 用户管理、权限配置、生成数据、参数配置、指标因子、日志、关于 |
+
+### 16.2 角色
+
+当前角色：
+
+- `admin`：超级管理员。
+- `viewer`：只读用户。
+
+`/admin/permissions` 可配置每个角色的：
+
+- 菜单是否显示。
+- 页面和 API 是否允许访问。
+
+以下功能永久为管理员专属，权限矩阵不能开放给只读用户：
+
+- 用户管理。
+- 权限配置。
+- 生成数据。
+- 参数配置。
+- 指标因子。
+- 日志。
+
+中间件同时检查页面路径和 API 前缀。隐藏菜单不等于授权，后端仍会拦截直接访问。
+
+### 16.3 用户数据库
+
+用户、会话和登录日志保存在 `webdata/app.sqlite`：
+
+- 密码使用 PBKDF2-SHA256 加盐哈希。
+- 账号状态支持启用和禁用。
+- 支持到期日。
+- 每个用户可设置 1 到 5 个最大会话，产品建议 1 到 2 个。
+- 记录登录 IP、User-Agent、时间、成功状态和失败原因。
+- 后台可创建用户、延期、禁用、重置密码、调整会话数和强制下线。
+- 到期用户跳转 `/expired`。
+
+### 16.4 会话策略
+
+```env
+APP_SESSION_POLICY=kick_oldest
+```
+
+- `kick_oldest`：新设备登录时踢掉最早会话，也是默认策略。
+- `reject_new`：在线设备数达到上限时拒绝新会话。
+- 默认 Cookie 有效期 7 天，但不会超过用户订阅到期时间。
+
+### 16.5 限流和水印
+
+- 默认每个普通用户/IP 每分钟 240 个请求。
+- 管理员最低允许 600 个请求。
+- 登录接口单独限制为每分钟 40 次。
+- 页面角落显示账号和到期日水印。
+- 导出或截图型页面应复用相同水印层。
+
+```env
+APP_RATE_LIMIT_PER_MINUTE=240
+APP_COOKIE_SECURE=1
+```
+
+生产环境启用 HTTPS 后应设置 `APP_COOKIE_SECURE=1`。
+
+## 17. 配置系统
+
+### 17.1 路径配置
+
+`config/settings.py` 支持将运行数据移出代码仓库：
+
+```env
+CACHE_DIR=/srv/a-stock/cache
+WEB_DATA_DIR=/srv/a-stock/webdata
+OUTPUT_DIR=/srv/a-stock/output
+```
+
+派生路径：
+
+```text
+SNAPSHOT_DIR = WEB_DATA_DIR/snapshots
+APP_DB_PATH  = WEB_DATA_DIR/app.sqlite
+FACTOR_DB_PATH = WEB_DATA_DIR/factors.duckdb
+```
+
+这样 Git 拉取、删除仓库和重新部署时，不会删除线上用户、因子仓和历史快照。
+
+### 17.2 Token
+
+Tushare Token 只从环境变量或 `.env` 读取：
+
+```env
+TUSHARE_TOKEN=replace_with_your_token
+```
+
+不要把真实 Token 写入代码、README、GitHub Actions 日志或前端 JavaScript。
+
+### 17.3 初始管理员
+
+仅在用户表为空时，系统使用以下环境变量创建初始账号：
+
+```env
+APP_ADMIN_USER=admin
+APP_ADMIN_PASSWORD=change_this_password
+```
+
+`APP_VIEWER_USER` 和 `APP_VIEWER_PASSWORD` 也只用于首次初始化。数据库已有用户后，应在 `/admin/users` 管理账号，不要期待修改 `.env` 自动覆盖现有密码。
+
+### 17.4 YAML 配置
+
+- `config/screening_profiles.yaml`：筛选 profile、过滤、权重、惩罚、Top N。
+- `config/risk_control.yaml`：账户、仓位、止损、移动止盈、成本。
+- `config/factors/factor_registry.yaml`：因子元数据和启用状态。
+- `config/factors/*.yaml`：历史分层和因子配置。
+
+### 17.5 Web 运行期覆盖
+
+参数配置页将允许修改的 settings 写入：
+
+```text
+webdata/config_overrides.json
+```
+
+`settings.py` 在默认值定义完成后应用该覆盖。删除或重置覆盖后才会回到源码默认值。
+
+生产环境修改参数前应保存当前回测批次和配置快照，以便复现。
+
+## 18. 安装与本地启动
+
+### 18.1 Python 版本
+
+推荐 Python 3.10 或 3.11。当前生产服务器使用 Python 3.10。
+
+### 18.2 Windows
+
+```powershell
+cd G:\a_stock_sentiment_system
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install duckdb PyYAML python-multipart
+python run_web.py --host 127.0.0.1 --port 8000
+```
+
+访问：
+
+```text
+http://127.0.0.1:8000/
+```
+
+### 18.3 Linux
+
+```bash
+cd /opt/a_stock_sentiment_system
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install duckdb PyYAML python-multipart
+.venv/bin/python run_web.py --host 127.0.0.1 --port 8000
+```
+
+Ubuntu 未安装 `python-is-python3` 时，系统命令可能只有 `python3`。激活虚拟环境后应优先直接使用 `.venv/bin/python`，避免解释器混用。
+
+### 18.4 开发模式
+
+```powershell
+python run_web.py --host 127.0.0.1 --port 8000 --reload
+```
+
+生产环境不要使用 `--reload`。
+
+## 19. 生成数据
+
+### 19.1 Web 页面
+
+管理员进入“生成数据”：
+
+- 单日模式：生成指定交易日。
+- 批量模式：按交易日顺序运行开始日期到结束日期。
+- 页面轮询 `/api/run/status` 显示增量日志和阶段状态。
+
+同一时刻只允许一个生成任务。2 核 2 GB 服务器建议串行运行历史日期，不要并发启动多个 Python 进程。
+
+### 19.2 独立脚本
+
+仅运行 Phase 1：
+
+```bash
+.venv/bin/python scripts/run_etl_daily.py --date 20260629 --prev-date 20260626
+```
+
+运行因子任务：
+
+```bash
+.venv/bin/python scripts/run_factor_jobs.py --date 20260629 --jobs market,lhb,signals,sector,stock
+```
+
+运行筛选：
+
+```bash
+.venv/bin/python scripts/run_screening.py --date 20260629 --profile default
+```
+
+运行一次实时叠加：
+
+```bash
+.venv/bin/python scripts/run_realtime_overlay.py --date 20260629
+```
+
+不重新请求数据，仅重算历史评分曲线和筛选结果：
+
+```bash
+.venv/bin/python scripts/recompute_screening_factors.py --start 20260105 --end 20260630
+```
+
+使用本地缓存运行基线回测，并生成按月样本外验证：
+
+```bash
+.venv/bin/python scripts/run_validation_backtest.py --start 20260105 --end 20260630
+```
+
+日常使用建议从 Web 页面执行完整五阶段，独立脚本主要用于排障和局部重算。
+
+## 20. 生产部署
+
+### 20.1 推荐目录
+
+```text
+/opt/a_stock_sentiment_system   # Git 代码，只读为主
+/srv/a-stock/cache              # 高频缓存，可写
+/srv/a-stock/webdata            # 用户、因子、快照，可写
+/srv/a-stock/output             # 回测产物，可写
+```
+
+### 20.2 systemd
+
+`/etc/systemd/system/a-stock.service`：
+
+```ini
+[Unit]
+Description=A Stock Sentiment System
+After=network.target
+
+[Service]
+Type=simple
+User=astock
+Group=astock
+WorkingDirectory=/opt/a_stock_sentiment_system
+EnvironmentFile=/opt/a_stock_sentiment_system/.env
+ExecStart=/opt/a_stock_sentiment_system/.venv/bin/python run_web.py --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+注意 `[Unit]`、`Description=` 等必须分行，不能写在同一行。
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now a-stock
+sudo systemctl status a-stock
+```
+
+systemd 已运行时，不要再手工执行 `python run_web.py`，否则会出现 8000 端口被占用。
+
+### 20.3 目录权限
+
+```bash
+sudo mkdir -p /srv/a-stock/cache /srv/a-stock/webdata /srv/a-stock/output
+sudo chown -R astock:astock /srv/a-stock
+sudo chmod -R u+rwX /srv/a-stock
+```
+
+如果服务用户是 `www-data`，将示例中的 `astock` 替换为 `www-data`。SQLite 不仅需要数据库文件可写，还需要所在目录可写，因为它会创建 journal 或 WAL 文件。
+
+### 20.4 Nginx
+
+```nginx
+server {
+    listen 80;
+    server_name astockreview.cn;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+    }
+}
+```
+
+配置 HTTPS 后同步设置 `APP_COOKIE_SECURE=1`。
+
+### 20.5 日志
+
+```bash
+sudo journalctl -u a-stock -f
+sudo journalctl -u a-stock --since "30 minutes ago"
+sudo journalctl -u a-stock -n 300 --no-pager
+```
+
+若进程被 `status=9/KILL` 杀死，优先检查 OOM：
+
+```bash
+free -h
+sudo dmesg -T | grep -Ei "out of memory|killed process|oom"
+```
+
+2 GB 服务器建议配置 Swap，并串行跑历史数据。
+
+## 21. Git 与运行数据边界
+
+当前 `.gitignore` 的原则：
+
+提交：
+
+- Python 源码。
+- 模板、静态资源。
+- YAML 配置。
+- 测试。
+- 文档。
+- 可选的脱敏、仅结构 bootstrap 数据库。
+
+忽略：
+
+- `data/`
+- `output/`
+- `webdata/snapshots/`
+- `webdata/screening/`
+- `webdata/warehouse/`
+- `webdata/realtime/`
+- `webdata/output/`
+- `webdata/etl_quality/`
+- 运行期 SQLite 和 DuckDB。
+
+只有 `webdata/bootstrap/*.sqlite` 可用于发布脱敏的初始化结构。不要提交线上 `app.sqlite`，其中包含用户、会话和登录信息。
+
+代码部署与数据部署应分离：删除 `/opt/a_stock_sentiment_system` 后重新拉 Git，不应影响 `/srv/a-stock/` 下的生产数据。
+
+## 22. 测试与验证
+
+运行全部测试：
+
+```powershell
+python -m pytest
+```
+
+当前测试覆盖：
+
+- 五阶段数据流水线。
+- Silver 写入和日期类型统一。
+- 大盘、板块、个股、龙虎榜和短线信号因子。
+- 指标筛选、分位排名和每日候选保底。
+- 主板、ST、创业板、科创板、北交所涨跌停幅度。
+- 实时缓存、交易时间窗口、行情服务和实时叠加。
+- 龙头池和近期龙头。
+- 早盘高开买入规则。
+- 移动止盈和价格显示。
+- 回测归因和滚动验证。
+- 用户权限矩阵。
+- 路径环境变量。
+- 概览数据聚合。
+
+修改以下模块时必须至少运行对应测试：
+
+| 修改范围 | 重点测试 |
+| --- | --- |
+| 涨跌停口径 | `test_price_limit_utils.py`、`test_status_overview.py` |
+| 筛选配置 | `test_screening_engine_phase3.py`、`test_factor_profile.py` |
+| 实时模块 | `test_realtime_*.py` |
+| 龙头池 | `test_leader_pool_service.py` |
+| 龙虎榜 | `test_lhb_factor_pipeline.py`、`test_lhb_view.py` |
+| 回测 | `test_simulation_open_gap_rule.py`、`test_backtest_trailing_stop.py`、`test_walk_forward.py` |
+| 权限 | `test_permissions.py` |
+
+## 23. 常见问题
+
+### 23.1 服务器和本地页面数据不同
+
+同一 Git 分支只保证代码相同，不保证数据相同。检查：
+
+1. 两边 `.env` 的 `CACHE_DIR`、`WEB_DATA_DIR`、`OUTPUT_DIR`。
+2. 对应日期的 `snapshot` 是否重新生成。
+3. `factors.duckdb` 是否包含同一日期和同一表。
+4. Tushare 权限和接口返回是否一致。
+5. 服务器是否缺少实时行情 Python 包。
+6. 概念成员、板块名称等本地缓存是否完整。
+
+### 23.2 SQLite readonly
+
+错误：
+
+```text
+sqlite3.OperationalError: attempt to write a readonly database
+```
+
+原因通常是服务用户对 `WEB_DATA_DIR` 或数据库所在目录没有写权限。修复目录所有权后重启服务。
+
+### 23.3 缓存 Permission denied
+
+错误路径通常位于 `CACHE_DIR`。不要只修改单个 CSV 权限，应让 systemd 服务用户拥有整个缓存目录。
+
+### 23.4 DuckDB INTEGER 与 VARCHAR 比较错误
+
+旧表可能把 `trade_date` 建成 INTEGER，新批次是 VARCHAR。当前仓库写入已统一关键列类型。已有旧数据库若仍冲突，应备份后迁移列类型，或在可重建场景删除旧因子仓并按历史日期重跑。
+
+### 23.5 Parquet 扩展重复注册
+
+若出现 `pandas.period already defined`，通常是 PyArrow/Pandas 扩展类型重复注册。系统会降级 CSV，但应统一虚拟环境中的 Pandas、PyArrow 版本并避免热重载重复导入。
+
+### 23.6 页面报 `Unexpected token '<'` 或 `Internal S...`
+
+前端期待 JSON，但后端返回了 HTML 错误页或纯文本 500。应查看 `journalctl` 中对应 API 的 Python traceback。页面已尽量先检查 HTTP 状态和 Content-Type，但真正原因仍在后端日志。
+
+### 23.7 8000 端口被占用
+
+```bash
+sudo ss -ltnp | grep :8000
+sudo systemctl status a-stock
+```
+
+systemd 正在运行时不要重复手工启动。
+
+### 23.8 Tushare 频率超限
+
+- 优先从 Web 生成完整日期，不要在多个终端并行跑。
+- 确认候选日线预热已经完成。
+- 页面历史查询应读取本地数据。
+- 批量历史按交易日串行执行。
+- 不要删除缓存后立即并行重跑长区间。
+
+### 23.9 服务器实时行情为空
+
+依次检查：
+
+1. `easyquotation`、`pqquotation`、`adata`、`eltdx` 是否安装在 systemd 使用的虚拟环境。
+2. 服务器能否访问上游行情站点。
+3. 当前是否在交易日 09:30 到 15:00。
+4. `/api/realtime/health` 的数据源状态。
+5. 候选代码是否已经标准化。
+6. 是否错误启动多个 Uvicorn worker。
+
+## 24. 当前边界和后续扩展
+
+### 24.1 已明确不进入主流程
+
+- 旧四策略选股。
+- 复盘演示和图文卡片。
+- 手机端独立接口。
+- 微信推送主链路。
+- 依赖云向量的 KB 入库。
+- 人工游资信誉和主观风格。
+
+仓库中若仍存在相应兼容文件，不代表它们参与当前每日数据生成。
+
+### 24.2 当前技术边界
+
+- 实时缓存仅在单进程内共享。
+- 回测基于日线 OHLC，无法精确还原日内成交顺序。
+- 历史结果不会随代码升级自动重算。
+- 概念梯队依赖本地成员映射缓存。
+- 第三方实时行情可能受上游接口变更影响。
+- 系统只生成研究和复盘结果，不连接券商交易柜台。
+
+### 24.3 推荐扩展顺序
+
+1. 将实时任务和 Web 进程分离，使用 Redis 共享缓存。
+2. 为历史跑批增加任务队列、断点续跑和资源配额。
+3. 为每个每日产物写入代码版本、配置哈希和数据版本。
+4. 建立因子 IC、分层收益和稳定性看板。
+5. 为回测加入分钟级数据，改善盘中转强和止损撮合。
+6. 将用户订阅、支付订单和授权记录独立成服务。
+
+## 25. 使用提醒
+
+本系统用于数据研究、市场复盘和策略验证。历史回测存在样本偏差、幸存者偏差、撮合简化和过拟合风险，不代表未来收益。任何真实交易决策都应由使用者独立判断并承担风险。

@@ -27,9 +27,9 @@
 {% block content %}
 <section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
   <div class="lp-kpi"><div id="kpi-total" class="lp-kpi-v mono">--</div><div class="lp-kpi-l">入池</div></div>
-  <div class="lp-kpi"><div id="kpi-core" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">当日龙头</div></div>
+  <div class="lp-kpi"><div id="kpi-core" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">核心龙头</div></div>
+  <div class="lp-kpi"><div id="kpi-sector" class="lp-kpi-v mono text-amber-300">--</div><div class="lp-kpi-l">板块龙头</div></div>
   <div class="lp-kpi"><div id="kpi-recent" class="lp-kpi-v mono text-emerald-300">--</div><div class="lp-kpi-l">近期龙头</div></div>
-  <div class="lp-kpi"><div id="kpi-days" class="lp-kpi-v mono text-slate-300">--</div><div class="lp-kpi-l">覆盖交易日</div></div>
 </section>
 
 <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
@@ -49,12 +49,14 @@
   .lp-pill { font-size:.68rem; font-weight:800; border-radius:.45rem; padding:.12rem .5rem; background:rgba(100,116,139,.18); color:#cbd5e1; border:1px solid rgba(100,116,139,.42); }
   .lp-card { border:1px solid rgba(51,65,85,.72); background:rgba(15,23,42,.48); border-radius:.75rem; padding:.9rem; min-width:0; }
   .lp-card.core { border-color:rgba(244,63,94,.48); }
+  .lp-card.sector { border-color:rgba(245,158,11,.44); }
   .lp-card.strong { border-color:rgba(16,185,129,.42); }
   .lp-head { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; }
   .lp-name { font-size:1rem; font-weight:900; color:#f1f5f9; line-height:1.25; }
   .lp-code { font-size:.72rem; color:#64748b; margin-top:.1rem; }
   .lp-type { flex:0 0 auto; display:inline-flex; align-items:center; border-radius:.5rem; padding:.18rem .55rem; font-size:.72rem; font-weight:900; color:#e2e8f0; background:rgba(100,116,139,.18); border:1px solid rgba(100,116,139,.4); }
   .lp-type.core { color:#fecdd3; background:rgba(244,63,94,.14); border-color:rgba(244,63,94,.38); }
+  .lp-type.sector { color:#fde68a; background:rgba(245,158,11,.13); border-color:rgba(245,158,11,.36); }
   .lp-type.strong { color:#6ee7b7; background:rgba(16,185,129,.14); border-color:rgba(16,185,129,.38); }
   .lp-metrics { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.5rem; margin-top:.85rem; }
   .lp-metric { background:rgba(2,6,23,.42); border:1px solid rgba(51,65,85,.55); border-radius:.55rem; padding:.55rem .6rem; min-width:0; }
@@ -101,6 +103,7 @@
   }
   function typeClass(type) {
     if (type === '核心龙头') return 'core';
+    if (type === '板块龙头') return 'sector';
     if (type === '近期龙头') return 'strong';
     return '';
   }
@@ -129,8 +132,8 @@
     const counts = j.counts || {};
     document.getElementById('kpi-total').textContent = rows.length || 0;
     document.getElementById('kpi-core').textContent = counts['核心龙头'] || 0;
+    document.getElementById('kpi-sector').textContent = counts['板块龙头'] || 0;
     document.getElementById('kpi-recent').textContent = counts['近期龙头'] || 0;
-    document.getElementById('kpi-days').textContent = j.lookback || 0;
     document.getElementById('pool-date').textContent = j.trade_date || '--';
     document.getElementById('pool-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
     if (!rows.length) {
@@ -150,21 +153,22 @@
           </a>
           <span class="lp-type ${tcls}">${esc(row.pool_type || '候选')}</span>
         </div>
+        ${renderStockSectorTags(row)}
         <div class="lp-metrics">
           <div class="lp-metric"><span>池排名</span><strong class="mono">#${esc(row.pool_rank || '--')}</strong></div>
           <div class="lp-metric"><span>评分</span><strong class="mono">${num(row.leader_score)}</strong></div>
-          <div class="lp-metric"><span>来源名次</span><strong class="mono">${row.source_rank ? '#' + row.source_rank : '--'}</strong></div>
+          <div class="lp-metric"><span>候选名次（参考）</span><strong class="mono">${row.source_rank ? '#' + row.source_rank : '--'}</strong></div>
           <div class="lp-metric"><span>龙头日期</span><strong class="mono">${esc(row.last_leader_date || '--')}</strong></div>
           <div class="lp-metric"><span>龙头时效</span><strong>${esc(row.leader_time_label || '--')}</strong></div>
           <div class="lp-metric"><span>当日涨幅</span><strong class="${clsPct(row.pct_chg)}">${pct(row.pct_chg)}</strong></div>
           <div class="lp-metric"><span>涨停幅度</span><strong class="mono">${row.limit_pct == null ? '--' : num(row.limit_pct, 0) + 'cm'}</strong></div>
           <div class="lp-metric"><span>涨停进度</span><strong class="mono">${row.limit_progress == null ? '--' : Math.round(Number(row.limit_progress) * 100) + '%'}</strong></div>
-          <div class="lp-metric"><span>近段入选</span><strong class="mono">${esc(row.appearances || 0)}次</strong></div>
-          <div class="lp-metric"><span>成交额</span><strong class="mono">${num(row.amount_ratio, 2)}x</strong></div>
-          <div class="lp-metric"><span>技术</span><strong class="mono">${num(row.tech_score)}</strong></div>
-          <div class="lp-metric"><span>流动性</span><strong class="mono">${num(row.liquidity_score)}</strong></div>
-          <div class="lp-metric"><span>资金流共识</span><strong class="mono">${num(row.capital_flow_score)}</strong></div>
-          <div class="lp-metric"><span>龙头质量</span><strong class="mono">${num(row.kpl_leader_score)}</strong></div>
+          <div class="lp-metric"><span>板块地位</span><strong class="mono">${num(row.sector_status_score)}</strong></div>
+          <div class="lp-metric"><span>市场辨识度</span><strong class="mono">${num(row.market_status_score)}</strong></div>
+          <div class="lp-metric"><span>身份持续性</span><strong class="mono">${num(row.continuity_score)}</strong></div>
+          <div class="lp-metric"><span>资金认可</span><strong class="mono">${num(row.capital_recognition_score)}</strong></div>
+          <div class="lp-metric"><span>接力安全度</span><strong class="mono">${num(row.safety_score)}</strong></div>
+          <div class="lp-metric"><span>成交额健康</span><strong class="mono">${num(row.amount_ratio, 2)}x</strong></div>
         </div>
         <div class="lp-reasons">${reasons || '<div class="lp-reason">通过当前因子筛选</div>'}</div>
         <div class="lp-action">${esc(row.action || '')}</div>

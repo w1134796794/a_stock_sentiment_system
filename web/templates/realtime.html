@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}实时行情 · 管理控制台{% endblock %}
 {% block page_title %}实时行情{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 当日指标筛选确认 · 板块行情</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 当日指标筛选实时确认</div>{% endblock %}
 
 {% block header_extra %}
   <span id="session-pill" class="rt-pill mr-2">{{ market_session.reason }}</span>
@@ -20,43 +20,14 @@
   <div class="rt-kpi"><div id="kpi-cancelled" class="rt-kpi-v mono text-rose-300">--</div><div class="rt-kpi-l">取消</div></div>
 </section>
 
-<section class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4">
-  <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
-    <div class="flex flex-wrap items-center gap-2 mb-4">
-      <h2 class="font-bold mr-auto">当日指标候选确认</h2>
-      <span id="overlay-source" class="rt-pill">--</span>
-      <span id="overlay-updated" class="text-xs text-slate-500 mono">--</span>
-    </div>
-    <div id="overlay-cards" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
-    <div id="overlay-empty" class="hidden text-sm text-slate-500 py-12 text-center">当日指标筛选尚未生成或暂无候选</div>
-  </section>
-
-  <aside class="space-y-4">
-    <section class="card border border-slate-800 rounded-xl p-4">
-      <div class="flex items-center gap-2 mb-3">
-        <h2 class="font-bold mr-auto">板块行情</h2>
-        <select id="sector-source"
-                class="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-xs focus:outline-none focus:border-emerald-500">
-          <option value="ths">同花顺</option>
-          <option value="east">东财</option>
-        </select>
-      </div>
-      <div id="sector-list" class="space-y-2"></div>
-      <div id="sector-empty" class="hidden text-sm text-slate-500 py-8 text-center">暂无板块行情</div>
-    </section>
-
-    <section class="card border border-slate-800 rounded-xl p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="font-bold">数据源</h2>
-        <span id="health-pill" class="rt-pill">检查中</span>
-      </div>
-      <div class="space-y-2 text-sm">
-        <div class="rt-health-row"><span>个股</span><strong id="health-quotes">--</strong></div>
-        <div class="rt-health-row"><span>板块</span><strong id="health-sectors">--</strong></div>
-        <div class="rt-health-row"><span>提示</span><strong id="health-error">--</strong></div>
-      </div>
-    </section>
-  </aside>
+<section class="card border border-slate-800 rounded-xl p-4 min-w-0">
+  <div class="flex flex-wrap items-center gap-2 mb-4">
+    <h2 class="font-bold mr-auto">当日指标候选确认</h2>
+    <span id="overlay-source" class="rt-pill">--</span>
+    <span id="overlay-updated" class="text-xs text-slate-500 mono">--</span>
+  </div>
+  <div id="overlay-cards" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
+  <div id="overlay-empty" class="hidden text-sm text-slate-500 py-12 text-center">当日指标筛选尚未生成或暂无候选</div>
 </section>
 
 <style>
@@ -79,14 +50,6 @@
   .rt-metric span { display:block; font-size:.66rem; color:#64748b; margin-bottom:.22rem; }
   .rt-metric strong { display:block; font-size:.85rem; color:#e2e8f0; font-weight:800; overflow-wrap:anywhere; }
   .rt-reason { margin-top:.75rem; color:#cbd5e1; font-size:.82rem; line-height:1.45; }
-  .rt-health-row { display:flex; align-items:flex-start; justify-content:space-between; gap:.9rem; border-bottom:1px solid rgba(51,65,85,.42); padding:.5rem 0; }
-  .rt-health-row:last-child { border-bottom:0; }
-  .rt-health-row span { color:#64748b; flex:0 0 auto; }
-  .rt-health-row strong { color:#e2e8f0; text-align:right; font-weight:600; overflow-wrap:anywhere; }
-  .rt-sector { display:flex; align-items:center; justify-content:space-between; gap:.7rem; border:1px solid rgba(51,65,85,.62); border-radius:.6rem; padding:.65rem .75rem; background:rgba(15,23,42,.42); }
-  .rt-sector-name { min-width:0; }
-  .rt-sector-name strong { display:block; color:#e2e8f0; font-size:.88rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .rt-sector-name span { display:block; color:#64748b; font-size:.68rem; margin-top:.08rem; }
   .rt-up { color:#ff6b6b !important; }
   .rt-down { color:#34d399 !important; }
   .rt-muted { color:#64748b !important; }
@@ -104,7 +67,6 @@
 <script>
   const tradeDate = {{ (date or '')|tojson }};
   const initialMarketSession = {{ (market_session or {})|tojson }};
-  const defaultSectorCodes = [];
   const autoRefreshMs = 5000;
   let refreshing = false;
   let marketSession = initialMarketSession;
@@ -113,8 +75,6 @@
   const els = {
     overlayCards: document.getElementById('overlay-cards'),
     overlayEmpty: document.getElementById('overlay-empty'),
-    sectorList: document.getElementById('sector-list'),
-    sectorEmpty: document.getElementById('sector-empty'),
     refreshAll: document.getElementById('refresh-all'),
     refreshSpin: document.getElementById('refresh-spin')
   };
@@ -134,13 +94,6 @@
   function px(v, fallback) {
     const n = Number(v || fallback || 0);
     return n ? n.toFixed(2) : '--';
-  }
-  function money(v) {
-    const n = Number(v || 0);
-    if (!n) return '--';
-    if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + '亿';
-    if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + '万';
-    return n.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
   }
   function gap(v) {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return '--';
@@ -223,25 +176,6 @@
     }
   }
 
-  async function loadHealth() {
-    const pill = document.getElementById('health-pill');
-    try {
-      const j = await fetchJson('/api/realtime/health', 5000);
-      applyMarketSession(j.session || initialMarketSession);
-      const q = j.quotes || {};
-      const s = j.sectors || {};
-      document.getElementById('health-quotes').textContent = q.available ? (q.provider || '可用') : '不可用';
-      document.getElementById('health-sectors').textContent = s.available ? (s.provider || '可用') : '不可用';
-      document.getElementById('health-error').textContent = s.last_error || q.last_error || '--';
-      pill.textContent = q.available || s.available ? '可用' : '异常';
-      pill.className = 'rt-pill ' + (q.available || s.available ? 'ok' : 'err');
-    } catch (e) {
-      pill.textContent = '异常';
-      pill.className = 'rt-pill err';
-      document.getElementById('health-error').textContent = String(e);
-    }
-  }
-
   async function loadCandidateConfirm() {
     els.overlayCards.innerHTML = '<div class="text-sm text-slate-500 py-10 text-center lg:col-span-2">加载中...</div>';
     els.overlayEmpty.classList.add('hidden');
@@ -249,6 +183,7 @@
       const params = new URLSearchParams({ limit: '20' });
       if (tradeDate) params.set('date', tradeDate);
       const j = await fetchJson('/api/realtime/overlay?' + params.toString(), 8000);
+      applyMarketSession(j.session || initialMarketSession);
       const rows = j.rows || [];
       const counts = j.counts || {};
       document.getElementById('kpi-confirmed').textContent = counts.confirmed || 0;
@@ -270,6 +205,7 @@
             </a>
             <span class="rt-status ${esc(r.confirm_status || 'observe')}">${statusText(r.confirm_status)}</span>
           </div>
+          ${renderStockSectorTags(r)}
           <div class="rt-metrics">
             <div class="rt-metric"><span>开盘</span><strong class="${clsPct(r.open_gap_pct)}">${gap(r.open_gap_pct)}</strong></div>
             <div class="rt-metric"><span>现价</span><strong class="mono">${px(r.last_price, r.pre_close)}</strong></div>
@@ -283,43 +219,13 @@
     }
   }
 
-  async function loadSectors() {
-    const source = document.getElementById('sector-source').value || 'east';
-    els.sectorList.innerHTML = '<div class="text-sm text-slate-500 py-8 text-center">加载中...</div>';
-    els.sectorEmpty.classList.add('hidden');
-    try {
-      const params = new URLSearchParams({ source, limit: '5' });
-      if (defaultSectorCodes.length) params.set('codes', defaultSectorCodes.join(','));
-      const j = await fetchJson('/api/realtime/sectors?' + params.toString(), 15000);
-      const rows = j.sectors || [];
-      if (!rows.length) {
-        els.sectorList.innerHTML = '';
-        els.sectorEmpty.classList.remove('hidden');
-        return;
-      }
-      els.sectorList.innerHTML = rows.map(s => `
-        <div class="rt-sector">
-          <div class="rt-sector-name">
-            <strong>${esc(s.name || s.code || '--')}</strong>
-            <span class="mono">${esc(s.code || '--')}${s.sector_type ? ' · ' + esc(s.sector_type) : ''}</span>
-          </div>
-          <div class="text-right">
-            <div class="mono font-bold ${clsPct(s.change_pct)}">${pct(s.change_pct)}</div>
-            <div class="mono text-[11px] text-slate-500">${money(s.amount_yuan)}</div>
-          </div>
-        </div>`).join('');
-    } catch (e) {
-      els.sectorList.innerHTML = `<div class="text-sm text-rose-300 py-8 text-center">${esc(e)}</div>`;
-    }
-  }
-
   async function refreshAll(silent = false) {
     if (refreshing) return;
     refreshing = true;
     els.refreshAll.disabled = true;
     els.refreshSpin.classList.remove('hidden');
     try {
-      await Promise.all([loadHealth(), loadCandidateConfirm(), loadSectors()]);
+      await loadCandidateConfirm();
       if (!silent) toast('已刷新', true);
     } finally {
       els.refreshSpin.classList.add('hidden');
@@ -330,7 +236,6 @@
   }
 
   document.getElementById('refresh-all').addEventListener('click', refreshAll);
-  document.getElementById('sector-source').addEventListener('change', loadSectors);
 
   setClock();
   applyMarketSession(initialMarketSession);

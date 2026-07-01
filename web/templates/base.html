@@ -22,7 +22,31 @@
     .nav-link svg { width:18px; height:18px; flex:0 0 18px; }
     .nav-group { font-size:.66rem; letter-spacing:.08em; text-transform:uppercase;
                  color:#475569; padding:.6rem .7rem .25rem; font-weight:600; }
+    .stock-sector-tags { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.55rem; min-height:1.35rem; }
+    .stock-sector-tag { display:inline-flex; align-items:center; gap:.22rem; max-width:100%; border-radius:.35rem;
+                        padding:.1rem .4rem; font-size:.66rem; line-height:1.35; border:1px solid rgba(71,85,105,.55);
+                        background:rgba(15,23,42,.72); color:#cbd5e1; }
+    .stock-sector-tag b { color:#64748b; font-weight:600; }
+    .stock-sector-tag span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .stock-sector-tag.industry { border-color:rgba(56,189,248,.34); color:#bae6fd; }
+    .stock-sector-tag.concept { border-color:rgba(16,185,129,.34); color:#a7f3d0; }
+    .stock-sector-tag.resonance, .stock-sector-tag.is-resonant {
+      border-color:rgba(251,191,36,.5); color:#fde68a; background:rgba(120,53,15,.16);
+    }
+    .stock-sector-tags.empty { color:#64748b; font-size:.68rem; }
   </style>
+  <script>
+    window.renderStockSectorTags = function (row) {
+      const escapeHtml = value => String(value ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      const tags = Array.isArray(row && row.sector_tags) ? row.sector_tags : [];
+      if (!tags.length) return '<div class="stock-sector-tags empty">板块未匹配</div>';
+      return `<div class="stock-sector-tags">${tags.map(tag => {
+        const type = String(tag.type || '板块');
+        const cls = type === '行业' ? 'industry' : (type === '概念' ? 'concept' : 'resonance');
+        return `<span class="stock-sector-tag ${cls}${tag.resonant ? ' is-resonant' : ''}"><b>${escapeHtml(type)}</b><span>${escapeHtml(tag.name || '--')}</span></span>`;
+      }).join('')}</div>`;
+    };
+  </script>
 </head>
 <body class="bg-slate-950 text-slate-100">
   {% set current_user = request.state.user %}

@@ -50,7 +50,11 @@ from web.permissions import (
     visible_menu_groups,
 )
 from web.realtime_cache import RealtimePayloadCache
-from web.stock_profile import clear_stock_profile_cache, load_stock_profiles
+from web.stock_profile import (
+    clear_stock_profile_cache,
+    enrich_stock_sector_labels,
+    load_stock_profiles,
+)
 
 from config.settings import (
     SNAPSHOT_DIR,
@@ -851,7 +855,65 @@ def _score_between(value: Any, low: float, high: float) -> float:
     return max(0.0, min(100.0, (v - low) / (high - low) * 100.0))
 
 
-def _factor_sector_rows(date: str, limit: int = 20) -> List[Dict[str, Any]]:
+@lru_cache(maxsize=8192)
+def _cached_stock_sector_memberships(code: str, cache_dir_text: str) -> tuple[tuple[str, str], ...]:
+    root = Path(cache_dir_text) / "sector" / "stock_sectors"
+    try:
+        paths = sorted(root.glob(f"{code}.*.csv"))
+    except OSError:
+        paths = []
+    if not paths:
+        return ()
+    memberships: List[tuple[str, str]] = []
+    try:
+        with paths[0].open("r", encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                sector_code = str(row.get("ts_code") or row.get("sector_code") or "").strip()
+                sector_name = str(row.get("name") or row.get("sector_name") or "").strip()
+                if sector_code or sector_name:
+                    memberships.append((sector_code, sector_name))
+    except OSError:
+        return ()
+    return tuple(memberships)
+
+
+def _limit_up_sector_counts(
+    rows: List[Dict[str, Any]],
+    cache_dir: Path = CACHE_DIR,
+) -> Dict[str, int]:
+    """Count unique official limit-up stocks by cached THS sector membership."""
+    members: Dict[str, set[str]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        code = _normalize_stock_code(
+            str(row.get("股票代码") or row.get("stock_code") or row.get("code") or "")
+        )
+        if not code:
+            continue
+        labels: List[str] = []
+        industry = str(row.get("行业") or row.get("所属行业") or "").strip()
+        if industry:
+            labels.append(industry)
+        concepts = row.get("_concepts") or []
+        if not concepts and row.get("概念"):
+            concepts = [x.strip() for x in str(row.get("概念")).split("/") if x.strip()]
+        labels.extend(str(item).strip() for item in concepts if str(item).strip())
+        for sector_code, sector_name in _cached_stock_sector_memberships(code, str(cache_dir)):
+            if sector_code:
+                labels.append(sector_code)
+            if sector_name:
+                labels.append(sector_name)
+        for label in dict.fromkeys(labels):
+            members.setdefault(label, set()).add(code)
+    return {label: len(codes) for label, codes in members.items()}
+
+
+def _factor_sector_rows(
+    date: str,
+    limit: int = 20,
+    limit_up_rows: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     fetch_limit = max(int(limit) * 80, 1000)
     try:
         import duckdb  # type: ignore
@@ -880,8 +942,15 @@ def _factor_sector_rows(date: str, limit: int = 20) -> List[Dict[str, Any]]:
     _enrich_sector_rows(rows)
     named = [row for row in rows if _allowed_hot_sector(row)]
     selected = (named or rows)[: int(limit)]
+    limit_up_counts = _limit_up_sector_counts(limit_up_rows or [])
     for i, row in enumerate(selected, start=1):
         row["rank"] = i
+        sector_code = str(row.get("sector_code") or row.get("板块代码") or "").strip()
+        sector_name = str(row.get("sector_name") or row.get("板块名称") or "").strip()
+        count = limit_up_counts.get(sector_code)
+        if count is None:
+            count = limit_up_counts.get(sector_name, 0)
+        row["limit_up_count"] = int(count)
     return selected
 
 
@@ -1076,6 +1145,7 @@ def _build_limitup_section_from_cache(date: str) -> Optional[Dict[str, Any]]:
                     "首次涨停时间": _format_board_time(raw.get("首次封板时间")),
                     "炸板次数": int(_to_float(raw.get("炸板次数"))),
                     "_concepts": concepts[:5],
+                    "_detail_url": f"/stock/{code6}?date={date}",
                 })
     except Exception:
         return None
@@ -1167,6 +1237,7 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
             "首次涨停时间": _format_board_time(r.get("first_time")),
             "炸板次数": int(_to_float(r.get("open_times"))),
             "_concepts": concepts[:5],
+            "_detail_url": f"/stock/{_normalize_stock_code(code)}?date={date}",
         })
     rows.sort(key=lambda x: (x.get("连板数") or 0, x.get("涨幅%") or 0, x.get("成交额(亿)") or 0), reverse=True)
     return {
@@ -1178,7 +1249,10 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def _build_concept_echelon_section(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _build_concept_echelon_section(
+    rows: List[Dict[str, Any]],
+    date: str = "",
+) -> Optional[Dict[str, Any]]:
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for row in rows or []:
         concepts = row.get("_concepts") or []
@@ -1203,6 +1277,22 @@ def _build_concept_echelon_section(rows: List[Dict[str, Any]]) -> Optional[Dict[
         lead = leaders[0]
         dist = [f"{level}板{counter[level]}" for level in sorted(counter.keys(), reverse=True)]
         representatives = "、".join(str(s.get("股票名称") or "") for s in leaders[:5] if s.get("股票名称"))
+        stock_rows = []
+        for stock in leaders:
+            code = _normalize_stock_code(str(stock.get("股票代码") or ""))
+            detail_url = str(stock.get("_detail_url") or "")
+            if not detail_url and code:
+                detail_url = f"/stock/{code}" + (f"?date={date}" if date else "")
+            stock_rows.append({
+                "股票名称": str(stock.get("股票名称") or ""),
+                "股票代码": code,
+                "连板数": int(stock.get("连板数") or 1),
+                "涨幅%": round(_to_float(stock.get("涨幅%")), 2),
+                "行业": str(stock.get("行业") or ""),
+                "首次涨停时间": str(stock.get("首次涨停时间") or ""),
+                "炸板次数": int(_to_float(stock.get("炸板次数"))),
+                "_detail_url": detail_url,
+            })
         concept_rows.append({
             "概念名称": concept,
             "涨停总数": len(stocks),
@@ -1210,6 +1300,7 @@ def _build_concept_echelon_section(rows: List[Dict[str, Any]]) -> Optional[Dict[
             "梯队分布": ", ".join(dist),
             "龙头股": f"{lead.get('股票名称') or ''} {int(lead.get('连板数') or 1)}板".strip(),
             "代表个股": representatives,
+            "_stocks": stock_rows,
         })
     if not concept_rows:
         return None
@@ -1243,12 +1334,17 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
             prepared.insert(0, screening_section)
     _enrich_candidate_indicator_sections(prepared, date)
 
-    hotspot_rows = _factor_sector_rows(date, limit=20)
+    limit_section = _build_limitup_section(date)
+    hotspot_rows = _factor_sector_rows(
+        date,
+        limit=20,
+        limit_up_rows=(limit_section or {}).get("rows") or [],
+    )
     mainline_rows = _mainline_theme_rows(date, limit=20)
     if hotspot_rows or mainline_rows:
         sector_columns = [
             "sector_name", "sector_code", "sector_type",
-            "mainline_score", "rank", "momentum_score", "amount_score",
+            "mainline_score", "rank", "limit_up_count", "momentum_score", "amount_score",
             "amount_ratio_score", "persistence_score", "trade_date", "computed_at",
         ]
         mainline_columns = [
@@ -1262,12 +1358,10 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
             if section.get("name") == "热点概念" and hotspot_rows:
                 section["columns"] = [c for c in sector_columns if c in hotspot_rows[0]]
                 section["rows"] = hotspot_rows[:10]
-                section["summary"] = "当日概念/行业板块强度排名；仅保留概念和行业板块。"
                 found_hot = True
             elif section.get("name") == "主线主题" and mainline_rows:
                 section["columns"] = [c for c in mainline_columns if c in mainline_rows[0]]
                 section["rows"] = mainline_rows[:10]
-                section["summary"] = "近10日持续活跃 + 当日确认重新计算；不是当日热点的简单复用。"
                 found_mainline = True
         if hotspot_rows and not found_hot:
             prepared.insert(0, {
@@ -1275,7 +1369,6 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
                 "kind": "table",
                 "columns": [c for c in sector_columns if c in hotspot_rows[0]],
                 "rows": hotspot_rows[:10],
-                "summary": "当日概念/行业板块强度排名；仅保留概念和行业板块。",
             })
         if mainline_rows and not found_mainline:
             insert_at = 1 if hotspot_rows else 0
@@ -1284,7 +1377,6 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
                 "kind": "table",
                 "columns": [c for c in mainline_columns if c in mainline_rows[0]],
                 "rows": mainline_rows[:10],
-                "summary": "近10日持续活跃 + 当日确认重新计算；不是当日热点的简单复用。",
             })
     else:
         for section in prepared:
@@ -1292,7 +1384,6 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
                 _enrich_sector_rows(section.get("rows") or [])
     _enrich_sector_indicator_sections(prepared, date)
 
-    limit_section = _build_limitup_section(date)
     if limit_section and limit_section.get("rows"):
         replaced = False
         for i, section in enumerate(prepared):
@@ -1307,7 +1398,7 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
                 if section.get("name") in ("主线主题", "热点行业", "热点概念"):
                     insert_at = i + 1
             prepared.insert(insert_at, limit_section)
-        concept_section = _build_concept_echelon_section(limit_section.get("rows") or [])
+        concept_section = _build_concept_echelon_section(limit_section.get("rows") or [], date)
         if concept_section and concept_section.get("rows"):
             concept_replaced = False
             for i, section in enumerate(prepared):
@@ -1341,10 +1432,6 @@ def _external_screening_section(date: str) -> Optional[Dict[str, Any]]:
         "kind": "table",
         "columns": columns,
         "rows": rows,
-        "summary": (
-            f"当日独立筛选结果：输入 {int(payload.get('input_count') or 0)}，"
-            f"最终保留 {len(rows)}；市场强弱只控制交易，不删除候选。"
-        ),
     }
 
 
@@ -1438,6 +1525,7 @@ def _clear_data_caches() -> None:
     _load_snapshot_cached.cache_clear()
     _load_prepared_snapshot_cached.cache_clear()
     _stock_concept_map.cache_clear()
+    _cached_stock_sector_memberships.cache_clear()
     clear_stock_profile_cache()
     _sector_meta_map.cache_clear()
     _DATES_CACHE["expires_at"] = 0.0
@@ -2108,6 +2196,7 @@ def _enrich_stock_names(rows: List[Dict[str, Any]], snapshot: Optional[Dict], da
         if not str(row.get("name") or row.get("股票名称") or "").strip():
             row["name"] = mapping.get(code) or code
         row.setdefault("display_name", row.get("name") or mapping.get(code) or code)
+    enrich_stock_sector_labels(rows, Path(CACHE_DIR))
 
 
 def _build_realtime_overlay_payload(
@@ -2227,11 +2316,6 @@ def _refresh_realtime_defaults() -> None:
             _overlay_cache_key(trade_date, "", 20, 90),
             lambda: _build_realtime_overlay_payload(trade_date, limit=20, stale_after_seconds=90),
         ),
-        (
-            _sector_cache_key(None, "ths", 5, False),
-            lambda: _build_realtime_sector_payload(None, source="ths", limit=5, include_raw=False),
-        ),
-        (("health", False), lambda: _build_realtime_health_payload(probe=False)),
     ]
     for key, loader in jobs:
         try:

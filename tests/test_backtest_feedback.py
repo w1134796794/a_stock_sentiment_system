@@ -300,14 +300,42 @@ def test_factor_feedback_uses_strong_weak_buckets():
                 "plan_rank": 3, "plan_score": 68,
                 "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 42}),
             },
+            {
+                "date": "20260618", "stock_code": "000006", "stock_name": "强C",
+                "action": "SELL", "pnl": 600, "pnl_pct": 0.06,
+                "stop_loss_triggered": False, "take_profit_triggered": True,
+                "plan_rank": 4, "plan_score": 77,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 76}),
+            },
+            {
+                "date": "20260618", "stock_code": "000007", "stock_name": "中A",
+                "action": "SELL", "pnl": 100, "pnl_pct": 0.01,
+                "stop_loss_triggered": False, "take_profit_triggered": False,
+                "plan_rank": 4, "plan_score": 72,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 55}),
+            },
+            {
+                "date": "20260618", "stock_code": "000008", "stock_name": "中B",
+                "action": "SELL", "pnl": -100, "pnl_pct": -0.01,
+                "stop_loss_triggered": False, "take_profit_triggered": False,
+                "plan_rank": 5, "plan_score": 71,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 52}),
+            },
+            {
+                "date": "20260618", "stock_code": "000009", "stock_name": "中C",
+                "action": "SELL", "pnl": 50, "pnl_pct": 0.005,
+                "stop_loss_triggered": False, "take_profit_triggered": False,
+                "plan_rank": 5, "plan_score": 70,
+                "factor_metrics_json": json.dumps({"stk_amount_ratio_5d": 50}),
+            },
         ]
     }
 
     feedback = build_attribution_frames(result)["factor_feedback"]
     amount = feedback[feedback["factor_id"] == "stk_amount_ratio_5d"].iloc[0]
 
-    assert amount["strong_count"] == 2
-    assert amount["strong_total_pnl"] == 1800
+    assert amount["strong_count"] == 3
+    assert amount["strong_total_pnl"] == 2400
     assert amount["weak_count"] == 3
     assert amount["weak_total_pnl"] == -1200
     assert amount["weak_stop_loss_rate"] == 1

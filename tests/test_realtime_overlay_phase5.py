@@ -48,7 +48,10 @@ def test_realtime_overlay_confirms_high_open_and_cancels_low_open(tmp_path):
     payload = service.build_overlay(
         "20260616",
         candidates=[
-            {"code": "000001", "name": "平安银行", "score": 88, "rank": 1},
+            {
+                "code": "000001", "name": "平安银行", "score": 88, "rank": 1,
+                "resonance_sectors": "银行,跨境支付",
+            },
             {"code": "600000", "name": "浦发银行", "score": 70, "rank": 2},
             {"code": "300001", "name": "特锐德", "score": 60, "rank": 3},
         ],
@@ -57,6 +60,7 @@ def test_realtime_overlay_confirms_high_open_and_cancels_low_open(tmp_path):
 
     rows = {row["code"]: row for row in payload["rows"]}
     assert rows["000001"]["confirm_status"] == "confirmed"
+    assert rows["000001"]["resonance_sectors"] == "银行,跨境支付"
     assert rows["600000"]["confirm_status"] == "cancelled"
     assert rows["300001"]["confirm_status"] == "observe"
     assert payload["counts"] == {"confirmed": 1, "cancelled": 1, "observe": 1}
