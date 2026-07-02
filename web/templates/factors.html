@@ -104,6 +104,56 @@
   </div>
 </section>
 
+{# ===================== 1. 动态权重 ===================== #}
+<section class="card border border-slate-800 rounded-xl p-4 mb-8">
+  <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+    <div>
+      <h2 class="text-lg font-bold text-emerald-300">筛选权重</h2>
+      <div class="text-xs text-slate-500 mt-0.5">
+        {{ state.dynamic_weights.source }}
+        {% if state.dynamic_weights.effective_date %} · 生效 {{ state.dynamic_weights.effective_date }}{% endif %}
+        {% if state.dynamic_weights.train_start %} · 训练 {{ state.dynamic_weights.train_start }} - {{ state.dynamic_weights.train_end }}{% endif %}
+      </div>
+    </div>
+    {% if state.dynamic_weights.selected_hyperparameters %}
+    <div class="text-xs text-slate-400 mono">
+      先验收缩 {{ (state.dynamic_weights.selected_hyperparameters.prior_blend * 100) | round(0) }}%
+      · 单因子上限 {{ (state.dynamic_weights.selected_hyperparameters.max_weight * 100) | round(0) }}%
+    </div>
+    {% endif %}
+  </div>
+  {% if state.dynamic_weights.rows %}
+  <div class="overflow-auto border border-slate-800 rounded-lg">
+    <table class="w-full text-xs">
+      <thead class="bg-slate-950/90 text-slate-500">
+        <tr class="text-left">
+          <th class="px-3 py-2 font-medium">因子</th>
+          <th class="px-3 py-2 font-medium text-right">当前权重</th>
+          <th class="px-3 py-2 font-medium text-right">先验权重</th>
+          <th class="px-3 py-2 font-medium text-right">平均IC</th>
+          <th class="px-3 py-2 font-medium text-right">IC-IR</th>
+          <th class="px-3 py-2 font-medium text-right">正IC占比</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in state.dynamic_weights.rows %}
+        <tr class="border-t border-slate-800/70">
+          <td class="px-3 py-1.5 mono text-slate-200">{{ row.factor }}</td>
+          <td class="px-3 py-1.5 mono text-right text-emerald-300">{{ (row.weight * 100) | round(2) }}%</td>
+          <td class="px-3 py-1.5 mono text-right text-slate-400">{{ (row.prior * 100) | round(2) }}%</td>
+          <td class="px-3 py-1.5 mono text-right text-slate-300">{{ row.ic_mean | round(4) if row.ic_mean is not none else '--' }}</td>
+          <td class="px-3 py-1.5 mono text-right text-slate-300">{{ row.ic_ir | round(2) if row.ic_ir is not none else '--' }}</td>
+          <td class="px-3 py-1.5 mono text-right text-slate-300">{{ (row.positive_ratio * 100) | round(1) ~ '%' if row.positive_ratio is defined and row.positive_ratio is not none else '--' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-sm text-rose-300">{{ state.dynamic_weights.error or '暂无可用权重' }}</div>
+  {% endif %}
+</section>
+
 {# ===================== 1. 因子开关 ===================== #}
 <section class="mb-8">
   <h2 class="text-lg font-bold text-emerald-300 mb-3">因子开关</h2>

@@ -56,6 +56,8 @@ def test_build_factor_state_structure():
     assert "strategies" not in st
     assert "param_groups" not in st
     assert "confidence_modes" not in st
+    assert st["dynamic_weights"]["rows"]
+    assert st["dynamic_weights"]["source"] in {"冷启动先验", "IC/IR 动态权重"}
     lhb_group = next((group for group in st["factor_groups"] if group["category"] == "lhb"), None)
     assert lhb_group is not None
     assert lhb_group["label"] == "龙虎榜"

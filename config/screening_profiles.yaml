@@ -29,7 +29,8 @@ screening_profiles:
         reason: "价格位置接近阶段强势区"
     ranking:
       candidate_percentile: true
-      weights:
+      # 冷启动先验。生产筛选优先加载 FACTOR_WEIGHT_DIR 中按生效日发布的 IC/IR 权重。
+      prior_weights:
         tech_score: 0.20
         stk_liquidity_percentile: 0.05
         stk_new_high_20d: 0.15
@@ -106,7 +107,8 @@ screening_profiles:
         max_drop_ratio: 0.70
         reason: "走势位置不能离强势区太远"
     ranking:
-      weights:
+      # 冷启动先验；没有足够历史样本或关闭动态模式时使用。
+      prior_weights:
         stk_pct_chg_1d: 0.25
         stk_vol_ratio_5d: 0.10
         stk_amount_ratio_5d: 0.10

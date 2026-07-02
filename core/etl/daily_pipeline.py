@@ -113,6 +113,24 @@ class ETLDailyPipeline:
             f"失败={len(failed)}"
         )
 
+        # 每月首个交易日只使用上一交易日及更早的数据训练，发布本月动态权重。
+        # 训练失败不阻断日常数据生成，筛选会自动回退 YAML 冷启动先验。
+        if prev_trade_date and str(prev_trade_date)[:6] != str(trade_date)[:6]:
+            try:
+                from core.factors.factor_library import FactorLibraryTrainer
+
+                trained = FactorLibraryTrainer(duckdb_path=self.duckdb_path).refresh_if_due(
+                    trade_date, prev_trade_date, profile=profile
+                )
+                if trained:
+                    logger.info(
+                        f"[数据生成][因子库] 本月动态权重已生效: "
+                        f"{trained.get('effective_date')}"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                result.warnings.append(f"动态因子权重训练未完成，使用先验权重: {exc}")
+                logger.warning(f"[数据生成][因子库] 动态权重训练失败，回退先验: {exc}")
+
         phase_started = time.monotonic()
         logger.info(f"[数据生成][Phase3] 指标筛选开始: {trade_date}, profile={profile}")
         screening = ScreeningEngine(

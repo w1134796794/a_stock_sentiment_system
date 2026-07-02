@@ -64,11 +64,27 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认仅本机）")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true", help="开发热重载")
+    parser.add_argument("--workers", type=int, default=1, help="Web Worker 数；大于 1 必须配置 REDIS_URL")
     args = parser.parse_args()
+
+    workers = max(int(args.workers), 1)
+    from config.settings import REDIS_URL
+
+    if workers > 1 and not REDIS_URL:
+        parser.error("--workers > 1 requires REDIS_URL for shared realtime cache and task state")
+    if workers > 1:
+        from core.infrastructure.shared_state import get_shared_state_backend
+
+        if not get_shared_state_backend().is_shared:
+            parser.error("--workers > 1 requires a reachable Redis service")
+    if args.reload and workers > 1:
+        parser.error("--reload cannot be combined with --workers > 1")
 
     _sanitize_stdio()
     _enable_fault_diagnostics()
-    uvicorn.run("web.app:app", host=args.host, port=args.port, reload=args.reload)
+    uvicorn.run(
+        "web.app:app", host=args.host, port=args.port, reload=args.reload, workers=workers
+    )
 
 
 if __name__ == "__main__":

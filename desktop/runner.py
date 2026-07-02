@@ -19,23 +19,31 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from core.infrastructure.shared_state import TaskLease, TaskStateStore
+
 
 class LogBuffer:
     """线程安全的行缓冲：支持按行增量读取（前端轮询用）。"""
 
-    def __init__(self) -> None:
+    def __init__(self, store: Optional[TaskStateStore] = None) -> None:
         self._lock = threading.Lock()
         self._lines: List[str] = []
         self._partial = ""  # 尚未遇到换行的残段（print 分片写入时用）
+        self._store = store
 
     def clear(self) -> None:
         with self._lock:
             self._lines.clear()
             self._partial = ""
+        if self._store and self._store.shared:
+            self._store.clear_logs()
 
     def append_line(self, line: str) -> None:
+        clean = line.rstrip("\n")
         with self._lock:
-            self._lines.append(line.rstrip("\n"))
+            self._lines.append(clean)
+        if self._store and self._store.shared:
+            self._store.append_log(clean)
 
     def append_text(self, text: str) -> None:
         """写入任意文本（可能不含/含多个换行），按换行切分成行。"""
@@ -46,8 +54,13 @@ class LogBuffer:
             parts = buf.split("\n")
             self._partial = parts.pop()  # 最后一段可能是半行
             self._lines.extend(parts)
+        if self._store and self._store.shared:
+            for line in parts:
+                self._store.append_log(line)
 
     def read_from(self, since: int) -> Tuple[List[str], int]:
+        if self._store and self._store.shared:
+            return self._store.read_logs(since)
         with self._lock:
             since = max(0, int(since or 0))
             return list(self._lines[since:]), len(self._lines)
@@ -121,7 +134,9 @@ class RunController:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.buffer = LogBuffer()
+        self._store = TaskStateStore("data_generation")
+        self.buffer = LogBuffer(self._store)
+        self._lease: Optional[TaskLease] = None
         self.state: str = "idle"  # idle / running / done / partial / error
         self.mode: str = "single"
         self.date: Optional[str] = None
@@ -141,6 +156,12 @@ class RunController:
         with self._lock:
             if self.state == "running":
                 return False, "已有分析任务在运行中，请等待完成。"
+            from config.settings import TASK_LOCK_TTL_SECONDS
+
+            lease = TaskLease.acquire("data_generation", TASK_LOCK_TTL_SECONDS)
+            if lease is None:
+                return False, "已有其他 Web Worker 启动了数据生成任务，请等待完成。"
+            self._lease = lease
             self.buffer.clear()
             self.state = "running"
             self.mode = "single"
@@ -156,6 +177,7 @@ class RunController:
             self._thread = threading.Thread(
                 target=self._worker, args=(date,), daemon=True, name="analysis-run"
             )
+            self._publish_state()
             self._thread.start()
         return True, "已启动分析任务。"
 
@@ -170,6 +192,12 @@ class RunController:
         with self._lock:
             if self.state == "running":
                 return False, "已有分析任务在运行中，请等待完成。"
+            from config.settings import TASK_LOCK_TTL_SECONDS
+
+            lease = TaskLease.acquire("data_generation", TASK_LOCK_TTL_SECONDS)
+            if lease is None:
+                return False, "已有其他 Web Worker 启动了数据生成任务，请等待完成。"
+            self._lease = lease
             self.buffer.clear()
             self.state = "running"
             self.mode = "batch"
@@ -185,12 +213,13 @@ class RunController:
             self._thread = threading.Thread(
                 target=self._batch_worker, args=(start, end), daemon=True, name="analysis-batch-run"
             )
+            self._publish_state()
             self._thread.start()
         return True, f"已启动历史批量生成：{start} ~ {end}。"
 
     def status(self, since: int = 0) -> Dict:
         lines, nxt = self.buffer.read_from(since)
-        return {
+        current = {
             "state": self.state,
             "mode": self.mode,
             "date": self.date,
@@ -205,6 +234,33 @@ class RunController:
             "lines": lines,
             "next": nxt,
         }
+        if self._store.shared:
+            remote = self._store.load()
+            if remote:
+                remote.update({"lines": lines, "next": nxt})
+                return remote
+        current["storage"] = "memory"
+        return current
+
+    def _publish_state(self) -> None:
+        self._store.save({
+            "state": self.state,
+            "mode": self.mode,
+            "date": self.date,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "total": self.total,
+            "completed": self.completed,
+            "failed": list(self.failed),
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error": self.error,
+        })
+
+    def _finish_lease(self) -> None:
+        lease, self._lease = self._lease, None
+        if lease is not None:
+            lease.release()
 
     # ---- 内部实现 -----------------------------------------------------
     def _worker(self, date: Optional[str]) -> None:
@@ -229,11 +285,13 @@ class RunController:
             system.run_daily_analysis(date)
             self.buffer.append_line("=== 指标数据生成完成，数据仓库、候选池和快照已生成 ===")
             self.state = "done"
+            self._publish_state()
         except Exception as exc:  # noqa: BLE001
             self.error = repr(exc)
             self.buffer.append_line(f"!!! 运行失败: {exc!r}")
             self.buffer.append_text(traceback.format_exc())
             self.state = "error"
+            self._publish_state()
         finally:
             sys.stdout, sys.stderr = old_out, old_err
             try:
@@ -241,6 +299,8 @@ class RunController:
             except Exception:  # noqa: BLE001
                 pass
             self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._publish_state()
+            self._finish_lease()
 
     def _batch_worker(self, start_date: str, end_date: str) -> None:
         import loguru
@@ -263,6 +323,7 @@ class RunController:
 
             trade_dates = TradeCalendar().get_trade_dates(start_date, end_date)
             self.total = len(trade_dates)
+            self._publish_state()
             self.buffer.append_line(
                 f"=== 开始历史批量生成 · {start_date} ~ {end_date} · 交易日 {len(trade_dates)} 个 ==="
             )
@@ -293,6 +354,7 @@ class RunController:
                     system.run_daily_analysis(trade_date)
                     self.completed = idx
                     self.date = trade_date
+                    self._publish_state()
                     self.buffer.append_line(
                         f"--- [{idx}/{len(trade_dates)}] {trade_date} 完成 · "
                         f"耗时 {time.monotonic() - date_started:.1f}s ---"
@@ -302,6 +364,7 @@ class RunController:
                     self.failed = list(failures)
                     self.completed = idx
                     self.date = trade_date
+                    self._publish_state()
                     self.buffer.append_line(
                         f"!!! [{idx}/{len(trade_dates)}] {trade_date} 失败 · "
                         f"耗时 {time.monotonic() - date_started:.1f}s: {exc!r}"
@@ -318,11 +381,13 @@ class RunController:
             else:
                 self.buffer.append_line(f"=== 历史批量生成完成：{len(trade_dates)} 个交易日全部成功 ===")
                 self.state = "done"
+            self._publish_state()
         except Exception as exc:  # noqa: BLE001
             self.error = repr(exc)
             self.buffer.append_line(f"!!! 批量生成失败: {exc!r}")
             self.buffer.append_text(traceback.format_exc())
             self.state = "error"
+            self._publish_state()
         finally:
             sys.stdout, sys.stderr = old_out, old_err
             try:
@@ -331,6 +396,8 @@ class RunController:
                 pass
             self.failed = list(failures)
             self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._publish_state()
+            self._finish_lease()
 
     def _loguru_sink(self, message) -> None:
         # loguru sink 收到已格式化字符串（带换行）
@@ -349,13 +416,37 @@ class BacktestController:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.buffer = LogBuffer()
+        self._store = TaskStateStore("backtest")
+        self.buffer = LogBuffer(self._store)
+        self._lease: Optional[TaskLease] = None
         self.state: str = "idle"
         self.started_at: Optional[str] = None
         self.finished_at: Optional[str] = None
         self.error: Optional[str] = None
         self.params: Dict[str, object] = {}
         self._thread: Optional[threading.Thread] = None
+
+    def _try_acquire(self) -> bool:
+        if self.state == "running":
+            return False
+        from config.settings import TASK_LOCK_TTL_SECONDS
+
+        self._lease = TaskLease.acquire("backtest", TASK_LOCK_TTL_SECONDS)
+        return self._lease is not None
+
+    def _publish_state(self) -> None:
+        self._store.save({
+            "state": self.state,
+            "params": self.params,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error": self.error,
+        })
+
+    def _finish_lease(self) -> None:
+        lease, self._lease = self._lease, None
+        if lease is not None:
+            lease.release()
 
     def start(self, start_date: Optional[str], end_date: Optional[str],
               initial_capital: object = None,
@@ -395,7 +486,7 @@ class BacktestController:
         if mode == "daily":
             target = trade_date or end_date or start_date or datetime.now().strftime("%Y%m%d")
             with self._lock:
-                if self.state == "running":
+                if not self._try_acquire():
                     return False, "已有回测任务在运行中，请等待完成。"
                 self.buffer.clear()
                 self.state = "running"
@@ -417,6 +508,7 @@ class BacktestController:
                     daemon=True,
                     name="backtest-run-daily",
                 )
+                self._publish_state()
                 self._thread.start()
             mode_txt = "开启风控" if risk_on else "关闭风控"
             reset_txt = "重置接力账户" if reset_state else "承接上一交易日账户"
@@ -433,7 +525,7 @@ class BacktestController:
                 start = (datetime.now() - timedelta(days=90)).strftime("%Y%m%d")
 
         with self._lock:
-            if self.state == "running":
+            if not self._try_acquire():
                 return False, "已有回测任务在运行中，请等待完成。"
             self.buffer.clear()
             self.state = "running"
@@ -447,13 +539,14 @@ class BacktestController:
                 target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements),
                 daemon=True, name="backtest-run"
             )
+            self._publish_state()
             self._thread.start()
         mode = "开启风控" if risk_on else "关闭风控"
         return True, f"已启动回测：{start} ~ {end}（{combination_label}，{mode}）"
 
     def status(self, since: int = 0) -> Dict:
         lines, nxt = self.buffer.read_from(since)
-        return {
+        current = {
             "state": self.state,
             "params": self.params,
             "started_at": self.started_at,
@@ -462,6 +555,13 @@ class BacktestController:
             "lines": lines,
             "next": nxt,
         }
+        if self._store.shared:
+            remote = self._store.load()
+            if remote:
+                remote.update({"lines": lines, "next": nxt})
+                return remote
+        current["storage"] = "memory"
+        return current
 
     def _worker(self, start: str, end: str, capital: float,
                 risk_control: bool = True, max_plan_rank: int = 0,
@@ -562,11 +662,13 @@ class BacktestController:
             self.buffer.append_line(f"接力账户状态已同步到 {state_path}，后续可用单日接力继续。")
             self.buffer.append_line("=== 回测完成，结果已保存，可在「模拟交易 / 回撤分析」查看 ===")
             self.state = "done"
+            self._publish_state()
         except Exception as exc:  # noqa: BLE001
             self.error = repr(exc)
             self.buffer.append_line(f"!!! 回测失败: {exc!r}")
             self.buffer.append_text(traceback.format_exc())
             self.state = "error"
+            self._publish_state()
         finally:
             sys.stdout, sys.stderr = old_out, old_err
             try:
@@ -574,6 +676,8 @@ class BacktestController:
             except Exception:  # noqa: BLE001
                 pass
             self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._publish_state()
+            self._finish_lease()
 
     def _worker_daily(self, trade_date: str, capital: float,
                       risk_control: bool = True, reset_state: bool = False,
@@ -703,11 +807,13 @@ class BacktestController:
             self.buffer.append_line(f"接力账户状态已更新到 {trade_date}：{state_path}")
             self.buffer.append_line("=== 单日接力回测完成，结果已保存，可在「模拟交易 / 回撤分析」查看 ===")
             self.state = "done"
+            self._publish_state()
         except Exception as exc:  # noqa: BLE001
             self.error = repr(exc)
             self.buffer.append_line(f"!!! 单日接力回测失败: {exc!r}")
             self.buffer.append_text(traceback.format_exc())
             self.state = "error"
+            self._publish_state()
         finally:
             sys.stdout, sys.stderr = old_out, old_err
             try:
@@ -715,6 +821,8 @@ class BacktestController:
             except Exception:  # noqa: BLE001
                 pass
             self.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._publish_state()
+            self._finish_lease()
 
     @staticmethod
     def _rolling_state_path() -> Path:

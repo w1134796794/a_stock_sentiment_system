@@ -560,11 +560,13 @@ max_drop_ratio = 0.70
 
 若某条优先规则导致保留数量低于 `min_keep`，或一次删除比例超过 `max_drop_ratio`，引擎会放宽该层并记录 trace，而不是生成空结果。
 
-### 10.4 候选池分位排名
+### 10.4 候选池分位排名与动态权重
 
 默认不直接拿高度压缩在 90 到 100 的绝对分相加，而是在当日候选池内部转换为分位后加权：
 
-| 因子 | 权重 |
+YAML 中的数值现在只是冷启动先验，不再直接等同于生产权重：
+
+| 因子 | 先验权重 |
 | --- | ---: |
 | 技术综合分 `tech_score` | 20% |
 | 流动性分位 `stk_liquidity_percentile` | 5% |
@@ -577,6 +579,24 @@ max_drop_ratio = 0.70
 | 板块共振 `stk_sector_resonance_score` | 10% |
 
 成交额评分在 1.15 倍附近达到峰值，区间内不再全部固定为 100；20 日位置在温和突破时最优，过度乖离会降分；非涨停股票的打板身位固定为中性 50，不再由流通市值制造伪身位差异。分位排名因此既保留横截面差异，也避免绝对分集中在 100 附近。
+
+生产运行由 `core/factors/factor_library.py` 管理权重：
+
+1. T 日因子只对应未来第 3 个交易日收盘收益，标签未来日期必须落在训练结束日内。
+2. 每个交易日做横截面秩相关，得到因子的日度 IC、平均 IC、IC 标准差、IC-IR、正 IC 占比和覆盖率。
+3. 负 IC 因子不会被武断反向使用，而是把学习权重压低；YAML 先验仍提供收缩保护。
+4. 在训练窗口最后一个月，对 `先验收缩比例 × 单因子权重上限` 做网格搜索。
+5. 目标同时考虑 Top10 相对全市场的未来收益、稳定性和 Rank IC。
+6. 发布物带 `effective_date`，筛选某个历史日期时只能加载不晚于该日期的版本。
+7. 最终仍在当日候选池内做分位加权，动态权重只改变相对贡献，不改变硬过滤和优先过滤语义。
+
+权重发布到：
+
+```text
+webdata/models/factor_weights/<profile>/weights_<effective_date>.json
+```
+
+发布物包含训练区间、预测周期、样本数、IC/IR、网格搜索明细、先验权重和最终权重。`FACTOR_WEIGHT_MODE=prior` 可强制关闭动态权重；默认 `dynamic`。生成数据流程会在每月首个交易日使用上一交易日及更早的数据训练本月版本，失败时回退冷启动先验，不阻断日常跑批。
 
 ### 10.5 成交额目标区间惩罚
 
@@ -724,11 +744,18 @@ REALTIME_CACHE_TTL_SECONDS=15
 
 盘后筛选分不会被实时价格重算。实时层只决定计划是否确认、继续观察或取消。
 
-### 12.4 单进程限制
+### 12.4 Redis 共享缓存
 
-当前缓存是进程内存缓存。部署时推荐单个 Uvicorn Web 进程。如果启动多个 worker，每个进程都会各自刷新一次行情，无法达到全站只请求一次的目标。
+配置 `REDIS_URL` 后，实时载荷不再保存在单个 Web Worker 的字典中：
 
-需要横向扩容时，应把实时刷新器独立成一个服务，并将缓存迁移到 Redis。
+- 所有 Worker 读取同一份 JSON 缓存。
+- 每个缓存 key 使用带 token 的 Redis 分布式锁，只有一个 Worker 请求上游行情。
+- 锁释放使用 Lua 校验 token，避免误删其他 Worker 续接的锁。
+- 刷新期间优先返回旧值；没有旧值时短暂等待同一加载结果。
+- 缓存载荷和新鲜时间一起保存，Redis TTL 只负责最终回收。
+- Redis 未配置或启动失败时自动降级进程内存，适合本地单进程开发，但生产会打印明确警告。
+
+数据生成和回测的状态、增量日志也写入 Redis；任务启动使用全局租约并定期续期，因此多个 Web Worker 不会重复启动同一类任务。当前计算线程仍由接到请求的 Worker 执行，Worker 被强杀时计算会中止，但租约过期后可重新运行；需要跨进程断点续跑时再接独立任务队列。
 
 ## 13. 龙头池和盘中转强
 
@@ -1018,6 +1045,22 @@ OHLC 无法知道日内高低点先后顺序，因此移动止盈以当日最高
 
 参数只有在多个验证折中方向一致、样本量足够、最大回撤可接受时才值得进入默认配置。禁止只根据某一批 97 笔或 125 笔交易反复调参。
 
+除入场规则 walk-forward 外，因子库还有独立的按月权重验证：
+
+```bash
+python scripts/train_factor_library.py \
+  --start 20260105 --end 20260630 \
+  --profile default --walk-forward --train-months 3
+```
+
+每一折只用之前 3 个月估计 IC/IR 和选择收缩参数，再将权重发布给下一个完整月。查看指标因子页面可以看到当前生效权重、先验权重、平均 IC、IC-IR 和正 IC 占比。若需要发布下一期正式版本：
+
+```bash
+python scripts/train_factor_library.py \
+  --start 20260301 --end 20260630 \
+  --profile default --effective-date 20260701
+```
+
 ## 16. Web 页面与权限
 
 ### 16.1 菜单
@@ -1263,6 +1306,27 @@ python run_web.py --host 127.0.0.1 --port 8000 --reload
 
 ### 20.2 systemd
 
+先安装并启动 Redis：
+
+```bash
+sudo apt update
+sudo apt install -y redis-server
+sudo systemctl enable --now redis-server
+redis-cli ping
+```
+
+`.env` 至少增加：
+
+```env
+REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_KEY_PREFIX=a_stock
+TASK_LOCK_TTL_SECONDS=180
+FACTOR_WEIGHT_MODE=dynamic
+FACTOR_WEIGHT_DIR=/srv/a-stock/webdata/models/factor_weights
+```
+
+Redis 只监听服务器本机，不要把 6379 端口开放到公网。
+
 `/etc/systemd/system/a-stock.service`：
 
 ```ini
@@ -1276,7 +1340,7 @@ User=astock
 Group=astock
 WorkingDirectory=/opt/a_stock_sentiment_system
 EnvironmentFile=/opt/a_stock_sentiment_system/.env
-ExecStart=/opt/a_stock_sentiment_system/.venv/bin/python run_web.py --host 127.0.0.1 --port 8000
+ExecStart=/opt/a_stock_sentiment_system/.venv/bin/python run_web.py --host 127.0.0.1 --port 8000 --workers 1
 Restart=always
 RestartSec=5
 
@@ -1293,6 +1357,8 @@ sudo systemctl status a-stock
 ```
 
 systemd 已运行时，不要再手工执行 `python run_web.py`，否则会出现 8000 端口被占用。
+
+确认 Redis 和共享目录稳定后，可将 `--workers 1` 调整为 `--workers 2`。程序会拒绝在未配置 `REDIS_URL` 时启动多 Worker，避免重复刷新行情和重复执行任务。2 GB 服务器建议最多 2 个 Worker，并且历史跑批期间保持 1 个。
 
 ### 20.3 目录权限
 
@@ -1488,7 +1554,7 @@ systemd 正在运行时不要重复手工启动。
 
 ### 24.2 当前技术边界
 
-- 实时缓存仅在单进程内共享。
+- Redis 负责共享实时缓存、任务状态和分布式锁，但重计算仍在启动任务的 Web Worker 内执行。
 - 回测基于日线 OHLC，无法精确还原日内成交顺序。
 - 历史结果不会随代码升级自动重算。
 - 概念梯队依赖本地成员映射缓存。
@@ -1497,10 +1563,10 @@ systemd 正在运行时不要重复手工启动。
 
 ### 24.3 推荐扩展顺序
 
-1. 将实时任务和 Web 进程分离，使用 Redis 共享缓存。
-2. 为历史跑批增加任务队列、断点续跑和资源配额。
-3. 为每个每日产物写入代码版本、配置哈希和数据版本。
-4. 建立因子 IC、分层收益和稳定性看板。
+1. 把长时间运行的历史跑批迁入独立 Worker 队列，增加断点续跑和资源配额。
+2. 为每个每日产物写入代码版本、配置哈希和数据版本。
+3. 在现有 IC/IR 表之上增加分层收益、换手率和稳定性时间序列图。
+4. 样本积累足够后，把同一份因子矩阵接入 LightGBM，并与 IC/IR 权重做严格样本外对照。
 5. 为回测加入分钟级数据，改善盘中转强和止损撮合。
 6. 将用户订阅、支付订单和授权记录独立成服务。
 

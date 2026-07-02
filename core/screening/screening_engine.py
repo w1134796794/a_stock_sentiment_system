@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -58,12 +59,18 @@ class ScreeningEngine:
         duckdb_path: Optional[Path] = None,
         profile_path: Optional[Path] = None,
         output_dir: Optional[Path] = None,
+        weight_repository: Any = None,
     ):
         from config.settings import BASE_DIR, FACTOR_DB_PATH, WEB_DATA_DIR
 
         self.duckdb_path = Path(duckdb_path or FACTOR_DB_PATH)
         self.profile_path = Path(profile_path or BASE_DIR / "config" / "screening_profiles.yaml")
         self.output_dir = Path(output_dir or WEB_DATA_DIR / "screening")
+        if weight_repository is None:
+            from core.factors.factor_library import DynamicWeightRepository
+
+            weight_repository = DynamicWeightRepository()
+        self.weight_repository = weight_repository
 
     def run(
         self,
@@ -83,9 +90,12 @@ class ScreeningEngine:
                 ok=False,
                 message=f"screening profile 不存在: {profile}",
             )
-        cfg = profiles[profile_name] or {}
+        cfg, weight_metadata = self._runtime_profile(
+            profiles[profile_name] or {}, trade_date, profile_name
+        )
 
         result = ScreeningResult(trade_date=trade_date, profile=profile_name)
+        result.weight_metadata = weight_metadata
         try:
             candidates = self.load_candidates(trade_date, candidate_codes=candidate_codes)
         except Exception as e:  # noqa: BLE001
@@ -142,6 +152,38 @@ class ScreeningEngine:
         with self.profile_path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return data.get("screening_profiles") or {}
+
+    def _runtime_profile(
+        self, cfg: Dict[str, Any], trade_date: str, profile: str,
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """Replace YAML priors with the latest weight version effective on trade_date."""
+        runtime = deepcopy(cfg)
+        ranking = runtime.setdefault("ranking", {})
+        prior = ranking.get("prior_weights") or ranking.get("weights") or {"stk_total_score": 1.0}
+        source = "yaml_prior"
+        effective_date = ""
+        artifact_path = ""
+        model_type = "manual_prior"
+        from config.settings import FACTOR_WEIGHT_MODE
+
+        artifact = None
+        if FACTOR_WEIGHT_MODE not in {"prior", "static", "off", "disabled"}:
+            artifact = self.weight_repository.resolve(trade_date, profile)
+        if artifact is not None:
+            ranking["weights"] = artifact.weights
+            source = "dynamic_ic_ir"
+            effective_date = artifact.effective_date
+            artifact_path = str(artifact.path)
+            model_type = str(artifact.payload.get("model_type") or "ic_ir")
+        else:
+            ranking["weights"] = prior
+        return runtime, {
+            "source": source,
+            "model_type": model_type,
+            "effective_date": effective_date,
+            "artifact_path": artifact_path,
+            "weights": dict(ranking["weights"]),
+        }
 
     def load_candidates(
         self,

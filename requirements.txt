@@ -16,6 +16,8 @@ adata>=2.9.5
 eltdx>=1.0.2
 # 环境变量管理（.env 文件，缺失时 settings.py 会优雅降级）
 python-dotenv>=1.0.0
+# 生产环境共享实时缓存、任务状态和分布式锁；未配置 REDIS_URL 时不连接服务。
+redis>=5.0.0
 
 # ===== 桌面管理工具（run_manager.py / 内嵌看板）=====
 # 内嵌的只读看板 + 配置中心仍基于 FastAPI；pywebview 提供本机原生窗口（无需浏览器）

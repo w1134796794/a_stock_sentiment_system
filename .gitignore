@@ -21,6 +21,7 @@ htmlcov/
 /webdata/backtest_trade_plans*/
 /webdata/etl_quality/
 /webdata/logs/
+/webdata/models/
 /webdata/output/
 /webdata/realtime/
 /webdata/screening/

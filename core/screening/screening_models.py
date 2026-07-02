@@ -49,6 +49,7 @@ class ScreeningResult:
     traces: List[FilterTrace] = field(default_factory=list)
     output_path: str = ""
     enhancement_schema_version: int = 1
+    weight_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -67,4 +68,5 @@ class ScreeningResult:
             "traces": [trace.to_dict() for trace in self.traces],
             "output_path": self.output_path,
             "enhancement_schema_version": self.enhancement_schema_version,
+            "weight_metadata": self.weight_metadata,
         }

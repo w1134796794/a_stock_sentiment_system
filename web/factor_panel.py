@@ -98,6 +98,9 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
     profiles.sort(key=lambda p: p["name"])
 
     latest_factor_data = _latest_factor_data()
+    dynamic_weight_state = _dynamic_weight_state(
+        latest_factor_data.get("trade_date", ""), active_profile or "default"
+    )
 
     return {
         "factor_groups": factor_groups,
@@ -111,6 +114,7 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
         "latest_factor_trade_date": latest_factor_data.get("trade_date", ""),
         "latest_factor_summary": latest_factor_data.get("rows", []),
         "override_count": _count(yaml_store),
+        "dynamic_weights": dynamic_weight_state,
     }
 
 
@@ -191,3 +195,46 @@ def _json_scalar(value: Any) -> Any:
     except Exception:
         pass
     return value
+
+
+def _dynamic_weight_state(trade_date: str, profile: str) -> Dict[str, Any]:
+    try:
+        from core.factors.factor_library import DynamicWeightRepository, FactorLibraryTrainer
+
+        profile = profile if profile in {"default", "momentum_repair"} else "default"
+        artifact = DynamicWeightRepository().resolve(trade_date or "99999999", profile)
+        prior = FactorLibraryTrainer().prior_weights(profile)
+        if artifact is None:
+            return {
+                "source": "冷启动先验",
+                "effective_date": "",
+                "model_type": "manual_prior",
+                "rows": [
+                    {"factor": factor, "weight": weight, "prior": weight, "ic_mean": None, "ic_ir": None}
+                    for factor, weight in sorted(prior.items(), key=lambda item: item[1], reverse=True)
+                ],
+            }
+        metrics = artifact.payload.get("factor_metrics") or {}
+        rows = []
+        for factor, weight in sorted(artifact.weights.items(), key=lambda item: item[1], reverse=True):
+            row = metrics.get(factor) or {}
+            rows.append({
+                "factor": factor,
+                "weight": float(weight),
+                "prior": float((artifact.payload.get("prior_weights") or {}).get(factor, 0.0)),
+                "ic_mean": row.get("ic_mean"),
+                "ic_ir": row.get("ic_ir"),
+                "positive_ratio": row.get("positive_ratio"),
+            })
+        return {
+            "source": "IC/IR 动态权重",
+            "effective_date": artifact.effective_date,
+            "model_type": artifact.payload.get("model_type", "ic_ir"),
+            "train_start": artifact.payload.get("train_start", ""),
+            "train_end": artifact.payload.get("train_end", ""),
+            "training_days": artifact.payload.get("training_days", 0),
+            "selected_hyperparameters": artifact.payload.get("selected_hyperparameters") or {},
+            "rows": rows,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"source": "读取失败", "error": str(exc), "rows": []}
