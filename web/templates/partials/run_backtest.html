@@ -75,6 +75,17 @@
         </details>
       </div>
       <div>
+        <label class="block text-[11px] text-slate-500 mb-0.5">入场模型</label>
+        <select id="bt-entry-mode" class="h-[30px] bg-slate-900 border border-slate-700 rounded-md px-2 text-sm text-slate-300">
+          <option value="hybrid" selected>弱转强 + 延续</option>
+          <option value="weak_only">只做弱转强</option>
+          <option value="continuation_only">只做强势延续</option>
+          <option value="acceleration_only">只做高开加速</option>
+          <option value="fixed_gap">原固定区间</option>
+          <option value="compare">四组对照</option>
+        </select>
+      </div>
+      <div>
         <label class="block text-[11px] text-slate-500 mb-0.5">风控闸门</label>
         <label class="flex items-center gap-1.5 h-[30px] px-2 rounded-md border border-slate-700 bg-slate-900 cursor-pointer select-none">
           <input id="bt-risk" type="checkbox"
@@ -148,7 +159,8 @@
     const riskOn = document.getElementById('bt-risk').checked;
     const body = {
       mode: mode(), initial_capital: val('bt-cap'), risk_control: riskOn,
-      max_plan_rank: 0, enhancements: enhancements()
+      max_plan_rank: 0, enhancements: enhancements(),
+      entry_mode: document.getElementById('bt-entry-mode').value
     };
     if (body.mode === 'daily') {
       body.trade_date = val('bt-day');

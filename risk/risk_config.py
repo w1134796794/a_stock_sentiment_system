@@ -48,8 +48,8 @@ class RiskConfig:
     max_positions: int = 8                    # 最多同时持仓只数
 
     # ---- 入场与市场分层 ----
-    min_open_gap: float = 0.0                 # 必须严格高开
-    max_open_gap: float = 0.03                # 高开超过 3% 不追
+    min_open_gap: float = 0.0                 # 仅原固定区间对照模式使用
+    max_open_gap: float = 0.03                # 仅原固定区间对照模式使用
     market_entry_threshold: float = 50.0      # 弱市停止开仓
     market_strong_threshold: float = 70.0     # 强市才扩展到前 N 名
     neutral_market_max_rank: int = 1          # 中性市场只执行第 1 名

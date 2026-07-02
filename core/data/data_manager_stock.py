@@ -633,7 +633,14 @@ class StockDataManager(DataManagerBase):
             logger.debug(f"[get_minute_bars_live] eltdx 实时分时失败 {ts_code} {trade_date}: {e}")
             return pd.DataFrame()
 
-    def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
+    def get_kline(
+        self,
+        ts_code: str,
+        period: str = "day",
+        count: int = 120,
+        *,
+        force_refresh: bool = False,
+    ) -> pd.DataFrame:
         """获取个股 K 线：eltdx 优先，AshareProvider 兜底。
 
         盘后批量分析仍使用 Tushare 的 ``get_stock_daily`` / ``get_all_stocks_daily``；
@@ -641,9 +648,12 @@ class StockDataManager(DataManagerBase):
         """
         cache_file = self.stock_dir / "kline" / f"{ts_code}_{period}_{count}.csv"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cached_df = pd.DataFrame()
         if cache_file.exists():
             try:
-                return pd.read_csv(cache_file)
+                cached_df = pd.read_csv(cache_file)
+                if not force_refresh:
+                    return cached_df
             except Exception:
                 pass
 
@@ -661,7 +671,7 @@ class StockDataManager(DataManagerBase):
                 df.to_csv(cache_file, index=False)
                 return df
 
-        return pd.DataFrame()
+        return cached_df
 
     def get_stocks_daily_batch(self,
                                ts_codes: List[str],

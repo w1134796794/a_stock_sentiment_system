@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import pandas as pd
+
+from core.realtime.entry_signal_service import RealtimeEntrySignalService
 from core.realtime.leader_pool_service import IntradayStrengthService, LeaderPoolService
 
 
@@ -63,7 +66,7 @@ def test_leader_pool_from_screening_json(tmp_path: Path):
     assert all(row["code"] != "000001" for row in result["rows"])
 
 
-def test_intraday_strength_cancels_low_open():
+def test_intraday_strength_uses_weak_to_strong_for_low_open():
     class FakePool:
         def build_pool(self, trade_date, *, lookback=5, limit=30):
             return {
@@ -75,7 +78,9 @@ def test_intraday_strength_cancels_low_open():
                         "pool_rank": 1,
                         "pool_type": "核心龙头",
                         "leader_score": 88,
-                        "action": "只在高开且实时转强时确认；低开直接放弃",
+                        "sector_status_score": 80,
+                        "context": {"amount_ratio": 1.2},
+                        "action": "按分钟入场条件确认",
                     }
                 ],
             }
@@ -95,10 +100,38 @@ def test_intraday_strength_cancels_low_open():
                 ]
             }
 
-    result = IntradayStrengthService(quote_service=FakeQuotes(), pool_service=FakePool()).build("20260618")
+    class FakeMinuteData:
+        def get_minute_bars_live(self, ts_code, trade_date):
+            prices = [
+                (9.90, 9.94, 9.86, 9.92),
+                (9.92, 9.96, 9.90, 9.94),
+                (9.94, 9.98, 9.92, 9.96),
+                (9.96, 9.99, 9.94, 9.98),
+                (9.98, 10.00, 9.96, 9.99),
+                (9.99, 10.06, 9.98, 10.04),
+                (10.05, 10.08, 10.02, 10.06),
+            ]
+            return pd.DataFrame([
+                {
+                    "time": f"09:{30 + i:02d}:00", "open": op, "high": high,
+                    "low": low, "close": close, "volume": 1000, "amount": close * 1000,
+                }
+                for i, (op, high, low, close) in enumerate(prices)
+            ])
 
-    assert result["rows"][0]["status"] == "cancelled"
-    assert "低开" in result["rows"][0]["reason"]
+        def get_all_stocks_daily(self, trade_date):
+            return pd.DataFrame()
+
+    result = IntradayStrengthService(
+        quote_service=FakeQuotes(),
+        pool_service=FakePool(),
+        entry_signal_service=RealtimeEntrySignalService(FakeMinuteData()),
+    ).build("20260618", market_date="20260619")
+
+    assert result["candidate_date"] == "20260618"
+    assert result["market_date"] == "20260619"
+    assert result["rows"][0]["status"] == "confirmed"
+    assert result["rows"][0]["entry_mode_text"] == "弱转强"
 
 
 def test_leader_pool_uses_20cm_limit_progress_for_chinext(tmp_path: Path):

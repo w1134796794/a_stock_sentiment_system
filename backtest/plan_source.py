@@ -114,9 +114,11 @@ def _rows_from_screening(
             "优先级": item.get("rank"),
             "综合评分": item.get("score"),
             "建议仓位": "中性 20%-30%",
-            "入场区间": "竞价高开0%-3%且实时确认后",
-            "竞价条件": "高开0%-3%才买入，平开、低开或高开超过3%直接放弃",
-            "风险提示": "实时行情为取消/观察时不主动买入",
+            "入场区间": "弱转强/强势延续/高开加速按分钟确认",
+            "竞价条件": "开盘仅用于信号分层，10:00前按一分钟行情确认",
+            "风险提示": "未确认或信号出现后无可成交分钟则不买入",
+            "共振板块": item.get("resonance_sectors") or "",
+            "所属板块": item.get("resonance_sectors") or "",
             "筛选理由": "；".join(str(x) for x in (item.get("reasons") or [])[:5]),
             "惩罚理由": "；".join(str(x) for x in (item.get("penalty_reasons") or [])[:5]),
             "龙虎榜口径": lhb_scenario or "lhb_sector",
@@ -155,9 +157,9 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     mode = str(row.get("模式类型") or row.get("pattern_type") or "指标筛选/default")
     score = row.get("综合评分") if row.get("综合评分") is not None else row.get("score")
     reason = str(row.get("筛选理由") or row.get("reason") or "")
-    entry = str(row.get("入场区间") or "竞价高开0%-3%且实时确认后")
-    condition = str(row.get("竞价条件") or "高开0%-3%才买入，平开、低开或高开超过3%直接放弃")
-    cancel = str(row.get("风险提示") or "平开、低开或高开超过3%直接放弃")
+    entry = str(row.get("入场区间") or "弱转强/强势延续/高开加速按分钟确认")
+    condition = str(row.get("竞价条件") or "开盘仅用于信号分层，10:00前按一分钟行情确认")
+    cancel = str(row.get("风险提示") or "未确认或无可成交分钟则不买入")
     position = _position(row.get("建议仓位") or row.get("position"))
     factor_metrics = {
         key.replace("因子_", "", 1): _to_number(value)
@@ -186,10 +188,10 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "理由": reason,
         "加入观察池": True,
         "热点共振": False,
-        "共振板块": "",
+        "共振板块": row.get("共振板块") or row.get("所属板块") or "",
         "综合评分": score or 0,
         "优先级": row.get("优先级") or row.get("rank") or "",
-        "所属板块": "",
+        "所属板块": row.get("所属板块") or row.get("共振板块") or "",
         "惩罚理由": row.get("惩罚理由") or "",
         "因子指标": json.dumps(factor_metrics, ensure_ascii=False, sort_keys=True),
         "原始指标": json.dumps(raw_context, ensure_ascii=False, sort_keys=True),

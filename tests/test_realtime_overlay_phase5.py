@@ -38,15 +38,32 @@ class FakeQuoteService:
         return {"ok": True, "quotes": [rows[c] for c in codes if c in rows]}
 
 
-def test_realtime_overlay_confirms_high_open_and_cancels_low_open(tmp_path):
+class FakeEntrySignalService:
+    def evaluate(self, rows, quotes, *, market_date):
+        return {
+            "000001": {
+                "signal_status": "confirmed", "entry_mode": "continuation_only",
+                "entry_mode_text": "强势延续", "reason": "分钟强势延续确认",
+            },
+            "600000": {
+                "signal_status": "observe", "entry_mode": "weak_only",
+                "entry_mode_text": "弱转强", "reason": "低开后等待收复昨收",
+            },
+            "300001": {
+                "signal_status": "observe", "entry_mode": "weak_only",
+                "entry_mode_text": "弱转强", "reason": "等待分钟确认",
+            },
+        }
+
+
+def test_realtime_overlay_uses_shared_minute_entry_signals(tmp_path):
     service = RealtimeOverlayService(
         FakeQuoteService(),
         output_dir=tmp_path,
-        min_open_gap_pct=0.0,
-        min_intraday_pct=0.0,
+        entry_signal_service=FakeEntrySignalService(),
     )
     payload = service.build_overlay(
-        "20260616",
+        "20260616", market_date="20260617",
         candidates=[
             {
                 "code": "000001", "name": "平安银行", "score": 88, "rank": 1,
@@ -61,9 +78,12 @@ def test_realtime_overlay_confirms_high_open_and_cancels_low_open(tmp_path):
     rows = {row["code"]: row for row in payload["rows"]}
     assert rows["000001"]["confirm_status"] == "confirmed"
     assert rows["000001"]["resonance_sectors"] == "银行,跨境支付"
-    assert rows["600000"]["confirm_status"] == "cancelled"
+    assert rows["600000"]["confirm_status"] == "observe"
+    assert rows["600000"]["entry_mode_text"] == "弱转强"
     assert rows["300001"]["confirm_status"] == "observe"
-    assert payload["counts"] == {"confirmed": 1, "cancelled": 1, "observe": 1}
+    assert payload["candidate_date"] == "20260616"
+    assert payload["market_date"] == "20260617"
+    assert payload["counts"] == {"confirmed": 1, "cancelled": 0, "observe": 2, "unfilled": 0}
     assert (tmp_path / "overlay_20260616.json").exists()
 
 
@@ -85,4 +105,4 @@ def test_realtime_overlay_does_not_fallback_to_snapshot_plans(tmp_path):
     payload = service.build_overlay("20260616")
 
     assert payload["rows"] == []
-    assert payload["source"] == "当日指标筛选未生成"
+    assert payload["source"] == "候选日指标筛选未生成"

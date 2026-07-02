@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}盘中转强 · 管理控制台{% endblock %}
 {% block page_title %}盘中转强{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 近期龙头盘中转强观察</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">候选 {{ candidate_date or '--' }} · 行情 {{ market_date or '--' }} · 近期龙头盘中转强观察</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
-  <label class="text-sm text-slate-400">交易日</label>
+  <label class="text-sm text-slate-400">候选日</label>
   <select id="date-select" class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
     {% for d in dates %}
       <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
@@ -28,7 +28,7 @@
 {% block content %}
 <section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
   <div class="is-kpi"><div id="kpi-confirmed" class="is-kpi-v mono text-emerald-300">--</div><div class="is-kpi-l">确认</div></div>
-  <div class="is-kpi"><div id="kpi-turning" class="is-kpi-v mono text-sky-300">--</div><div class="is-kpi-l">转强观察</div></div>
+  <div class="is-kpi"><div id="kpi-unfilled" class="is-kpi-v mono text-sky-300">--</div><div class="is-kpi-l">信号正确·无法成交</div></div>
   <div class="is-kpi"><div id="kpi-observe" class="is-kpi-v mono text-amber-300">--</div><div class="is-kpi-l">继续观察</div></div>
   <div class="is-kpi"><div id="kpi-cancelled" class="is-kpi-v mono text-rose-300">--</div><div class="is-kpi-l">取消</div></div>
 </section>
@@ -51,6 +51,7 @@
   .is-card { border:1px solid rgba(51,65,85,.72); background:rgba(15,23,42,.48); border-radius:.75rem; padding:.9rem; min-width:0; }
   .is-card.confirmed { border-color:rgba(16,185,129,.58); }
   .is-card.turning { border-color:rgba(56,189,248,.48); }
+  .is-card.unfilled { border-color:rgba(56,189,248,.58); }
   .is-card.cancelled { border-color:rgba(244,63,94,.48); opacity:.88; }
   .is-head { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; }
   .is-name { font-size:1rem; font-weight:900; color:#f1f5f9; line-height:1.25; }
@@ -58,6 +59,7 @@
   .is-status { flex:0 0 auto; display:inline-flex; align-items:center; border-radius:.5rem; padding:.18rem .55rem; font-size:.72rem; font-weight:900; }
   .is-status.confirmed { color:#042f2e; background:#5eead4; }
   .is-status.turning { color:#e0f2fe; background:rgba(56,189,248,.22); border:1px solid rgba(56,189,248,.42); }
+  .is-status.unfilled { color:#e0f2fe; background:rgba(56,189,248,.22); border:1px solid rgba(56,189,248,.42); }
   .is-status.observe { color:#fde68a; background:rgba(245,158,11,.18); border:1px solid rgba(245,158,11,.36); }
   .is-status.cancelled { color:#fff1f2; background:#e11d48; }
   .is-metrics { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.5rem; margin-top:.85rem; }
@@ -74,6 +76,7 @@
 
 <script>
   const initialDate = {{ (date or '')|tojson }};
+  const initialMarketDate = {{ (market_date or '')|tojson }};
   const els = {
     date: document.getElementById('date-select'),
     lookback: document.getElementById('lookback-select'),
@@ -118,6 +121,7 @@
     els.empty.classList.add('hidden');
     const params = new URLSearchParams({ limit: '30', lookback: els.lookback.value || '5' });
     if (els.date && els.date.value) params.set('date', els.date.value);
+    if (initialMarketDate) params.set('market_date', initialMarketDate);
     try {
       const r = await fetch('/api/intraday-strength?' + params.toString());
       const j = await r.json();
@@ -134,10 +138,10 @@
     const rows = j.rows || [];
     const counts = j.counts || {};
     document.getElementById('kpi-confirmed').textContent = counts.confirmed || 0;
-    document.getElementById('kpi-turning').textContent = counts.turning || 0;
+    document.getElementById('kpi-unfilled').textContent = counts.unfilled || 0;
     document.getElementById('kpi-observe').textContent = counts.observe || 0;
     document.getElementById('kpi-cancelled').textContent = counts.cancelled || 0;
-    document.getElementById('pool-date').textContent = j.trade_date || '--';
+    document.getElementById('pool-date').textContent = `候选 ${j.candidate_date || j.trade_date || '--'} · 行情 ${j.market_date || '--'}`;
     document.getElementById('pool-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
     if (!rows.length) {
       els.grid.innerHTML = '';
@@ -147,7 +151,7 @@
     els.grid.innerHTML = rows.map(row => `
       <article class="is-card ${esc(row.status || 'observe')}">
         <div class="is-head">
-          <a href="/stock/${esc(row.code)}?date=${esc(j.trade_date || initialDate)}" class="min-w-0 hover:text-emerald-300">
+          <a href="/stock/${esc(row.code)}?date=${esc(j.market_date || initialMarketDate)}&context_date=${esc(j.candidate_date || j.trade_date || initialDate)}" class="min-w-0 hover:text-emerald-300">
             <div class="is-name">${esc(nameOf(row))}</div>
             <div class="is-code mono">${esc(row.code || '--')} · ${esc(row.leader_time_label || row.pool_type || '--')}</div>
           </a>
@@ -155,6 +159,7 @@
         </div>
         ${renderStockSectorTags(row)}
         <div class="is-metrics">
+          <div class="is-metric"><span>入场模式</span><strong>${esc(row.entry_mode_text || '等待分类')}</strong></div>
           <div class="is-metric"><span>转强分</span><strong class="mono">${num(row.turn_score)}</strong></div>
           <div class="is-metric"><span>池分</span><strong class="mono">${num(row.leader_score)}</strong></div>
           <div class="is-metric"><span>开盘</span><strong class="${clsPct(row.open_gap_pct)}">${pct(row.open_gap_pct)}</strong></div>

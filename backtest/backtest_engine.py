@@ -16,6 +16,17 @@ from pathlib import Path
 import loguru
 
 from backtest.matching_rules import limit_up_price, open_gap_pct
+from backtest.minute_entry import (
+    ENTRY_COMPARE,
+    ENTRY_CONTINUATION,
+    ENTRY_FIXED,
+    ENTRY_HYBRID,
+    ENTRY_MODES,
+    ENTRY_WEAK,
+    EntryDecision,
+    MinuteEntryEvaluator,
+    normalize_minute_bars,
+)
 from backtest.trade_calendar import TradeCalendar
 
 logger = loguru.logger
@@ -32,6 +43,15 @@ class BacktestConfig:
     max_plan_rank: int = 0  # 0=不按名次截断，全部候选交给买点规则判断
 
     # 入场与市场分层
+    entry_mode: str = ENTRY_HYBRID  # 默认按分钟执行弱转强+强势延续
+    entry_confirm_deadline: str = "10:00:00"
+    weak_entry_min_gap: float = -0.03
+    weak_entry_max_gap: float = 0.01
+    continuation_max_gap: float = 0.05
+    entry_min_amount_pace: float = 0.80
+    entry_max_amount_pace: float = 3.00
+    continuation_min_auction_volume_ratio: float = 0.008
+    continuation_min_auction_amount: float = 5_000_000
     min_open_gap: float = 0.0  # 必须严格高开
     max_open_gap: float = 0.03  # 高开超过3%不追
     reduced_position_gap: float = 0.02  # 高开2%-3%仍可买，但降低追高风险
@@ -143,6 +163,9 @@ class TradeRecord:
     market_score: float = 0.0
     amount_ratio: float = 0.0
     entry_signal: str = ""
+    entry_time: str = ""
+    mfe_pct: float = 0.0
+    mae_pct: float = 0.0
 
 
 class BacktestEngine:
@@ -162,6 +185,22 @@ class BacktestEngine:
         self.total_capital: float = self.config.initial_capital
         self._last_entry_gap: Dict[str, float] = {}
         self._last_entry_signal: Dict[str, str] = {}
+        self._last_entry_meta: Dict[str, Dict[str, Any]] = {}
+        self._minute_frames: Dict[Tuple[str, str], pd.DataFrame] = {}
+        self._auction_rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self._day_plans = pd.DataFrame()
+        self.entry_attempts: List[Dict[str, Any]] = []
+        self.entry_candidate_count: int = 0
+        self.minute_evaluator = MinuteEntryEvaluator(
+            deadline=self.config.entry_confirm_deadline,
+            weak_min_gap=self.config.weak_entry_min_gap,
+            weak_max_gap=self.config.weak_entry_max_gap,
+            continuation_max_gap=self.config.continuation_max_gap,
+            min_amount_pace=self.config.entry_min_amount_pace,
+            max_amount_pace=self.config.entry_max_amount_pace,
+            min_auction_volume_ratio=self.config.continuation_min_auction_volume_ratio,
+            min_auction_amount=self.config.continuation_min_auction_amount,
+        )
 
     def export_state(self) -> Dict[str, Any]:
         """导出可落盘的账户状态，用于单日接力回测。"""
@@ -175,6 +214,8 @@ class BacktestEngine:
             "current_positions": json.loads(json.dumps(self.current_positions, ensure_ascii=False)),
             "daily_nav": json.loads(json.dumps(self.daily_nav, ensure_ascii=False)),
             "trade_history": [asdict(t) for t in self.trade_history],
+            "entry_attempts": json.loads(json.dumps(self.entry_attempts, ensure_ascii=False)),
+            "entry_candidate_count": self.entry_candidate_count,
         }
 
     def import_state(self, state: Dict[str, Any]) -> None:
@@ -189,6 +230,8 @@ class BacktestEngine:
             for code, pos in (state.get("current_positions") or {}).items()
         }
         self.daily_nav = [dict(row or {}) for row in (state.get("daily_nav") or [])]
+        self.entry_attempts = [dict(row or {}) for row in (state.get("entry_attempts") or [])]
+        self.entry_candidate_count = int(state.get("entry_candidate_count") or 0)
         allowed = set(TradeRecord.__dataclass_fields__.keys())
         self.trade_history = []
         for row in state.get("trade_history") or []:
@@ -271,6 +314,12 @@ class BacktestEngine:
         if not plans_df.empty:
             logger.info(f"[{date}] 加载 {prev_date} 制定的 {len(plans_df)} 条交易计划")
 
+            # 分钟策略先把当日所有候选的一分钟行情和竞价数据落入磁盘/内存缓存，
+            # 后续逐票判定只读缓存，不在某个条件分支里临时访问行情源。
+            self._day_plans = plans_df.copy()
+            if self.config.entry_mode != ENTRY_FIXED:
+                self._prefetch_entry_data(plans_df, date)
+
             # 3. 根据计划执行买入（检查开盘情况和介入时机）
             for _, plan in plans_df.iterrows():
                 self._execute_buy(plan, date)
@@ -284,6 +333,8 @@ class BacktestEngine:
             ]
             for stock_code, entry_signal in new_positions:
                 self._check_entry_day_stop(stock_code, date, entry_signal)
+
+            self._day_plans = pd.DataFrame()
 
         # 4. 计算当日净值
         self._calculate_daily_nav(date)
@@ -395,6 +446,7 @@ class BacktestEngine:
         if not can_buy:
             self._last_entry_gap.pop(stock_code, None)
             self._last_entry_signal.pop(stock_code, None)
+            self._last_entry_meta.pop(stock_code, None)
             return
 
         entry_gap = self._last_entry_gap.get(stock_code, 0.0)
@@ -410,12 +462,14 @@ class BacktestEngine:
             logger.warning(f"现金不足，跳过买入 {stock_name}")
             self._last_entry_gap.pop(stock_code, None)
             self._last_entry_signal.pop(stock_code, None)
+            self._last_entry_meta.pop(stock_code, None)
             return
         
         if entry_price <= 0:
             logger.warning(f"{stock_name} 买入价格无效，跳过")
             self._last_entry_gap.pop(stock_code, None)
             self._last_entry_signal.pop(stock_code, None)
+            self._last_entry_meta.pop(stock_code, None)
             return
 
         # 确保买入价格不超过对应板块涨停价。
@@ -453,6 +507,7 @@ class BacktestEngine:
         factor_context = json.loads(factor_context_json or '{}')
         open_gap = self._last_entry_gap.pop(stock_code, 0.0)
         entry_signal = self._last_entry_signal.pop(stock_code, "竞价买点")
+        entry_meta = self._last_entry_meta.pop(stock_code, {})
         market_score = self._float(factor_context.get('mkt_market_score'))
         amount_ratio = self._float(
             factor_context.get('amount_ratio_5d'),
@@ -478,8 +533,12 @@ class BacktestEngine:
             'market_score': market_score,
             'amount_ratio': amount_ratio,
             'entry_signal': entry_signal,
+            'entry_time': str(entry_meta.get('entry_time') or '09:30:00'),
+            'confirm_time': str(entry_meta.get('confirm_time') or ''),
             'stop_loss_price': entry_price * (1 - self.config.stop_loss_pct),
             'highest_price': entry_price,  # 用于跟踪回撤
+            'max_favorable_price': entry_price,
+            'min_adverse_price': entry_price,
             'last_close': self._float((self._get_stock_daily_bar(stock_code, date) or {}).get('close'), entry_price),
         }
 
@@ -514,6 +573,7 @@ class BacktestEngine:
             market_score=market_score,
             amount_ratio=amount_ratio,
             entry_signal=entry_signal,
+            entry_time=str(entry_meta.get('entry_time') or '09:30:00'),
         )
         self.trade_history.append(trade_record)
 
@@ -530,16 +590,132 @@ class BacktestEngine:
         session_close = self._float(daily_bar.get('close'))
         if stop_price <= 0:
             return
-        # 盘中转强使用日内 high 确认，无法从日 K 判断最低价发生在触发前还是触发后；
-        # 只有收盘已跌破止损线时，才能确定触发后必然再次向下穿越止损价。
-        triggered = session_close <= stop_price if entry_signal == "盘中转强" else session_low <= stop_price
-        if not triggered:
+        entry_time = str(position.get('entry_time') or '')
+        minute_frame = self._minute_frames.get((str(date), stock_code), pd.DataFrame())
+        if entry_time and not minute_frame.empty and entry_signal != "竞价买点":
+            post_entry = minute_frame[minute_frame['time'] >= entry_time]
+            if not post_entry.empty:
+                session_low = self._float(post_entry['low'].min(), session_low)
+                session_high = self._float(post_entry['high'].max(), position['entry_price'])
+                self._update_excursion(position, session_high, session_low)
+                triggered = bool((pd.to_numeric(post_entry['low'], errors='coerce') <= stop_price).any())
+            else:
+                triggered = session_close <= stop_price
+        else:
+            self._update_excursion(position, self._float(daily_bar.get('high')), session_low)
+            triggered = session_low <= stop_price
+        if triggered:
+            # A股现货当日买入不可卖出。只记录入场后不利波动，下一交易日再按
+            # 开盘跳空或盘中止损规则成交，避免虚构 T+0 止损。
+            position['entry_day_stop_breached'] = True
+            logger.info(
+                f"[{date}] {position['stock_name']} 买入当日跌破止损线{stop_price:.2f}，"
+                f"受T+1限制仅记录风险，不执行当日卖出"
+            )
+
+    @staticmethod
+    def _update_excursion(position: Dict[str, Any], high_price: float, low_price: float) -> None:
+        entry = float(position.get('entry_price') or 0.0)
+        if entry <= 0:
             return
-        logger.info(
-            f"[{date}] {position['stock_name']} 买入当日触发硬止损: {stop_price:.2f} "
-            f"(信号={entry_signal}, 最低={session_low:.2f}, 收盘={session_close:.2f})"
+        high = float(high_price or entry)
+        low = float(low_price or entry)
+        position['max_favorable_price'] = max(
+            float(position.get('max_favorable_price') or entry), high, entry
         )
-        self._execute_sell(stock_code, stop_price, date, 'stop_loss')
+        position['min_adverse_price'] = min(
+            float(position.get('min_adverse_price') or entry), low, entry
+        )
+
+    def _prefetch_entry_data(self, plans: pd.DataFrame, date: str) -> None:
+        requested = loaded = 0
+        for _, plan in plans.iterrows():
+            code = str(plan.get('代码') or '').zfill(6)
+            if not code:
+                continue
+            requested += 1
+            ts_code = self._standardize_stock_code(code)
+            key = (str(date), code)
+            try:
+                frame = self.dm.get_stock_tick(ts_code, str(date))
+                self._minute_frames[key] = normalize_minute_bars(frame)
+                if not self._minute_frames[key].empty:
+                    loaded += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[{date}] {code} 分钟行情预取失败: {exc}")
+                self._minute_frames[key] = pd.DataFrame()
+            try:
+                self._auction_rows[key] = dict(self.dm.get_auction_data(ts_code, str(date)) or {})
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"[{date}] {code} 竞价数据预取失败: {exc}")
+                self._auction_rows[key] = {}
+        logger.info(f"[{date}] 候选分钟行情预取完成: {loaded}/{requested}")
+
+    def _sector_sync_checker(self, plan: pd.Series, date: str, stock_code: str):
+        raw_sector = str(plan.get('共振板块') or plan.get('所属板块') or '')
+        sectors = {part.strip() for part in raw_sector.replace('；', ',').split(',') if part.strip()}
+        factor_score = self._float(plan.get('因子_stk_sector_resonance_score'))
+        if not sectors or self._day_plans.empty:
+            return lambda _time: factor_score >= 60.0
+
+        peers: List[str] = []
+        for _, other in self._day_plans.iterrows():
+            other_code = str(other.get('代码') or '').zfill(6)
+            if not other_code or other_code == stock_code:
+                continue
+            other_sector = str(other.get('共振板块') or other.get('所属板块') or '')
+            if any(sector in other_sector for sector in sectors):
+                peers.append(other_code)
+
+        def checker(at_time: str) -> bool:
+            if not peers:
+                return factor_score >= 65.0
+            positive = observed = 0
+            for peer in peers:
+                frame = self._minute_frames.get((str(date), peer), pd.DataFrame())
+                if frame.empty:
+                    continue
+                rows = frame[frame['time'] <= str(at_time)]
+                if rows.empty:
+                    continue
+                observed += 1
+                latest = self._float(rows.iloc[-1].get('close'))
+                pre_close = self._float(frame.iloc[0].get('pre_close')) if 'pre_close' in frame.columns else 0.0
+                if pre_close <= 0:
+                    pre_close = self._float(self._get_prev_close(peer, date))
+                if latest > 0 and pre_close > 0 and latest >= pre_close:
+                    positive += 1
+            return (positive / observed >= 0.5) if observed else factor_score >= 65.0
+
+        return checker
+
+    def _is_leader_or_mainline_core(self, plan: pd.Series) -> bool:
+        leader_quality = self._float(plan.get('因子_stk_kpl_leader_quality'))
+        mainline = self._float(plan.get('因子_stk_sector_mainline_score'))
+        board_position = self._float(plan.get('因子_stk_board_position'))
+        return leader_quality >= 65.0 or (mainline >= 75.0 and board_position >= 60.0)
+
+    def _record_entry_attempt(
+        self, plan: pd.Series, date: str, stock_code: str, stock_name: str,
+        decision: EntryDecision,
+    ) -> None:
+        self.entry_attempts.append({
+            'date': str(date),
+            'stock_code': stock_code,
+            'stock_name': stock_name,
+            'plan_rank': self._int(plan.get('优先级')),
+            'plan_score': self._float(plan.get('综合评分')),
+            'entry_mode': self.config.entry_mode,
+            'signal': decision.signal,
+            'status': decision.status,
+            'reason': decision.reason,
+            'confirm_time': decision.confirm_time,
+            'entry_time': decision.entry_time,
+            'entry_price': decision.entry_price,
+            'open_gap_pct': decision.open_gap_pct,
+            'amount_pace': decision.amount_pace,
+            'sector_confirmed': decision.sector_confirmed,
+        })
 
     def _check_buy_conditions(self, plan: pd.Series, date: str, stock_code: str, stock_name: str) -> Tuple[bool, float]:
         """
@@ -550,6 +726,7 @@ class BacktestEngine:
         """
         target_price = plan['目标价']
         entry_timing = plan.get('介入时机', '09:31-10:00')
+        self.entry_candidate_count += 1
         
         # 获取当日开盘数据
         try:
@@ -572,14 +749,64 @@ class BacktestEngine:
             logger.debug(f"{stock_name} 获取开盘数据失败: {e}，不能确认高开，放弃买入")
             return False, 0
         
-        # 早盘竞价硬规则：必须高开才允许执行；低开/平开/缺昨收直接放弃。
         prev_close = float(daily_data.get('pre_close') or 0)
         if prev_close <= 0:
             prev_close = self._get_prev_close(stock_code, date) or 0
         gap = open_gap_pct({"open": open_price, "pre_close": prev_close}, prev_close)
         if gap is None:
-            logger.info(f"{stock_name} 昨收价缺失，不能确认高开，放弃买入")
+            logger.info(f"{stock_name} 昨收价缺失，无法计算开盘状态，放弃买入")
             return False, 0
+        self._last_entry_gap[stock_code] = gap
+
+        lu_price = None
+        if prev_close and prev_close > 0:
+            lu_price = limit_up_price(prev_close, stock_code, stock_name)
+
+        entry_mode = self.config.entry_mode if self.config.entry_mode in ENTRY_MODES else ENTRY_HYBRID
+        if entry_mode == ENTRY_COMPARE:
+            entry_mode = ENTRY_HYBRID
+        if entry_mode != ENTRY_FIXED:
+            previous_date = self.calendar.prev(date)
+            previous_bar = self._get_stock_daily_bar(stock_code, previous_date) or {}
+            auction = self._auction_rows.get((str(date), stock_code), {})
+            amount_ratio = self._float(
+                plan.get('原始_amount_ratio_5d'), self._float(plan.get('原始_amount_ratio'))
+            )
+            decision = self.minute_evaluator.evaluate(
+                mode=entry_mode,
+                bars=self._minute_frames.get((str(date), stock_code), pd.DataFrame()),
+                open_gap=gap,
+                prev_close=prev_close,
+                previous_amount=self._daily_amount_yuan(previous_bar),
+                previous_volume=self._float(previous_bar.get('vol_hand'), self._float(previous_bar.get('vol'))),
+                auction_amount=self._float(auction.get('竞价成交额')),
+                auction_volume=self._float(auction.get('竞价成交量')),
+                plan_amount_ratio=amount_ratio,
+                limit_price=self._float(lu_price),
+                is_leader=self._is_leader_or_mainline_core(plan),
+                sector_sync=self._sector_sync_checker(plan, date, stock_code),
+            )
+            self._record_entry_attempt(plan, date, stock_code, stock_name, decision)
+            if not decision.filled:
+                logger.info(
+                    f"{stock_name} {decision.signal or '分钟入场'} {decision.status}: {decision.reason}"
+                )
+                return False, 0
+            self._last_entry_signal[stock_code] = decision.signal
+            self._last_entry_meta[stock_code] = {
+                'confirm_time': decision.confirm_time,
+                'entry_time': decision.entry_time,
+                'amount_pace': decision.amount_pace,
+                'sector_confirmed': decision.sector_confirmed,
+            }
+            entry_price = decision.entry_price * (1 + self.config.slippage)
+            logger.info(
+                f"{stock_name} {decision.confirm_time}确认{decision.signal}，"
+                f"{decision.entry_time}按下一分钟开盘价{decision.entry_price:.2f}成交"
+            )
+            return True, entry_price
+
+        # 原固定区间仅作为基线对照，不再是默认入场方式。
         if gap <= self.config.min_open_gap:
             label = "低开" if gap < 0 else "平开"
             logger.info(f"{stock_name} {label}{gap:.2%}，未高开，放弃竞价买点")
@@ -587,14 +814,9 @@ class BacktestEngine:
         if gap > self.config.max_open_gap:
             logger.info(f"{stock_name} 高开{gap:.2%}超过{self.config.max_open_gap:.2%}，不追高")
             return False, 0
-        self._last_entry_gap[stock_code] = gap
-
-        # 检查是否涨停开盘（无法买入）
-        if prev_close and prev_close > 0:
-            lu_price = limit_up_price(prev_close, stock_code, stock_name)
-            if lu_price is not None and open_price >= lu_price * 0.998:  # 考虑浮点误差
-                logger.info(f"{stock_name} 涨停开盘，无法买入")
-                return False, 0
+        if lu_price is not None and open_price >= lu_price * 0.998:
+            logger.info(f"{stock_name} 涨停开盘，无法买入")
+            return False, 0
 
         plan_score = self._float(plan.get('综合评分'))
         if plan_score < self.config.direct_entry_min_score:
@@ -699,6 +921,7 @@ class BacktestEngine:
             # 最高价采用当日 high，而不是只看收盘价；触发仍按收盘确认，避免
             # 仅有 OHLC 时假设无法得知的日内高低点先后顺序。
             session_high = self._float(daily_bar.get('high'), current_price)
+            self._update_excursion(position, session_high, session_low)
             position['highest_price'] = max(
                 self._float(position.get('highest_price'), position['entry_price']),
                 session_high,
@@ -780,6 +1003,20 @@ class BacktestEngine:
             f"昨收{reference_close:.2f} -> 前收{official_pre_close:.2f}, 比例{ratio:.6f}"
         )
 
+    @classmethod
+    def _daily_amount_yuan(cls, daily_bar: Dict[str, Any]) -> float:
+        """将日线成交额统一为元，与分钟 amount 口径一致。
+
+        Silver 使用 ``amount_yuan``；DataManager/Tushare ``daily.amount`` 的原始
+        单位是千元。不能直接把两者相比。
+        """
+        if not daily_bar:
+            return 0.0
+        amount_yuan = cls._float(daily_bar.get('amount_yuan'))
+        if amount_yuan > 0:
+            return amount_yuan
+        return cls._float(daily_bar.get('amount')) * 1000.0
+
     def _trailing_stop_distance(self, peak_profit_pct: float) -> float:
         """Return the pullback distance for the current profit stage."""
         profit = max(self._float(peak_profit_pct), 0.0)
@@ -845,6 +1082,9 @@ class BacktestEngine:
             market_score=float(position.get('market_score') or 0.0),
             amount_ratio=float(position.get('amount_ratio') or 0.0),
             entry_signal=str(position.get('entry_signal') or ''),
+            entry_time=str(position.get('entry_time') or ''),
+            mfe_pct=(float(position.get('max_favorable_price') or position['entry_price']) / position['entry_price'] - 1.0),
+            mae_pct=(float(position.get('min_adverse_price') or position['entry_price']) / position['entry_price'] - 1.0),
         )
 
         self.trade_history.append(trade_record)
@@ -1043,6 +1283,9 @@ class BacktestEngine:
                 'daily_nav': self.daily_nav,
                 'trade_history': self.trade_history,
                 'current_positions': self.current_positions,
+                'entry_attempts': self.entry_attempts,
+                'entry_mode': self.config.entry_mode,
+                'entry_candidate_count': self.entry_candidate_count,
                 'as_of_date': str(self.daily_nav[-1].get('date') if self.daily_nav else ''),
             }
 
@@ -1118,6 +1361,9 @@ class BacktestEngine:
             'daily_nav': self.daily_nav,
             'trade_history': self.trade_history,
             'current_positions': self.current_positions,
+            'entry_attempts': self.entry_attempts,
+            'entry_mode': self.config.entry_mode,
+            'entry_candidate_count': self.entry_candidate_count,
             'as_of_date': str(self.daily_nav[-1].get('date') if self.daily_nav else ''),
         }
 

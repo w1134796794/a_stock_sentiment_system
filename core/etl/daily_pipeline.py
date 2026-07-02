@@ -242,7 +242,7 @@ class ETLDailyPipeline:
             "strategy": {
                 "position": position,
                 "strategy": strategy,
-                "forbidden_actions": "低开候选直接放弃；实时行情取消时不买入",
+                "forbidden_actions": "10:00前未确认、跌破开盘结构或无可成交分钟时不买入",
             },
         }
 
@@ -269,12 +269,13 @@ class ETLDailyPipeline:
                 "优先级": item.get("rank"),
                 "综合评分": round(score, 2),
                 "建议仓位": position,
-                "入场区间": "竞价高开0%-3%且实时确认后",
+                "入场区间": "弱转强/强势延续/高开加速按分钟确认",
                 "止损": "实时取消线或-3%",
                 "止盈": trailing_text,
-                "竞价条件": "高开0%-3%才买入，平开、低开或高开超过3%直接放弃",
-                "次日预期": "按指标评分排序，盘中只做确认/取消",
-                "风险提示": "实时行情为取消/观察时不主动买入",
+                "竞价条件": "开盘仅用于信号分层，10:00前按一分钟行情确认",
+                "次日预期": "弱转强优先，强势延续和龙头高开加速作为补充",
+                "风险提示": "未确认或信号后无可成交分钟时不主动买入",
+                "共振板块": item.get("resonance_sectors") or "",
                 "筛选理由": "；".join(str(x) for x in reasons[:4]),
             })
         return pd.DataFrame(rows)

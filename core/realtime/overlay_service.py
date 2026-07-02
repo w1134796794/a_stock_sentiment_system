@@ -28,9 +28,7 @@ class RealtimeOverlayService:
         screening_dir: Optional[Path] = None,
         snapshot_reader: Any = None,
         output_dir: Optional[Path] = None,
-        min_open_gap_pct: float = 0.0,
-        min_intraday_pct: float = 0.0,
-        cancel_intraday_pct: float = -2.0,
+        entry_signal_service: Any = None,
     ):
         from config.settings import SNAPSHOT_DIR, WEB_DATA_DIR
         from snapshot.reader import SnapshotReader
@@ -39,46 +37,53 @@ class RealtimeOverlayService:
         self.screening_dir = Path(screening_dir or WEB_DATA_DIR / "screening")
         self.snapshot_reader = snapshot_reader or SnapshotReader(SNAPSHOT_DIR)
         self.output_dir = Path(output_dir or WEB_DATA_DIR / "realtime")
-        self.min_open_gap_pct = float(min_open_gap_pct)
-        self.min_intraday_pct = float(min_intraday_pct)
-        self.cancel_intraday_pct = float(cancel_intraday_pct)
+        self.entry_signal_service = entry_signal_service
 
     def build_overlay(
         self,
         trade_date: Optional[str] = None,
         *,
+        market_date: Optional[str] = None,
         candidates: Optional[Iterable[Dict[str, Any]]] = None,
         profile: str = "",
         limit: int = 20,
         persist: bool = False,
     ) -> Dict[str, Any]:
-        trade_date = str(trade_date or self._latest_date() or "")
-        rows = list(candidates) if candidates is not None else self._load_candidates(trade_date, profile=profile)
+        candidate_date = str(trade_date or self._latest_date() or "")
+        market_date = str(market_date or candidate_date)
+        rows = list(candidates) if candidates is not None else self._load_candidates(candidate_date, profile=profile)
         rows = self._dedupe_candidates(rows)[: max(int(limit or 20), 1)]
         codes = [r["code"] for r in rows if r.get("code")]
 
         quotes = self._quote_map(codes)
+        signals = self.entry_signal_service.evaluate(
+            rows, quotes, market_date=market_date,
+        ) if self.entry_signal_service is not None else {}
         overlay_rows = []
         for cand in rows:
             quote = quotes.get(cand.get("code") or "", {})
-            overlay_rows.append(self._build_row(trade_date, cand, quote))
+            signal = signals.get(cand.get("code") or "", {})
+            overlay_rows.append(self._build_row(candidate_date, market_date, cand, quote, signal))
 
         counts = {
             "confirmed": sum(1 for r in overlay_rows if r["confirm_status"] == "confirmed"),
             "cancelled": sum(1 for r in overlay_rows if r["confirm_status"] == "cancelled"),
             "observe": sum(1 for r in overlay_rows if r["confirm_status"] == "observe"),
+            "unfilled": sum(1 for r in overlay_rows if r["confirm_status"] == "unfilled"),
         }
-        screening_exists = self._screening_path(trade_date, profile).exists()
+        screening_exists = self._screening_path(candidate_date, profile).exists()
         payload = {
             "ok": bool(overlay_rows),
-            "trade_date": trade_date,
+            "trade_date": candidate_date,
+            "candidate_date": candidate_date,
+            "market_date": market_date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "source": "当日指标筛选" if screening_exists else "当日指标筛选未生成",
+            "source": "候选日指标筛选" if screening_exists else "候选日指标筛选未生成",
             "profile": profile or "",
             "thresholds": {
-                "min_open_gap_pct": self.min_open_gap_pct,
-                "min_intraday_pct": self.min_intraday_pct,
-                "cancel_intraday_pct": self.cancel_intraday_pct,
+                "weak_to_strong": "-3%至+1%",
+                "continuation": "+1%至+5%",
+                "acceleration": "+5%以上仅龙头/主线核心",
             },
             "counts": counts,
             "rows": overlay_rows,
@@ -144,15 +149,25 @@ class RealtimeOverlayService:
         except Exception:
             return None
 
-    def _build_row(self, trade_date: str, candidate: Dict[str, Any], quote: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_row(
+        self,
+        candidate_date: str,
+        market_date: str,
+        candidate: Dict[str, Any],
+        quote: Dict[str, Any],
+        signal: Dict[str, Any],
+    ) -> Dict[str, Any]:
         open_price = _to_float(quote.get("open_price"))
         pre_close = _to_float(quote.get("pre_close"))
         last_price = _to_float(quote.get("last_price"))
         change_pct = _to_float(quote.get("change_pct"))
         gap_pct = (open_price / pre_close - 1.0) * 100.0 if open_price > 0 and pre_close > 0 else None
-        status, reason = self._decide(quote, gap_pct, change_pct)
+        status = str(signal.get("signal_status") or "observe")
+        reason = str(signal.get("reason") or "等待当日分钟入场条件")
         return {
-            "trade_date": trade_date,
+            "trade_date": candidate_date,
+            "candidate_date": candidate_date,
+            "market_date": market_date,
             "code": candidate.get("code") or "",
             "name": quote.get("name") or candidate.get("name") or "",
             "screening_rank": candidate.get("rank"),
@@ -168,21 +183,14 @@ class RealtimeOverlayService:
             "is_stale": bool(quote.get("is_stale")),
             "confirm_status": status,
             "reason": reason,
+            "entry_mode": signal.get("entry_mode") or "",
+            "entry_mode_text": signal.get("entry_mode_text") or "等待分类",
+            "signal_status_text": signal.get("signal_status_text") or "观察",
+            "confirm_time": signal.get("confirm_time") or "",
+            "entry_time": signal.get("entry_time") or "",
+            "entry_price": signal.get("entry_price"),
             "candidate_reasons": candidate.get("reasons") or [],
         }
-
-    def _decide(self, quote: Dict[str, Any], gap_pct: Optional[float], change_pct: float) -> tuple[str, str]:
-        if not quote:
-            return "observe", "未获取到实时行情，保持观察"
-        if quote.get("is_stale"):
-            return "observe", "行情可能过期，保持观察"
-        if gap_pct is not None and gap_pct < 0:
-            return "cancelled", f"竞价/开盘低开 {gap_pct:.2f}%，放弃"
-        if change_pct <= self.cancel_intraday_pct:
-            return "cancelled", f"盘中跌幅 {change_pct:.2f}% 触发取消线"
-        if gap_pct is not None and gap_pct >= self.min_open_gap_pct and change_pct >= self.min_intraday_pct:
-            return "confirmed", f"高开 {gap_pct:.2f}% 且实时涨幅 {change_pct:.2f}%，确认"
-        return "observe", "未满足确认条件，继续观察"
 
     @staticmethod
     def _dedupe_candidates(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

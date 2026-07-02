@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}实时行情 · 管理控制台{% endblock %}
 {% block page_title %}实时行情{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 当日指标筛选实时确认</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">候选 {{ candidate_date or '--' }} · 行情 {{ market_date or '--' }} · 当日分钟入场确认</div>{% endblock %}
 
 {% block header_extra %}
   <span id="session-pill" class="rt-pill mr-2">{{ market_session.reason }}</span>
@@ -14,15 +14,16 @@
 {% endblock %}
 
 {% block content %}
-<section class="grid grid-cols-3 gap-3 mb-4">
+<section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
   <div class="rt-kpi"><div id="kpi-confirmed" class="rt-kpi-v mono text-emerald-300">--</div><div class="rt-kpi-l">确认</div></div>
   <div class="rt-kpi"><div id="kpi-observe" class="rt-kpi-v mono text-amber-300">--</div><div class="rt-kpi-l">观察</div></div>
+  <div class="rt-kpi"><div id="kpi-unfilled" class="rt-kpi-v mono text-sky-300">--</div><div class="rt-kpi-l">信号正确·无法成交</div></div>
   <div class="rt-kpi"><div id="kpi-cancelled" class="rt-kpi-v mono text-rose-300">--</div><div class="rt-kpi-l">取消</div></div>
 </section>
 
 <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
   <div class="flex flex-wrap items-center gap-2 mb-4">
-    <h2 class="font-bold mr-auto">当日指标候选确认</h2>
+    <h2 class="font-bold mr-auto">上一交易日候选·当日分钟确认</h2>
     <span id="overlay-source" class="rt-pill">--</span>
     <span id="overlay-updated" class="text-xs text-slate-500 mono">--</span>
   </div>
@@ -44,6 +45,7 @@
   .rt-status { flex:0 0 auto; display:inline-flex; align-items:center; border-radius:.5rem; padding:.18rem .55rem; font-size:.72rem; font-weight:900; }
   .rt-status.confirmed { color:#042f2e; background:#5eead4; }
   .rt-status.cancelled { color:#fff1f2; background:#e11d48; }
+  .rt-status.unfilled { color:#e0f2fe; background:rgba(56,189,248,.22); border:1px solid rgba(56,189,248,.42); }
   .rt-status.observe { color:#fde68a; background:rgba(245,158,11,.18); border:1px solid rgba(245,158,11,.36); }
   .rt-metrics { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.5rem; margin-top:.85rem; }
   .rt-metric { background:rgba(2,6,23,.42); border:1px solid rgba(51,65,85,.55); border-radius:.55rem; padding:.55rem .6rem; min-width:0; }
@@ -66,6 +68,7 @@
 
 <script>
   const tradeDate = {{ (date or '')|tojson }};
+  const marketDate = {{ (market_date or '')|tojson }};
   const initialMarketSession = {{ (market_session or {})|tojson }};
   const autoRefreshMs = 5000;
   let refreshing = false;
@@ -101,7 +104,7 @@
     return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
   }
   function statusText(v) {
-    return { confirmed: '确认', cancelled: '取消', observe: '观察' }[v] || '观察';
+    return { confirmed: '确认', unfilled: '无法成交', cancelled: '取消', observe: '观察' }[v] || '观察';
   }
   function toast(text, ok) {
     const t = document.getElementById('rt-toast');
@@ -182,12 +185,14 @@
     try {
       const params = new URLSearchParams({ limit: '20' });
       if (tradeDate) params.set('date', tradeDate);
+      if (marketDate) params.set('market_date', marketDate);
       const j = await fetchJson('/api/realtime/overlay?' + params.toString(), 8000);
       applyMarketSession(j.session || initialMarketSession);
       const rows = j.rows || [];
       const counts = j.counts || {};
       document.getElementById('kpi-confirmed').textContent = counts.confirmed || 0;
       document.getElementById('kpi-observe').textContent = counts.observe || 0;
+      document.getElementById('kpi-unfilled').textContent = counts.unfilled || 0;
       document.getElementById('kpi-cancelled').textContent = counts.cancelled || 0;
       document.getElementById('overlay-source').textContent = j.source || '--';
       document.getElementById('overlay-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
@@ -199,7 +204,7 @@
       els.overlayCards.innerHTML = rows.map(r => `
         <article class="rt-card">
           <div class="rt-card-head">
-            <a href="/stock/${esc(r.code)}" class="min-w-0 hover:text-emerald-300">
+            <a href="/stock/${esc(r.code)}?date=${esc(j.market_date || marketDate)}&context_date=${esc(j.candidate_date || tradeDate)}" class="min-w-0 hover:text-emerald-300">
               <div class="rt-name">${esc(stockName(r))}</div>
               <div class="rt-code mono">${esc(r.code || '--')}</div>
             </a>
@@ -207,6 +212,7 @@
           </div>
           ${renderStockSectorTags(r)}
           <div class="rt-metrics">
+            <div class="rt-metric"><span>入场模式</span><strong>${esc(r.entry_mode_text || '等待分类')}</strong></div>
             <div class="rt-metric"><span>开盘</span><strong class="${clsPct(r.open_gap_pct)}">${gap(r.open_gap_pct)}</strong></div>
             <div class="rt-metric"><span>现价</span><strong class="mono">${px(r.last_price, r.pre_close)}</strong></div>
             <div class="rt-metric"><span>涨幅</span><strong class="${clsPct(r.pct_chg)}">${pct(r.pct_chg)}</strong></div>

@@ -133,7 +133,7 @@ def test_risk_projection_keeps_simulation_specific_strategy_thresholds():
     assert config.trailing_stop_pct == 0.10
 
 
-def test_entry_day_auction_buy_executes_hard_stop_immediately():
+def test_entry_day_stop_is_recorded_but_not_sold_due_to_t_plus_one():
     dm = DailyRows({
         ("000001.SZ", "20260623"): {
             "open": 10.1, "high": 10.2, "low": 9.3, "close": 9.4, "pre_close": 10.0,
@@ -146,9 +146,9 @@ def test_entry_day_auction_buy_executes_hard_stop_immediately():
 
     engine._check_entry_day_stop("000001", "20260623", "竞价买点")
 
-    assert "000001" not in engine.current_positions
-    assert engine.trade_history[-1].exit_reason == "stop_loss"
-    assert engine.trade_history[-1].holding_days == 1
+    assert "000001" in engine.current_positions
+    assert engine.current_positions["000001"]["entry_day_stop_breached"] is True
+    assert engine.trade_history == []
 
 
 def test_corporate_action_price_break_keeps_position_value_continuous():

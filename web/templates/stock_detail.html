@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}个股详情 · {{ stock_name or code }}{% endblock %}
 {% block page_title %}{{ stock_name or '个股详情' }} <span class="mono text-slate-400 text-base">{{ code }}</span>{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date or '--' }} · 分时 / 日K / 集合竞价</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">行情 {{ market_date or date or '--' }} · 候选上下文 {{ context_date or '--' }} · 分时 / 日K / 集合竞价</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
-  <label class="text-sm text-slate-400">交易日</label>
-  <select onchange="location.href='/stock/{{ code }}?date='+this.value"
+  <label class="text-sm text-slate-400">行情日</label>
+  <select onchange="location.href='/stock/{{ code }}?date='+this.value+'&context_date={{ context_date or '' }}'"
           class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
     {% for d in dates %}
       <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
@@ -123,10 +123,10 @@
     el.innerHTML = rows.map(render).join('');
   }
 
-  fetch(`/api/stock/{{ code }}/chart?date={{ date or '' }}`)
+  fetch(`/api/stock/{{ code }}/chart?date={{ date or '' }}&context_date={{ context_date or '' }}`)
     .then(r => r.json())
     .then(data => {
-      document.getElementById('intraday-subtitle').textContent = `${data.date || '--'} · ${data.intraday.length} 个分时点`;
+      document.getElementById('intraday-subtitle').textContent = `行情 ${data.market_date || data.date || '--'} · ${data.intraday.length} 个分时点`;
       document.getElementById('daily-subtitle').textContent = `${data.daily.length} 根日K`;
 
       if (data.intraday.length) {

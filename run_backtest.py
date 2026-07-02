@@ -126,6 +126,9 @@ def save_backtest_results(
             'market_score': getattr(t, 'market_score', 0),
             'amount_ratio': getattr(t, 'amount_ratio', 0),
             'entry_signal': getattr(t, 'entry_signal', ''),
+            'entry_time': getattr(t, 'entry_time', ''),
+            'mfe_pct': getattr(t, 'mfe_pct', 0),
+            'mae_pct': getattr(t, 'mae_pct', 0),
         } for t in result['trade_history']])
 
         trades_file = output_path / f"backtest_trades_{timestamp}.csv"
@@ -172,14 +175,31 @@ def save_backtest_results(
             'plan_rank': position.get('plan_rank') or 0,
             'plan_score': position.get('plan_score') or 0,
             'entry_signal': position.get('entry_signal') or '',
+            'entry_time': position.get('entry_time') or '',
+            'mfe_pct': (
+                float(position.get('max_favorable_price') or entry_price) / entry_price - 1.0
+                if entry_price > 0 else 0.0
+            ),
+            'mae_pct': (
+                float(position.get('min_adverse_price') or entry_price) / entry_price - 1.0
+                if entry_price > 0 else 0.0
+            ),
         })
     positions_file = output_path / f"backtest_positions_{timestamp}.csv"
     pd.DataFrame(position_rows, columns=[
         'as_of_date', 'stock_code', 'stock_name', 'entry_date', 'entry_price',
         'current_price', 'shares', 'cost_basis', 'market_value', 'unrealized_pnl',
         'unrealized_pnl_pct', 'holding_days', 'plan_rank', 'plan_score', 'entry_signal',
+        'entry_time', 'mfe_pct', 'mae_pct',
     ]).to_csv(positions_file, index=False, encoding="utf-8-sig")
     logger.info(f"持仓快照已保存: {positions_file}")
+
+    # 保存所有入场尝试，包括“信号正确但无法成交”和10:00前取消。
+    attempts = result.get('entry_attempts') or []
+    if attempts:
+        attempts_file = output_path / f"backtest_entry_attempts_{timestamp}.csv"
+        pd.DataFrame(attempts).to_csv(attempts_file, index=False, encoding="utf-8-sig")
+        logger.info(f"入场信号明细已保存: {attempts_file}")
 
     # 保存净值曲线
     if result.get('daily_nav'):
@@ -204,6 +224,13 @@ def save_backtest_results(
         'initial_capital': result.get('initial_capital', 0),
         'final_capital': result.get('final_capital', 0)
     }
+    attempts = result.get('entry_attempts') or []
+    summary.update({
+        'entry_mode': result.get('entry_mode') or (metadata or {}).get('entry_mode') or '',
+        'entry_candidate_count': result.get('entry_candidate_count', 0),
+        'entry_signal_count': sum(1 for row in attempts if row.get('status') in {'filled', 'signal_unfilled'}),
+        'entry_unfilled_count': sum(1 for row in attempts if row.get('status') == 'signal_unfilled'),
+    })
     if metadata:
         summary.update(metadata)
 
@@ -225,24 +252,25 @@ def save_backtest_results(
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"回测归因报表生成失败: {exc}")
 
-    try:
-        from backtest.walk_forward import build_monthly_walk_forward_frames
+    if str((metadata or {}).get("entry_mode") or "fixed_gap") == "fixed_gap":
+        try:
+            from backtest.walk_forward import build_monthly_walk_forward_frames
 
-        folds, oos_summary = build_monthly_walk_forward_frames(
-            result,
-            start_date=str((metadata or {}).get("start_date") or ""),
-            end_date=str((metadata or {}).get("end_date") or ""),
-            train_months=3,
-            validation_months=1,
-        )
-        for name, frame in (("walk_forward", folds), ("walk_forward_summary", oos_summary)):
-            if frame is None or frame.empty:
-                continue
-            path = output_path / f"backtest_{name}_{timestamp}.csv"
-            frame.to_csv(path, index=False, encoding="utf-8-sig")
-            logger.info(f"滚动验证报表已保存: {path}")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"滚动验证报表生成失败: {exc}")
+            folds, oos_summary = build_monthly_walk_forward_frames(
+                result,
+                start_date=str((metadata or {}).get("start_date") or ""),
+                end_date=str((metadata or {}).get("end_date") or ""),
+                train_months=3,
+                validation_months=1,
+            )
+            for name, frame in (("walk_forward", folds), ("walk_forward_summary", oos_summary)):
+                if frame is None or frame.empty:
+                    continue
+                path = output_path / f"backtest_{name}_{timestamp}.csv"
+                frame.to_csv(path, index=False, encoding="utf-8-sig")
+                logger.info(f"滚动验证报表已保存: {path}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"滚动验证报表生成失败: {exc}")
 
     return timestamp
 

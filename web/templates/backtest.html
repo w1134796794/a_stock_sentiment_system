@@ -67,6 +67,35 @@
   </div>
 </section>
 
+{# ===== 入场模型对照 ===== #}
+{% if bt.entry_mode_rows %}
+<section class="card border border-slate-800 rounded-xl p-4 mb-6">
+  <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+    <h2 class="text-base font-bold">入场模型对照</h2>
+    <span class="text-xs text-slate-500">分钟信号按下一分钟开盘成交；封板无成交量只记信号，不记买入</span>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead><tr class="text-slate-400">
+        {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','总收益','止损率','最大回撤','平均MFE','平均MAE'] %}
+        <th class="text-left font-medium px-3 py-2 whitespace-nowrap">{{ c }}</th>
+        {% endfor %}
+      </tr></thead>
+      <tbody>
+        {% for r in bt.entry_mode_rows %}
+        <tr class="border-t border-slate-800">
+          {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','总收益','止损率','最大回撤','平均MFE','平均MAE'] %}
+          {% set v = r[c] %}
+          <td class="px-3 py-1.5 whitespace-nowrap {% if c in ['平均收益','总收益'] and v.startswith('-') %}text-rose-400{% elif c in ['平均收益','总收益'] %}text-emerald-300{% endif %}">{{ v }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
 {# ===== 龙虎榜因子对照 ===== #}
 {% if bt.lhb_comparison_rows %}
 <section class="card border border-slate-800 rounded-xl p-4 mb-6">

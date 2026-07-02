@@ -455,17 +455,24 @@ class BacktestController:
               mode: object = "range",
               trade_date: Optional[str] = None,
               reset_state: object = False,
-              enhancements: object = None) -> Tuple[bool, str]:
+              enhancements: object = None,
+              entry_mode: object = "hybrid") -> Tuple[bool, str]:
         from core.screening.enhancements import enhancement_label, normalize_enhancements
+        from backtest.minute_entry import ENTRY_COMPARE, ENTRY_HYBRID, ENTRY_MODES
 
         selected_enhancements = normalize_enhancements(enhancements)
         combination_label = enhancement_label(selected_enhancements)
+        selected_entry_mode = str(entry_mode or ENTRY_HYBRID).strip().lower()
+        if selected_entry_mode not in ENTRY_MODES:
+            selected_entry_mode = ENTRY_HYBRID
         start_date = (str(start_date).strip() if start_date else "") or None
         end_date = (str(end_date).strip() if end_date else "") or None
         trade_date = (str(trade_date).strip() if trade_date else "") or None
         mode = (str(mode or "range").strip().lower() or "range")
         if mode not in {"range", "daily"}:
             mode = "range"
+        if mode == "daily" and selected_entry_mode == ENTRY_COMPARE:
+            selected_entry_mode = ENTRY_HYBRID
         try:
             capital = float(initial_capital) if initial_capital not in (None, "") else 100000.0
         except (TypeError, ValueError):
@@ -499,12 +506,13 @@ class BacktestController:
                     "max_plan_rank": max_rank,
                     "reset_state": bool(reset_state),
                     "enhancements": selected_enhancements,
+                    "entry_mode": selected_entry_mode,
                 }
                 self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.finished_at = None
                 self._thread = threading.Thread(
                     target=self._worker_daily,
-                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements),
+                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements, selected_entry_mode),
                     daemon=True,
                     name="backtest-run-daily",
                 )
@@ -533,10 +541,11 @@ class BacktestController:
             self.params = {"mode": "range", "start_date": start, "end_date": end,
                            "initial_capital": capital, "risk_control": risk_on,
                            "max_plan_rank": max_rank, "enhancements": selected_enhancements}
+            self.params["entry_mode"] = selected_entry_mode
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements),
+                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode),
                 daemon=True, name="backtest-run"
             )
             self._publish_state()
@@ -565,7 +574,7 @@ class BacktestController:
 
     def _worker(self, start: str, end: str, capital: float,
                 risk_control: bool = True, max_plan_rank: int = 0,
-                enhancements: object = None) -> None:
+                enhancements: object = None, entry_mode: str = "hybrid") -> None:
         import loguru
 
         _ensure_file_sink()
@@ -618,14 +627,32 @@ class BacktestController:
                 RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
             )
             config.max_plan_rank = max_plan_rank
+            config.entry_mode = "hybrid" if entry_mode == "compare" else entry_mode
             self.buffer.append_line(
                 f"退出策略：盈利5%-10%/10%-20%/20%以上分别从高点回撤 "
                 f"{config.trailing_early_stop_pct:.0%}/{config.trailing_mid_stop_pct:.0%}/"
                 f"{config.trailing_stop_pct:.0%} 退出；不设固定止盈"
             )
-            engine = BacktestEngine(dm, config)
-            result = engine.run_backtest(
-                start_date=start, end_date=end, trade_plans_dir=str(trade_plans_dir))
+            entry_comparison = None
+            if entry_mode == "compare":
+                from backtest.entry_mode_comparison import run_entry_mode_comparison
+
+                self.buffer.append_line(
+                    "开始四组入场对照：固定区间 / 弱转强 / 强势延续 / 混合模式"
+                )
+                entry_comparison = run_entry_mode_comparison(
+                    data_manager=dm,
+                    base_config=config,
+                    start_date=start,
+                    end_date=end,
+                    trade_plans_dir=Path(trade_plans_dir),
+                )
+                result = entry_comparison["primary"]
+                engine = entry_comparison["primary_engine"]
+            else:
+                engine = BacktestEngine(dm, config)
+                result = engine.run_backtest(
+                    start_date=start, end_date=end, trade_plans_dir=str(trade_plans_dir))
 
             report = PerformanceAnalyzer().generate_performance_report(result)
             self.buffer.append_text("\n" + report + "\n")
@@ -639,8 +666,16 @@ class BacktestController:
                 "max_plan_rank": max_plan_rank,
                 "enhancements": selected_enhancements,
                 "enhancement_label": combination_label,
+                "entry_mode": entry_mode,
             })
-            if not selected_enhancements:
+            if entry_comparison is not None:
+                from backtest.entry_mode_comparison import save_entry_mode_comparison
+
+                comparison_path = save_entry_mode_comparison(
+                    entry_comparison, Path(OUTPUT_DIR), run_id
+                )
+                self.buffer.append_line(f"四组入场对照报表已保存：{comparison_path}")
+            if not selected_enhancements and entry_comparison is None:
                 from backtest.lhb_comparison import run_lhb_comparison, save_lhb_comparison
 
                 self.buffer.append_line("开始龙虎榜四组对照回测：无龙虎榜 / 净买入 / 机构 / 龙虎榜＋板块共振")
@@ -681,7 +716,8 @@ class BacktestController:
 
     def _worker_daily(self, trade_date: str, capital: float,
                       risk_control: bool = True, reset_state: bool = False,
-                      max_plan_rank: int = 0, enhancements: object = None) -> None:
+                      max_plan_rank: int = 0, enhancements: object = None,
+                      entry_mode: str = "hybrid") -> None:
         import loguru
 
         _ensure_file_sink()
@@ -734,13 +770,14 @@ class BacktestController:
                 self.state = "error"
                 return
             self.buffer.append_line(
-                f"已加载上一交易日 {prev_date} 的回测计划：{row_count} 条候选（按买点/盘中转强确认）。")
+                f"已加载上一交易日 {prev_date} 的回测计划：{row_count} 条候选（按分钟入场模型确认）。")
 
             dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=False)
             config = BacktestConfig.from_risk_config(
                 RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
             )
             config.max_plan_rank = max_plan_rank
+            config.entry_mode = entry_mode
             self.buffer.append_line(
                 f"退出策略：盈利5%-10%/10%-20%/20%以上分别从高点回撤 "
                 f"{config.trailing_early_stop_pct:.0%}/{config.trailing_mid_stop_pct:.0%}/"
@@ -760,6 +797,14 @@ class BacktestController:
                             f"!!! 接力账户使用 {enhancement_label(state_enhancements)}，本次选择 {combination_label}，口径不一致。"
                         )
                         self.error = "接力账户增强组合不一致"
+                        self.state = "error"
+                        return
+                    state_entry_mode = str(state.get("entry_mode") or "hybrid")
+                    if state_entry_mode != entry_mode:
+                        self.buffer.append_line(
+                            f"!!! 接力账户使用入场模式 {state_entry_mode}，本次选择 {entry_mode}，口径不一致。"
+                        )
+                        self.error = "接力账户入场模式不一致"
                         self.state = "error"
                         return
                     last_date = str(state.get("last_date") or "")
@@ -799,6 +844,7 @@ class BacktestController:
                 "max_plan_rank": max_plan_rank,
                 "enhancements": selected_enhancements,
                 "enhancement_label": combination_label,
+                "entry_mode": entry_mode,
             })
             state_path = self._save_rolling_state(
                 engine, "daily", state_source=state_source, enhancements=selected_enhancements,
@@ -851,6 +897,7 @@ class BacktestController:
         state["source_mode"] = mode
         state["state_source"] = state_source
         state["enhancements"] = normalize_enhancements(enhancements)
+        state["entry_mode"] = str(getattr(engine.config, "entry_mode", "hybrid"))
         path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 

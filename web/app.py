@@ -77,6 +77,7 @@ templates.env.globals["visible_menu_groups"] = visible_menu_groups
 reader = SnapshotReader(SNAPSHOT_DIR)
 _REALTIME_QUOTE_SERVICE = None
 _REALTIME_SECTOR_SERVICE = None
+_REALTIME_ENTRY_SIGNAL_SERVICE = None
 _REALTIME_SERVICE_LOCK = Lock()
 _REALTIME_WORKER_LOCK = Lock()
 _REALTIME_REFRESH_STOP = Event()
@@ -1776,24 +1777,33 @@ def dragon_page(request: Request, date: Optional[str] = None) -> Any:
 @app.get("/intraday", response_class=HTMLResponse)
 def intraday_page(request: Request, date: Optional[str] = None) -> Any:
     """盘中转强：因子龙头池叠加实时行情确认。"""
-    latest = date or _latest_date()
+    market_date = _realtime_market_date()
+    candidate_date = date or _realtime_candidate_date(market_date)
     return templates.TemplateResponse(
         request,
         "intraday.html",
-        {"date": latest, "dates": _list_dates()},
+        {
+            "date": candidate_date,
+            "candidate_date": candidate_date,
+            "market_date": market_date,
+            "dates": _list_dates(),
+        },
     )
 
 
 @app.get("/realtime", response_class=HTMLResponse)
 def realtime_page(request: Request) -> Any:
     """实时行情面板：个股批量行情、板块行情、行情源健康。"""
-    latest = _latest_date()
-    snapshot = _load_snapshot(latest) if latest else None
+    market_date = _realtime_market_date()
+    candidate_date = _realtime_candidate_date(market_date)
+    snapshot = _load_snapshot(candidate_date) if candidate_date else None
     return templates.TemplateResponse(
         request,
         "realtime.html",
         {
-            "date": latest,
+            "date": candidate_date,
+            "candidate_date": candidate_date,
+            "market_date": market_date,
             "default_codes": _default_realtime_codes(snapshot),
             "market_session": _current_realtime_session(),
         },
@@ -2031,18 +2041,27 @@ def report(request: Request, date: str) -> Any:
 
 
 @app.get("/stock/{code}", response_class=HTMLResponse)
-def stock_detail_page(request: Request, code: str, date: Optional[str] = None) -> Any:
+def stock_detail_page(
+    request: Request,
+    code: str,
+    date: Optional[str] = None,
+    context_date: Optional[str] = None,
+) -> Any:
     """个股详情：分时、日K、竞价摘要、信号与风控上下文。"""
-    latest = date or _latest_date()
-    snapshot = _load_snapshot(latest) if latest else None
+    market_date = date or _latest_date()
+    candidate_date = context_date or market_date
+    snapshot = _load_snapshot(candidate_date) if candidate_date else None
     context = _find_stock_context(snapshot, code)
+    dates = sorted(set(_list_dates() + ([market_date] if market_date else [])), reverse=True)
     return templates.TemplateResponse(
         request,
         "stock_detail.html",
         {
             "code": _normalize_stock_code(code),
-            "date": latest,
-            "dates": _list_dates(),
+            "date": market_date,
+            "market_date": market_date,
+            "context_date": candidate_date,
+            "dates": dates,
             "stock_name": context.get("name") or "",
             "context": context,
         },
@@ -2050,7 +2069,12 @@ def stock_detail_page(request: Request, code: str, date: Optional[str] = None) -
 
 
 @app.get("/api/stock/{code}/chart")
-def api_stock_chart(code: str, date: Optional[str] = None, daily_count: int = 120) -> Any:
+def api_stock_chart(
+    code: str,
+    date: Optional[str] = None,
+    context_date: Optional[str] = None,
+    daily_count: int = 120,
+) -> Any:
     """Chart payload for stock detail page."""
     from core.data.data_manager_main import DataManager
     from core.utils.stock_code_utils import StockCodeUtils
@@ -2061,11 +2085,25 @@ def api_stock_chart(code: str, date: Optional[str] = None, daily_count: int = 12
 
     ts_code = StockCodeUtils.standardize_code(code, add_suffix=True)
     dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
-    intraday_df = dm.get_stock_tick(ts_code, trade_date)
-    daily_df = dm.get_kline(ts_code, period="day", count=max(20, min(int(daily_count or 120), 300)))
+    session_date = str(_current_realtime_session().get("date") or "")
+    if trade_date == session_date:
+        intraday_df = dm.get_minute_bars_live(ts_code, trade_date)
+    else:
+        intraday_df = dm.get_stock_tick(ts_code, trade_date)
+    daily_limit = max(20, min(int(daily_count or 120), 300))
+    daily_df = dm.get_kline(
+        ts_code,
+        period="day",
+        count=daily_limit,
+        force_refresh=trade_date == session_date,
+    )
+    daily_df = _merge_intraday_daily_candle(
+        daily_df, intraday_df, trade_date, limit=daily_limit,
+    )
     auction = dm.get_auction_data(ts_code, trade_date)
 
-    snapshot = _load_snapshot(trade_date)
+    candidate_date = context_date or trade_date
+    snapshot = _load_snapshot(candidate_date)
     context = _find_stock_context(snapshot, ts_code)
 
     return JSONResponse({
@@ -2073,6 +2111,8 @@ def api_stock_chart(code: str, date: Optional[str] = None, daily_count: int = 12
         "ts_code": ts_code,
         "name": context.get("name") or "",
         "date": trade_date,
+        "market_date": trade_date,
+        "context_date": candidate_date,
         "intraday": _df_to_intraday_line(intraday_df, trade_date),
         "daily": _df_to_daily_candles(daily_df),
         "auction": auction or {},
@@ -2107,12 +2147,25 @@ def _get_realtime_sector_service():
     return _REALTIME_SECTOR_SERVICE
 
 
+def _get_realtime_entry_signal_service():
+    global _REALTIME_ENTRY_SIGNAL_SERVICE
+    if _REALTIME_ENTRY_SIGNAL_SERVICE is None:
+        with _REALTIME_SERVICE_LOCK:
+            if _REALTIME_ENTRY_SIGNAL_SERVICE is None:
+                from core.realtime.entry_signal_service import RealtimeEntrySignalService
+
+                _REALTIME_ENTRY_SIGNAL_SERVICE = RealtimeEntrySignalService()
+    return _REALTIME_ENTRY_SIGNAL_SERVICE
+
+
 def _overlay_cache_key(
-    trade_date: Optional[str], profile: str, limit: int, stale_after_seconds: int,
+    trade_date: Optional[str], market_date: Optional[str], profile: str,
+    limit: int, stale_after_seconds: int,
 ) -> tuple:
     return (
         "overlay",
         str(trade_date or ""),
+        str(market_date or ""),
         str(profile or ""),
         int(limit),
         int(stale_after_seconds),
@@ -2202,15 +2255,18 @@ def _enrich_stock_names(rows: List[Dict[str, Any]], snapshot: Optional[Dict], da
 def _build_realtime_overlay_payload(
     trade_date: Optional[str],
     *,
+    market_date: Optional[str] = None,
     profile: str = "",
     limit: int = 20,
     stale_after_seconds: int = 90,
 ) -> Dict[str, Any]:
     service = RealtimeOverlayService(
         quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
+        entry_signal_service=_get_realtime_entry_signal_service(),
     )
     payload = service.build_overlay(
         trade_date,
+        market_date=market_date or _realtime_market_date(),
         profile=profile,
         limit=limit,
         persist=False,
@@ -2290,6 +2346,35 @@ def _current_realtime_session() -> Dict[str, Any]:
     return realtime_session_status()
 
 
+def _realtime_market_date() -> str:
+    """实时行情所属的交易日，与候选股生成日期分离。"""
+    session = _current_realtime_session()
+    current = str(session.get("date") or "")
+    if session.get("is_trade_date"):
+        return current
+    try:
+        from backtest.trade_calendar import TradeCalendar
+
+        return str(TradeCalendar().prev(current) or current)
+    except Exception:
+        return current or _latest_date()
+
+
+def _realtime_candidate_date(market_date: Optional[str] = None) -> str:
+    """当日盘中使用上一交易日已生成的候选池。"""
+    market_date = str(market_date or _realtime_market_date())
+    try:
+        from backtest.trade_calendar import TradeCalendar
+
+        previous = str(TradeCalendar().prev(market_date) or "")
+    except Exception:
+        previous = ""
+    available = [date for date in _list_dates() if date <= previous]
+    if available:
+        return max(available)
+    return _latest_date()
+
+
 def _data_generation_running() -> bool:
     try:
         from desktop.runner import CONTROLLER
@@ -2310,11 +2395,14 @@ def _get_cached_realtime_payload(key: tuple, loader) -> Any:
 def _refresh_realtime_defaults() -> None:
     if _data_generation_running() or not _current_realtime_session()["is_open"]:
         return
-    trade_date = _latest_date()
+    market_date = _realtime_market_date()
+    trade_date = _realtime_candidate_date(market_date)
     jobs = [
         (
-            _overlay_cache_key(trade_date, "", 20, 90),
-            lambda: _build_realtime_overlay_payload(trade_date, limit=20, stale_after_seconds=90),
+            _overlay_cache_key(trade_date, market_date, "", 20, 90),
+            lambda: _build_realtime_overlay_payload(
+                trade_date, market_date=market_date, limit=20, stale_after_seconds=90,
+            ),
         ),
     ]
     for key, loader in jobs:
@@ -2449,20 +2537,24 @@ def api_realtime_health(probe: bool = False) -> Any:
 @app.get("/api/realtime/overlay")
 def api_realtime_overlay(
     date: Optional[str] = None,
+    market_date: Optional[str] = None,
     profile: str = "",
     limit: int = 20,
     persist: bool = False,
     stale_after_seconds: int = 90,
 ) -> Any:
-    trade_date = date or _latest_date()
+    quote_date = market_date or _realtime_market_date()
+    trade_date = date or _realtime_candidate_date(quote_date)
     normalized_limit = max(1, min(int(limit or 20), 100))
     normalized_stale = max(1, int(stale_after_seconds or 90))
     if persist:
         service = RealtimeOverlayService(
             quote_service=_get_realtime_quote_service(stale_after_seconds=normalized_stale),
+            entry_signal_service=_get_realtime_entry_signal_service(),
         )
         payload = service.build_overlay(
             trade_date,
+            market_date=quote_date,
             profile=profile,
             limit=normalized_limit,
             persist=True,
@@ -2470,11 +2562,14 @@ def api_realtime_overlay(
         snapshot = _load_snapshot(trade_date) if trade_date else None
         _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
     else:
-        key = _overlay_cache_key(trade_date, profile, normalized_limit, normalized_stale)
+        key = _overlay_cache_key(
+            trade_date, quote_date, profile, normalized_limit, normalized_stale,
+        )
         payload = _get_cached_realtime_payload(
             key,
             lambda: _build_realtime_overlay_payload(
                 trade_date,
+                market_date=quote_date,
                 profile=profile,
                 limit=normalized_limit,
                 stale_after_seconds=normalized_stale,
@@ -2505,20 +2600,33 @@ def api_leader_pool(
 @app.get("/api/intraday-strength")
 def api_intraday_strength(
     date: Optional[str] = None,
+    market_date: Optional[str] = None,
     lookback: int = 10,
     limit: int = 30,
     stale_after_seconds: int = 90,
 ) -> Any:
     from core.realtime.leader_pool_service import IntradayStrengthService
 
-    trade_date = date or _latest_date()
-    service = IntradayStrengthService(
-        quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
-    )
-    payload = service.build(
-        trade_date,
-        lookback=max(1, min(int(lookback or 5), 20)),
-        limit=max(1, min(int(limit or 30), 100)),
+    quote_date = market_date or _realtime_market_date()
+    trade_date = date or _realtime_candidate_date(quote_date)
+    normalized_lookback = max(1, min(int(lookback or 5), 20))
+    normalized_limit = max(1, min(int(limit or 30), 100))
+
+    def load_payload():
+        service = IntradayStrengthService(
+            quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
+            entry_signal_service=_get_realtime_entry_signal_service(),
+        )
+        return service.build(
+            trade_date,
+            market_date=quote_date,
+            lookback=normalized_lookback,
+            limit=normalized_limit,
+        )
+
+    payload = _get_cached_realtime_payload(
+        ("intraday-strength", trade_date, quote_date, normalized_lookback, normalized_limit),
+        load_payload,
     )
     snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
@@ -2609,10 +2717,15 @@ def _date_to_ts(date_str: Any, time_str: Any = "15:00:00") -> int:
 def _df_to_daily_candles(df) -> List[Dict[str, Any]]:
     if df is None or df.empty:
         return []
+    import pandas as pd
+
     rows = []
     for _, r in df.iterrows():
         date = r.get("trade_date")
-        ts = _date_to_ts(date, r.get("time") or "15:00:00")
+        time_value = r.get("time")
+        if time_value is None or pd.isna(time_value) or str(time_value).lower() in {"", "nan", "none"}:
+            time_value = "15:00:00"
+        ts = _date_to_ts(date, time_value)
         if not ts:
             continue
         rows.append({
@@ -2623,6 +2736,64 @@ def _df_to_daily_candles(df) -> List[Dict[str, Any]]:
             "close": float(r.get("close") or 0),
         })
     return [r for r in rows if r["open"] or r["close"]]
+
+
+def _merge_intraday_daily_candle(daily_df, intraday_df, trade_date: str, *, limit: int = 120):
+    """用指定交易日的分时 OHLC 补齐日K最后一根。
+
+    K 线缓存可能在当日开盘前生成；分时是当日新数据，因此对
+    ``trade_date`` 做替换而不是简单追加，避免同日重复K线。
+    """
+    import pandas as pd
+
+    target = str(trade_date or "").replace("-", "")[:8]
+    daily = daily_df.copy() if daily_df is not None else pd.DataFrame()
+    if not daily.empty:
+        if "trade_date" not in daily.columns and "datetime" in daily.columns:
+            daily["trade_date"] = pd.to_datetime(
+                daily["datetime"], errors="coerce",
+            ).dt.strftime("%Y%m%d")
+        if "trade_date" not in daily.columns:
+            daily["trade_date"] = ""
+        daily["trade_date"] = daily["trade_date"].astype(str).str.replace("-", "", regex=False).str[:8]
+        daily = daily[daily["trade_date"] <= target]
+
+    minute = intraday_df.copy() if intraday_df is not None else pd.DataFrame()
+    if target and not minute.empty:
+        for column in ("open", "high", "low", "close"):
+            if column not in minute.columns:
+                minute[column] = minute.get("price", minute.get("close", 0.0))
+            minute[column] = pd.to_numeric(minute[column], errors="coerce")
+        valid = minute.dropna(subset=["close"])
+        valid = valid[valid["close"] > 0]
+        if not valid.empty:
+            open_value = float(valid.iloc[0].get("open") or valid.iloc[0]["close"])
+            close_value = float(valid.iloc[-1]["close"])
+            high_value = float(valid["high"].max()) if valid["high"].notna().any() else max(open_value, close_value)
+            low_value = float(valid["low"].min()) if valid["low"].notna().any() else min(open_value, close_value)
+            volume_col = "vol" if "vol" in valid.columns else "volume" if "volume" in valid.columns else ""
+            volume = float(pd.to_numeric(valid[volume_col], errors="coerce").fillna(0).sum()) if volume_col else 0.0
+            candle = pd.DataFrame([{
+                "trade_date": target,
+                "time": "15:00:00",
+                "datetime": f"{target[:4]}-{target[4:6]}-{target[6:8]} 15:00:00",
+                "open": open_value,
+                "high": high_value,
+                "low": low_value,
+                "close": close_value,
+                "vol": volume,
+                "volume": volume,
+                "amount": float(pd.to_numeric(valid.get("amount", 0), errors="coerce").fillna(0).sum()) if "amount" in valid.columns else 0.0,
+                "source": "intraday_aggregate",
+            }])
+            if not daily.empty:
+                daily = daily[daily["trade_date"] != target]
+            daily = pd.concat([daily, candle], ignore_index=True, sort=False)
+
+    if daily.empty:
+        return daily
+    daily = daily.sort_values("trade_date").drop_duplicates("trade_date", keep="last")
+    return daily.tail(max(int(limit or 120), 1)).reset_index(drop=True)
 
 
 def _df_to_intraday_line(df, trade_date: str) -> List[Dict[str, Any]]:
@@ -2807,7 +2978,8 @@ def api_backtest_run(payload: dict = Body(default={})) -> Any:
         mode=p.get("mode") or "range",
         trade_date=p.get("trade_date"),
         reset_state=p.get("reset_state"),
-        enhancements=p.get("enhancements"))
+        enhancements=p.get("enhancements"),
+        entry_mode=p.get("entry_mode") or "hybrid")
     return JSONResponse({"started": ok, "message": msg})
 
 

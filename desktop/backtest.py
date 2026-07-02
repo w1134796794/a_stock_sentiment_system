@@ -196,6 +196,17 @@ def runs_meta() -> List[Dict[str, Any]]:
         combination = str(s.get("enhancement_label") or "").strip()
         if combination:
             label += f" · {combination}"
+        entry_mode = str(s.get("entry_mode") or "").strip()
+        entry_labels = {
+            "fixed_gap": "固定区间",
+            "weak_only": "弱转强",
+            "continuation_only": "强势延续",
+            "hybrid": "弱转强+强势延续",
+            "acceleration_only": "只做高开加速",
+            "compare": "入场对照",
+        }
+        if entry_mode:
+            label += f" · {entry_labels.get(entry_mode, entry_mode)}"
         if isinstance(ret, (int, float)):
             label += f" · 收益 {ret * 100:+.1f}%"
         meta.append({"run": run, "label": label})
@@ -446,6 +457,26 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "最大回撤": _fmt_pct(r.get("max_drawdown"), signed=True),
         })
 
+    entry_mode_rows = []
+    for r in load_table("entry_modes", run):
+        entry_mode_rows.append({
+            "模式": r.get("entry_mode_label") or r.get("entry_mode") or "",
+            "候选数": int(float(r.get("candidate_count") or 0)),
+            "信号数": int(float(r.get("signal_count") or 0)),
+            "成交数": int(float(r.get("filled_count") or 0)),
+            "未成交信号": int(float(r.get("signal_unfilled_count") or 0)),
+            "成交覆盖率": _fmt_pct(r.get("fill_coverage")),
+            "信号成交率": _fmt_pct(r.get("signal_fill_rate")),
+            "已平仓": int(float(r.get("closed_trades") or 0)),
+            "胜率": _fmt_pct(r.get("win_rate")),
+            "平均收益": _fmt_pct(r.get("average_return"), signed=True),
+            "总收益": _fmt_pct(r.get("total_return"), signed=True),
+            "止损率": _fmt_pct(r.get("stop_rate")),
+            "最大回撤": _fmt_pct(r.get("max_drawdown"), signed=True),
+            "平均MFE": _fmt_pct(r.get("average_mfe"), signed=True),
+            "平均MAE": _fmt_pct(r.get("average_mae"), signed=True),
+        })
+
     # 逐笔展示原始 BUY/SELL；FIFO 仅用于识别哪些 BUY 仍处于持仓中。
     open_lots: Dict[str, List[Dict[str, Any]]] = {}
     for index, trade in enumerate(trades):
@@ -518,6 +549,9 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "买入信号": _trade_text(
                 position.get("entry_signal") if is_open and position else record.get("entry_signal", ""),
             ),
+            "入场时间": position.get("entry_time") if is_open and position else record.get("entry_time", ""),
+            "MFE": _fmt_pct(position.get("mfe_pct") if is_open and position else record.get("mfe_pct"), signed=True),
+            "MAE": _fmt_pct(position.get("mae_pct") if is_open and position else record.get("mae_pct"), signed=True),
             "状态/退出": status,
             "_sort_date": str(record.get("date") or ""),
             "_sort_index": index,
@@ -558,11 +592,12 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "walk_forward_rows": walk_forward_rows,
         "walk_forward_summary": walk_forward_summary,
         "lhb_comparison_rows": lhb_comparison_rows,
+        "entry_mode_rows": entry_mode_rows,
         "transaction_view": True,
         "trade_rows": trade_rows,
         "trade_columns": ["日期", "动作", "名称", "代码", "模式", "买入价", "卖出价", "现价",
                           "股数", "盈亏", "盈亏%", "持仓天数", "止损", "止盈", "排名", "评分",
-                          "买入信号", "状态/退出"],
+                          "买入信号", "入场时间", "MFE", "MAE", "状态/退出"],
     })
     return base
 

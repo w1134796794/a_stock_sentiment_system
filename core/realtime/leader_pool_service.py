@@ -454,7 +454,7 @@ class LeaderPoolService:
             "event_risk_safety": round(_to_float(source.get("event_risk_safety"), 100.0), 2),
             "lhb_signal_date": str(source.get("lhb_signal_date") or ""),
             "lhb_effective_date": str(source.get("lhb_effective_date") or ""),
-            "action": "只在高开且实时转强时确认；低开直接放弃",
+            "action": "按弱转强、强势延续或高开加速的分钟条件确认",
             "reasons": reasons,
             "candidate_reasons": source.get("candidate_reasons") or [],
         }
@@ -531,21 +531,41 @@ class LeaderPoolService:
 class IntradayStrengthService:
     """Realtime strength confirmation over the factor-native leader pool."""
 
-    def __init__(self, *, quote_service: Any = None, pool_service: Optional[LeaderPoolService] = None) -> None:
+    def __init__(
+        self,
+        *,
+        quote_service: Any = None,
+        pool_service: Optional[LeaderPoolService] = None,
+        entry_signal_service: Any = None,
+    ) -> None:
         self.quote_service = quote_service
         self.pool_service = pool_service or LeaderPoolService()
+        self.entry_signal_service = entry_signal_service
 
     def build(
         self,
         trade_date: Optional[str] = None,
         *,
+        market_date: Optional[str] = None,
         lookback: int = 10,
         limit: int = 30,
     ) -> Dict[str, Any]:
         pool = self.pool_service.build_pool(trade_date, lookback=lookback, limit=limit)
         rows = pool.get("rows") or []
         quotes = self._quote_map(row.get("code") for row in rows)
-        enriched = [self._build_row(row, quotes.get(row.get("code") or "", {})) for row in rows]
+        candidate_date = str(pool.get("trade_date") or trade_date or "")
+        market_date = str(market_date or candidate_date)
+        signals = self.entry_signal_service.evaluate(
+            rows, quotes, market_date=market_date,
+        ) if self.entry_signal_service is not None else {}
+        enriched = [
+            self._build_row(
+                row,
+                quotes.get(row.get("code") or "", {}),
+                signals.get(row.get("code") or "", {}),
+            )
+            for row in rows
+        ]
         enriched.sort(key=lambda row: (row["status_order"], -_to_float(row.get("turn_score")), int(row.get("pool_rank") or 999)))
         for row in enriched:
             row.pop("status_order", None)
@@ -554,12 +574,14 @@ class IntradayStrengthService:
             counts[row["status"]] = counts.get(row["status"], 0) + 1
         return {
             "ok": bool(enriched),
-            "trade_date": pool.get("trade_date"),
+            "trade_date": candidate_date,
+            "candidate_date": candidate_date,
+            "market_date": market_date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "thresholds": {
-                "cancel_low_open": "低开直接放弃",
-                "turning_pct": 1.5,
-                "confirmed_pct": 3.0,
+                "weak_to_strong": "-3%至+1%",
+                "continuation": "+1%至+5%",
+                "acceleration": "+5%以上仅龙头/主线核心",
             },
             "counts": counts,
             "rows": enriched,
@@ -592,7 +614,12 @@ class IntradayStrengthService:
         except Exception:
             return None
 
-    def _build_row(self, pool_row: Dict[str, Any], quote: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_row(
+        self,
+        pool_row: Dict[str, Any],
+        quote: Dict[str, Any],
+        signal: Dict[str, Any],
+    ) -> Dict[str, Any]:
         pre_close = _to_float(quote.get("pre_close"))
         open_price = _to_float(quote.get("open_price"))
         last_price = _to_float(quote.get("last_price"))
@@ -601,7 +628,9 @@ class IntradayStrengthService:
         open_gap = (open_price / pre_close - 1.0) * 100.0 if open_price > 0 and pre_close > 0 else None
         intraday_lift = (last_price / open_price - 1.0) * 100.0 if last_price > 0 and open_price > 0 else None
         high_from_open = (high_price / open_price - 1.0) * 100.0 if high_price > 0 and open_price > 0 else None
-        status, order, reason = self._status(quote, open_gap, change_pct, intraday_lift)
+        status = str(signal.get("signal_status") or "observe")
+        order = {"confirmed": 0, "unfilled": 1, "observe": 2, "cancelled": 3}.get(status, 2)
+        reason = str(signal.get("reason") or "等待当日分钟入场条件")
         realtime_score = self._realtime_score(open_gap, change_pct, intraday_lift)
         turn_score = _to_float(pool_row.get("leader_score")) * 0.45 + realtime_score * 0.55
         if status == "cancelled":
@@ -610,9 +639,19 @@ class IntradayStrengthService:
             **pool_row,
             "status": status,
             "status_order": order,
-            "status_text": {"confirmed": "转强确认", "turning": "转强观察", "observe": "继续观察", "cancelled": "取消"}[status],
+            "status_text": {
+                "confirmed": "转强确认",
+                "unfilled": "信号确认·无法成交",
+                "observe": "继续观察",
+                "cancelled": "取消",
+            }.get(status, "继续观察"),
             "turn_score": round(max(0.0, min(100.0, turn_score)), 2),
             "reason": reason,
+            "entry_mode": signal.get("entry_mode") or "",
+            "entry_mode_text": signal.get("entry_mode_text") or "等待分类",
+            "confirm_time": signal.get("confirm_time") or "",
+            "entry_time": signal.get("entry_time") or "",
+            "entry_price": signal.get("entry_price"),
             "quote_time": quote.get("received_at") or quote.get("time") or "",
             "quote_source": quote.get("source") or "",
             "is_stale": bool(quote.get("is_stale")),
@@ -624,30 +663,6 @@ class IntradayStrengthService:
             "intraday_lift_pct": round(intraday_lift, 2) if intraday_lift is not None else None,
             "high_from_open_pct": round(high_from_open, 2) if high_from_open is not None else None,
         }
-
-    @staticmethod
-    def _status(
-        quote: Dict[str, Any],
-        open_gap: Optional[float],
-        change_pct: float,
-        intraday_lift: Optional[float],
-    ) -> tuple[str, int, str]:
-        if not quote:
-            return "observe", 2, "未获取到实时行情，保持观察"
-        if quote.get("is_stale"):
-            return "observe", 2, "行情可能过期，保持观察"
-        if open_gap is not None and open_gap < 0:
-            return "cancelled", 3, f"低开 {open_gap:.2f}%，按规则直接放弃"
-        if change_pct <= -2.0:
-            return "cancelled", 3, f"实时跌幅 {change_pct:.2f}% 触发取消线"
-        if open_gap is not None and open_gap >= 0 and change_pct >= 3.0:
-            lift_txt = f"，开盘后拉升 {intraday_lift:.2f}%" if intraday_lift is not None else ""
-            return "confirmed", 0, f"高开 {open_gap:.2f}% 且实时涨幅 {change_pct:.2f}%{lift_txt}"
-        if open_gap is not None and open_gap >= 0 and change_pct >= 1.5:
-            return "turning", 1, f"高开 {open_gap:.2f}% 且实时涨幅 {change_pct:.2f}%，进入转强观察"
-        if open_gap is not None and open_gap >= 0:
-            return "observe", 2, f"高开 {open_gap:.2f}%，但实时涨幅 {change_pct:.2f}% 未达到转强线"
-        return "observe", 2, "行情不完整，保持观察"
 
     @staticmethod
     def _realtime_score(open_gap: Optional[float], change_pct: float, intraday_lift: Optional[float]) -> float:
