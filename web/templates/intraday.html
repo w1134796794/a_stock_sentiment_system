@@ -171,6 +171,12 @@
           <div class="is-metric"><span>池排名</span><strong class="mono">#${esc(row.pool_rank || '--')}</strong></div>
           <div class="is-metric"><span>来源名次</span><strong class="mono">${row.source_rank ? '#' + row.source_rank : '--'}</strong></div>
           <div class="is-metric"><span>龙头日期</span><strong class="mono">${esc(row.last_leader_date || '--')}</strong></div>
+          <div class="is-metric"><span>龙头阶段</span><strong>${esc(row.lifecycle_state || '--')}</strong></div>
+          <div class="is-metric"><span>历史成功率</span><strong class="mono">${row.success_probability == null ? '--' : num(row.success_probability) + '%'}</strong></div>
+          <div class="is-metric"><span>类似信号</span><strong class="mono">${row.historical_samples == null ? '--' : row.historical_samples + '次'}</strong></div>
+          <div class="is-metric"><span>平均MFE / MAE</span><strong class="mono">${row.average_mfe_pct == null ? '--' : num(row.average_mfe_pct) + '% / ' + num(row.average_mae_pct || 0) + '%'}</strong></div>
+          <div class="is-metric"><span>数据完整度</span><strong class="mono">${row.data_completeness == null ? '--' : num(row.data_completeness, 0) + '%'}</strong></div>
+          <div class="is-metric"><span>可信等级</span><strong class="mono">${esc(row.confidence_grade || 'D')}</strong></div>
         </div>
         <div class="is-reason">${esc(row.reason || '--')}</div>
         <div class="is-action">${esc(row.action || '')}</div>

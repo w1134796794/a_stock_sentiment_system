@@ -1,6 +1,7 @@
 """Point-in-time minute-bar entry rules for short-term backtests."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -34,6 +35,13 @@ class EntryDecision:
     open_gap_pct: float = 0.0
     amount_pace: float = 0.0
     sector_confirmed: bool = False
+    data_status: str = "complete"
+    data_completeness: float = 1.0
+    profile_samples: int = 0
+    hold_minutes: int = 0
+    false_break_count: int = 0
+    pullback_quality: float = 0.0
+    active_buy_ratio: float = 0.0
 
     @property
     def filled(self) -> bool:
@@ -86,6 +94,14 @@ def normalize_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
     data["vwap"] = source_avg.fillna(calculated_vwap) if source_avg is not None else calculated_vwap
     data["vwap"] = data["vwap"].fillna(data["close"])
     data["cum_amount"] = data["amount"].cumsum()
+    buy_source = next((column for column in ("active_buy_amount", "buy_amount", "主动买入额") if column in data.columns), "")
+    sell_source = next((column for column in ("active_sell_amount", "sell_amount", "主动卖出额") if column in data.columns), "")
+    if buy_source and sell_source:
+        buy = pd.to_numeric(data[buy_source], errors="coerce").fillna(0.0)
+        sell = pd.to_numeric(data[sell_source], errors="coerce").fillna(0.0)
+        data["active_buy_ratio"] = buy / (buy + sell).replace(0, pd.NA)
+    else:
+        data["active_buy_ratio"] = pd.NA
     return data
 
 
@@ -127,7 +143,9 @@ class MinuteEntryEvaluator:
         plan_amount_ratio: float = 0.0,
         limit_price: float = 0.0,
         is_leader: bool = False,
-        sector_sync: Optional[Callable[[str], bool]] = None,
+        sector_sync: Optional[Callable[[str], Optional[bool]]] = None,
+        expected_amount_fraction: Optional[Callable[[str], Optional[float]]] = None,
+        amount_profile_samples: int = 0,
         live: bool = False,
     ) -> EntryDecision:
         data = normalize_minute_bars(bars)
@@ -147,14 +165,16 @@ class MinuteEntryEvaluator:
                 return EntryDecision("rejected", signal="弱转强", reason="开盘不在弱转强区间", open_gap_pct=open_gap)
             return self._weak_to_strong(
                 data, first_five, scan, open_gap, prev_close, previous_amount,
-                plan_amount_ratio, limit_price, sector_sync, live,
+                plan_amount_ratio, limit_price, sector_sync, expected_amount_fraction,
+                amount_profile_samples, live,
             )
         if mode == ENTRY_CONTINUATION:
             if not self.weak_max_gap < open_gap <= self.continuation_max_gap:
                 return EntryDecision("rejected", signal="强势延续", reason="开盘不在强势延续区间", open_gap_pct=open_gap)
             return self._continuation(
                 data, first_five, scan, open_gap, previous_amount, previous_volume,
-                auction_amount, auction_volume, plan_amount_ratio, limit_price, sector_sync, live,
+                auction_amount, auction_volume, plan_amount_ratio, limit_price, sector_sync,
+                expected_amount_fraction, amount_profile_samples, live,
             )
         if mode == ENTRY_ACCELERATION:
             if open_gap <= self.continuation_max_gap:
@@ -169,12 +189,14 @@ class MinuteEntryEvaluator:
             if self.weak_min_gap <= open_gap <= self.weak_max_gap:
                 return self._weak_to_strong(
                     data, first_five, scan, open_gap, prev_close, previous_amount,
-                    plan_amount_ratio, limit_price, sector_sync, live,
+                    plan_amount_ratio, limit_price, sector_sync, expected_amount_fraction,
+                    amount_profile_samples, live,
                 )
             if self.weak_max_gap < open_gap <= self.continuation_max_gap:
                 return self._continuation(
                     data, first_five, scan, open_gap, previous_amount, previous_volume,
-                    auction_amount, auction_volume, plan_amount_ratio, limit_price, sector_sync, live,
+                    auction_amount, auction_volume, plan_amount_ratio, limit_price, sector_sync,
+                    expected_amount_fraction, amount_profile_samples, live,
                 )
             if open_gap > self.continuation_max_gap:
                 return EntryDecision(
@@ -186,15 +208,23 @@ class MinuteEntryEvaluator:
 
     def _weak_to_strong(
         self, data, first_five, scan, gap, prev_close, previous_amount,
-        plan_amount_ratio, limit_price, sector_sync, live,
+        plan_amount_ratio, limit_price, sector_sync, expected_amount_fraction,
+        amount_profile_samples, live,
     ) -> EntryDecision:
         opening_low = float(first_five["low"].min())
         opening_high = float(first_five["high"].max())
+        sector_observed = False
         for index, row in scan.iterrows():
             if float(row["low"]) < opening_low * 0.999:
                 return EntryDecision("cancelled", "弱转强", "跌破开盘前5分钟低点", str(row["time"]), open_gap_pct=gap)
-            pace = self._amount_pace(row, previous_amount, plan_amount_ratio)
-            sector_ok = bool(sector_sync(str(row["time"]))) if sector_sync else True
+            pace = self._amount_pace(row, previous_amount, plan_amount_ratio, expected_amount_fraction)
+            sector_state = sector_sync(str(row["time"])) if sector_sync else None
+            sector_observed = sector_observed or sector_state is not None
+            sector_ok = bool(sector_state)
+            history = scan.loc[:index]
+            false_breaks = int(((history["high"] > opening_high) & (history["close"] < opening_high)).sum())
+            hold_minutes = int((history["close"] >= history["vwap"]).sum())
+            pullback_quality = float((history["close"] / history["vwap"]).clip(upper=1.02).mean())
             confirmed = (
                 float(row["close"]) >= prev_close
                 and float(row["close"]) >= float(row["vwap"])
@@ -206,15 +236,35 @@ class MinuteEntryEvaluator:
                 return self._next_minute_fill(
                     data, index, "弱转强", "收复昨收、站上VWAP并突破前5分钟高点",
                     gap, pace, sector_ok, limit_price, live=live,
+                    profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
+                    false_break_count=false_breaks, pullback_quality=pullback_quality,
+                    active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
                 )
+        if not sector_observed:
+            return EntryDecision(
+                "data_insufficient", "弱转强", "缺少真实板块指数或成分股宽度，保持观察",
+                open_gap_pct=gap, data_status="missing_sector", data_completeness=0.55,
+                profile_samples=amount_profile_samples,
+            )
+        if previous_amount > 0 and expected_amount_fraction is None:
+            return EntryDecision(
+                "data_insufficient", "弱转强", "缺少历史同分钟成交进度模型，保持观察",
+                open_gap_pct=gap, data_status="missing_amount_profile", data_completeness=0.65,
+            )
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "弱转强", "弱转强条件尚未全部满足", open_gap_pct=gap)
         return EntryDecision("cancelled", "弱转强", "10:00前未完成弱转强确认", open_gap_pct=gap)
 
     def _continuation(
         self, data, first_five, scan, gap, previous_amount, previous_volume,
-        auction_amount, auction_volume, plan_amount_ratio, limit_price, sector_sync, live,
+        auction_amount, auction_volume, plan_amount_ratio, limit_price, sector_sync,
+        expected_amount_fraction, amount_profile_samples, live,
     ) -> EntryDecision:
+        if auction_amount <= 0 or auction_volume <= 0 or previous_volume <= 0:
+            return EntryDecision(
+                "data_insufficient", "强势延续", "缺少真实竞价成交额、竞价量或昨日日量",
+                open_gap_pct=gap, data_status="missing_auction", data_completeness=0.55,
+            )
         auction_ratio = auction_volume / previous_volume if previous_volume > 0 else 0.0
         auction_ok = (
             auction_amount >= self.min_auction_amount
@@ -225,17 +275,37 @@ class MinuteEntryEvaluator:
             return EntryDecision(status, "强势延续", "竞价成交额或竞价量比不足", open_gap_pct=gap)
         opening_high = float(first_five["high"].max())
         touched_vwap = False
+        sector_observed = False
         for index, row in scan.iterrows():
             vwap = float(row["vwap"])
             touched_vwap = touched_vwap or float(row["low"]) <= vwap * 1.002
-            sector_ok = bool(sector_sync(str(row["time"]))) if sector_sync else True
-            pace = self._amount_pace(row, previous_amount, plan_amount_ratio)
+            sector_state = sector_sync(str(row["time"])) if sector_sync else None
+            sector_observed = sector_observed or sector_state is not None
+            sector_ok = bool(sector_state)
+            pace = self._amount_pace(row, previous_amount, plan_amount_ratio, expected_amount_fraction)
             trigger = (touched_vwap and float(row["close"]) >= vwap) or float(row["high"]) > opening_high
             if trigger and sector_ok and self.min_amount_pace <= pace <= self.max_amount_pace:
+                history = scan.loc[:index]
+                false_breaks = int(((history["high"] > opening_high) & (history["close"] < opening_high)).sum())
+                hold_minutes = int((history["close"] >= history["vwap"]).sum())
+                pullback_quality = float((history["close"] / history["vwap"]).clip(upper=1.02).mean())
                 return self._next_minute_fill(
                     data, index, "强势延续", "竞价放量后回踩VWAP承接或突破前5分钟高点",
                     gap, pace, sector_ok, limit_price, live=live,
+                    profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
+                    false_break_count=false_breaks, pullback_quality=pullback_quality,
+                    active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
                 )
+        if not sector_observed:
+            return EntryDecision(
+                "data_insufficient", "强势延续", "缺少真实板块指数或成分股宽度，保持观察",
+                open_gap_pct=gap, data_status="missing_sector", data_completeness=0.55,
+            )
+        if previous_amount > 0 and expected_amount_fraction is None:
+            return EntryDecision(
+                "data_insufficient", "强势延续", "缺少历史同分钟成交进度模型，保持观察",
+                open_gap_pct=gap, data_status="missing_amount_profile", data_completeness=0.65,
+            )
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "强势延续", "强势延续条件尚未全部满足", open_gap_pct=gap)
         return EntryDecision("cancelled", "强势延续", "10:00前未出现有效承接或突破", open_gap_pct=gap)
@@ -251,8 +321,11 @@ class MinuteEntryEvaluator:
             if tradable.empty:
                 return EntryDecision("signal_unfilled", "高开加速", "接近涨停开盘，暂无可成交证据", "09:30:00", open_gap_pct=gap)
         opening_high = float(first_five["high"].max())
+        sector_observed = False
         for index, row in scan.iterrows():
-            sector_ok = bool(sector_sync(str(row["time"]))) if sector_sync else True
+            sector_state = sector_sync(str(row["time"])) if sector_sync else None
+            sector_observed = sector_observed or sector_state is not None
+            sector_ok = bool(sector_state)
             if sector_ok and (
                 float(row["high"]) > opening_high
                 or (limit_price > 0 and float(row["high"]) >= limit_price * 0.998)
@@ -261,6 +334,11 @@ class MinuteEntryEvaluator:
                     data, index, "高开加速", "龙头高开后继续突破", gap, 0.0,
                     sector_ok, limit_price, unfilled_when_locked=True, live=live,
                 )
+        if not sector_observed:
+            return EntryDecision(
+                "data_insufficient", "高开加速", "缺少真实板块指数或成分股宽度，保持观察",
+                open_gap_pct=gap, data_status="missing_sector", data_completeness=0.60,
+            )
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "高开加速", "高开加速条件尚未全部满足", open_gap_pct=gap)
         return EntryDecision("cancelled", "高开加速", "10:00前未出现龙头加速确认", open_gap_pct=gap)
@@ -269,6 +347,11 @@ class MinuteEntryEvaluator:
         self, data, index, signal, reason, gap, pace, sector_ok, limit_price,
         unfilled_when_locked: bool = False,
         live: bool = False,
+        profile_samples: int = 0,
+        hold_minutes: int = 0,
+        false_break_count: int = 0,
+        pullback_quality: float = 0.0,
+        active_buy_ratio: float = 0.0,
     ) -> EntryDecision:
         following = data[data.index > index]
         if following.empty:
@@ -292,22 +375,23 @@ class MinuteEntryEvaluator:
         return EntryDecision(
             "filled", signal, reason, str(data.loc[index, "time"]),
             str(next_row.get("time") or ""), price, gap, pace, sector_ok,
+            profile_samples=profile_samples, hold_minutes=hold_minutes,
+            false_break_count=false_break_count, pullback_quality=pullback_quality,
+            active_buy_ratio=active_buy_ratio,
         )
 
     @staticmethod
-    def _amount_pace(row: pd.Series, previous_amount: float, fallback: float) -> float:
+    def _amount_pace(
+        row: pd.Series,
+        previous_amount: float,
+        fallback: float,
+        expected_amount_fraction: Optional[Callable[[str], Optional[float]]] = None,
+    ) -> float:
         if previous_amount > 0:
-            hh, mm, *_ = [int(part) for part in str(row["time"]).split(":")]
-            elapsed = max((hh * 60 + mm) - (9 * 60 + 30) + 1, 1)
-            # A股成交量明显呈开盘/收盘集中的 U 型，不能用全天 240 分钟线性外推。
-            # 09:30 首分钟约按全天 8%，10:00 附近累计约按 25% 作为基准。
-            if elapsed <= 30:
-                expected_fraction = 0.08 + 0.17 * (elapsed / 30.0)
-            elif elapsed <= 120:
-                expected_fraction = 0.25 + 0.30 * ((elapsed - 30) / 90.0)
-            else:
-                expected_fraction = 0.55 + 0.45 * ((elapsed - 120) / 120.0)
-            expected = previous_amount * min(expected_fraction, 1.0)
+            fraction = expected_amount_fraction(str(row["time"])) if expected_amount_fraction else None
+            if fraction is None or not math.isfinite(float(fraction)) or float(fraction) <= 0:
+                return math.nan
+            expected = previous_amount * min(float(fraction), 1.0)
             if expected > 0:
                 return float(row["cum_amount"]) / expected
         return float(fallback or 0.0)

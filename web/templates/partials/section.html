@@ -62,7 +62,9 @@
   {% else %}
     {% set name_prefs = ['sector_name', '板块名称', '概念名称', '股票名称', 'stock_name', '名称', 'name'] %}
     {% set code_prefs = ['sector_code', '板块代码', '股票代码', 'stock_code', 'code', '代码', 'ts_code'] %}
-    {% set metric_prefs = ['模式类型', 'pattern_type', '板块类型', '类型', 'type', '置信度', 'confidence',
+    {% set metric_prefs = ['候选概率', 'candidate_probability', '预期收益%', 'expected_return_pct',
+                           '可信等级', 'confidence_grade', '止损概率%', 'stop_probability',
+                           '模式类型', 'pattern_type', '板块类型', '类型', 'type', '置信度', 'confidence',
                            '主线主题评分', '涨停家数', 'limit_up_count', '当日主线评分', '近10日上榜天数',
                            '综合评分', 'composite_score', 'mainline_score', '动量评分', 'momentum_score',
                            '成交额评分', 'amount_score', '持续性评分', 'persistence_score', '涨跌幅', 'pct_change',

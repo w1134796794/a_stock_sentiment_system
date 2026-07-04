@@ -206,7 +206,13 @@ def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
         sections.append({
             "name": "指标筛选",
             "kind": "table",
-            "columns": ["rank", "code", "name", "score", "gold_rank", "reasons"],
+            "summary": "3日强势成功率采用严格复合标签；预期收益为未来3日相对大盘和所属板块的超额收益。可信等级按同市场历史基准、样本量、数据完整度和可成交性共同评定。",
+            "columns": [
+                "rank", "code", "name", "score", "gold_rank",
+                "candidate_probability", "baseline_probability", "probability_lift",
+                "expected_return_pct", "stop_probability",
+                "similar_sample_size", "confidence_grade", "reasons",
+            ],
             "rows": etl_rows,
         })
 

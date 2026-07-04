@@ -305,6 +305,22 @@ COLUMN_LABELS: Dict[str, str] = {
     "name": "名称",
     "type": "类型",
     "confidence": "置信度",
+    "candidate_probability": "3日强势成功率%",
+    "baseline_probability": "同市场基准%",
+    "probability_lift": "相对基准",
+    "expected_return_pct": "3日预期超额收益%",
+    "stop_probability": "止损概率%",
+    "similar_sample_size": "类似行情样本",
+    "confidence_grade": "可信等级",
+    "confidence_score": "可信度%",
+    "data_completeness": "数据完整度%",
+    "sample_reliability": "样本可靠度%",
+    "average_mfe_pct": "平均MFE%",
+    "average_mae_pct": "平均MAE%",
+    "model_type": "模型类型",
+    "as_of_date": "模型生效日",
+    "lifecycle_state": "龙头阶段",
+    "lifecycle_reason": "阶段说明",
     "description": "信号描述",
     "key_metrics": "关键指标",
     "validation_rules": "校验规则",
@@ -684,6 +700,9 @@ def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: s
                     columns = _insert_column_after(columns, "所属概念", ["所属行业", "name", "股票名称"])
                 anchor = "gold_rank"
                 for column in [
+                    "candidate_probability", "baseline_probability", "probability_lift",
+                    "expected_return_pct", "stop_probability",
+                    "similar_sample_size", "confidence_grade",
                     "模式类型", "计划评分", "入场区间",
                     "止损", "止盈", "次日预期", "风险提示",
                 ]:
@@ -1427,10 +1446,16 @@ def _external_screening_section(date: str) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
     rows = [dict(row) for row in (payload.get("final") or []) if isinstance(row, dict)]
-    columns = ["rank", "code", "name", "score", "gold_rank", "reasons"]
+    columns = [
+        "rank", "code", "name", "score", "gold_rank",
+        "candidate_probability", "baseline_probability", "probability_lift",
+        "expected_return_pct", "stop_probability",
+        "similar_sample_size", "confidence_grade", "reasons",
+    ]
     return {
         "name": "指标筛选",
         "kind": "table",
+        "summary": "3日强势成功率采用严格复合标签；预期收益为未来3日相对大盘和所属板块的超额收益。可信等级按同市场历史基准、样本量、数据完整度和可成交性共同评定。",
         "columns": columns,
         "rows": rows,
     }

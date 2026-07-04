@@ -217,6 +217,11 @@
             <div class="rt-metric"><span>现价</span><strong class="mono">${px(r.last_price, r.pre_close)}</strong></div>
             <div class="rt-metric"><span>涨幅</span><strong class="${clsPct(r.pct_chg)}">${pct(r.pct_chg)}</strong></div>
             <div class="rt-metric"><span>分数</span><strong class="mono">${Number(r.screening_score || 0).toFixed(1)}</strong></div>
+            <div class="rt-metric"><span>历史成功率</span><strong class="mono">${r.success_probability == null ? '--' : Number(r.success_probability).toFixed(1) + '%'}</strong></div>
+            <div class="rt-metric"><span>类似信号</span><strong class="mono">${r.historical_samples == null ? '--' : r.historical_samples + '次'}</strong></div>
+            <div class="rt-metric"><span>平均MFE / MAE</span><strong class="mono">${r.average_mfe_pct == null ? '--' : Number(r.average_mfe_pct).toFixed(1) + '% / ' + Number(r.average_mae_pct || 0).toFixed(1) + '%'}</strong></div>
+            <div class="rt-metric"><span>数据完整度</span><strong class="mono">${r.data_completeness == null ? '--' : Number(r.data_completeness).toFixed(0) + '%'}</strong></div>
+            <div class="rt-metric"><span>可信等级</span><strong class="mono">${esc(r.confidence_grade || 'D')}</strong></div>
           </div>
           <div class="rt-reason">${esc(r.reason || '--')}</div>
         </article>`).join('');

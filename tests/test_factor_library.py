@@ -67,3 +67,23 @@ def test_published_artifact_contains_auditable_metrics(tmp_path):
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["model_type"] == "ic_ir_constrained_blend"
     assert payload["factor_metrics"]["factor_a"]["ic_mean"] == 0.03
+
+
+def test_ic_ir_training_keeps_stable_inverse_factor_direction(tmp_path):
+    rng = np.random.default_rng(11)
+    rows = []
+    for date in pd.bdate_range("2026-01-05", periods=40):
+        inverse = rng.normal(size=40)
+        for value in inverse:
+            rows.append({
+                "trade_date": date.strftime("%Y%m%d"),
+                "factor_inverse": value,
+                "target_return": -0.02 * value + rng.normal(scale=0.003),
+            })
+    trainer = FactorLibraryTrainer(
+        repository=DynamicWeightRepository(tmp_path), min_daily_samples=20,
+    )
+    metrics = trainer.factor_metrics(pd.DataFrame(rows), ["factor_inverse"])
+    weights = trainer._learned_weights(metrics)
+    assert metrics["factor_inverse"]["ic_mean"] < 0
+    assert weights["factor_inverse"] < 0

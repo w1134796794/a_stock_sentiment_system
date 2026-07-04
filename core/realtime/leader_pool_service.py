@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from core.realtime.models import normalize_stock_code
+from core.signals.confidence_service import ConfidenceService
+from core.signals.leader_outcome import LeaderOutcomeTracker
 from core.utils.price_limit import (
     get_price_limit_pct_points,
     limit_progress,
@@ -82,10 +84,16 @@ class LeaderPoolService:
     CORE_SCORE = 72.0
     SECTOR_SCORE = 64.0
 
-    def __init__(self, *, screening_dir: Optional[Path] = None) -> None:
-        from config.settings import WEB_DATA_DIR
+    def __init__(
+        self, *, screening_dir: Optional[Path] = None, duckdb_path: Optional[Path] = None,
+    ) -> None:
+        from config.settings import FACTOR_DB_PATH, WEB_DATA_DIR
 
         self.screening_dir = Path(screening_dir or WEB_DATA_DIR / "screening")
+        self.duckdb_path = Path(duckdb_path or FACTOR_DB_PATH) if (duckdb_path or screening_dir is None) else None
+        self.outcome_tracker = LeaderOutcomeTracker(self.duckdb_path) if self.duckdb_path is not None else None
+        self._stats_cache: Dict[tuple[str, str], Dict[str, Any]] = {}
+        self._universe_cache: Dict[str, List[Dict[str, Any]]] = {}
 
     def build_pool(
         self,
@@ -104,7 +112,7 @@ class LeaderPoolService:
         for date, data in history:
             daily_snapshots: List[Dict[str, Any]] = []
             seen_codes = set()
-            source_rows = data.get("candidate_pool") or data.get("final") or []
+            source_rows = self._source_rows(date, data)
             for item in source_rows:
                 code = normalize_stock_code(item.get("code") or item.get("stock_code") or "", add_suffix=False)
                 if not code or code in seen_codes:
@@ -401,12 +409,36 @@ class LeaderPoolService:
             pool_type = str(current_event.get("pool_type") or "板块龙头")
             order = 0 if pool_type == "核心龙头" else 1
             leader_time_label = "当日核心龙头" if pool_type == "核心龙头" else "当日板块龙头"
+            prior_events = [event for event in events if str(event.get("date") or "") < target]
+            lifecycle_state = "确认龙头" if prior_events else "萌芽龙头"
         else:
             pool_type = "近期龙头"
             order = 2
             leader_time_label = "上一交易日龙头" if leader_age_days == 1 else f"{leader_age_days}个交易日前龙头"
+            current_sector = _to_float((current or {}).get("sector_status_score"), 0.0)
+            current_safety = _to_float((current or {}).get("safety_score"), 0.0)
+            lifecycle_state = "分歧龙头" if current and current_sector >= 55.0 and current_safety >= 40.0 else "衰退龙头"
 
         reasons = self._reasons(pool_type, source_rank, source_date, target, last_event, source)
+        stats_key = (target, lifecycle_state)
+        if stats_key not in self._stats_cache:
+            self._stats_cache[stats_key] = self.outcome_tracker.stats(
+                lifecycle_state, as_of_date=target,
+            ) if self.outcome_tracker is not None else {}
+        stats = self._stats_cache[stats_key]
+        leader_confidence = ConfidenceService.assess(
+            calibrated_probability=stats.get("success_probability", 0.5),
+            expected_return=stats.get("expected_return", 0.0),
+            stop_probability=stats.get("stop_probability", 0.5),
+            average_mfe=stats.get("average_mfe", 0.0),
+            average_mae=stats.get("average_mae", 0.0),
+            sample_size=stats.get("sample_size", 0),
+            data_completeness=min(int(source.get("evidence_count") or 0) / 4.0, 1.0),
+            regime_match=_to_float(source.get("sector_status_score"), 50.0) / 100.0,
+            tradability=_to_float(source.get("safety_score"), 50.0) / 100.0,
+            model_type="leader_lifecycle_oos" if stats else "leader_lifecycle_pending_oos_calibration",
+            as_of_date=target,
+        )
         return {
             "code": code,
             "name": name,
@@ -425,6 +457,8 @@ class LeaderPoolService:
             "last_leader_date": last_leader_date,
             "leader_age_days": leader_age_days,
             "leader_time_label": leader_time_label,
+            "lifecycle_state": lifecycle_state,
+            "lifecycle_reason": self._lifecycle_reason(lifecycle_state, source, last_event),
             "resonance_sectors": str(source.get("resonance_sectors") or ""),
             "primary_sector": str(source.get("primary_sector") or ""),
             "latest_score": round(latest_score, 2),
@@ -452,12 +486,93 @@ class LeaderPoolService:
             "attention_score": round(_to_float(source.get("attention_score"), 50.0), 2),
             "kpl_leader_score": round(_to_float(source.get("kpl_leader_score"), 50.0), 2),
             "event_risk_safety": round(_to_float(source.get("event_risk_safety"), 100.0), 2),
+            "leader_confidence": leader_confidence,
+            "confidence_grade": leader_confidence["confidence_grade"],
             "lhb_signal_date": str(source.get("lhb_signal_date") or ""),
             "lhb_effective_date": str(source.get("lhb_effective_date") or ""),
             "action": "按弱转强、强势延续或高开加速的分钟条件确认",
             "reasons": reasons,
             "candidate_reasons": source.get("candidate_reasons") or [],
         }
+
+    @staticmethod
+    def _lifecycle_reason(state: str, source: Dict[str, Any], last_event: Dict[str, Any]) -> str:
+        if state == "萌芽龙头":
+            return "首次通过板块地位、市场辨识度和资金证据门槛"
+        if state == "确认龙头":
+            return "连续交易日保持独立龙头证据"
+        if state == "分歧龙头":
+            return "当日身份减弱，但板块承接和接力安全尚未失效"
+        return f"最近龙头身份停留在{last_event.get('date') or '--'}，当前证据不足"
+
+    def _source_rows(self, date: str, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Merge screening rows with the full limit-up/strong-sector universe."""
+        preferred = list(data.get("candidate_pool") or data.get("final") or [])
+        rows = preferred + self._load_market_universe(date)
+        output: List[Dict[str, Any]] = []
+        seen = set()
+        for item in rows:
+            code = normalize_stock_code(item.get("code") or item.get("stock_code") or "", add_suffix=False)
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            output.append(item)
+        return output
+
+    def _load_market_universe(self, date: str) -> List[Dict[str, Any]]:
+        if str(date) in self._universe_cache:
+            return self._universe_cache[str(date)]
+        if self.duckdb_path is None or not self.duckdb_path.exists():
+            return []
+        try:
+            import duckdb  # type: ignore
+
+            con = duckdb.connect(str(self.duckdb_path), read_only=True)
+            try:
+                frame = con.execute(
+                    "SELECT * FROM factor_stock_wide WHERE CAST(trade_date AS VARCHAR)=? "
+                    "AND (limit_progress >= 0.60 OR board_height >= 1 "
+                    "OR (sector_mainline_score >= 70 AND pct_chg >= 3)) "
+                    "ORDER BY limit_progress DESC, sector_mainline_score DESC, total_score DESC LIMIT 500",
+                    [str(date)],
+                ).fetchdf()
+            finally:
+                con.close()
+        except Exception:
+            return []
+        output: List[Dict[str, Any]] = []
+        for row in frame.to_dict("records"):
+            output.append({
+                "code": row.get("code"), "name": row.get("name"),
+                "score": row.get("enhanced_total_score") or row.get("total_score"),
+                "rank": row.get("rank"), "resonance_sectors": row.get("resonance_sectors") or "",
+                "source_universe": "全量涨停与强板块成分",
+                "metrics": {
+                    "tech_score": row.get("tech_score"),
+                    "stk_liquidity_percentile": row.get("liquidity_score"),
+                    "stk_new_high_20d": _to_float(row.get("new_high_ratio"), 0.0) * 100.0,
+                    "stk_sector_mainline_score": row.get("sector_mainline_score"),
+                    "stk_sector_persistence_score": row.get("sector_persistence_score"),
+                    "stk_sector_resonance_score": row.get("sector_resonance_score"),
+                    "stk_board_position": row.get("board_score"),
+                    "stk_seal_time_quality": row.get("seal_time_score"),
+                    "stk_kpl_leader_quality": row.get("leader_quality_score"),
+                    "stk_attention_consensus": row.get("attention_score"),
+                    "stk_capital_flow_consensus": row.get("capital_flow_consensus_score"),
+                    "stk_lhb_composite_score": row.get("lhb_composite_score"),
+                    "stk_lhb_institution_score": row.get("institution_net_buy_score"),
+                    "stk_lhb_crowding_risk": 100.0 - _to_float(row.get("crowding_penalty_score")),
+                    "stk_attention_crowding_risk": 100.0 - _to_float(row.get("attention_crowding_penalty")),
+                    "stk_block_trade_risk": 100.0 - _to_float(row.get("event_risk_score")),
+                },
+                "context": {
+                    "pct_chg": row.get("pct_chg"), "limit_progress": row.get("limit_progress"),
+                    "amount_ratio": row.get("amount_ratio"), "vol_ratio": row.get("vol_ratio"),
+                    "board_height": row.get("board_height"), "lhb_present": row.get("lhb_present"),
+                },
+            })
+        self._universe_cache[str(date)] = output
+        return output
 
     @staticmethod
     def _reasons(
@@ -652,6 +767,14 @@ class IntradayStrengthService:
             "confirm_time": signal.get("confirm_time") or "",
             "entry_time": signal.get("entry_time") or "",
             "entry_price": signal.get("entry_price"),
+            "success_probability": signal.get("success_probability"),
+            "historical_samples": signal.get("historical_samples"),
+            "average_mfe_pct": signal.get("average_mfe_pct"),
+            "average_mae_pct": signal.get("average_mae_pct"),
+            "data_completeness": signal.get("data_completeness"),
+            "confidence_grade": signal.get("confidence_grade") or "D",
+            "confidence": signal.get("confidence") or {},
+            "sector_detail": signal.get("sector_detail") or {},
             "quote_time": quote.get("received_at") or quote.get("time") or "",
             "quote_source": quote.get("source") or "",
             "is_stale": bool(quote.get("is_stale")),

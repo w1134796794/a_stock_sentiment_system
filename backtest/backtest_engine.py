@@ -28,6 +28,7 @@ from backtest.minute_entry import (
     normalize_minute_bars,
 )
 from backtest.trade_calendar import TradeCalendar
+from core.signals.minute_amount_profile import MinuteAmountProfileRepository
 
 logger = loguru.logger
 
@@ -188,9 +189,11 @@ class BacktestEngine:
         self._last_entry_meta: Dict[str, Dict[str, Any]] = {}
         self._minute_frames: Dict[Tuple[str, str], pd.DataFrame] = {}
         self._auction_rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self._sector_peers: Dict[str, List[str]] = {}
         self._day_plans = pd.DataFrame()
         self.entry_attempts: List[Dict[str, Any]] = []
         self.entry_candidate_count: int = 0
+        self.amount_profiles = MinuteAmountProfileRepository()
         self.minute_evaluator = MinuteEntryEvaluator(
             deadline=self.config.entry_confirm_deadline,
             weak_min_gap=self.config.weak_entry_min_gap,
@@ -629,10 +632,13 @@ class BacktestEngine:
 
     def _prefetch_entry_data(self, plans: pd.DataFrame, date: str) -> None:
         requested = loaded = 0
+        sector_map: Dict[str, set[str]] = {}
         for _, plan in plans.iterrows():
             code = str(plan.get('代码') or '').zfill(6)
             if not code:
                 continue
+            raw_sector = str(plan.get('共振板块') or plan.get('所属板块') or '')
+            sector_map[code] = {part.strip() for part in raw_sector.replace('；', ',').split(',') if part.strip()}
             requested += 1
             ts_code = self._standardize_stock_code(code)
             key = (str(date), code)
@@ -649,27 +655,77 @@ class BacktestEngine:
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f"[{date}] {code} 竞价数据预取失败: {exc}")
                 self._auction_rows[key] = {}
+        self._sector_peers = self._load_sector_peer_codes(date, sector_map)
+        peer_codes = sorted({peer for peers in self._sector_peers.values() for peer in peers})
+        peer_loaded = 0
+        for peer in peer_codes:
+            key = (str(date), peer)
+            if key in self._minute_frames and not self._minute_frames[key].empty:
+                peer_loaded += 1
+                continue
+            try:
+                frame = self.dm.get_stock_tick(self._standardize_stock_code(peer), str(date))
+                self._minute_frames[key] = normalize_minute_bars(frame)
+                peer_loaded += int(not self._minute_frames[key].empty)
+            except Exception:
+                self._minute_frames[key] = pd.DataFrame()
         logger.info(f"[{date}] 候选分钟行情预取完成: {loaded}/{requested}")
+        logger.info(f"[{date}] 板块成分分钟行情预取完成: {peer_loaded}/{len(peer_codes)}")
+
+    @staticmethod
+    def _load_sector_peer_codes(date: str, sector_map: Dict[str, set[str]]) -> Dict[str, List[str]]:
+        if not sector_map:
+            return {}
+        try:
+            import duckdb  # type: ignore
+            from config.settings import FACTOR_DB_PATH
+
+            con = duckdb.connect(str(FACTOR_DB_PATH), read_only=True)
+            try:
+                rows = con.execute(
+                    "SELECT code, resonance_sectors, total_score FROM factor_stock_wide "
+                    "WHERE CAST(trade_date AS VARCHAR) = ("
+                    "SELECT MAX(CAST(trade_date AS VARCHAR)) FROM factor_stock_wide "
+                    "WHERE CAST(trade_date AS VARCHAR) < ?)",
+                    [str(date)],
+                ).fetchdf()
+            finally:
+                con.close()
+        except Exception:
+            return {}
+        output: Dict[str, List[str]] = {}
+        for code, sectors in sector_map.items():
+            if not sectors:
+                output[code] = []
+                continue
+            matches = rows[
+                rows["resonance_sectors"].fillna("").astype(str).map(
+                    lambda text: any(sector in text for sector in sectors)
+                )
+                & rows["code"].astype(str).str.zfill(6).ne(code)
+            ].sort_values("total_score", ascending=False)
+            output[code] = matches["code"].astype(str).str.zfill(6).head(8).tolist()
+        return output
 
     def _sector_sync_checker(self, plan: pd.Series, date: str, stock_code: str):
         raw_sector = str(plan.get('共振板块') or plan.get('所属板块') or '')
         sectors = {part.strip() for part in raw_sector.replace('；', ',').split(',') if part.strip()}
-        factor_score = self._float(plan.get('因子_stk_sector_resonance_score'))
         if not sectors or self._day_plans.empty:
-            return lambda _time: factor_score >= 60.0
+            return lambda _time: None
 
-        peers: List[str] = []
+        peers: List[str] = list(self._sector_peers.get(stock_code) or [])
         for _, other in self._day_plans.iterrows():
             other_code = str(other.get('代码') or '').zfill(6)
             if not other_code or other_code == stock_code:
                 continue
             other_sector = str(other.get('共振板块') or other.get('所属板块') or '')
             if any(sector in other_sector for sector in sectors):
-                peers.append(other_code)
+                if other_code not in peers:
+                    peers.append(other_code)
 
-        def checker(at_time: str) -> bool:
+        def checker(at_time: str) -> Optional[bool]:
             if not peers:
-                return factor_score >= 65.0
+                return None
             positive = observed = 0
             for peer in peers:
                 frame = self._minute_frames.get((str(date), peer), pd.DataFrame())
@@ -685,7 +741,7 @@ class BacktestEngine:
                     pre_close = self._float(self._get_prev_close(peer, date))
                 if latest > 0 and pre_close > 0 and latest >= pre_close:
                     positive += 1
-            return (positive / observed >= 0.5) if observed else factor_score >= 65.0
+            return (positive / observed >= 0.55) if observed >= 2 else None
 
         return checker
 
@@ -715,6 +771,13 @@ class BacktestEngine:
             'open_gap_pct': decision.open_gap_pct,
             'amount_pace': decision.amount_pace,
             'sector_confirmed': decision.sector_confirmed,
+            'data_status': decision.data_status,
+            'data_completeness': decision.data_completeness,
+            'profile_samples': decision.profile_samples,
+            'hold_minutes': decision.hold_minutes,
+            'false_break_count': decision.false_break_count,
+            'pullback_quality': decision.pullback_quality,
+            'active_buy_ratio': decision.active_buy_ratio,
         })
 
     def _check_buy_conditions(self, plan: pd.Series, date: str, stock_code: str, stock_name: str) -> Tuple[bool, float]:
@@ -785,6 +848,13 @@ class BacktestEngine:
                 limit_price=self._float(lu_price),
                 is_leader=self._is_leader_or_mainline_core(plan),
                 sector_sync=self._sector_sync_checker(plan, date, stock_code),
+                expected_amount_fraction=(
+                    lambda time_text, amount=self._daily_amount_yuan(previous_bar):
+                    self.amount_profiles.expected_fraction(amount, time_text)[0]
+                ) if self.amount_profiles.available else None,
+                amount_profile_samples=self.amount_profiles.expected_fraction(
+                    self._daily_amount_yuan(previous_bar), "10:00:00"
+                )[1],
             )
             self._record_entry_attempt(plan, date, stock_code, stock_name, decision)
             if not decision.filled:

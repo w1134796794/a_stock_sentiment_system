@@ -17,6 +17,9 @@ from backtest.minute_entry import (
 )
 from backtest.trade_calendar import TradeCalendar
 from core.realtime.models import normalize_stock_code
+from core.realtime.sector_breadth import RealtimeSectorBreadthProvider
+from core.signals.confidence_service import ConfidenceService, HistoricalSignalStatsRepository
+from core.signals.minute_amount_profile import MinuteAmountProfileRepository
 from core.utils.price_limit import limit_up_price
 
 
@@ -46,11 +49,17 @@ class RealtimeEntrySignalService:
         evaluator: Optional[MinuteEntryEvaluator] = None,
         minute_ttl_seconds: float = 45.0,
         calendar: Optional[TradeCalendar] = None,
+        amount_profile_repository: Optional[MinuteAmountProfileRepository] = None,
+        sector_breadth_provider: Any = None,
+        signal_stats_repository: Optional[HistoricalSignalStatsRepository] = None,
     ) -> None:
         self.dm = data_manager
         self.evaluator = evaluator or MinuteEntryEvaluator()
         self.minute_ttl_seconds = max(float(minute_ttl_seconds), 5.0)
         self.calendar = calendar or TradeCalendar()
+        self.amount_profiles = amount_profile_repository or MinuteAmountProfileRepository()
+        self.sector_breadth = sector_breadth_provider or RealtimeSectorBreadthProvider()
+        self.signal_stats = signal_stats_repository or HistoricalSignalStatsRepository()
         self._minute_cache: Dict[Tuple[str, str], Tuple[float, pd.DataFrame]] = {}
         self._previous_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._lock = RLock()
@@ -129,22 +138,34 @@ class RealtimeEntrySignalService:
         mode = self._mode_for_gap(gap)
         auction = self._auction(code, market_date) if mode == ENTRY_CONTINUATION else {}
         amount_ratio = self._metric(row, "amount_ratio", 0.0)
+        previous_amount = self._previous_amount_yuan(previous)
+        _, profile_samples = self.amount_profiles.expected_fraction(previous_amount, "10:00:00")
+
+        def expected_fraction(time_text: str) -> Optional[float]:
+            fraction, _ = self.amount_profiles.expected_fraction(previous_amount, time_text)
+            return fraction
+
+        sector_checker, sector_detail = self._sector_checker(
+            row, code, all_rows, frames, quotes, market_date,
+        )
         decision = self.evaluator.evaluate(
             mode=mode,
             bars=frame,
             open_gap=gap,
             prev_close=pre_close,
-            previous_amount=self._previous_amount_yuan(previous),
+            previous_amount=previous_amount,
             previous_volume=_float(previous.get("vol_hand"), _float(previous.get("vol"))),
             auction_amount=_float(auction.get("竞价成交额")),
             auction_volume=_float(auction.get("竞价成交量")),
             plan_amount_ratio=amount_ratio,
             limit_price=_float(limit_up_price(pre_close, code, name)),
             is_leader=self._is_leader(row),
-            sector_sync=self._sector_checker(row, code, all_rows, frames, quotes),
+            sector_sync=sector_checker,
+            expected_amount_fraction=expected_fraction if self.amount_profiles.available else None,
+            amount_profile_samples=profile_samples,
             live=True,
         )
-        return self._payload(decision, mode, market_date)
+        return self._payload(decision, mode, market_date, sector_detail=sector_detail)
 
     @staticmethod
     def _mode_for_gap(gap: float) -> str:
@@ -154,8 +175,10 @@ class RealtimeEntrySignalService:
             return ENTRY_CONTINUATION
         return ENTRY_ACCELERATION
 
-    @staticmethod
-    def _payload(decision: EntryDecision, mode: str, market_date: str) -> Dict[str, Any]:
+    def _payload(
+        self, decision: EntryDecision, mode: str, market_date: str,
+        *, sector_detail: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         if decision.status in {"filled", "confirmed"}:
             status = "confirmed"
             status_text = "确认"
@@ -168,19 +191,50 @@ class RealtimeEntrySignalService:
         else:
             status = "observe"
             status_text = "观察"
+        signal_name = decision.signal or MODE_LABELS.get(mode, "")
+        stats = self.signal_stats.get(signal_name, as_of_date=market_date)
+        sector_complete = float((sector_detail or {}).get("data_completeness") or 0.0)
+        data_completeness = min(float(decision.data_completeness), sector_complete or float(decision.data_completeness))
+        confidence = ConfidenceService.assess(
+            calibrated_probability=stats.get("success_probability", 0.5),
+            expected_return=stats.get("expected_return", 0.0),
+            stop_probability=stats.get("stop_probability", 0.5),
+            sample_size=stats.get("sample_size", 0),
+            average_mfe=stats.get("average_mfe", 0.0),
+            average_mae=stats.get("average_mae", 0.0),
+            data_completeness=data_completeness,
+            regime_match=1.0,
+            tradability=0.0 if decision.status == "signal_unfilled" else 1.0,
+            model_type=f"entry_{mode}",
+            as_of_date=market_date,
+        )
         return {
             "market_date": market_date,
             "entry_mode": mode,
             "entry_mode_text": MODE_LABELS.get(mode, "等待分类"),
             "signal_status": status,
             "signal_status_text": status_text,
-            "signal": decision.signal or MODE_LABELS.get(mode, ""),
+            "signal": signal_name,
             "reason": decision.reason,
             "confirm_time": decision.confirm_time,
             "entry_time": decision.entry_time,
             "entry_price": decision.entry_price or None,
             "amount_pace": decision.amount_pace or None,
             "sector_confirmed": bool(decision.sector_confirmed),
+            "sector_detail": sector_detail or {},
+            "data_status": decision.data_status,
+            "data_completeness": confidence["data_completeness"],
+            "profile_samples": decision.profile_samples,
+            "hold_minutes": decision.hold_minutes,
+            "false_break_count": decision.false_break_count,
+            "pullback_quality": decision.pullback_quality,
+            "active_buy_ratio": decision.active_buy_ratio,
+            "confidence": confidence,
+            "success_probability": confidence["candidate_probability"],
+            "historical_samples": confidence["sample_size"],
+            "average_mfe_pct": confidence["average_mfe_pct"],
+            "average_mae_pct": confidence["average_mae_pct"],
+            "confidence_grade": confidence["confidence_grade"],
         }
 
     def _minute_frame(self, code: str, market_date: str) -> pd.DataFrame:
@@ -245,12 +299,15 @@ class RealtimeEntrySignalService:
         all_rows: List[Dict[str, Any]],
         frames: Dict[str, pd.DataFrame],
         quotes: Dict[str, Dict[str, Any]],
-    ):
+        market_date: str,
+    ) -> Tuple[Any, Dict[str, Any]]:
         sectors = self._sectors(row)
-        fallback = max(
-            self._metric(row, "stk_sector_resonance_score", 0.0),
-            _float(row.get("sector_status_score")),
-        )
+        try:
+            state, detail = self.sector_breadth.evaluate(sectors, market_date)
+            if state is not None:
+                return (lambda _at_time: state), detail
+        except Exception:
+            detail = {}
         peers: List[str] = []
         for other in all_rows:
             other_code = normalize_stock_code(other.get("code") or other.get("stock_code") or "", add_suffix=False)
@@ -276,9 +333,13 @@ class RealtimeEntrySignalService:
                     continue
                 observed += 1
                 positive += int(latest >= previous_close)
-            return (positive / observed >= 0.5) if observed else fallback >= 65.0
+            return (positive / observed >= 0.5) if observed else None
 
-        return checker
+        return checker, (detail or {
+            "reason": "仅取得同候选板块样本" if peers else "板块指数与成分股实时数据不足",
+            "observed_members": len(peers),
+            "data_completeness": 0.5 if peers else 0.0,
+        })
 
     @staticmethod
     def _sectors(row: Dict[str, Any]) -> set[str]:

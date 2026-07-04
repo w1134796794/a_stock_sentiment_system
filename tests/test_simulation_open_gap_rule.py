@@ -151,6 +151,7 @@ def test_backtest_engine_weak_entry_uses_next_minute_open_not_daily_high():
         },
     })
     engine = BacktestEngine(dm, BacktestConfig(slippage=0, entry_mode="weak_only"))
+    engine._sector_sync_checker = lambda *_args, **_kwargs: (lambda _time: True)
     minute = pd.DataFrame([
         {"time": "09:30:00", "open": 9.80, "high": 9.90, "low": 9.75, "close": 9.88, "volume": 1000},
         {"time": "09:31:00", "open": 9.88, "high": 9.92, "low": 9.82, "close": 9.90, "volume": 1000},

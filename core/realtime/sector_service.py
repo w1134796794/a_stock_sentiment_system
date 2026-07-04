@@ -112,6 +112,22 @@ class RealtimeSectorService:
             "missing": errors,
         }
 
+    def resolve_codes_by_names(
+        self, names: Iterable[str], *, source: str = "east",
+    ) -> Dict[str, str]:
+        """Resolve persisted sector labels to provider codes for realtime checks."""
+        self._ensure_sector_names(source)
+        requested = {str(name or "").strip() for name in names if str(name or "").strip()}
+        resolved: Dict[str, str] = {}
+        for code, label in self._sector_names.items():
+            clean_label = str(label or "").strip()
+            for name in requested:
+                if name in resolved:
+                    continue
+                if clean_label == name or (len(name) >= 3 and (name in clean_label or clean_label in name)):
+                    resolved[name] = code.split(".")[0]
+        return resolved
+
     def get_market_quotes(
         self,
         codes: Optional[Iterable[str]] = None,

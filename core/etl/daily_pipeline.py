@@ -113,6 +113,17 @@ class ETLDailyPipeline:
             f"失败={len(failed)}"
         )
 
+        # 分钟成交进度必须来自历史同分钟样本，禁止实时判定使用固定U型假设。
+        try:
+            from core.signals.minute_amount_profile import MinuteAmountProfileTrainer
+
+            minute_profile = MinuteAmountProfileTrainer().refresh_if_due()
+            if not minute_profile.get("ok"):
+                result.warnings.append(f"分钟成交进度模型不可用: {minute_profile.get('message')}")
+        except Exception as exc:  # noqa: BLE001
+            result.warnings.append(f"分钟成交进度模型训练失败: {exc}")
+            logger.warning(f"[数据生成][分钟成交进度] 训练失败: {exc}")
+
         # 每月首个交易日只使用上一交易日及更早的数据训练，发布本月动态权重。
         # 训练失败不阻断日常数据生成，筛选会自动回退 YAML 冷启动先验。
         if prev_trade_date and str(prev_trade_date)[:6] != str(trade_date)[:6]:
@@ -158,6 +169,23 @@ class ETLDailyPipeline:
                 f"{result.plan_cache_summary.get('cached', 0)}/"
                 f"{result.plan_cache_summary.get('requested', 0)} 只已落本地"
             )
+
+        # 龙头身份按生命周期留痕，历史结果只在未来数据成熟后回填，用于样本外概率校准。
+        try:
+            from core.realtime.leader_pool_service import LeaderPoolService
+            from core.signals.leader_outcome import LeaderOutcomeTracker
+
+            leader_service = LeaderPoolService(
+                screening_dir=self.web_data_dir / "screening", duckdb_path=self.duckdb_path,
+            )
+            tracker = LeaderOutcomeTracker(self.duckdb_path)
+            leader_rows = leader_service.build_pool(trade_date, lookback=20, limit=60).get("rows") or []
+            recorded = tracker.record(trade_date, leader_rows)
+            matured = tracker.refresh_outcomes(trade_date)
+            logger.info(f"[数据生成][龙头生命周期] 记录={recorded}, 成熟样本回填={matured}")
+        except Exception as exc:  # noqa: BLE001
+            result.warnings.append(f"龙头生命周期留痕失败: {exc}")
+            logger.warning(f"[数据生成][龙头生命周期] 失败: {exc}")
 
         phase_started = time.monotonic()
         logger.info(f"[数据生成][Phase4] 分析摘要开始: {trade_date}")
@@ -268,6 +296,13 @@ class ETLDailyPipeline:
                 "模式类型": f"指标筛选/{screening.get('profile') or 'default'}",
                 "优先级": item.get("rank"),
                 "综合评分": round(score, 2),
+                "3日强势成功率%": item.get("candidate_probability"),
+                "同市场基准%": item.get("baseline_probability"),
+                "相对基准": item.get("probability_lift"),
+                "3日预期超额收益%": item.get("expected_return_pct"),
+                "止损概率%": item.get("stop_probability"),
+                "类似样本": item.get("similar_sample_size"),
+                "可信等级": item.get("confidence_grade") or "D",
                 "建议仓位": position,
                 "入场区间": "弱转强/强势延续/高开加速按分钟确认",
                 "止损": "实时取消线或-3%",

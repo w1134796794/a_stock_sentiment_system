@@ -189,6 +189,14 @@ class RealtimeOverlayService:
             "confirm_time": signal.get("confirm_time") or "",
             "entry_time": signal.get("entry_time") or "",
             "entry_price": signal.get("entry_price"),
+            "success_probability": signal.get("success_probability"),
+            "historical_samples": signal.get("historical_samples"),
+            "average_mfe_pct": signal.get("average_mfe_pct"),
+            "average_mae_pct": signal.get("average_mae_pct"),
+            "data_completeness": signal.get("data_completeness"),
+            "confidence_grade": signal.get("confidence_grade") or "D",
+            "confidence": signal.get("confidence") or {},
+            "sector_detail": signal.get("sector_detail") or {},
             "candidate_reasons": candidate.get("reasons") or [],
         }
 

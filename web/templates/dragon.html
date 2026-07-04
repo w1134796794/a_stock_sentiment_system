@@ -160,6 +160,8 @@
           <div class="lp-metric"><span>候选名次（参考）</span><strong class="mono">${row.source_rank ? '#' + row.source_rank : '--'}</strong></div>
           <div class="lp-metric"><span>龙头日期</span><strong class="mono">${esc(row.last_leader_date || '--')}</strong></div>
           <div class="lp-metric"><span>龙头时效</span><strong>${esc(row.leader_time_label || '--')}</strong></div>
+          <div class="lp-metric"><span>生命周期</span><strong>${esc(row.lifecycle_state || '--')}</strong></div>
+          <div class="lp-metric"><span>可信等级</span><strong class="mono">${esc(row.confidence_grade || 'D')}</strong></div>
           <div class="lp-metric"><span>当日涨幅</span><strong class="${clsPct(row.pct_chg)}">${pct(row.pct_chg)}</strong></div>
           <div class="lp-metric"><span>涨停幅度</span><strong class="mono">${row.limit_pct == null ? '--' : num(row.limit_pct, 0) + 'cm'}</strong></div>
           <div class="lp-metric"><span>涨停进度</span><strong class="mono">${row.limit_progress == null ? '--' : Math.round(Number(row.limit_progress) * 100) + '%'}</strong></div>

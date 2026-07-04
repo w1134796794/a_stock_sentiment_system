@@ -14,6 +14,7 @@ from loguru import logger
 from core.screening.explanations import build_screening_reasons
 from core.screening.screening_models import FilterTrace, ScreeningResult
 from core.screening.enhancements import ENHANCEMENT_DEFINITIONS
+from core.signals.confidence_service import ConfidenceService, market_regime
 from core.utils.price_limit import get_price_limit_pct_points, limit_progress
 
 
@@ -71,6 +72,10 @@ class ScreeningEngine:
 
             weight_repository = DynamicWeightRepository()
         self.weight_repository = weight_repository
+        self._confidence_profile: Dict[str, Any] = {}
+        self._confidence_model_type = "manual_prior"
+        self._confidence_as_of_date = ""
+        self._active_regime = "neutral"
 
     def run(
         self,
@@ -112,6 +117,22 @@ class ScreeningEngine:
             if persist:
                 result.output_path = str(self.persist_result(result))
             return result
+
+        market_values = pd.to_numeric(candidates.get("mkt_market_score"), errors="coerce") if "mkt_market_score" in candidates else pd.Series(dtype=float)
+        if market_values.empty or market_values.dropna().empty:
+            market_values = pd.to_numeric(candidates.get("market_score"), errors="coerce") if "market_score" in candidates else pd.Series([50.0])
+        self._active_regime = market_regime(float(market_values.dropna().median()) if not market_values.dropna().empty else 50.0)
+        regime_weights = (weight_metadata.get("regime_weights") or {}).get(self._active_regime)
+        if regime_weights:
+            cfg.setdefault("ranking", {})["weights"] = dict(regime_weights)
+            weight_metadata["weights"] = dict(regime_weights)
+            weight_metadata["source"] = "dynamic_regime_ic_ir"
+        profiles = weight_metadata.get("confidence_profiles") or {}
+        self._confidence_profile = dict(profiles.get(self._active_regime) or profiles.get("all") or {})
+        self._confidence_model_type = str(weight_metadata.get("model_type") or "manual_prior")
+        self._confidence_as_of_date = str(weight_metadata.get("effective_date") or "")
+        weight_metadata["market_regime"] = self._active_regime
+        weight_metadata["confidence_profile_available"] = bool(self._confidence_profile)
 
         neutral_score = _to_float((cfg.get("missing") or {}).get("neutral_score"), 50.0)
         working = candidates.copy()
@@ -183,6 +204,8 @@ class ScreeningEngine:
             "effective_date": effective_date,
             "artifact_path": artifact_path,
             "weights": dict(ranking["weights"]),
+            "regime_weights": dict((artifact.payload.get("regime_weights") if artifact else {}) or {}),
+            "confidence_profiles": dict((artifact.payload.get("confidence_profiles") if artifact else {}) or {}),
         }
 
     def load_candidates(
@@ -501,6 +524,23 @@ class ScreeningEngine:
             score = round(_to_float(row.get("_screening_score"), 0.0), 4)
             base_reasons = reasons.get(code, [])[:8]
             penalty_reasons = self._penalty_reasons(row, cfg, neutral_score)
+            configured_factors = list((ranking_cfg.get("weights") or {}).keys())
+            observed = sum(
+                1 for factor in configured_factors
+                if factor in ranked.columns and pd.notna(row.get(factor))
+            )
+            completeness = observed / len(configured_factors) if configured_factors else 0.0
+            liquidity = _to_float(row.get("stk_liquidity_percentile"), _to_float(row.get("liquidity_score"), 50.0))
+            tradability = max(0.5, min(1.0, liquidity / 70.0))
+            confidence = ConfidenceService.from_profile(
+                self._confidence_profile,
+                score=score,
+                data_completeness=completeness,
+                regime_match=1.0 if self._confidence_profile else 0.75,
+                tradability=tradability,
+                model_type=self._confidence_model_type,
+                as_of_date=self._confidence_as_of_date,
+            )
             final.append({
                 "code": code,
                 "ts_code": str(row.get("ts_code") or ""),
@@ -513,6 +553,14 @@ class ScreeningEngine:
                 "signal_adjustment": round(_to_float(row.get("_signal_adjustment"), 0.0), 4),
                 "rank": rank,
                 "gold_rank": int(_to_float(row.get("rank"), rank)),
+                "candidate_probability": confidence["candidate_probability"],
+                "baseline_probability": confidence["baseline_probability"],
+                "probability_lift": confidence["probability_lift"],
+                "expected_return_pct": confidence["expected_return_pct"],
+                "stop_probability": confidence["stop_probability"],
+                "similar_sample_size": confidence["sample_size"],
+                "confidence_grade": confidence["confidence_grade"],
+                "confidence": confidence,
                 "reasons": build_screening_reasons(
                     metrics=metrics,
                     context=context,
@@ -596,14 +644,15 @@ class ScreeningEngine:
         if bool(ranking_cfg.get("candidate_percentile")):
             return self._candidate_percentile_score(df, cfg, neutral_score)
         weights = ranking_cfg.get("weights") or {"stk_total_score": 1.0}
-        total_weight = sum(max(float(w), 0.0) for w in weights.values())
+        total_weight = sum(abs(float(w)) for w in weights.values())
         if total_weight <= 0:
             return pd.Series([neutral_score] * len(df), index=df.index)
         score = pd.Series([0.0] * len(df), index=df.index, dtype=float)
         for factor, weight in weights.items():
-            weight = max(float(weight), 0.0)
+            weight = float(weight)
             values = self._factor_series(df, factor, neutral_score)
-            score += values * weight
+            component = values if weight >= 0 else 100.0 - values
+            score += component * abs(weight)
         score = score / total_weight
         penalty = self._ranking_penalty(df, cfg, neutral_score)
         return (score - penalty).clip(lower=0, upper=100)
@@ -675,18 +724,19 @@ class ScreeningEngine:
     ) -> pd.Series:
         """Rank each factor inside the current candidate pool before weighting."""
         weights = (cfg.get("ranking") or {}).get("weights") or {"stk_total_score": 1.0}
-        total_weight = sum(max(float(weight), 0.0) for weight in weights.values())
+        total_weight = sum(abs(float(weight)) for weight in weights.values())
         if total_weight <= 0 or df.empty:
             return pd.Series([neutral_score] * len(df), index=df.index, dtype=float)
         score = pd.Series(0.0, index=df.index, dtype=float)
         for factor, weight in weights.items():
-            weight = max(float(weight), 0.0)
+            weight = float(weight)
             values = self._factor_series(df, factor, neutral_score)
             if values.nunique(dropna=True) <= 1:
                 percentile = pd.Series(50.0, index=df.index, dtype=float)
             else:
                 percentile = values.rank(method="average", pct=True) * 100.0
-            score += percentile * weight
+            component = percentile if weight >= 0 else 100.0 - percentile
+            score += component * abs(weight)
         penalty = self._ranking_penalty(df, cfg, neutral_score)
         return (score / total_weight - penalty).clip(lower=0, upper=100)
 

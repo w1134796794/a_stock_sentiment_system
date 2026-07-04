@@ -63,10 +63,15 @@ def test_leader_pool_from_screening_json(tmp_path: Path):
     assert result["rows"][0]["pool_type"] == "核心龙头"
     assert result["rows"][0]["source_rank"] == 7
     assert result["rows"][0]["resonance_sectors"] == "光通信"
+    assert result["rows"][0]["lifecycle_state"] == "萌芽龙头"
     assert all(row["code"] != "000001" for row in result["rows"])
 
 
 def test_intraday_strength_uses_weak_to_strong_for_low_open():
+    class FakeBreadth:
+        def evaluate(self, sectors, market_date):
+            return True, {"breadth": 0.7, "index_change_pct": 1.0, "data_completeness": 1.0}
+
     class FakePool:
         def build_pool(self, trade_date, *, lookback=5, limit=30):
             return {
@@ -125,7 +130,9 @@ def test_intraday_strength_uses_weak_to_strong_for_low_open():
     result = IntradayStrengthService(
         quote_service=FakeQuotes(),
         pool_service=FakePool(),
-        entry_signal_service=RealtimeEntrySignalService(FakeMinuteData()),
+        entry_signal_service=RealtimeEntrySignalService(
+            FakeMinuteData(), sector_breadth_provider=FakeBreadth(),
+        ),
     ).build("20260618", market_date="20260619")
 
     assert result["candidate_date"] == "20260618"
@@ -185,3 +192,4 @@ def test_recent_one_day_leader_is_kept_with_source_date(tmp_path: Path):
     assert row["source_date"] == "20260618"
     assert row["leader_age_days"] == 1
     assert row["leader_time_label"] == "上一交易日龙头"
+    assert row["lifecycle_state"] in {"分歧龙头", "衰退龙头"}
