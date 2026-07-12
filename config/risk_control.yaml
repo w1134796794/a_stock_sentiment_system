@@ -52,8 +52,12 @@ stamp_duty_rate: 0.001           # 印花税（卖出）
 slippage: 0.002                  # 滑点
 min_holding_days: 1              # 最小持仓天数（T+1）
 
-# ---- 凯利仓位（R-4 落地用，当前仅占位）----
-kelly_fraction: 0.5              # 半凯利
-kelly_min_samples: 20            # 单模式最小样本数，不足则回退固定风险法
-kelly_max_position: 0.25         # 凯利结果单票封顶
+# ---- 固定风险 / 保守凯利 ----
+position_sizing_mode: fixed_risk  # fixed_risk / conservative_kelly
+fixed_risk_per_trade: 0.005       # 单笔最多损失账户权益0.5%
+kelly_fraction: 0.25              # 1/4凯利
+kelly_min_samples: 50             # 单模式最小样本数，不足则回退固定风险法
+kelly_max_position: 0.10          # 凯利结果单票封顶
+kelly_credibility: 0.80           # 胜率贝叶斯后验区间
+kelly_payoff_haircut: 0.80        # 盈亏比折价，降低估计误差
 

@@ -309,18 +309,52 @@ COLUMN_LABELS: Dict[str, str] = {
     "baseline_probability": "同市场基准%",
     "probability_lift": "相对基准",
     "expected_return_pct": "3日预期超额收益%",
-    "stop_probability": "止损概率%",
-    "similar_sample_size": "类似行情样本",
+    "expected_excess_return_pct": "3日预期超额收益%",
+    "expected_gross_return_pct": "3日预期总收益%",
+    "gross_return_interval_low_pct": "预期总收益下界%",
+    "gross_return_interval_high_pct": "预期总收益上界%",
+    "stop_probability": "3日先触发-4%概率%",
+    "stop_probability_source": "止损统计来源",
+    "stop_probability_definition": "止损统计口径",
+    "similar_sample_size": "同市场同评分层样本",
+    "model_validation_sample_size": "模型有效样本",
     "confidence_grade": "可信等级",
+    "probability_ci_low": "成功率区间下界%",
+    "probability_ci_high": "成功率区间上界%",
+    "return_interval_low_pct": "预期超额下界%",
+    "return_interval_high_pct": "预期超额上界%",
+    "brier_score": "Brier误差",
+    "ece": "校准误差ECE%",
+    "model_drift_status": "模型漂移",
+    "decision_label": "系统结论",
+    "trust_layers": "四层可信度",
+    "shap_explanation": "模型贡献",
+    "data": "数据可信度",
+    "model": "模型可信度",
+    "trading": "交易可信度",
+    "portfolio": "组合可信度",
+    "status": "状态",
+    "description": "说明",
     "confidence_score": "可信度%",
     "data_completeness": "数据完整度%",
+    "regime_match": "市场适配度%",
+    "tradability": "可成交性%",
     "sample_reliability": "样本可靠度%",
     "average_mfe_pct": "平均MFE%",
     "average_mae_pct": "平均MAE%",
     "model_type": "模型类型",
+    "model_as_of_date": "模型生效日",
     "as_of_date": "模型生效日",
+    "drift_psi": "因子漂移PSI",
+    "drift_ks": "因子漂移KS",
+    "position_budget_pct": "建议风险仓位%",
+    "position_budget_reason": "仓位约束",
+    "worst_expected_loss_pct": "最坏账户亏损%",
     "lifecycle_state": "龙头阶段",
     "lifecycle_reason": "阶段说明",
+    "behavior_state_label": "行为阶段",
+    "behavior_state_probability": "阶段置信度%",
+    "behavior_state_probabilities": "五阶段概率",
     "description": "信号描述",
     "key_metrics": "关键指标",
     "validation_rules": "校验规则",
@@ -611,7 +645,6 @@ def _insert_column_after(columns: List[str], column: str, anchors: List[str]) ->
 
 def _merge_plan_fields_into_screening(row: Dict[str, Any], plan: Dict[str, Any]) -> bool:
     field_map = [
-        ("模式类型", "模式类型"),
         ("综合评分", "计划评分"),
         ("入场区间", "入场区间"),
         ("止损", "止损"),
@@ -629,13 +662,20 @@ def _merge_plan_fields_into_screening(row: Dict[str, Any], plan: Dict[str, Any])
     return changed
 
 
+def _is_screening_section(section: Dict[str, Any]) -> bool:
+    return bool(
+        section.get("category") == "strategy"
+        or section.get("name") in {"指标筛选", "ETL指标筛选"}
+    )
+
+
 def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: str) -> None:
-    target_names = {"指标筛选", "ETL指标筛选", "交易计划"}
     codes: List[str] = []
     screening_by_code: Dict[str, Dict[str, Any]] = {}
     plans_by_code: Dict[str, Dict[str, Any]] = {}
     for section in sections or []:
-        if section.get("name") not in target_names:
+        is_screening = _is_screening_section(section)
+        if not is_screening and section.get("name") != "交易计划":
             continue
         for row in section.get("rows") or []:
             if not isinstance(row, dict):
@@ -644,19 +684,21 @@ def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: s
             if not code:
                 continue
             codes.append(code)
-            if section.get("name") in {"指标筛选", "ETL指标筛选"}:
+            if is_screening:
                 screening_by_code[code] = row
             elif section.get("name") == "交易计划":
                 plans_by_code[code] = row
 
     factor_map = _factor_value_long_map(date, codes)
+    factor_labels = _factor_name_map()
     stock_profiles = load_stock_profiles(codes, Path(CACHE_DIR))
     fallback_concepts = _stock_concept_map(date)
     if not factor_map and not screening_by_code and not plans_by_code:
         return
 
     for section in sections or []:
-        if section.get("name") not in target_names:
+        is_screening = _is_screening_section(section)
+        if not is_screening and section.get("name") != "交易计划":
             continue
         rows = section.get("rows") or []
         changed = False
@@ -667,7 +709,7 @@ def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: s
             if not code:
                 continue
             source = screening_by_code.get(code) or row
-            if section.get("name") in {"指标筛选", "ETL指标筛选"}:
+            if is_screening:
                 changed = _merge_plan_fields_into_screening(row, plans_by_code.get(code) or {}) or changed
                 profile = stock_profiles.get(code) or {}
                 industries = list(profile.get("industries") or [])
@@ -678,21 +720,50 @@ def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: s
                 if concepts:
                     row["所属概念"] = concepts
                     changed = True
+                shap_rows = row.get("shap_explanation") or []
+                if isinstance(shap_rows, list) and shap_rows:
+                    row["shap_explanation"] = [
+                        {
+                            "因子": factor_labels.get(str(item.get("factor") or ""), str(item.get("factor") or "")),
+                            "贡献": round(float(item.get("contribution") or 0.0), 4),
+                        }
+                        for item in shap_rows if isinstance(item, dict)
+                    ]
+                    changed = True
+                drift_labels = {
+                    "stable": "稳定", "watch": "关注", "degraded": "已降级", "unknown": "待检测",
+                }
+                if row.get("model_drift_status") in drift_labels:
+                    row["model_drift_status"] = drift_labels[row["model_drift_status"]]
+                    changed = True
+                model_labels = {
+                    "lightgbm_meta_label": "LightGBM元标签",
+                    "ic_ir_constrained_blend": "IC/IR约束基线",
+                }
+                if row.get("model_type") in model_labels:
+                    row["model_type"] = model_labels[row["model_type"]]
+                    changed = True
             tags = _candidate_indicator_tags(source, factor_map.get(code) or [])
             if tags:
                 row["命中指标"] = tags
                 changed = True
-            if section.get("name") in {"指标筛选", "ETL指标筛选"}:
-                for field in ("rank", "score", "优先级", "建议仓位", "竞价条件"):
+            if is_screening:
+                removable_fields = ["rank", "score", "优先级", "竞价条件"]
+                if section.get("kind") != "decision_pool":
+                    removable_fields.append("建议仓位")
+                for field in removable_fields:
                     if field in row:
                         row.pop(field, None)
                         changed = True
         if changed:
             columns = list(section.get("columns") or [])
-            if section.get("name") in {"指标筛选", "ETL指标筛选"}:
+            if is_screening:
+                removable_columns = {"rank", "score", "优先级", "竞价条件"}
+                if section.get("kind") != "decision_pool":
+                    removable_columns.add("建议仓位")
                 columns = [
                     column for column in columns
-                    if column not in {"rank", "score", "优先级", "建议仓位", "竞价条件"}
+                    if column not in removable_columns
                 ]
                 if any(isinstance(row, dict) and row.get("所属行业") for row in rows):
                     columns = _insert_column_after(columns, "所属行业", ["name", "股票名称", "code"])
@@ -701,8 +772,20 @@ def _enrich_candidate_indicator_sections(sections: List[Dict[str, Any]], date: s
                 anchor = "gold_rank"
                 for column in [
                     "candidate_probability", "baseline_probability", "probability_lift",
-                    "expected_return_pct", "stop_probability",
-                    "similar_sample_size", "confidence_grade",
+                    "expected_gross_return_pct", "expected_return_pct", "stop_probability",
+                    "stop_probability_source", "stop_probability_definition",
+                    "gross_return_interval_low_pct", "gross_return_interval_high_pct",
+                    "average_mfe_pct", "average_mae_pct",
+                    "probability_ci_low", "probability_ci_high",
+                    "return_interval_low_pct", "return_interval_high_pct",
+                    "similar_sample_size", "model_validation_sample_size",
+                    "data_completeness", "regime_match", "tradability",
+                    "sample_reliability", "brier_score", "ece", "model_drift_status",
+                    "drift_psi", "drift_ks", "model_type", "model_as_of_date",
+                    "position_budget_pct", "position_budget_reason", "worst_expected_loss_pct",
+                    "behavior_state_label", "behavior_state_probability",
+                    "behavior_state_probabilities",
+                    "decision_label", "trust_layers", "confidence_grade", "shap_explanation",
                     "模式类型", "计划评分", "入场区间",
                     "止损", "止盈", "次日预期", "风险提示",
                 ]:
@@ -1342,16 +1425,10 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
         if section.get("name") == "ETL指标筛选":
             section["name"] = "指标筛选"
 
-    screening_section = _external_screening_section(date)
-    if screening_section is not None:
-        replaced = False
-        for index, section in enumerate(prepared):
-            if section.get("name") == "指标筛选":
-                prepared[index] = screening_section
-                replaced = True
-                break
-        if not replaced:
-            prepared.insert(0, screening_section)
+    screening_sections = _external_screening_sections(date)
+    if screening_sections:
+        prepared = [section for section in prepared if not _is_screening_section(section)]
+        prepared[0:0] = screening_sections
     _enrich_candidate_indicator_sections(prepared, date)
 
     limit_section = _build_limitup_section(date)
@@ -1436,29 +1513,114 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
     return prepared
 
 
-def _external_screening_section(date: str) -> Optional[Dict[str, Any]]:
-    """Build the indicator section from the standalone screening artifact."""
-    path = Path(WEB_DATA_DIR) / "screening" / f"screening_{date}.json"
-    if not path.exists():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    rows = [dict(row) for row in (payload.get("final") or []) if isinstance(row, dict)]
-    columns = [
-        "rank", "code", "name", "score", "gold_rank",
-        "candidate_probability", "baseline_probability", "probability_lift",
-        "expected_return_pct", "stop_probability",
-        "similar_sample_size", "confidence_grade", "reasons",
-    ]
-    return {
-        "name": "指标筛选",
-        "kind": "table",
-        "summary": "3日强势成功率采用严格复合标签；预期收益为未来3日相对大盘和所属板块的超额收益。可信等级按同市场历史基准、样本量、数据完整度和可成交性共同评定。",
+def _external_screening_sections(date: str) -> List[Dict[str, Any]]:
+    """Build one market-aware, deduplicated decision pool."""
+    screening_dir = Path(WEB_DATA_DIR) / "screening"
+    canonical_path = screening_dir / f"screening_{date}.json"
+    comparison_path = screening_dir / "combinations" / f"strategy_runs_{date}.json"
+    payloads: Dict[str, Dict[str, Any]] = {}
+    primary = ""
+    if comparison_path.exists():
+        try:
+            comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
+            payloads = {
+                str(key): dict(value)
+                for key, value in (comparison.get("results") or {}).items()
+                if isinstance(value, dict)
+            }
+            primary = str(comparison.get("primary") or "")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Strategy comparison artifact failed: %s", exc)
+    if not payloads and canonical_path.exists():
+        try:
+            payload = json.loads(canonical_path.read_text(encoding="utf-8"))
+            strategy_id = str(payload.get("strategy_id") or payload.get("profile") or "default")
+            payloads = {strategy_id: payload}
+            primary = strategy_id
+        except Exception:
+            return []
+    if not payloads:
+        return []
+
+    from core.portfolio.decision_pool_service import DecisionPoolService
+    from core.screening.strategy_profiles import StrategyProfileRepository
+
+    repository = StrategyProfileRepository()
+    profiles = {
+        str(item.get("id")): item
+        for item in repository.list_profiles(enabled_only=True)
+    }
+    market_score = 50.0
+    snapshot_path = Path(WEB_DATA_DIR) / "snapshots" / f"{date}.json"
+    if snapshot_path.exists():
+        try:
+            snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            market = snapshot.get("market") or {}
+            market_score = float(
+                (market.get("env") or {}).get("market_score")
+                or (market.get("scores") or {}).get("etl_market_score")
+                or 50.0
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Decision pool market state failed: %s", exc)
+
+    persisted_regime = str(
+        ((payloads.get(primary) or {}).get("weight_metadata") or {}).get("market_regime")
+        or ""
+    )
+    decision = DecisionPoolService().build(
+        payloads,
+        profiles,
+        market_score=market_score,
+        market_regime=persisted_regime,
+    )
+    from core.models.health_monitor import ModelHealthMonitor
+
+    no_ab_streak = ModelHealthMonitor().no_ab_streak(date)
+    training_diagnostic = {
+        "triggered": no_ab_streak >= 3,
+        "streak": no_ab_streak,
+        "message": (
+            f"连续{no_ab_streak}个交易日没有A/B级候选：请运行训练诊断，检查标签、校准、漂移基准和发布闸门。"
+            if no_ab_streak >= 3 else ""
+        ),
+    }
+    rows = decision["rows"]
+    columns = list(dict.fromkeys(
+        [
+            "code", "name", "一句话结论", "策略共识显示", "命中策略", "所属主线",
+            "共振板块", "板块强度", "模型状态", "股票等级", "预期超额收益%",
+            "明日入场模式", "失效条件", "建议仓位",
+            "candidate_probability", "expected_return_pct", "stop_probability",
+            "confidence_grade", "model_validation_sample_size", "data_completeness",
+            "model_drift_status", "trust_layers", "shap_explanation", "reasons", "metrics", "context",
+        ]
+        + [key for row in rows for key in row if not str(key).startswith("_")]
+    ))
+    return [{
+        "name": "今日决策池",
+        "category": "strategy",
+        "kind": "decision_pool",
+        "tab_count": decision["decision_count"],
+        "summary": (
+            f"{decision['regime_label']}（市场分 {decision['market_score']}），"
+            f"当前启用：{'、'.join(decision['active_strategy_names']) or '无适用策略'}。"
+            "首屏只保留决策信息，所有专业指标已下沉。"
+        ),
+        "market_regime_label": decision["regime_label"],
+        "active_strategy_names": decision["active_strategy_names"],
+        "hidden_strategy_names": decision["hidden_strategy_names"],
+        "training_diagnostic": training_diagnostic,
+        "groups": decision["groups"],
         "columns": columns,
         "rows": rows,
-    }
+    }]
+
+
+def _external_screening_section(date: str) -> Optional[Dict[str, Any]]:
+    """Backward-compatible accessor for callers that only need the primary tab."""
+    sections = _external_screening_sections(date)
+    return sections[0] if sections else None
 
 
 def _prepare_snapshot(snapshot: Optional[Dict[str, Any]], date: str) -> Optional[Dict[str, Any]]:
@@ -1563,7 +1725,7 @@ def _clear_data_caches() -> None:
 # 注：候选池、板块热度、涨停数据与龙虎榜分别由数据浏览页承载。
 # ----------------------------------------------------------------------
 DATA_CATEGORIES: List[Dict[str, Any]] = [
-    {"key": "strategy", "label": "指标筛选", "signals": True, "names": ["ETL指标筛选", "指标筛选"]},
+    {"key": "strategy", "label": "候选股", "signals": True, "names": ["ETL指标筛选", "指标筛选"]},
     {"key": "sector", "label": "板块热度", "signals": False,
      "names": ["热点概念", "热点行业", "概念持续性", "行业持续性", "主线主题"]},
     {"key": "limitup", "label": "涨停数据", "signals": False,
@@ -1574,10 +1736,14 @@ _CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
 
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
+    from core.automation.internal_scheduler import AUTOMATION_SCHEDULER
+
     _start_realtime_refresh_worker()
+    AUTOMATION_SCHEDULER.start()
     try:
         yield
     finally:
+        AUTOMATION_SCHEDULER.stop()
         _stop_realtime_refresh_worker()
 
 
@@ -1785,7 +1951,7 @@ def index(request: Request) -> Any:
 @app.get("/report", response_class=HTMLResponse)
 def report_index() -> Any:
     latest = _latest_date()
-    return RedirectResponse(url=f"/report/{latest}" if latest else "/")
+    return RedirectResponse(url=f"/data/strategy/{latest}" if latest else "/")
 
 
 @app.get("/dragon", response_class=HTMLResponse)
@@ -1816,12 +1982,24 @@ def intraday_page(request: Request, date: Optional[str] = None) -> Any:
     )
 
 
+@app.get("/assistant", response_class=HTMLResponse)
+def assistant_page(request: Request, date: Optional[str] = None, capital: float = 100_000.0) -> Any:
+    latest = date or _latest_date()
+    return RedirectResponse(url=f"/data/strategy/{latest}" if latest else "/")
+
+
 @app.get("/realtime", response_class=HTMLResponse)
 def realtime_page(request: Request) -> Any:
     """实时行情面板：个股批量行情、板块行情、行情源健康。"""
     market_date = _realtime_market_date()
     candidate_date = _realtime_candidate_date(market_date)
     snapshot = _load_snapshot(candidate_date) if candidate_date else None
+    try:
+        from core.realtime.overlay_service import RealtimeOverlayService
+
+        strategy_profiles = RealtimeOverlayService().profile_summaries(candidate_date)
+    except Exception:  # pragma: no cover - page should remain usable without snapshots
+        strategy_profiles = []
     return templates.TemplateResponse(
         request,
         "realtime.html",
@@ -1831,6 +2009,7 @@ def realtime_page(request: Request) -> Any:
             "market_date": market_date,
             "default_codes": _default_realtime_codes(snapshot),
             "market_session": _current_realtime_session(),
+            "strategy_profiles": strategy_profiles,
         },
     )
 
@@ -1849,16 +2028,156 @@ def _default_realtime_codes(snapshot: Optional[Dict], limit: int = 8) -> List[st
     return codes or ["000001", "600000", "300750", "002594"]
 
 
-@app.get("/run", response_class=HTMLResponse)
-def run_page(request: Request) -> Any:
-    """生成数据页：一键执行指标主流程并实时查看日志。"""
-    from desktop.runner import CONTROLLER
+_PIPELINE_STAGE_CONFIG = {
+    "fetch": {
+        "key": "fetch",
+        "title": "盘后取数",
+        "subtitle": "远端接口 · 原始缓存 · Silver标准层",
+        "action": "开始取数",
+        "api": "/api/fetch",
+        "description": "拉取日线、指数、板块、涨跌停、龙虎榜与资金流等盘后接口。已完整日期默认直接复用本地数据。",
+        "sources": [
+            "全市场日线", "股票基础资料", "每日指标", "涨停池", "跌停池", "涨停股概念",
+            "指数日线", "板块目录", "板块行情", "最强板块", "全市场资金流",
+            "龙虎榜股票", "机构席位", "知名游资", "同花顺资金流", "东方财富资金流",
+            "板块资金流", "同花顺热榜", "东方财富热榜", "开盘啦榜单", "融资融券", "大宗交易",
+        ],
+        "flow": [
+            ["1", "接口取数", "批量获取全部盘后数据"],
+            ["2", "原始缓存", "接口结果按日期落本地"],
+            ["3", "标准入仓", "统一代码、日期和金额单位"],
+        ],
+    },
+    "factors": {
+        "key": "factors",
+        "title": "因子计算",
+        "subtitle": "只读Silver · 大盘/板块/个股因子",
+        "action": "计算因子",
+        "api": "/api/run",
+        "description": "只读取本地 Silver 数据计算因子，不会调用行情接口；缺少盘后数据时任务会明确停止。",
+        "sources": [],
+        "flow": [
+            ["1", "校验数据", "确认当日Silver分区完整"],
+            ["2", "计算因子", "生成大盘、板块和个股指标"],
+            ["3", "写入因子库", "更新宽表、长表与模型状态"],
+        ],
+    },
+    "screening": {
+        "key": "screening",
+        "title": "选股策略",
+        "subtitle": "只读因子 · 候选排序 · 页面快照",
+        "action": "运行选股",
+        "api": "/api/screening-run",
+        "description": "只读取已计算因子执行候选筛选、龙头留痕和快照生成；不会重新取数或重算因子。",
+        "sources": [],
+        "flow": [
+            ["1", "校验因子", "确认当日核心因子表完整"],
+            ["2", "候选筛选", "按配置过滤并排序"],
+            ["3", "发布结果", "生成摘要、候选池和页面快照"],
+        ],
+    },
+}
+
+
+def _pipeline_stage_page(request: Request, stage: str) -> Any:
+    from desktop.runner import FACTOR_CONTROLLER, FETCH_CONTROLLER, SCREENING_CONTROLLER
     from desktop.status import etl_artifacts
 
+    controllers = {
+        "fetch": FETCH_CONTROLLER,
+        "factors": FACTOR_CONTROLLER,
+        "screening": SCREENING_CONTROLLER,
+    }
+    config = _PIPELINE_STAGE_CONFIG[stage]
+    controller = controllers[stage]
+    run_status = controller.status(0)
+    artifacts = (
+        etl_artifacts(stage=stage)
+        if run_status.get("state") != "running"
+        else {"date": run_status.get("date") or "", "stage": stage, "items": []}
+    )
+    strategy_profiles = []
+    if stage == "screening":
+        from core.screening.strategy_profiles import StrategyProfileRepository
+
+        strategy_profiles = StrategyProfileRepository().list_profiles(enabled_only=True)
     return templates.TemplateResponse(
         request,
         "run.html",
-        {"run": CONTROLLER.status(0), "artifacts": etl_artifacts()},
+        {
+            "run": run_status,
+            "artifacts": artifacts,
+            "stage_config": config,
+            "strategy_profiles": strategy_profiles,
+        },
+    )
+
+
+@app.get("/fetch", response_class=HTMLResponse)
+def fetch_page(request: Request) -> Any:
+    return _pipeline_stage_page(request, "fetch")
+
+
+@app.get("/run", response_class=HTMLResponse)
+def run_page(request: Request) -> Any:
+    return _pipeline_stage_page(request, "factors")
+
+
+@app.get("/screening-run", response_class=HTMLResponse)
+def screening_run_page(request: Request) -> Any:
+    return _pipeline_stage_page(request, "screening")
+
+
+@app.get("/strategies", response_class=HTMLResponse)
+def strategies_page(request: Request) -> Any:
+    import importlib.util
+
+    from core.screening.strategy_profiles import (
+        ENTRY_MODES,
+        MARKET_REGIMES,
+        STOCK_POOLS,
+        SUPPORTED_OPERATORS,
+        WEIGHT_SOURCES,
+        StrategyProfileRepository,
+        factor_catalog,
+    )
+
+    repository = StrategyProfileRepository()
+    profiles = repository.list_profiles()
+    return templates.TemplateResponse(
+        request,
+        "strategies.html",
+        {
+            "strategy_state": {
+                "profiles": profiles,
+                "factors": factor_catalog(),
+                "base_profiles": sorted({row.get("base_profile") for row in profiles if row.get("base_profile")}),
+                "operators": list(SUPPORTED_OPERATORS),
+                "stock_pools": list(STOCK_POOLS),
+                "market_regimes": list(MARKET_REGIMES),
+                "entry_modes": list(ENTRY_MODES),
+                "weight_sources": list(WEIGHT_SOURCES),
+                "model_dependencies": {
+                    "lightgbm": importlib.util.find_spec("lightgbm") is not None,
+                    "xgboost": importlib.util.find_spec("xgboost") is not None,
+                },
+            },
+        },
+    )
+
+
+@app.get("/strategy-lab", response_class=HTMLResponse)
+def strategy_lab_page(request: Request, date: Optional[str] = None) -> Any:
+    from core.screening.strategy_profiles import StrategyProfileRepository
+
+    return templates.TemplateResponse(
+        request,
+        "strategy_lab.html",
+        {
+            "date": date or _latest_date(),
+            "dates": _list_dates(),
+            "strategy_profiles": StrategyProfileRepository().list_profiles(enabled_only=True),
+        },
     )
 
 
@@ -1992,27 +2311,131 @@ def api_admin_user_limits(user_id: int, payload: dict = Body(default={})) -> Any
 # ----------------------------------------------------------------------
 @app.post("/api/run")
 def api_run(payload: dict = Body(default={})) -> Any:
-    from desktop.runner import CONTROLLER
+    from desktop.runner import FACTOR_CONTROLLER
 
     _clear_data_caches()
-    data = payload or {}
-    mode = (data.get("mode") or "single").strip().lower()
-    if mode == "batch":
-        ok, msg = CONTROLLER.start_batch(data.get("start_date"), data.get("end_date"))
-    else:
-        mode = "single"
-        ok, msg = CONTROLLER.start(data.get("date"))
-    return JSONResponse({"started": ok, "message": msg, "mode": mode})
+    return _start_pipeline_controller(FACTOR_CONTROLLER, payload)
 
 
 @app.get("/api/run/status")
 def api_run_status(since: int = 0) -> Any:
-    from desktop.runner import CONTROLLER
+    from desktop.runner import FACTOR_CONTROLLER
     from desktop.status import etl_artifacts
 
-    status = CONTROLLER.status(since)
-    status["artifacts"] = etl_artifacts(status.get("date"))
+    status = FACTOR_CONTROLLER.status(since)
+    if status.get("state") != "running":
+        status["artifacts"] = etl_artifacts(status.get("date"), stage="factors")
     return JSONResponse(status)
+
+
+def _start_pipeline_controller(controller: Any, payload: Optional[dict]) -> JSONResponse:
+    data = payload or {}
+    mode = str(data.get("mode") or "single").strip().lower()
+    options = dict(data.get("options") or {})
+    if mode == "batch":
+        ok, msg = controller.start_batch(
+            data.get("start_date"), data.get("end_date"), options=options,
+        )
+    else:
+        mode = "single"
+        ok, msg = controller.start(data.get("date"), options=options)
+    return JSONResponse({"started": ok, "message": msg, "mode": mode})
+
+
+@app.post("/api/fetch")
+def api_fetch(payload: dict = Body(default={})) -> Any:
+    from desktop.runner import FETCH_CONTROLLER
+
+    _clear_data_caches()
+    return _start_pipeline_controller(FETCH_CONTROLLER, payload)
+
+
+@app.get("/api/fetch/status")
+def api_fetch_status(since: int = 0) -> Any:
+    from desktop.runner import FETCH_CONTROLLER
+    from desktop.status import etl_artifacts
+
+    status = FETCH_CONTROLLER.status(since)
+    if status.get("state") != "running":
+        status["artifacts"] = etl_artifacts(status.get("date"), stage="fetch")
+    return JSONResponse(status)
+
+
+@app.post("/api/screening-run")
+def api_screening_run(payload: dict = Body(default={})) -> Any:
+    from desktop.runner import SCREENING_CONTROLLER
+    from core.screening.strategy_profiles import StrategyProfileRepository
+
+    _clear_data_caches()
+    data = dict(payload or {})
+    try:
+        strategy_ids = StrategyProfileRepository().validate_selection(data.get("strategy_ids") or [])
+        primary = str(data.get("primary_strategy") or "")
+        if primary not in strategy_ids:
+            primary = strategy_ids[0]
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"started": False, "message": str(exc)}, status_code=400)
+    data["options"] = {
+        "strategy_ids": strategy_ids,
+        "primary_strategy": primary,
+    }
+    return _start_pipeline_controller(SCREENING_CONTROLLER, data)
+
+
+@app.get("/api/screening-run/status")
+def api_screening_run_status(since: int = 0) -> Any:
+    from desktop.runner import SCREENING_CONTROLLER
+    from desktop.status import etl_artifacts
+
+    status = SCREENING_CONTROLLER.status(since)
+    if status.get("state") != "running":
+        status["artifacts"] = etl_artifacts(status.get("date"), stage="screening")
+    return JSONResponse(status)
+
+
+@app.get("/api/strategies")
+def api_strategies() -> Any:
+    from core.screening.strategy_profiles import StrategyProfileRepository, factor_catalog
+
+    return JSONResponse({
+        "ok": True,
+        "profiles": StrategyProfileRepository().list_profiles(),
+        "factors": factor_catalog(),
+    })
+
+
+@app.get("/api/strategy-lab")
+def api_strategy_lab(date: Optional[str] = None, strategy_ids: Optional[str] = None) -> Any:
+    from core.portfolio.strategy_lab_service import StrategyLabService
+
+    selected = [part.strip() for part in str(strategy_ids or "").split(",") if part.strip()]
+    try:
+        payload = StrategyLabService().build(date or _latest_date() or "", selected or None)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse(payload)
+
+
+@app.post("/api/strategies/{profile_id}")
+def api_save_strategy(profile_id: str, payload: dict = Body(default={})) -> Any:
+    from core.screening.strategy_profiles import StrategyProfileRepository
+
+    try:
+        profile = StrategyProfileRepository().save(profile_id, payload or {})
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "profile": profile})
+
+
+@app.delete("/api/strategies/{profile_id}")
+def api_delete_strategy(profile_id: str) -> Any:
+    from core.screening.strategy_profiles import StrategyProfileRepository
+
+    try:
+        StrategyProfileRepository().delete(profile_id)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/logs")
@@ -2030,39 +2453,15 @@ def api_overview() -> Any:
 
 
 @app.get("/api/etl/artifacts")
-def api_etl_artifacts(date: Optional[str] = None) -> Any:
+def api_etl_artifacts(date: Optional[str] = None, stage: str = "all") -> Any:
     from desktop.status import etl_artifacts
 
-    return JSONResponse(etl_artifacts(date))
+    return JSONResponse(etl_artifacts(date, stage=stage))
 
 
 @app.get("/report/{date}", response_class=HTMLResponse)
 def report(request: Request, date: str) -> Any:
-    snapshot = _load_prepared_snapshot(date)
-    dates = _list_dates()
-    if snapshot is None:
-        return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {"snapshot": None, "date": date, "dates": dates},
-            status_code=404,
-        )
-    market = snapshot.get("market", {}) or {}
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "snapshot": snapshot,
-            "date": date,
-            "dates": dates,
-            "plans": snapshot.get("trade_plans", {}).get("rows", []),
-            "market": market,
-            "risk_gate": snapshot.get("risk_gate"),
-            "sections": snapshot.get("sections", []),
-            "winrate": _load_winrate(),
-            "cur_cycle": market.get("cycle_name") or "",
-        },
-    )
+    return RedirectResponse(url=f"/data/strategy/{date}")
 
 
 @app.get("/stock/{code}", response_class=HTMLResponse)
@@ -2402,9 +2801,12 @@ def _realtime_candidate_date(market_date: Optional[str] = None) -> str:
 
 def _data_generation_running() -> bool:
     try:
-        from desktop.runner import CONTROLLER
+        from desktop.runner import FACTOR_CONTROLLER, FETCH_CONTROLLER, SCREENING_CONTROLLER
 
-        return CONTROLLER.state == "running"
+        return any(
+            controller.state == "running"
+            for controller in (FETCH_CONTROLLER, FACTOR_CONTROLLER, SCREENING_CONTROLLER)
+        )
     except Exception:
         return False
 
@@ -2432,7 +2834,11 @@ def _refresh_realtime_defaults() -> None:
     ]
     for key, loader in jobs:
         try:
-            _REALTIME_PAYLOAD_CACHE.refresh(key, loader)
+            payload = _REALTIME_PAYLOAD_CACHE.refresh(key, loader)
+            if isinstance(payload, dict):
+                from core.notifications.notifier import NotificationService
+
+                NotificationService().notify_realtime_payload(payload)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Realtime cache refresh failed for %s: %s", key[0], exc)
 
@@ -2865,6 +3271,127 @@ def api_config_save(payload: dict = Body(...)) -> Any:
     return JSONResponse(result)
 
 
+@app.get("/api/agent/candidate")
+def api_agent_candidate(date: str, code: str) -> Any:
+    from core.agent.evidence_service import AgentEvidenceService
+
+    return JSONResponse(AgentEvidenceService().get_candidate_evidence(date, code))
+
+
+@app.get("/api/assistant/brief")
+def api_assistant_brief(date: str, capital: float = 100_000.0) -> Any:
+    from core.agent.review_assistant import ReviewAssistantService
+
+    return JSONResponse(ReviewAssistantService().build_brief(date, capital=capital))
+
+
+@app.get("/api/assistant/ask")
+def api_assistant_ask(date: str, question: str = "今天能不能出手？", capital: float = 100_000.0) -> Any:
+    from core.agent.review_assistant import ReviewAssistantService
+
+    return JSONResponse(ReviewAssistantService().answer(date, question, capital=capital))
+
+
+@app.get("/api/automation/status")
+def api_automation_status() -> Any:
+    from core.automation.internal_scheduler import AUTOMATION_SCHEDULER
+
+    payload = AUTOMATION_SCHEDULER.status()
+    for key, path in {
+        "model_health": Path(WEB_DATA_DIR) / "models" / "health" / "latest.json",
+        "strategy_health": Path(WEB_DATA_DIR) / "reports" / "strategy_health" / "latest.json",
+    }.items():
+        try:
+            payload[key] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except (OSError, ValueError, TypeError):
+            payload[key] = {}
+    return JSONResponse(payload)
+
+
+@app.get("/api/realtime/auction-alert")
+def api_realtime_auction_alert(market_date: Optional[str] = None) -> Any:
+    target = str(market_date or _realtime_market_date())
+    path = Path(WEB_DATA_DIR) / "realtime" / f"auction_alert_{target}.json"
+    if not path.exists():
+        return JSONResponse({"ok": False, "market_date": target, "rows": [], "message": "当日竞价预警尚未生成"})
+    try:
+        return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError) as exc:
+        return JSONResponse({"ok": False, "market_date": target, "rows": [], "message": str(exc)}, status_code=500)
+
+
+@app.get("/api/agent/leader")
+def api_agent_leader(date: str, code: str = "", lookback: int = 10) -> Any:
+    from core.agent.evidence_service import AgentEvidenceService
+
+    return JSONResponse(AgentEvidenceService().get_leader_lifecycle(date, code, lookback=max(1, min(lookback, 20))))
+
+
+@app.get("/api/agent/intraday")
+def api_agent_intraday(
+    date: str, code: str, market_date: str = "", lookback: int = 10, limit: int = 30,
+) -> Any:
+    from core.agent.evidence_service import AgentEvidenceService
+
+    quote_date = market_date or _realtime_market_date()
+    key = ("intraday-strength", date, quote_date, max(1, min(lookback, 20)), max(1, min(limit, 100)))
+    cached = _REALTIME_PAYLOAD_CACHE.get(key)
+    return JSONResponse(AgentEvidenceService().get_intraday_signal(date, code, cached_payload=cached))
+
+
+@app.get("/api/agent/sector")
+def api_agent_sector(date: str, sector: str) -> Any:
+    from core.agent.evidence_service import AgentEvidenceService
+
+    return JSONResponse(AgentEvidenceService().get_sector_breadth(date, sector))
+
+
+@app.get("/api/agent/similar")
+def api_agent_similar(date: str, code: str, limit: int = 20) -> Any:
+    from core.agent.evidence_service import AgentEvidenceService
+
+    return JSONResponse(AgentEvidenceService().get_similar_samples(date, code, limit=max(1, min(limit, 100))))
+
+
+@app.get("/api/agent/explain")
+def api_agent_explain(date: str, code: str) -> Any:
+    from core.agent.evidence_service import AgentEvidenceService
+
+    return JSONResponse(AgentEvidenceService().explain_prediction(date, code))
+
+
+@app.get("/api/agent/position-budget")
+def api_agent_position_budget(
+    win_rate: float,
+    payoff_ratio: float,
+    samples: int,
+    stop_distance: float = 0.05,
+    data_quality: float = 1.0,
+    regime_match: float = 1.0,
+    tradability: float = 1.0,
+    correlation_penalty: float = 0.0,
+) -> Any:
+    from core.agent.evidence_service import AgentEvidenceService
+
+    return JSONResponse(AgentEvidenceService.get_position_budget(
+        win_rate=win_rate,
+        payoff_ratio=payoff_ratio,
+        samples=samples,
+        stop_distance=stop_distance,
+        data_quality=data_quality,
+        regime_match=regime_match,
+        tradability=tradability,
+        correlation_penalty=correlation_penalty,
+    ))
+
+
+@app.get("/api/agent/skills")
+def api_agent_skills() -> Any:
+    from core.agent.style_skills import StyleSkillRegistry
+
+    return JSONResponse({"ok": True, "skills": StyleSkillRegistry().list()})
+
+
 @app.post("/api/config/reset")
 def api_config_reset(payload: dict = Body(default={})) -> Any:
     """重置参数。body: {scope?, path?}；都不传则清空全部覆盖。"""
@@ -2961,9 +3488,15 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
 def backtest_page(request: Request, run: Optional[str] = None) -> Any:
     """模拟交易结果：汇总指标 + 净值曲线 + 逐笔交易 + 模式表现。"""
     from desktop.backtest import backtest_overview
+    from core.screening.strategy_profiles import StrategyProfileRepository
+
+    strategy_profiles = StrategyProfileRepository().list_profiles(enabled_only=True)
 
     return templates.TemplateResponse(
-        request, "backtest.html", {"bt": backtest_overview(run)}
+        request, "backtest.html", {
+            "bt": backtest_overview(run),
+            "strategy_profiles": strategy_profiles,
+        }
     )
 
 
@@ -2971,9 +3504,13 @@ def backtest_page(request: Request, run: Optional[str] = None) -> Any:
 def drawdown_page(request: Request, run: Optional[str] = None) -> Any:
     """回撤分析：水下回撤曲线 + 最大回撤 + 回撤区间 + 最差交易。"""
     from desktop.backtest import drawdown_overview
+    from core.screening.strategy_profiles import StrategyProfileRepository
 
     return templates.TemplateResponse(
-        request, "drawdown.html", {"dd": drawdown_overview(run)}
+        request, "drawdown.html", {
+            "dd": drawdown_overview(run),
+            "strategy_profiles": StrategyProfileRepository().list_profiles(enabled_only=True),
+        }
     )
 
 
@@ -3004,7 +3541,9 @@ def api_backtest_run(payload: dict = Body(default={})) -> Any:
         trade_date=p.get("trade_date"),
         reset_state=p.get("reset_state"),
         enhancements=p.get("enhancements"),
-        entry_mode=p.get("entry_mode") or "hybrid")
+        entry_mode=p.get("entry_mode") or "hybrid",
+        position_sizing_mode=p.get("position_sizing_mode") or "fixed_risk",
+        strategy_ids=p.get("strategy_ids"))
     return JSONResponse({"started": ok, "message": msg})
 
 

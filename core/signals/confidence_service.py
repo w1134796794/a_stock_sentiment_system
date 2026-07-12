@@ -61,6 +61,10 @@ class ConfidenceService:
         data_completeness: Any = 1.0,
         regime_match: Any = 1.0,
         tradability: Any = 1.0,
+        probability_interval: Optional[Mapping[str, Any]] = None,
+        return_interval: Optional[Mapping[str, Any]] = None,
+        calibration: Optional[Mapping[str, Any]] = None,
+        model_drift: Optional[Mapping[str, Any]] = None,
         model_type: str = "",
         as_of_date: str = "",
     ) -> Dict[str, Any]:
@@ -97,7 +101,27 @@ class ConfidenceService:
             samples=samples,
             data_completeness=data_ratio,
         )
-        return {
+        drift = dict(model_drift or {})
+        drift_status = str(drift.get("status") or "unknown")
+        if data_ratio < 0.75 or samples < 20:
+            decision = "data_insufficient"
+            decision_label = "数据不足"
+        elif drift_status == "degraded":
+            decision = "model_degraded"
+            decision_label = "模型失效，暂停采用"
+            grade = "D"
+        elif probability <= baseline and expected <= 0:
+            decision = "no_edge"
+            decision_label = "无样本外优势"
+        elif grade in {"A", "B"}:
+            decision = "eligible"
+            decision_label = "具备优势，等待盘中确认"
+        else:
+            decision = "watch"
+            decision_label = "观察，不主动参与"
+        probability_interval = dict(probability_interval or {})
+        return_interval = dict(return_interval or {})
+        result = {
             "candidate_probability": round(probability * 100.0, 2),
             "baseline_probability": round(baseline * 100.0, 2),
             "probability_lift": round(probability_lift, 2),
@@ -114,7 +138,42 @@ class ConfidenceService:
             "confidence_grade": grade,
             "model_type": str(model_type or ""),
             "as_of_date": str(as_of_date or ""),
+            "probability_ci_low": round(_ratio(probability_interval.get("low"), probability) * 100.0, 2),
+            "probability_ci_high": round(_ratio(probability_interval.get("high"), probability) * 100.0, 2),
+            "return_interval_low_pct": round(_float(return_interval.get("low"), expected) * 100.0, 2),
+            "return_interval_high_pct": round(_float(return_interval.get("high"), expected) * 100.0, 2),
+            "brier_score": None if (calibration or {}).get("brier_score") is None else round(_float((calibration or {}).get("brier_score")), 4),
+            "ece": None if (calibration or {}).get("ece") is None else round(_float((calibration or {}).get("ece")) * 100.0, 2),
+            "model_drift_status": drift_status,
+            "drift_psi": round(_float(drift.get("max_psi")), 4),
+            "drift_ks": round(_float(drift.get("max_ks")), 4),
+            "decision_status": decision,
+            "decision_label": decision_label,
         }
+        result["trust_layers"] = {
+            "data": {
+                "score": round(data_ratio * 100.0, 1),
+                "status": "complete" if data_ratio >= 0.90 else "partial",
+                "description": "指标覆盖与快照完整度",
+            },
+            "model": {
+                "score": round(confidence * 100.0, 2),
+                "grade": grade,
+                "drift": drift_status,
+                "description": "样本外校准、样本可靠度与漂移",
+            },
+            "trading": {
+                "score": round(tradability_ratio * 100.0, 1),
+                "status": "requires_intraday_confirmation",
+                "description": "次日仍需分钟行情确认真实买点",
+            },
+            "portfolio": {
+                "score": None,
+                "status": "pending_account_context",
+                "description": "需结合持仓相关性和账户风险预算",
+            },
+        }
+        return result
 
     @staticmethod
     def grade(
@@ -160,6 +219,7 @@ class ConfidenceService:
         data_completeness: Any = 1.0,
         regime_match: Any = 1.0,
         tradability: Any = 1.0,
+        model_drift: Optional[Mapping[str, Any]] = None,
         model_type: str = "",
         as_of_date: str = "",
     ) -> Dict[str, Any]:
@@ -214,6 +274,16 @@ class ConfidenceService:
             data_completeness=data_completeness,
             regime_match=regime_match,
             tradability=tradability,
+            probability_interval={
+                "low": interpolate("probability_ci_low", 0.0, lower=0.0, upper=1.0),
+                "high": interpolate("probability_ci_high", 1.0, lower=0.0, upper=1.0),
+            },
+            return_interval={
+                "low": interpolate("return_interval_low", 0.0, lower=-1.0, upper=1.0),
+                "high": interpolate("return_interval_high", 0.0, lower=-1.0, upper=1.0),
+            },
+            calibration=payload.get("calibration") or {},
+            model_drift=model_drift,
             model_type=model_type,
             as_of_date=as_of_date,
         )

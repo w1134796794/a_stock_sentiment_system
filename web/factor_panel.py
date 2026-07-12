@@ -19,6 +19,7 @@ CATEGORY_LABELS: Dict[str, str] = {
     "sector": "板块",
     "stock_tech": "个股技术",
     "moneyflow": "资金流",
+    "behavior": "行为周期",
     "lhb": "龙虎榜",
     "cross_cycle": "跨周期",
 }
@@ -215,6 +216,20 @@ def _dynamic_weight_state(trade_date: str, profile: str) -> Dict[str, Any]:
                 ],
             }
         metrics = artifact.payload.get("factor_metrics") or {}
+        confidence_profiles = artifact.payload.get("confidence_profiles") or {}
+        confidence_profile = confidence_profiles.get("all") or {}
+        candidate_model = artifact.payload.get("candidate_model") or {}
+        calibration = (
+            candidate_model.get("calibration")
+            if candidate_model.get("active")
+            else confidence_profile.get("calibration")
+        ) or {}
+        conformal = (
+            candidate_model.get("return_conformal")
+            if candidate_model.get("active")
+            else confidence_profile.get("conformal")
+        ) or {}
+        regime_model = artifact.payload.get("market_regime_model") or {}
         rows = []
         for factor, weight in sorted(artifact.weights.items(), key=lambda item: item[1], reverse=True):
             row = metrics.get(factor) or {}
@@ -226,15 +241,74 @@ def _dynamic_weight_state(trade_date: str, profile: str) -> Dict[str, Any]:
                 "ic_ir": row.get("ic_ir"),
                 "positive_ratio": row.get("positive_ratio"),
             })
+        versions = []
+        for path in sorted(artifact.path.parent.glob("weights_*.json"))[-12:]:
+            try:
+                import json
+
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                oos = payload.get("oos_evaluation") or {}
+                versions.append({
+                    "effective_date": payload.get("effective_date") or path.stem.removeprefix("weights_"),
+                    "model_type": payload.get("model_type") or "",
+                    "rank_ic": oos.get("rank_ic"),
+                    "top_excess_return": oos.get("top_excess_return"),
+                    "top_excess_win_rate": oos.get("top_excess_win_rate"),
+                })
+            except Exception:
+                continue
+        bins = list(confidence_profile.get("bins") or [])
+        deciles = []
+        if bins:
+            groups = [group for group in __import__("numpy").array_split(bins, min(10, len(bins))) if len(group)]
+            for index, group in enumerate(groups, start=1):
+                weights = [max(int(row.get("sample_size") or 0), 1) for row in group]
+                total_weight = sum(weights)
+                deciles.append({
+                    "decile": index,
+                    "expected_return": sum(float(row.get("expected_return") or 0.0) * weight for row, weight in zip(group, weights)) / total_weight,
+                    "success_probability": sum(float(row.get("success_probability") or 0.0) * weight for row, weight in zip(group, weights)) / total_weight,
+                })
+        drift = _latest_screening_drift(trade_date)
         return {
-            "source": "IC/IR 动态权重",
+            "source": "LightGBM + IC/IR" if candidate_model.get("active") else "IC/IR 动态权重",
             "effective_date": artifact.effective_date,
             "model_type": artifact.payload.get("model_type", "ic_ir"),
             "train_start": artifact.payload.get("train_start", ""),
             "train_end": artifact.payload.get("train_end", ""),
             "training_days": artifact.payload.get("training_days", 0),
             "selected_hyperparameters": artifact.payload.get("selected_hyperparameters") or {},
+            "calibration": calibration,
+            "conformal": conformal,
+            "bootstrap": confidence_profile.get("bootstrap") or {},
+            "adwin": confidence_profile.get("adwin") or {},
+            "deciles": deciles,
+            "versions": versions,
+            "candidate_model": candidate_model,
+            "market_regime_model": regime_model,
+            "feature_drift": drift,
+            "publication_gate": artifact.payload.get("publication_gate") or {},
             "rows": rows,
         }
     except Exception as exc:  # noqa: BLE001
         return {"source": "读取失败", "error": str(exc), "rows": []}
+
+
+def _latest_screening_drift(trade_date: str) -> Dict[str, Any]:
+    try:
+        import json
+        from pathlib import Path
+
+        from config.settings import WEB_DATA_DIR
+
+        directory = Path(WEB_DATA_DIR) / "screening"
+        path = directory / f"screening_{trade_date}.json" if trade_date else None
+        if path is None or not path.exists():
+            paths = sorted(directory.glob("screening_*.json"))
+            path = paths[-1] if paths else None
+        if path is None:
+            return {"status": "unknown"}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return ((payload.get("weight_metadata") or {}).get("feature_drift") or {"status": "unknown"})
+    except Exception:
+        return {"status": "unknown"}

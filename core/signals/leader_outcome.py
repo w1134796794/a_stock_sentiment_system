@@ -9,6 +9,8 @@ import pandas as pd
 
 
 class LeaderOutcomeTracker:
+    _OUTCOME_COLUMNS = ("next_3d_excess_return", "mfe_3d", "mae_3d", "success")
+
     def __init__(self, duckdb_path: Optional[Path] = None) -> None:
         if duckdb_path is None:
             from config.settings import FACTOR_DB_PATH
@@ -45,10 +47,10 @@ class LeaderOutcomeTracker:
         frame = pd.DataFrame(records)
         con = duckdb.connect(str(self.duckdb_path))
         try:
+            self._ensure_table(con)
             con.register("_leader_signals", frame)
-            con.execute("CREATE TABLE IF NOT EXISTS leader_signal_history AS SELECT * FROM _leader_signals WHERE 1=0")
             con.execute("DELETE FROM leader_signal_history WHERE CAST(signal_date AS VARCHAR)=?", [str(signal_date)])
-            con.execute("INSERT INTO leader_signal_history SELECT * FROM _leader_signals")
+            con.execute("INSERT INTO leader_signal_history BY NAME SELECT * FROM _leader_signals")
         finally:
             try:
                 con.unregister("_leader_signals")
@@ -65,8 +67,9 @@ class LeaderOutcomeTracker:
         con = duckdb.connect(str(self.duckdb_path))
         try:
             tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
-            if not {"leader_signal_history", "signal_outcome_wide"}.issubset(tables):
+            if "signal_outcome_wide" not in tables:
                 return 0
+            self._ensure_table(con)
             before = con.execute(
                 "SELECT COUNT(*) FROM leader_signal_history WHERE next_3d_excess_return IS NULL"
             ).fetchone()[0]
@@ -76,7 +79,7 @@ class LeaderOutcomeTracker:
                 "success=o.label_success, outcome_date=o.future_date "
                 "FROM signal_outcome_wide AS o "
                 "WHERE l.signal_date=o.trade_date AND l.code=o.code "
-                "AND CAST(o.future_date AS VARCHAR) < ? AND l.next_3d_excess_return IS NULL",
+                "AND CAST(o.future_date AS VARCHAR) < ?",
                 [str(as_of_date)],
             )
             after = con.execute(
@@ -85,6 +88,41 @@ class LeaderOutcomeTracker:
             return max(int(before - after), 0)
         finally:
             con.close()
+
+    @classmethod
+    def _ensure_table(cls, con: Any) -> None:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS leader_signal_history (
+                signal_date VARCHAR,
+                code VARCHAR,
+                name VARCHAR,
+                lifecycle_state VARCHAR,
+                pool_type VARCHAR,
+                primary_sector VARCHAR,
+                leader_score DOUBLE,
+                sector_status_score DOUBLE,
+                market_status_score DOUBLE,
+                capital_recognition_score DOUBLE,
+                safety_score DOUBLE,
+                next_3d_excess_return DOUBLE,
+                mfe_3d DOUBLE,
+                mae_3d DOUBLE,
+                success DOUBLE,
+                outcome_date VARCHAR,
+                recorded_at VARCHAR
+            )
+            """
+        )
+        schema = {
+            str(row[0]): str(row[1]).upper()
+            for row in con.execute("DESCRIBE leader_signal_history").fetchall()
+        }
+        for column in cls._OUTCOME_COLUMNS:
+            if schema.get(column) != "DOUBLE":
+                con.execute(
+                    f'ALTER TABLE leader_signal_history ALTER COLUMN "{column}" SET DATA TYPE DOUBLE'
+                )
 
     def stats(self, lifecycle_state: str, *, as_of_date: str) -> Dict[str, Any]:
         if not self.duckdb_path.exists():

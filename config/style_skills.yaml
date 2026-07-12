@@ -1,0 +1,52 @@
+schema_version: 1
+skills:
+  premarket_plan:
+    name: 盘前计划
+    version: 1.0.0
+    universe: 昨日指标候选与近期龙头
+    required_evidence: [candidate, market_regime, sector]
+    entry_modes: [弱转强, 强势延续, 高开加速]
+    veto_rules: [模型失效, 数据不足, 弱市禁开仓]
+    exit_rules: [硬止损, 高点回撤止盈, 时间止损]
+    sizing: fixed_risk_or_conservative_kelly
+    benchmark_metrics: [覆盖率, 胜率, 平均收益, 止损率, 最大回撤]
+  weak_to_strong:
+    name: 弱转强观察
+    version: 1.0.0
+    universe: 昨日候选与近期龙头
+    required_evidence: [candidate, minute_quote, sector_breadth]
+    entry_modes: [弱转强]
+    veto_rules: [分钟数据缺失, 板块转弱, 跌破开盘低点, 十点前未确认]
+    exit_rules: [硬止损, 高点回撤止盈]
+    sizing: conservative_kelly
+    benchmark_metrics: [信号成交率, 胜率, MFE, MAE, 最大回撤]
+  leader_lifecycle:
+    name: 龙头生命周期
+    version: 1.0.0
+    universe: 全量涨停池与板块成分股
+    required_evidence: [leader_lifecycle, sector, capital_recognition]
+    entry_modes: [弱转强, 强势延续, 高开加速]
+    veto_rules: [衰退龙头, 板块跟随减少, 资金流出, 无可成交分钟]
+    exit_rules: [生命周期衰退, 高点回撤止盈, 硬止损]
+    sizing: conservative_kelly
+    benchmark_metrics: [生命周期持续日, 板块超额, 最大收益, 最大回撤]
+  risk_review:
+    name: 风险审查
+    version: 1.0.0
+    universe: 待执行信号与当前持仓
+    required_evidence: [position_budget, portfolio_cvar, correlation]
+    entry_modes: []
+    veto_rules: [负凯利, 单板块超限, CVaR超限, 账户熔断]
+    exit_rules: [账户熔断, 组合降仓]
+    sizing: risk_parity_cvar_capped
+    benchmark_metrics: [最大回撤, CVaR, 连亏概率, 资金利用率]
+  postmarket_review:
+    name: 盘后复盘
+    version: 1.0.0
+    universe: 当日信号、成交、未成交与持仓
+    required_evidence: [candidate, execution, attribution]
+    entry_modes: []
+    veto_rules: []
+    exit_rules: []
+    sizing: none
+    benchmark_metrics: [因子贡献, 信号归因, 滑点, MFE, MAE, 模型漂移]

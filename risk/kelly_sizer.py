@@ -23,6 +23,7 @@ from typing import Dict, Optional
 import loguru
 
 from risk.risk_config import RiskConfig
+from core.signals.trust_algorithms import beta_binomial_interval
 
 logger = loguru.logger
 
@@ -41,8 +42,21 @@ class KellySizer:
         w = min(max(win_rate, 0.0), 1.0)
         return w - (1 - w) / payoff_ratio
 
+    def fixed_risk_size(self, stop_distance: float, *, base_position_pct: float) -> Dict:
+        distance = max(float(stop_distance or 0.0), 1e-6)
+        cap = min(self.cfg.kelly_max_position, self.cfg.max_position_per_stock)
+        pct = min(self.cfg.fixed_risk_per_trade / distance, cap, max(float(base_position_pct), 0.0))
+        return {
+            "position_pct": round(max(pct, 0.0), 4),
+            "method": "fixed_risk",
+            "full_kelly": 0.0,
+            "rationale": f"账户风险{self.cfg.fixed_risk_per_trade:.2%} ÷ 止损距离{distance:.2%}，封顶{cap:.0%}",
+        }
+
     def size(self, win_rate: float, payoff_ratio: float, n: int,
-             base_position_pct: float) -> Dict:
+             base_position_pct: float, *, stop_distance: float = 0.05,
+             data_quality: float = 1.0, regime_match: float = 1.0,
+             tradability: float = 1.0, correlation_penalty: float = 0.0) -> Dict:
         """
         返回 ``{position_pct, method, full_kelly, rationale}``。
 
@@ -52,33 +66,44 @@ class KellySizer:
         cap = min(self.cfg.kelly_max_position, self.cfg.max_position_per_stock)
 
         if n < self.cfg.kelly_min_samples:
-            pct = min(base_position_pct, cap)
-            return {
-                "position_pct": round(pct, 4),
-                "method": "fallback_insufficient_samples",
-                "full_kelly": 0.0,
-                "rationale": (f"样本{n} < 阈值{self.cfg.kelly_min_samples}，"
-                              f"回退固定仓位 {pct:.1%}"),
-            }
+            result = self.fixed_risk_size(stop_distance, base_position_pct=base_position_pct)
+            result["method"] = "fallback_fixed_risk_insufficient_samples"
+            result["rationale"] = f"样本{n} < {self.cfg.kelly_min_samples}；{result['rationale']}"
+            return result
 
-        f_full = self.full_kelly(win_rate, payoff_ratio)
+        posterior = beta_binomial_interval(
+            float(win_rate) * int(n), int(n), credibility=self.cfg.kelly_credibility,
+        )
+        conservative_win_rate = float(posterior["lower"])
+        conservative_payoff = max(float(payoff_ratio) * self.cfg.kelly_payoff_haircut, 0.0)
+        f_full = self.full_kelly(conservative_win_rate, conservative_payoff)
         if f_full <= 0:
             return {
                 "position_pct": 0.0,
                 "method": "reject_negative_edge",
                 "full_kelly": round(f_full, 4),
-                "rationale": (f"W={win_rate:.0%}, R={payoff_ratio:.2f} → f*={f_full:.3f}≤0，"
+                "win_rate_lower": round(conservative_win_rate, 4),
+                "rationale": (f"胜率下界={conservative_win_rate:.0%}, 折价盈亏比={conservative_payoff:.2f} → f*={f_full:.3f}≤0，"
                               f"无正期望，建议不交易"),
             }
 
-        pct = self.cfg.kelly_fraction * f_full
+        quality = (
+            min(max(float(data_quality), 0.0), 1.0)
+            * min(max(float(regime_match), 0.0), 1.0)
+            * min(max(float(tradability), 0.0), 1.0)
+            * (1.0 - min(max(float(correlation_penalty), 0.0), 1.0))
+        )
+        pct = self.cfg.kelly_fraction * f_full * quality
         pct = min(max(pct, 0.0), cap)
         return {
             "position_pct": round(pct, 4),
-            "method": "kelly",
+            "method": "conservative_kelly",
             "full_kelly": round(f_full, 4),
-            "rationale": (f"W={win_rate:.0%}, R={payoff_ratio:.2f} → f*={f_full:.3f}，"
-                          f"{self.cfg.kelly_fraction:g}×半凯利封顶 {cap:.0%} = {pct:.1%}"),
+            "win_rate_lower": round(conservative_win_rate, 4),
+            "payoff_haircut": round(conservative_payoff, 4),
+            "quality_multiplier": round(quality, 4),
+            "rationale": (f"胜率下界={conservative_win_rate:.0%}, 折价盈亏比={conservative_payoff:.2f}，"
+                          f"{self.cfg.kelly_fraction:g}×凯利×质量{quality:.0%}，封顶{cap:.0%} = {pct:.1%}"),
         }
 
     def size_from_stat(self, stat, base_position_pct: float) -> Dict:

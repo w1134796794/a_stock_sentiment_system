@@ -253,7 +253,15 @@ class SilverWarehouse:
 
 def _looks_like_duckdb_lock(error: Exception) -> bool:
     text = str(error).lower()
-    return any(token in text for token in ("cannot open file", "正在使用", "being used", "locked", "lock"))
+    return any(token in text for token in (
+        "cannot open file",
+        "can't open a connection",
+        "different configuration",
+        "正在使用",
+        "being used",
+        "locked",
+        "lock",
+    ))
 
 
 def _quote_ident(name: str) -> str:

@@ -25,11 +25,12 @@
 {% endblock %}
 
 {% block content %}
-<section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+<section class="grid grid-cols-2 xl:grid-cols-5 gap-3 mb-4">
   <div class="lp-kpi"><div id="kpi-total" class="lp-kpi-v mono">--</div><div class="lp-kpi-l">入池</div></div>
   <div class="lp-kpi"><div id="kpi-core" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">核心龙头</div></div>
-  <div class="lp-kpi"><div id="kpi-sector" class="lp-kpi-v mono text-amber-300">--</div><div class="lp-kpi-l">板块龙头</div></div>
-  <div class="lp-kpi"><div id="kpi-recent" class="lp-kpi-v mono text-emerald-300">--</div><div class="lp-kpi-l">近期龙头</div></div>
+  <div class="lp-kpi"><div id="kpi-short" class="lp-kpi-v mono text-emerald-300">--</div><div class="lp-kpi-l">短线角色</div></div>
+  <div class="lp-kpi"><div id="kpi-sector" class="lp-kpi-v mono text-amber-300">--</div><div class="lp-kpi-l">板块角色</div></div>
+  <div class="lp-kpi"><div id="kpi-emotion" class="lp-kpi-v mono text-cyan-300">--</div><div class="lp-kpi-l">情绪角色</div></div>
 </section>
 
 <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
@@ -58,6 +59,12 @@
   .lp-type.core { color:#fecdd3; background:rgba(244,63,94,.14); border-color:rgba(244,63,94,.38); }
   .lp-type.sector { color:#fde68a; background:rgba(245,158,11,.13); border-color:rgba(245,158,11,.36); }
   .lp-type.strong { color:#6ee7b7; background:rgba(16,185,129,.14); border-color:rgba(16,185,129,.38); }
+  .lp-type.emotion { color:#67e8f9; background:rgba(6,182,212,.13); border-color:rgba(6,182,212,.38); }
+  .lp-roles { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.55rem; }
+  .lp-role { display:inline-flex; align-items:center; border-radius:.35rem; padding:.12rem .38rem; font-size:.66rem; font-weight:800; border:1px solid rgba(100,116,139,.42); color:#cbd5e1; background:rgba(100,116,139,.12); }
+  .lp-role.short { color:#6ee7b7; border-color:rgba(16,185,129,.38); background:rgba(16,185,129,.10); }
+  .lp-role.sector { color:#fde68a; border-color:rgba(245,158,11,.36); background:rgba(245,158,11,.10); }
+  .lp-role.emotion { color:#67e8f9; border-color:rgba(6,182,212,.38); background:rgba(6,182,212,.10); }
   .lp-metrics { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.5rem; margin-top:.85rem; }
   .lp-metric { background:rgba(2,6,23,.42); border:1px solid rgba(51,65,85,.55); border-radius:.55rem; padding:.55rem .6rem; min-width:0; }
   .lp-metric span { display:block; font-size:.66rem; color:#64748b; margin-bottom:.22rem; }
@@ -104,6 +111,7 @@
   function typeClass(type) {
     if (type === '核心龙头') return 'core';
     if (type === '板块龙头') return 'sector';
+    if (type === '情绪龙头') return 'emotion';
     if (type === '近期龙头') return 'strong';
     return '';
   }
@@ -130,10 +138,12 @@
   function renderPool(j) {
     const rows = j.rows || [];
     const counts = j.counts || {};
+    const roleCounts = j.role_counts || {};
     document.getElementById('kpi-total').textContent = rows.length || 0;
     document.getElementById('kpi-core').textContent = counts['核心龙头'] || 0;
-    document.getElementById('kpi-sector').textContent = counts['板块龙头'] || 0;
-    document.getElementById('kpi-recent').textContent = counts['近期龙头'] || 0;
+    document.getElementById('kpi-short').textContent = roleCounts['短线龙头'] || 0;
+    document.getElementById('kpi-sector').textContent = roleCounts['板块龙头'] || 0;
+    document.getElementById('kpi-emotion').textContent = roleCounts['情绪龙头'] || 0;
     document.getElementById('pool-date').textContent = j.trade_date || '--';
     document.getElementById('pool-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
     if (!rows.length) {
@@ -144,6 +154,8 @@
     els.grid.innerHTML = rows.map(row => {
       const tcls = typeClass(row.pool_type);
       const reasons = (row.reasons || []).slice(0, 4).map(x => `<div class="lp-reason">${esc(x)}</div>`).join('');
+      const roleClass = role => role === '短线龙头' ? 'short' : role === '板块龙头' ? 'sector' : role === '情绪龙头' ? 'emotion' : '';
+      const roles = (row.leader_roles || []).map(role => `<span class="lp-role ${roleClass(role)}">${esc(role)}</span>`).join('');
       return `
       <article class="lp-card ${tcls}">
         <div class="lp-head">
@@ -154,6 +166,7 @@
           <span class="lp-type ${tcls}">${esc(row.pool_type || '候选')}</span>
         </div>
         ${renderStockSectorTags(row)}
+        ${roles ? `<div class="lp-roles">${roles}</div>` : ''}
         <div class="lp-metrics">
           <div class="lp-metric"><span>池排名</span><strong class="mono">#${esc(row.pool_rank || '--')}</strong></div>
           <div class="lp-metric"><span>评分</span><strong class="mono">${num(row.leader_score)}</strong></div>

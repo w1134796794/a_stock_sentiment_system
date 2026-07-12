@@ -36,11 +36,8 @@ class SentimentSystem:
         self.pipeline = ETLDailyPipeline(self.dm)
 
     def run_daily_analysis(self, date: str | None = None) -> ETLDailyResult:
-        """执行每日完整数据生成流程。"""
-        target = str(date or self.today)
-        date_utils = DateUtils()
-        target = date_utils.get_nearest_trade_date(target)
-        self.yesterday = date_utils.get_prev_trade_date(target)
+        """执行取数、因子、选股三个独立阶段，供自动任务兼容调用。"""
+        target = self._resolve_target(date)
 
         logger.info(f"开始执行 {target} 的日度数据生成...")
         logger.info(f"对比日期: {self.yesterday}")
@@ -50,6 +47,55 @@ class SentimentSystem:
         if not result.ok:
             raise RuntimeError("数据生成未完整成功，请查看日志和 webdata/etl_quality 质量报告")
         return result
+
+    def fetch_post_close_data(
+        self, date: str | None = None, *, skip_existing: bool = True
+    ) -> ETLDailyResult:
+        """只获取盘后接口数据并落 Silver；完整日期默认不重复请求。"""
+        target = self._resolve_target(date)
+        logger.info(f"开始执行 {target} 的盘后取数...")
+        result = self.pipeline.fetch_data(
+            target, self.yesterday, skip_existing=skip_existing
+        )
+        if not result.ok:
+            raise RuntimeError("盘后取数未完整成功，请查看数据质量报告")
+        return result
+
+    def run_factor_calculation(self, date: str | None = None) -> ETLDailyResult:
+        """只读取本地 Silver 计算因子，不访问远端行情接口。"""
+        target = self._resolve_target(date)
+        logger.info(f"开始执行 {target} 的因子计算...")
+        result = self.pipeline.compute_factors(target, self.yesterday)
+        if not result.ok:
+            raise RuntimeError("因子计算未完整成功，请查看任务日志")
+        return result
+
+    def run_screening_strategy(
+        self,
+        date: str | None = None,
+        *,
+        strategy_ids: list[str] | None = None,
+        primary_strategy: str = "",
+    ) -> ETLDailyResult:
+        """只读取本地因子表执行候选筛选、摘要与页面快照。"""
+        target = self._resolve_target(date)
+        logger.info(f"开始执行 {target} 的选股策略...")
+        result = self.pipeline.run_screening(
+            target,
+            self.yesterday,
+            strategy_ids=strategy_ids,
+            primary_strategy=primary_strategy,
+        )
+        if not result.ok:
+            raise RuntimeError("选股策略未完整成功，请查看任务日志")
+        return result
+
+    def _resolve_target(self, date: str | None) -> str:
+        target = str(date or self.today)
+        date_utils = DateUtils()
+        target = date_utils.get_nearest_trade_date(target)
+        self.yesterday = date_utils.get_prev_trade_date(target)
+        return target
 
     @staticmethod
     def _print_summary(result: ETLDailyResult) -> None:
@@ -149,7 +195,12 @@ def main() -> None:
     setup_logging()
 
     parser = argparse.ArgumentParser(description="A股短线情绪量化系统")
-    parser.add_argument("--mode", choices=["analysis", "backtest", "risk", "position"], default="analysis", help="运行模式")
+    parser.add_argument(
+        "--mode",
+        choices=["analysis", "fetch", "factors", "screening", "backtest", "risk", "position"],
+        default="analysis",
+        help="运行模式；fetch/factors/screening 可独立执行盘后三阶段",
+    )
     parser.add_argument("--date", type=str, help="分析日期 (YYYYMMDD)，默认今日")
     parser.add_argument("--start-date", type=str, help="回测开始日期 (YYYYMMDD)")
     parser.add_argument("--end-date", type=str, help="回测结束日期 (YYYYMMDD)")
@@ -163,6 +214,12 @@ def main() -> None:
     try:
         if args.mode == "analysis":
             SentimentSystem().run_daily_analysis(args.date)
+        elif args.mode == "fetch":
+            SentimentSystem().fetch_post_close_data(args.date)
+        elif args.mode == "factors":
+            SentimentSystem().run_factor_calculation(args.date)
+        elif args.mode == "screening":
+            SentimentSystem().run_screening_strategy(args.date)
         elif args.mode == "backtest":
             run_backtest(args.start_date, args.end_date)
         elif args.mode == "risk":

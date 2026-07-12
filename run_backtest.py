@@ -129,6 +129,10 @@ def save_backtest_results(
             'entry_time': getattr(t, 'entry_time', ''),
             'mfe_pct': getattr(t, 'mfe_pct', 0),
             'mae_pct': getattr(t, 'mae_pct', 0),
+            'strategy_id': getattr(t, 'strategy_id', ''),
+            'strategy_name': getattr(t, 'strategy_name', ''),
+            'strategy_version': getattr(t, 'strategy_version', ''),
+            'strategy_sources': getattr(t, 'strategy_sources', ''),
         } for t in result['trade_history']])
 
         trades_file = output_path / f"backtest_trades_{timestamp}.csv"
@@ -176,6 +180,10 @@ def save_backtest_results(
             'plan_score': position.get('plan_score') or 0,
             'entry_signal': position.get('entry_signal') or '',
             'entry_time': position.get('entry_time') or '',
+            'strategy_id': position.get('strategy_id') or '',
+            'strategy_name': position.get('strategy_name') or '',
+            'strategy_version': position.get('strategy_version') or '',
+            'strategy_sources': position.get('strategy_sources') or '',
             'mfe_pct': (
                 float(position.get('max_favorable_price') or entry_price) / entry_price - 1.0
                 if entry_price > 0 else 0.0
@@ -190,7 +198,8 @@ def save_backtest_results(
         'as_of_date', 'stock_code', 'stock_name', 'entry_date', 'entry_price',
         'current_price', 'shares', 'cost_basis', 'market_value', 'unrealized_pnl',
         'unrealized_pnl_pct', 'holding_days', 'plan_rank', 'plan_score', 'entry_signal',
-        'entry_time', 'mfe_pct', 'mae_pct',
+        'entry_time', 'strategy_id', 'strategy_name', 'strategy_version', 'strategy_sources',
+        'mfe_pct', 'mae_pct',
     ]).to_csv(positions_file, index=False, encoding="utf-8-sig")
     logger.info(f"持仓快照已保存: {positions_file}")
 

@@ -1,17 +1,11 @@
 {% extends "base.html" %}
-{% block title %}生成数据 · 管理控制台{% endblock %}
-{% block page_title %}生成数据{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">预取行情 · 计算指标 · 生成候选 · 刷新页面</div>{% endblock %}
+{% block title %}{{ stage_config.title }} · 管理控制台{% endblock %}
+{% block page_title %}{{ stage_config.title }}{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ stage_config.subtitle }}</div>{% endblock %}
 
 {% block content %}
-<section class="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
-  {% for step in [
-    ['1', '数据预取', '统一代码、日期和行情口径'],
-    ['2', '指标计算', '计算大盘、板块和个股指标'],
-    ['3', '候选筛选', '按配置筛选排序'],
-    ['4', '页面刷新', '生成页面可读结果'],
-    ['5', '实时确认', '盘中确认/取消']
-  ] %}
+<section class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+  {% for step in stage_config.flow %}
   <div class="flow-step">
     <div class="flow-step-no mono">{{ step[0] }}</div>
     <div class="font-bold">{{ step[1] }}</div>
@@ -20,17 +14,57 @@
   {% endfor %}
 </section>
 
+{% if stage_config.sources %}
+<section class="card border border-slate-800 rounded-xl p-4 mb-4">
+  <div class="text-sm font-bold mb-3">本阶段接口范围</div>
+  <div class="flex flex-wrap gap-2">
+    {% for source in stage_config.sources %}
+    <span class="rounded border border-slate-700 bg-slate-950/40 px-2 py-1 text-xs text-slate-300">{{ source }}</span>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if stage_config.key == 'screening' %}
+<section class="card border border-slate-800 rounded-lg p-4 mb-4">
+  <div class="flex items-center justify-between gap-3 mb-3">
+    <div>
+      <h2 class="font-bold">本次策略组合</h2>
+      <div class="text-[11px] text-slate-500 mt-1">可同时运行多个组合；主发布方案用于候选股、龙头池和页面快照。</div>
+    </div>
+    <a href="/strategies" class="text-xs font-semibold text-emerald-300 hover:text-emerald-200">管理组合</a>
+  </div>
+  <div id="strategy-selection" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+    {% for strategy in strategy_profiles %}
+    <div class="strategy-choice" data-strategy-choice="{{ strategy.id }}">
+      <label class="flex items-start gap-2 min-w-0 flex-1">
+        <input type="checkbox" class="strategy-check mt-1 accent-emerald-500" value="{{ strategy.id }}" checked>
+        <span class="min-w-0">
+          <b class="text-sm text-slate-200">{{ strategy.name }}</b>
+          <span class="block text-[11px] text-slate-500 mt-0.5">{{ strategy.weight_source }} · {{ strategy.stock_pool }} · 输出{{ strategy.top_n }}</span>
+        </span>
+      </label>
+      <label class="text-[11px] text-slate-400 whitespace-nowrap" title="设为页面主发布方案">
+        <input type="radio" name="primary-strategy" class="strategy-primary accent-amber-400" value="{{ strategy.id }}" {% if strategy.primary %}checked{% endif %}> 主方案
+      </label>
+    </div>
+    {% endfor %}
+  </div>
+  {% if not strategy_profiles %}<div class="text-sm text-amber-300">暂无启用方案，请先进入“策略组合”创建。</div>{% endif %}
+</section>
+{% endif %}
+
 <section class="card border border-slate-800 rounded-xl p-4 mb-4">
   <div class="flex items-end gap-3 flex-wrap">
     <div>
       <label class="block text-xs text-slate-400 mb-1">运行模式</label>
       <div class="inline-flex overflow-hidden rounded-lg border border-slate-700 bg-slate-950/60">
-        <button id="run-mode-single" type="button" class="run-mode active">单日生成</button>
+        <button id="run-mode-single" type="button" class="run-mode active">单日运行</button>
         <button id="run-mode-batch" type="button" class="run-mode">历史批量</button>
       </div>
     </div>
     <div id="run-single-fields">
-      <label class="block text-xs text-slate-400 mb-1">分析日期（留空＝今日/最近交易日）</label>
+      <label class="block text-xs text-slate-400 mb-1">交易日期（留空＝今日/最近交易日）</label>
       <input id="run-date" type="text" inputmode="numeric" placeholder="YYYYMMDD，如 20260604"
              class="mono w-48 bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500">
     </div>
@@ -48,7 +82,7 @@
     </div>
     <button id="run-btn"
             class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-5 py-2 disabled:opacity-40">
-      开始生成
+      {{ stage_config.action }}
     </button>
     <div class="flex items-center gap-2 text-sm">
       <span class="text-slate-400">状态</span>
@@ -57,8 +91,7 @@
     </div>
   </div>
   <div class="text-[11px] text-slate-500 mt-2">
-    单日生成等价于 <span class="mono">python main.py --mode analysis --date …</span>；历史批量会按交易日顺序逐日生成。结果会写入
-    <span class="mono">webdata/factors.duckdb</span>、<span class="mono">webdata/screening</span> 和最新页面快照。
+    {{ stage_config.description }} 历史批量会按交易日顺序逐日运行，单日失败不会阻断后续日期。
   </div>
 </section>
 
@@ -78,6 +111,11 @@
 
 <aside class="space-y-4">
   <section class="card border border-slate-800 rounded-xl p-4">
+    <div class="flex items-center justify-between mb-2"><h2 class="font-bold">自动运行</h2><span id="automation-state" class="artifact-pill warn">读取中</span></div>
+    <div id="automation-summary" class="text-sm text-slate-400 leading-6">--</div>
+    <div id="automation-latest" class="text-xs text-slate-500 mt-2"></div>
+  </section>
+  <section class="card border border-slate-800 rounded-xl p-4">
     <div class="flex items-center justify-between mb-3">
       <h2 class="font-bold">数据产物</h2>
       <button id="artifact-refresh" class="text-xs text-emerald-300 hover:text-emerald-200">刷新</button>
@@ -87,8 +125,7 @@
   <section class="card border border-slate-800 rounded-xl p-4">
     <h2 class="font-bold mb-3">运行后查看</h2>
     <div class="grid gap-2 text-sm">
-      <a class="run-link" href="/report">交易计划</a>
-      <a class="run-link" href="/data/strategy">指标筛选明细</a>
+      <a class="run-link" href="/data/strategy">候选股明细</a>
       <a class="run-link" href="/data/sector">板块热度</a>
       <a class="run-link" href="/realtime">实时确认</a>
     </div>
@@ -109,11 +146,14 @@
   .run-mode { min-width:5.5rem; padding:.42rem .8rem; font-size:.82rem; font-weight:800; color:#94a3b8; }
   .run-mode:hover { color:#dbeafe; background:rgba(30,41,59,.72); }
   .run-mode.active { color:#6ee7b7; background:rgba(16,185,129,.16); box-shadow:inset 0 0 0 1px rgba(16,185,129,.42); }
+  .strategy-choice { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; min-height:58px; border:1px solid rgba(51,65,85,.9); border-radius:.45rem; padding:.65rem .75rem; background:rgba(2,6,23,.35); }
+  .strategy-choice:has(.strategy-check:checked) { border-color:rgba(16,185,129,.55); background:rgba(16,185,129,.08); }
 </style>
 
 <script>
 (function () {
   const initial = {{ run|tojson }};
+  const stageConfig = {{ stage_config|tojson }};
   let artifacts = {{ artifacts|tojson }};
   let since = initial.next || 0;
   let polling = false;
@@ -131,6 +171,8 @@
   const modeSingleBtn = document.getElementById('run-mode-single');
   const modeBatchBtn = document.getElementById('run-mode-batch');
   const autoscroll = document.getElementById('run-autoscroll');
+  const strategyChecks = [...document.querySelectorAll('.strategy-check')];
+  const strategyPrimary = [...document.querySelectorAll('.strategy-primary')];
 
   const STATE = {
     idle:    { t: '空闲',   c: 'bg-slate-700 text-slate-200' },
@@ -163,7 +205,21 @@
     } else if (d.started_at) {
       parts.push('开始于 ' + d.started_at);
     }
+    const selected = d.options?.strategy_ids || [];
+    if (selected.length) parts.push(`组合 ${selected.length} 个`);
     return parts.join(' · ');
+  }
+
+  function syncStrategySelection() {
+    const selected = new Set(strategyChecks.filter(input => input.checked).map(input => input.value));
+    strategyPrimary.forEach(input => {
+      input.disabled = !selected.has(input.value);
+      if (input.checked && input.disabled) input.checked = false;
+    });
+    if (selected.size && !strategyPrimary.some(input => input.checked && !input.disabled)) {
+      const first = strategyPrimary.find(input => !input.disabled);
+      if (first) first.checked = true;
+    }
   }
 
   function setState(s, meta) {
@@ -207,7 +263,7 @@
     if (polling) return;
     polling = true;
     try {
-      const r = await fetch('/api/run/status?since=' + since);
+      const r = await fetch(stageConfig.api + '/status?since=' + since);
       const d = await r.json();
       since = d.next;
       appendLines(d.lines);
@@ -230,6 +286,12 @@
   if (initial.date && initial.mode !== 'batch') dateEl.value = initial.date;
   if (initial.start_date) startDateEl.value = initial.start_date;
   if (initial.end_date) endDateEl.value = initial.end_date;
+  if (initial.options?.strategy_ids?.length) {
+    strategyChecks.forEach(input => input.checked = initial.options.strategy_ids.includes(input.value));
+    strategyPrimary.forEach(input => input.checked = input.value === initial.options.primary_strategy);
+  }
+  strategyChecks.forEach(input => input.addEventListener('change', syncStrategySelection));
+  syncStrategySelection();
   setMode(runMode);
   setState(initial.state, buildMeta(initial));
   if (initial.state === 'running') poll();
@@ -244,8 +306,17 @@
     const payload = runMode === 'batch'
       ? { mode: 'batch', start_date: startDateEl.value.trim(), end_date: endDateEl.value.trim() }
       : { mode: 'single', date: dateEl.value.trim() };
+    if (stageConfig.key === 'screening') {
+      payload.strategy_ids = strategyChecks.filter(input => input.checked).map(input => input.value);
+      payload.primary_strategy = strategyPrimary.find(input => input.checked && !input.disabled)?.value || '';
+      if (!payload.strategy_ids.length) {
+        appendLines(['[提示] 请至少选择一个策略组合']);
+        btn.disabled = false;
+        return;
+      }
+    }
     try {
-      const r = await fetch('/api/run', {
+      const r = await fetch(stageConfig.api, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -267,9 +338,20 @@
   document.getElementById('artifact-refresh').addEventListener('click', async () => {
     const artifactDate = runMode === 'batch' ? endDateEl.value.trim() : dateEl.value.trim();
     const params = artifactDate ? ('?date=' + encodeURIComponent(artifactDate)) : '';
-    const r = await fetch('/api/etl/artifacts' + params);
+    const joiner = params ? '&' : '?';
+    const r = await fetch('/api/etl/artifacts' + params + joiner + 'stage=' + encodeURIComponent(stageConfig.key));
     renderArtifacts(await r.json());
   });
+  fetch('/api/automation/status').then(r => r.json()).then(data => {
+    const state = document.getElementById('automation-state');
+    state.textContent = data.running ? '运行中' : (data.enabled ? '待启动' : '已关闭');
+    state.className = 'artifact-pill ' + (data.running ? 'ok' : 'warn');
+    document.getElementById('automation-summary').textContent = `交易日 ${data.auction_time} 竞价预警 · ${data.daily_time} 盘后三阶段${data.auto_backtest ? '并回测最近3个月' : ''}`;
+    const latest = data.latest || {};
+    const health = data.strategy_health || {};
+    const healthText = health.ok ? `近3个月：胜率${health.win_rate_pct}% · 收益${health.total_return_pct}% · 最大回撤${health.max_drawdown_pct}%` : '';
+    document.getElementById('automation-latest').textContent = [latest.message || (latest.trade_date ? `最近任务 ${latest.trade_date} · ${latest.status || '--'}` : '尚无执行记录'), healthText].filter(Boolean).join(' · ');
+  }).catch(() => {});
 })();
 </script>
 {% endblock %}

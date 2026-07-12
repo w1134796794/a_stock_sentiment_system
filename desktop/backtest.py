@@ -366,6 +366,41 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
     for r in pattern_rows:
         r.pop("_pnl", None)
 
+    strategy_stats: Dict[str, Dict[str, Any]] = {}
+    for trade in closed:
+        strategy_id = str(trade.get("strategy_id") or "default")
+        item = strategy_stats.setdefault(strategy_id, {
+            "策略": str(trade.get("strategy_name") or strategy_id),
+            "版本": str(trade.get("strategy_version") or "--"),
+            "笔数": 0,
+            "盈利": 0,
+            "总盈亏": 0.0,
+            "总收益": 0.0,
+            "止损": 0,
+        })
+        item["笔数"] += 1
+        item["盈利"] += int(float(trade.get("pnl") or 0.0) > 0)
+        item["总盈亏"] += float(trade.get("pnl") or 0.0)
+        item["总收益"] += float(trade.get("pnl_pct") or 0.0)
+        item["止损"] += int(bool(trade.get("stop_loss_triggered")))
+    strategy_rows = []
+    for item in strategy_stats.values():
+        count = int(item["笔数"])
+        strategy_rows.append({
+            "策略": item["策略"],
+            "版本": item["版本"],
+            "已平仓": count,
+            "胜率": f"{item['盈利'] / count * 100:.1f}%" if count else "--",
+            "平均收益": f"{item['总收益'] / count * 100:+.2f}%" if count else "--",
+            "总盈亏": f"{item['总盈亏']:+,.0f}",
+            "止损率": f"{item['止损'] / count * 100:.1f}%" if count else "--",
+            "样本提示": "样本不足30笔，仅供观察" if count < 30 else "样本可用于比较",
+            "_pnl": item["总盈亏"],
+        })
+    strategy_rows.sort(key=lambda row: row["_pnl"], reverse=True)
+    for row in strategy_rows:
+        row.pop("_pnl", None)
+
     factor_feedback_rows = []
     for r in load_table("factor_feedback", run):
         factor_id = str(r.get("factor_id") or "")
@@ -534,6 +569,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "名称": record.get("stock_name", ""),
             "代码": code,
             "模式": _pattern_text(record.get("pattern_type", "")),
+            "策略": record.get("strategy_name") or record.get("strategy_id") or "默认短线综合",
             "买入价": _fmt_price(record.get("entry_price")),
             "卖出价": _fmt_price(record.get("exit_price"), blank_zero=True) if is_sell else "",
             "现价": _fmt_price(position.get("current_price"), blank_zero=True) if is_open and position else "",
@@ -586,6 +622,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "nav_days": len(nav),
         "equity_chart": _chart([r["total_value"] for r in nav], fill="bottom") if nav else None,
         "pattern_rows": pattern_rows,
+        "strategy_rows": strategy_rows,
         "factor_feedback_rows": factor_feedback_rows,
         "rank_feedback_rows": rank_feedback_rows,
         "rank_suggestion": rank_suggestion,
@@ -595,7 +632,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "entry_mode_rows": entry_mode_rows,
         "transaction_view": True,
         "trade_rows": trade_rows,
-        "trade_columns": ["日期", "动作", "名称", "代码", "模式", "买入价", "卖出价", "现价",
+        "trade_columns": ["日期", "动作", "名称", "代码", "策略", "模式", "买入价", "卖出价", "现价",
                           "股数", "盈亏", "盈亏%", "持仓天数", "止损", "止盈", "排名", "评分",
                           "买入信号", "入场时间", "MFE", "MAE", "状态/退出"],
     })

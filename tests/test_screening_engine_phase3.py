@@ -1,4 +1,6 @@
 import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -26,6 +28,96 @@ def test_candidate_percentile_score_avoids_absolute_score_saturation(tmp_path):
     assert score.iloc[0] < 40
     assert 60 < score.iloc[1] < 70
     assert score.iloc[2] == 100
+
+
+def test_drift_reference_prefers_current_market_regime():
+    metadata = {
+        "feature_reference": {"factor_a": {"values": [0, 1]}},
+        "feature_reference_by_regime": {
+            "strong": {"factor_a": {"values": [8, 9]}},
+        },
+        "feature_reference_regime_meta": {
+            "strong": {"sample_size": 1200, "trade_days": 12},
+        },
+    }
+
+    references, audit = ScreeningEngine._select_drift_references(metadata, "strong")
+
+    assert references["factor_a"]["values"] == [8, 9]
+    assert audit == {
+        "reference_scope": "market_regime",
+        "reference_regime": "strong",
+        "reference_sample_size": 1200,
+        "reference_trade_days": 12,
+    }
+
+
+def test_drift_reference_falls_back_for_legacy_artifact():
+    metadata = {"feature_reference": {"factor_a": {"values": [0, 1]}}}
+
+    references, audit = ScreeningEngine._select_drift_references(metadata, "weak")
+
+    assert references == metadata["feature_reference"]
+    assert audit["reference_scope"] == "global_fallback"
+    assert audit["reference_regime"] == "weak"
+
+
+def test_runtime_profile_propagates_regime_drift_references(tmp_path):
+    payload = {
+        "model_type": "test",
+        "feature_reference": {"factor_a": {"values": [0, 1]}},
+        "feature_reference_by_regime": {
+            "strong": {"factor_a": {"values": [8, 9]}},
+        },
+        "feature_reference_regime_meta": {
+            "strong": {"sample_size": 800, "trade_days": 8},
+        },
+    }
+    artifact = SimpleNamespace(
+        weights={"factor_a": 1.0},
+        effective_date="20260701",
+        path=Path(tmp_path) / "weights_20260701.json",
+        payload=payload,
+    )
+    repository = SimpleNamespace(resolve=lambda *_args: artifact)
+    engine = ScreeningEngine(
+        duckdb_path=tmp_path / "none.duckdb",
+        output_dir=tmp_path,
+        weight_repository=repository,
+    )
+
+    _, metadata = engine._runtime_profile(
+        {"ranking": {"weights": {"factor_a": 1.0}}}, "20260703", "default",
+    )
+
+    assert metadata["feature_reference_by_regime"] == payload["feature_reference_by_regime"]
+    assert metadata["feature_reference_regime_meta"] == payload["feature_reference_regime_meta"]
+
+
+def test_manual_strategy_keeps_weights_but_uses_shared_confidence_baseline(tmp_path):
+    payload = {
+        "confidence_profiles": {"neutral": {"sample_size": 120}},
+        "feature_reference_by_regime": {"neutral": {"factor_a": {"values": [1, 2]}}},
+    }
+    artifact = SimpleNamespace(
+        weights={"factor_a": 0.2}, effective_date="20260701",
+        path=Path(tmp_path) / "weights_20260701.json", payload=payload,
+    )
+    repository = SimpleNamespace(resolve=lambda _date, profile: artifact if profile == "default" else None)
+    engine = ScreeningEngine(
+        duckdb_path=tmp_path / "none.duckdb", output_dir=tmp_path,
+        weight_repository=repository,
+    )
+
+    runtime, metadata = engine._runtime_profile({
+        "strategy_weight_source": "manual",
+        "strategy_weight_profile": "custom",
+        "ranking": {"weights": {"factor_a": 1.0}},
+    }, "20260703", "custom")
+
+    assert runtime["ranking"]["weights"] == {"factor_a": 1.0}
+    assert metadata["confidence_profiles"] == payload["confidence_profiles"]
+    assert metadata["confidence_profile_source"] == "default_shared_baseline"
 
 
 @pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
@@ -75,7 +167,11 @@ def test_screening_engine_reads_gold_tables_and_writes_json(tmp_path):
     con.execute("CREATE TABLE factor_value_long AS SELECT * FROM value_long")
     con.close()
 
-    engine = ScreeningEngine(duckdb_path=db_path, output_dir=tmp_path / "screening")
+    engine = ScreeningEngine(
+        duckdb_path=db_path,
+        output_dir=tmp_path / "screening",
+        weight_repository=SimpleNamespace(resolve=lambda *_args: None),
+    )
     result = engine.run("20260616", persist=True)
 
     assert result.ok is True
@@ -83,5 +179,7 @@ def test_screening_engine_reads_gold_tables_and_writes_json(tmp_path):
     assert result.after_hard_filter > 0  # 弱市仍产出候选，市场分层只在交易执行时拦截
     assert result.final[0]["code"] == "000001"
     assert result.final[0]["score"] > result.final[-1]["score"]
+    assert result.final[0]["position_budget_pct"] <= 8.0
+    assert "弱市试仓" in result.final[0]["position_budget_reason"]
     assert result.traces
     assert (tmp_path / "screening" / "screening_20260616.json").exists()

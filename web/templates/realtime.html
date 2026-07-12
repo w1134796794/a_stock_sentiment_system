@@ -14,6 +14,18 @@
 {% endblock %}
 
 {% block content %}
+<section class="card border border-slate-800 rounded-xl p-3 mb-4">
+  <div id="strategy-tabs" class="flex flex-wrap gap-2"></div>
+</section>
+
+<section id="auction-alert" class="hidden card border border-amber-500/25 rounded-lg p-4 mb-4">
+  <div class="flex items-center justify-between gap-3 mb-3">
+    <div><h2 class="font-bold">09:25 竞价预警</h2><div class="text-xs text-slate-500 mt-1">只做盘前分类，09:30 后仍需分钟条件确认</div></div>
+    <span id="auction-updated" class="text-xs text-slate-500 mono"></span>
+  </div>
+  <div id="auction-rows" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2"></div>
+</section>
+
 <section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
   <div class="rt-kpi"><div id="kpi-confirmed" class="rt-kpi-v mono text-emerald-300">--</div><div class="rt-kpi-l">确认</div></div>
   <div class="rt-kpi"><div id="kpi-observe" class="rt-kpi-v mono text-amber-300">--</div><div class="rt-kpi-l">观察</div></div>
@@ -23,7 +35,7 @@
 
 <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
   <div class="flex flex-wrap items-center gap-2 mb-4">
-    <h2 class="font-bold mr-auto">上一交易日候选·当日分钟确认</h2>
+    <h2 id="overlay-title" class="font-bold mr-auto">上一交易日候选·当日分钟确认</h2>
     <span id="overlay-source" class="rt-pill">--</span>
     <span id="overlay-updated" class="text-xs text-slate-500 mono">--</span>
   </div>
@@ -38,6 +50,12 @@
   .rt-pill { font-size:.68rem; font-weight:800; border-radius:.45rem; padding:.12rem .5rem; background:rgba(100,116,139,.18); color:#cbd5e1; border:1px solid rgba(100,116,139,.42); }
   .rt-pill.ok { background:rgba(16,185,129,.16); color:#6ee7b7; border-color:rgba(16,185,129,.42); }
   .rt-pill.err { background:rgba(244,63,94,.16); color:#fda4af; border-color:rgba(244,63,94,.42); }
+  .rt-strategy-tab { display:inline-flex; align-items:center; gap:.45rem; padding:.42rem .7rem; border:1px solid rgba(71,85,105,.8); border-radius:.5rem; color:#cbd5e1; font-size:.78rem; font-weight:800; }
+  .rt-strategy-tab b { color:#94a3b8; font-size:.72rem; }
+  .rt-strategy-tab:hover { border-color:rgba(16,185,129,.65); color:#a7f3d0; }
+  .rt-strategy-tab.active { background:rgba(16,185,129,.14); border-color:rgba(16,185,129,.65); color:#6ee7b7; }
+  .rt-strategy-tab.active b { color:#34d399; }
+  .rt-strategy-tab.disabled { opacity:.42; cursor:not-allowed; }
   .rt-card { border:1px solid rgba(51,65,85,.72); background:rgba(15,23,42,.48); border-radius:.75rem; padding:.9rem; min-width:0; }
   .rt-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; }
   .rt-name { font-size:1rem; font-weight:800; color:#f1f5f9; line-height:1.25; }
@@ -70,17 +88,36 @@
   const tradeDate = {{ (date or '')|tojson }};
   const marketDate = {{ (market_date or '')|tojson }};
   const initialMarketSession = {{ (market_session or {})|tojson }};
+  const strategyProfiles = {{ (strategy_profiles or [])|tojson }};
   const autoRefreshMs = 5000;
   let refreshing = false;
   let marketSession = initialMarketSession;
   let autoRefreshTimer = null;
   let nextOpenTimer = null;
+  let activeProfile = (strategyProfiles.find(item => item.primary && item.available) || strategyProfiles.find(item => item.available) || strategyProfiles[0] || {}).id || 'default';
   const els = {
     overlayCards: document.getElementById('overlay-cards'),
     overlayEmpty: document.getElementById('overlay-empty'),
     refreshAll: document.getElementById('refresh-all'),
     refreshSpin: document.getElementById('refresh-spin')
   };
+
+  async function loadAuctionAlert() {
+    try {
+      const j = await fetchJson(`/api/realtime/auction-alert?market_date=${encodeURIComponent(marketDate)}`, 5000);
+      const rows = j.rows || [];
+      if (!rows.length) return;
+      document.getElementById('auction-alert').classList.remove('hidden');
+      document.getElementById('auction-updated').textContent = (j.generated_at || '').replace('T', ' ');
+      document.getElementById('auction-rows').innerHTML = rows.slice(0, 12).map(row => `
+        <div class="border border-slate-700/70 rounded-md px-3 py-2 min-w-0">
+          <div class="flex items-center gap-2"><strong class="truncate">${esc(row.name || row.code)}</strong><span class="text-xs mono text-slate-500">${esc(row.code)}</span><span class="ml-auto text-xs text-amber-300">${esc(row.category)}</span></div>
+          <div class="text-xs text-slate-400 mt-1">开盘 ${gap(row.open_gap_pct)} · ${esc(row.conclusion)}</div>
+        </div>`).join('');
+    } catch (_) {
+      document.getElementById('auction-alert').classList.add('hidden');
+    }
+  }
 
   function esc(v) {
     return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -154,6 +191,28 @@
     const name = String(row.display_name || row.name || '').trim();
     return name || String(row.code || '--');
   }
+
+  function renderStrategyTabs() {
+    const host = document.getElementById('strategy-tabs');
+    if (!strategyProfiles.length) {
+      host.innerHTML = '<span class="text-sm text-slate-500 px-2 py-1">尚未生成策略候选</span>';
+      return;
+    }
+    host.innerHTML = strategyProfiles.map(item => `
+      <button type="button" data-strategy-profile="${esc(item.id)}"
+              class="rt-strategy-tab ${item.id === activeProfile ? 'active' : ''} ${item.available ? '' : 'disabled'}"
+              ${item.available ? '' : 'disabled'}>
+        <span>${esc(item.name || item.id)}</span>
+        <b class="mono">${Number(item.candidate_count || 0)}</b>
+      </button>`).join('');
+    host.querySelectorAll('[data-strategy-profile]').forEach(button => {
+      button.addEventListener('click', () => {
+        activeProfile = button.dataset.strategyProfile || 'default';
+        renderStrategyTabs();
+        loadCandidateConfirm();
+      });
+    });
+  }
   async function fetchJson(url, timeoutMs) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs || 6000);
@@ -186,6 +245,7 @@
       const params = new URLSearchParams({ limit: '20' });
       if (tradeDate) params.set('date', tradeDate);
       if (marketDate) params.set('market_date', marketDate);
+      if (activeProfile) params.set('profile', activeProfile);
       const j = await fetchJson('/api/realtime/overlay?' + params.toString(), 8000);
       applyMarketSession(j.session || initialMarketSession);
       const rows = j.rows || [];
@@ -196,6 +256,8 @@
       document.getElementById('kpi-cancelled').textContent = counts.cancelled || 0;
       document.getElementById('overlay-source').textContent = j.source || '--';
       document.getElementById('overlay-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
+      const strategy = j.strategy || {};
+      document.getElementById('overlay-title').textContent = `${strategy.name || '候选策略'} · 上一交易日候选 · 当日分钟确认`;
       if (!rows.length) {
         els.overlayCards.innerHTML = '';
         els.overlayEmpty.classList.remove('hidden');
@@ -210,15 +272,18 @@
             </a>
             <span class="rt-status ${esc(r.confirm_status || 'observe')}">${statusText(r.confirm_status)}</span>
           </div>
+          <div class="flex flex-wrap gap-1.5 mt-2"><span class="rt-pill ok">${esc(r.strategy_name || strategy.name || activeProfile)}</span><span class="rt-pill mono">v${esc(r.strategy_version || strategy.version || '--')}</span></div>
           ${renderStockSectorTags(r)}
           <div class="rt-metrics">
             <div class="rt-metric"><span>入场模式</span><strong>${esc(r.entry_mode_text || '等待分类')}</strong></div>
+            <div class="rt-metric"><span>行为阶段</span><strong>${esc(r.behavior_state_label || '状态不明确')}</strong></div>
+            <div class="rt-metric"><span>阶段置信度</span><strong class="mono">${r.behavior_state_probability == null ? '--' : Number(r.behavior_state_probability).toFixed(1) + '%'}</strong></div>
             <div class="rt-metric"><span>开盘</span><strong class="${clsPct(r.open_gap_pct)}">${gap(r.open_gap_pct)}</strong></div>
             <div class="rt-metric"><span>现价</span><strong class="mono">${px(r.last_price, r.pre_close)}</strong></div>
             <div class="rt-metric"><span>涨幅</span><strong class="${clsPct(r.pct_chg)}">${pct(r.pct_chg)}</strong></div>
             <div class="rt-metric"><span>分数</span><strong class="mono">${Number(r.screening_score || 0).toFixed(1)}</strong></div>
-            <div class="rt-metric"><span>历史成功率</span><strong class="mono">${r.success_probability == null ? '--' : Number(r.success_probability).toFixed(1) + '%'}</strong></div>
-            <div class="rt-metric"><span>类似信号</span><strong class="mono">${r.historical_samples == null ? '--' : r.historical_samples + '次'}</strong></div>
+            <div class="rt-metric"><span>历史成功率${r.historical_stats_basis ? ' · ' + esc(r.historical_stats_basis) : ''}</span><strong class="mono">${r.success_probability == null ? '--' : Number(r.success_probability).toFixed(1) + '%'}</strong></div>
+            <div class="rt-metric"><span>同模式历史样本</span><strong class="mono">${r.historical_samples == null ? '--' : r.historical_samples + '次'}</strong></div>
             <div class="rt-metric"><span>平均MFE / MAE</span><strong class="mono">${r.average_mfe_pct == null ? '--' : Number(r.average_mfe_pct).toFixed(1) + '% / ' + Number(r.average_mae_pct || 0).toFixed(1) + '%'}</strong></div>
             <div class="rt-metric"><span>数据完整度</span><strong class="mono">${r.data_completeness == null ? '--' : Number(r.data_completeness).toFixed(0) + '%'}</strong></div>
             <div class="rt-metric"><span>可信等级</span><strong class="mono">${esc(r.confidence_grade || 'D')}</strong></div>
@@ -249,7 +314,9 @@
   document.getElementById('refresh-all').addEventListener('click', refreshAll);
 
   setClock();
+  renderStrategyTabs();
   applyMarketSession(initialMarketSession);
+  loadAuctionAlert();
   refreshAll();
 </script>
 {% endblock %}

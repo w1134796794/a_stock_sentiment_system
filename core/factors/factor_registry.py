@@ -23,6 +23,7 @@ class FactorCategory(Enum):
     SECTOR = "sector"
     STOCK_TECH = "stock_tech"
     MONEYFLOW = "moneyflow"
+    BEHAVIOR = "behavior"
     CROSS_CYCLE = "cross_cycle"
 
 

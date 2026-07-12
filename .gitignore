@@ -24,9 +24,12 @@ htmlcov/
 /webdata/models/
 /webdata/output/
 /webdata/realtime/
+/webdata/reports/
+/webdata/runtime/
 /webdata/screening/
 /webdata/snapshots/
 /webdata/warehouse/
+/webdata/fetch_status/
 /webdata/config_overrides.json
 
 # Mutable runtime databases must stay outside Git. The application initializes

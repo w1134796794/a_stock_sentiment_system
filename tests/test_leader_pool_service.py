@@ -64,6 +64,11 @@ def test_leader_pool_from_screening_json(tmp_path: Path):
     assert result["rows"][0]["source_rank"] == 7
     assert result["rows"][0]["resonance_sectors"] == "光通信"
     assert result["rows"][0]["lifecycle_state"] == "萌芽龙头"
+    assert result["rows"][0]["primary_role"] == "短线龙头"
+    assert {"短线龙头", "板块龙头", "情绪龙头"}.issubset(
+        result["rows"][0]["leader_roles"]
+    )
+    assert result["role_counts"]["短线龙头"] >= 1
     assert all(row["code"] != "000001" for row in result["rows"])
 
 

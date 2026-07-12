@@ -53,17 +53,33 @@ class RealtimeOverlayService:
         market_date = str(market_date or candidate_date)
         rows = list(candidates) if candidates is not None else self._load_candidates(candidate_date, profile=profile)
         rows = self._dedupe_candidates(rows)[: max(int(limit or 20), 1)]
+        strategy = self._strategy_metadata(profile, rows)
         codes = [r["code"] for r in rows if r.get("code")]
 
         quotes = self._quote_map(codes)
-        signals = self.entry_signal_service.evaluate(
-            rows, quotes, market_date=market_date,
-        ) if self.entry_signal_service is not None else {}
+        if self.entry_signal_service is None:
+            signals = {}
+        else:
+            try:
+                signals = self.entry_signal_service.evaluate(
+                    rows, quotes, market_date=market_date, execution=strategy["execution"],
+                )
+            except TypeError:
+                # Lightweight third-party/test signal adapters may predate the strategy contract.
+                signals = self.entry_signal_service.evaluate(rows, quotes, market_date=market_date)
         overlay_rows = []
         for cand in rows:
             quote = quotes.get(cand.get("code") or "", {})
             signal = signals.get(cand.get("code") or "", {})
-            overlay_rows.append(self._build_row(candidate_date, market_date, cand, quote, signal))
+            row = self._build_row(candidate_date, market_date, cand, quote, signal)
+            row.update({
+                "strategy_id": strategy["id"],
+                "strategy_name": strategy["name"],
+                "strategy_version": strategy["version"],
+                "strategy_execution": dict(strategy["execution"]),
+                "position_cap_pct": strategy["position_cap_pct"],
+            })
+            overlay_rows.append(row)
 
         counts = {
             "confirmed": sum(1 for r in overlay_rows if r["confirm_status"] == "confirmed"),
@@ -71,15 +87,16 @@ class RealtimeOverlayService:
             "observe": sum(1 for r in overlay_rows if r["confirm_status"] == "observe"),
             "unfilled": sum(1 for r in overlay_rows if r["confirm_status"] == "unfilled"),
         }
-        screening_exists = self._screening_path(candidate_date, profile).exists()
+        screening_exists = self._screening_path(candidate_date, strategy["id"]).exists()
         payload = {
             "ok": bool(overlay_rows),
             "trade_date": candidate_date,
             "candidate_date": candidate_date,
             "market_date": market_date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "source": "候选日指标筛选" if screening_exists else "候选日指标筛选未生成",
-            "profile": profile or "",
+            "source": f"候选策略 · {strategy['name']}" if screening_exists else "候选策略尚未生成",
+            "profile": strategy["id"],
+            "strategy": strategy,
             "thresholds": {
                 "weak_to_strong": "-3%至+1%",
                 "continuation": "+1%至+5%",
@@ -95,7 +112,9 @@ class RealtimeOverlayService:
     def persist(self, payload: Dict[str, Any]) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         date = str(payload.get("trade_date") or datetime.now().strftime("%Y%m%d"))
-        path = self.output_dir / f"overlay_{date}.json"
+        market_date = str(payload.get("market_date") or date)
+        profile = str(payload.get("profile") or "default")
+        path = self.output_dir / f"overlay_{date}_{market_date}_{profile}.json"
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         return path
 
@@ -112,17 +131,83 @@ class RealtimeOverlayService:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 final = data.get("final") or []
                 if final:
-                    return list(final)
+                    strategy_id = str(data.get("strategy_id") or profile or data.get("profile") or "default")
+                    strategy_name = str(data.get("strategy_name") or strategy_id)
+                    strategy_version = str(data.get("strategy_version") or "")
+                    execution = dict(data.get("strategy_execution") or {})
+                    position_cap_pct = _to_float(data.get("position_cap_pct"))
+                    rows = []
+                    for item in final:
+                        row = dict(item or {})
+                        row.setdefault("strategy_id", strategy_id)
+                        row.setdefault("strategy_name", strategy_name)
+                        row.setdefault("strategy_version", strategy_version)
+                        row.setdefault("strategy_execution", execution)
+                        row.setdefault("position_cap_pct", position_cap_pct)
+                        rows.append(row)
+                    return rows
             except Exception:
                 pass
         return []
 
     def _screening_path(self, trade_date: str, profile: str = "") -> Path:
-        suffix = f"_{profile}" if profile else ""
-        preferred = self.screening_dir / f"screening_{trade_date}{suffix}.json"
-        if preferred.exists():
-            return preferred
+        if profile:
+            combination = self.screening_dir / "combinations" / str(profile) / f"screening_{trade_date}.json"
+            if combination.exists():
+                return combination
+            legacy = self.screening_dir / f"screening_{trade_date}_{profile}.json"
+            if legacy.exists():
+                return legacy
+            if str(profile) != "default":
+                return combination
         return self.screening_dir / f"screening_{trade_date}.json"
+
+    def profile_summaries(self, trade_date: str) -> List[Dict[str, Any]]:
+        """Return strategy tabs with counts without requesting realtime quotes."""
+        try:
+            from core.screening.strategy_profiles import StrategyProfileRepository
+
+            profiles = StrategyProfileRepository().list_profiles(enabled_only=True)
+        except Exception:
+            profiles = []
+        summaries: List[Dict[str, Any]] = []
+        for profile in profiles:
+            path = self._screening_path(trade_date, str(profile.get("id") or ""))
+            payload: Dict[str, Any] = {}
+            if path.exists():
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    payload = {}
+            summaries.append({
+                "id": profile.get("id"),
+                "name": profile.get("name"),
+                "version": profile.get("version"),
+                "execution": profile.get("execution") or {},
+                "candidate_count": len(payload.get("final") or []),
+                "available": bool(payload),
+                "primary": bool(profile.get("primary")),
+            })
+        return summaries
+
+    @staticmethod
+    def _strategy_metadata(profile: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        first = dict(rows[0] or {}) if rows else {}
+        profile_id = str(profile or first.get("strategy_id") or first.get("profile") or "default")
+        try:
+            from core.screening.strategy_profiles import StrategyProfileRepository
+
+            strategy = StrategyProfileRepository().get_profile(profile_id) or {}
+        except Exception:
+            strategy = {}
+        execution = dict(first.get("strategy_execution") or strategy.get("execution") or {})
+        return {
+            "id": profile_id,
+            "name": str(first.get("strategy_name") or strategy.get("name") or profile_id),
+            "version": str(first.get("strategy_version") or strategy.get("version") or ""),
+            "execution": execution,
+            "position_cap_pct": _to_float(first.get("position_cap_pct"), _to_float(strategy.get("position_cap_pct"))),
+        }
 
     def _quote_map(self, codes: List[str]) -> Dict[str, Dict[str, Any]]:
         service = self._ensure_quote_service()
@@ -191,6 +276,7 @@ class RealtimeOverlayService:
             "entry_price": signal.get("entry_price"),
             "success_probability": signal.get("success_probability"),
             "historical_samples": signal.get("historical_samples"),
+            "historical_stats_basis": signal.get("historical_stats_basis") or "",
             "average_mfe_pct": signal.get("average_mfe_pct"),
             "average_mae_pct": signal.get("average_mae_pct"),
             "data_completeness": signal.get("data_completeness"),

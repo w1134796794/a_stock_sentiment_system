@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from core.automation.internal_scheduler import InternalScheduler
+from core.models.health_monitor import ModelHealthMonitor
+from core.notifications.notifier import NotificationService
+from core.realtime.auction_alert_service import AuctionAlertService
+from risk.capital_presets import resolve_capital_preset
+
+
+def test_small_capital_presets_concentrate_without_exceeding_limits():
+    small = resolve_capital_preset(50_000)
+    medium = resolve_capital_preset(200_000)
+    standard = resolve_capital_preset(1_000_000)
+
+    assert small.max_positions == 3
+    assert medium.max_positions == 5
+    assert standard.max_positions == 8
+    assert small.max_position_per_stock > medium.max_position_per_stock > standard.max_position_per_stock
+
+
+def test_auction_gap_classification_is_plain_language():
+    assert AuctionAlertService._classify(-4.0)[0] == "大幅低开"
+    assert AuctionAlertService._classify(0.5)[0] == "弱转强观察"
+    assert AuctionAlertService._classify(3.0)[0] == "强势延续观察"
+    assert AuctionAlertService._classify(7.0)[0] == "高开加速观察"
+    assert AuctionAlertService._classify(None)[0] == "数据不足"
+
+
+def test_realtime_notification_only_sends_confirmed(monkeypatch):
+    service = NotificationService()
+    calls = []
+
+    def fake_send(title, content, **kwargs):
+        calls.append((title, content, kwargs))
+        return {"ok": True, "sent": 1}
+
+    monkeypatch.setattr(service, "send", fake_send)
+    count = service.notify_realtime_payload({
+        "market_date": "20260706",
+        "rows": [
+            {"code": "000001", "name": "测试A", "confirm_status": "confirmed", "entry_mode_text": "弱转强", "pct_chg": 2.3},
+            {"code": "000002", "name": "测试B", "confirm_status": "observe", "entry_mode_text": "观察", "pct_chg": 1.0},
+        ],
+    })
+
+    assert count == 1
+    assert len(calls) == 1
+    assert "弱转强确认" in calls[0][1]
+
+
+def test_internal_scheduler_registers_both_jobs(monkeypatch):
+    monkeypatch.setenv("AUTOMATION_ENABLED", "true")
+    scheduler = InternalScheduler()
+    scheduler.start()
+    try:
+        status = scheduler.status()
+        tags = {tag for job in status["jobs"] for tag in job["tags"]}
+        assert status["running"] is True
+        assert tags == {"auction", "daily"}
+    finally:
+        scheduler.stop()
+
+
+def test_model_health_reports_active_fallback(tmp_path):
+    monitor = ModelHealthMonitor(tmp_path)
+    result = monitor.write({
+        "trade_date": "20260703",
+        "final": [{"confidence_grade": "C"}],
+        "weight_metadata": {
+            "candidate_model_runtime": "fallback_drift",
+            "market_regime": "strong",
+            "feature_drift": {"status": "degraded", "max_psi": 0.4, "max_ks": 0.2},
+        },
+    })
+
+    assert result["status"] == "fallback"
+    assert "IC/IR" in result["message"]
+    assert (tmp_path / "latest.json").exists()
+
+
+def test_model_health_triggers_training_diagnostic_after_three_no_ab_days(tmp_path):
+    monitor = ModelHealthMonitor(tmp_path)
+    for date in ("20260701", "20260702", "20260703"):
+        result = monitor.write({
+            "trade_date": date,
+            "final": [{"confidence_grade": "C"}],
+            "weight_metadata": {"candidate_model_runtime": "fallback_drift"},
+        })
+
+    assert result["no_ab_streak"] == 3
+    assert result["training_diagnostic_triggered"] is True
+    assert "连续3个交易日" in result["training_diagnostic_message"]

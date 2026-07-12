@@ -19,6 +19,12 @@ python-dotenv>=1.0.0
 # 生产环境共享实时缓存、任务状态和分布式锁；未配置 REDIS_URL 时不连接服务。
 redis>=5.0.0
 
+# 可信度校准、LightGBM排序/元标签、HMM市场状态
+scipy>=1.11.0
+scikit-learn>=1.4.0
+lightgbm>=4.3.0
+hmmlearn>=0.3.0
+
 # ===== 桌面管理工具（run_manager.py / 内嵌看板）=====
 # 内嵌的只读看板 + 配置中心仍基于 FastAPI；pywebview 提供本机原生窗口（无需浏览器）
 fastapi>=0.110.0

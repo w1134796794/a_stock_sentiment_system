@@ -26,6 +26,7 @@ from core.screening.screening_engine import ScreeningEngine
 class ETLDailyResult:
     trade_date: str
     prev_trade_date: str = ""
+    stage: str = "full"
     silver_summary: Dict[str, Any] = field(default_factory=dict)
     factor_results: List[Dict[str, Any]] = field(default_factory=list)
     screening: Dict[str, Any] = field(default_factory=dict)
@@ -37,6 +38,16 @@ class ETLDailyResult:
 
     @property
     def ok(self) -> bool:
+        if self.stage == "fetch":
+            return bool(self.silver_summary.get("ready") or self.silver_summary.get("quality_ok"))
+        if self.stage == "factors":
+            return bool(self.factor_results and all(item.get("ok") for item in self.factor_results))
+        if self.stage == "screening":
+            return bool(
+                self.screening.get("ok")
+                and self.gold_summary.get("ok")
+                and self.snapshot_paths
+            )
         return bool(
             self.silver_summary
             and all(item.get("ok") for item in self.factor_results)
@@ -69,19 +80,56 @@ class ETLDailyPipeline:
         self.app_db_path = Path(app_db_path or APP_DB_PATH)
 
     def run(self, trade_date: str, prev_trade_date: str = "", *, profile: str = "default") -> ETLDailyResult:
-        from snapshot import SnapshotWriter
+        """Run all three stages in order for automation and CLI compatibility."""
+        fetched = self.fetch_data(trade_date, prev_trade_date, skip_existing=True)
+        factors = self.compute_factors(trade_date, prev_trade_date, profile=profile)
+        selected = self.run_screening(trade_date, prev_trade_date, profile=profile)
+        # 仅旧的完整流水线保留候选行情兼容缓存。三个独立阶段均不调用此 DataManager 方法。
+        current_codes = [
+            str(item.get("code") or "") for item in selected.screening.get("final") or []
+        ]
+        previous_codes = self._snapshot_plan_codes(prev_trade_date)
+        if hasattr(self.dm, "warm_trade_plan_daily_cache"):
+            selected.plan_cache_summary = self.dm.warm_trade_plan_daily_cache(
+                str(trade_date), current_codes + previous_codes
+            )
+        selected.stage = "full"
+        selected.silver_summary = fetched.silver_summary
+        selected.factor_results = factors.factor_results
+        selected.warnings = fetched.warnings + factors.warnings + selected.warnings
+        return selected
+
+    def fetch_data(
+        self,
+        trade_date: str,
+        prev_trade_date: str = "",
+        *,
+        skip_existing: bool = True,
+    ) -> ETLDailyResult:
+        """Fetch all post-close sources and persist the normalized Silver layer."""
+        from core.etl.stage_status import fetch_status, write_fetch_manifest
 
         trade_date = str(trade_date)
         prev_trade_date = str(prev_trade_date or "")
-        result = ETLDailyResult(trade_date=trade_date, prev_trade_date=prev_trade_date)
+        result = ETLDailyResult(
+            trade_date=trade_date, prev_trade_date=prev_trade_date, stage="fetch"
+        )
+        existing = fetch_status(
+            trade_date, db_path=self.duckdb_path, web_data_dir=self.web_data_dir
+        )
+        if skip_existing and existing.get("complete"):
+            existing["skipped"] = True
+            result.silver_summary = existing
+            logger.info(f"[盘后取数] {trade_date} 本地数据完整，跳过远端接口")
+            return result
 
-        logger.info(f"[数据生成] 开始主流程: {trade_date}, prev={prev_trade_date or '-'}")
-
+        logger.info(f"[盘后取数] 开始: {trade_date}, prev={prev_trade_date or '-'}")
         phase_started = time.monotonic()
-        logger.info(f"[数据生成][Phase1] 数据预取与 Silver 落盘开始: {trade_date}")
         zt_pool = self._safe_df(lambda: self.dm.get_limit_up_pool(trade_date), "今日涨停池")
-        prev_zt_pool = self._safe_df(lambda: self.dm.get_limit_up_pool(prev_trade_date), "昨日涨停池") if prev_trade_date else pd.DataFrame()
-
+        prev_zt_pool = (
+            self._safe_df(lambda: self.dm.get_limit_up_pool(prev_trade_date), "昨日涨停池")
+            if prev_trade_date else pd.DataFrame()
+        )
         dataset = self.data_prep.build(
             trade_date,
             prev_trade_date,
@@ -94,81 +142,202 @@ class ETLDailyPipeline:
             silver_dir=self.web_data_dir / "warehouse" / "silver",
             quality_dir=self.web_data_dir / "etl_quality",
         )
-        result.silver_summary = dict(dataset.meta.get("silver_persist") or {})
-        if not result.silver_summary:
-            result.warnings.append("silver_summary 为空，Phase 1 可能未成功落盘")
-        logger.info(
-            f"[数据生成][Phase1] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
+        persisted = dict(dataset.meta.get("silver_persist") or {})
+        write_fetch_manifest(
+            trade_date,
+            web_data_dir=self.web_data_dir,
+            sources=dataset.meta.get("source_fetch_status") or {},
+            writes=persisted.get("writes") or {},
         )
+        status = fetch_status(
+            trade_date, db_path=self.duckdb_path, web_data_dir=self.web_data_dir
+        )
+        status.update({"persist": persisted, "skipped": False})
+        result.silver_summary = status
+        if not status.get("ready"):
+            result.warnings.append(status.get("message") or "盘后数据不完整")
+        if status.get("source_missing"):
+            result.warnings.append(
+                f"部分增强接口未完成，将在下次取数时重试: {status.get('source_missing')}"
+            )
+        if status.get("write_missing"):
+            result.warnings.append(
+                f"Silver 表未写入 DuckDB: {status.get('write_missing')}"
+            )
+        logger.info(
+            f"[盘后取数] 完成: {trade_date}, ready={status.get('ready')}, "
+            f"耗时={time.monotonic() - phase_started:.1f}s"
+        )
+        return result
 
+    def compute_factors(
+        self,
+        trade_date: str,
+        prev_trade_date: str = "",
+        *,
+        profile: str = "default",
+    ) -> ETLDailyResult:
+        """Compute factors from local Silver data without calling market APIs."""
+        from core.etl.stage_status import fetch_status, require_stage
+
+        trade_date = str(trade_date)
+        prev_trade_date = str(prev_trade_date or "")
+        result = ETLDailyResult(
+            trade_date=trade_date, prev_trade_date=prev_trade_date, stage="factors"
+        )
+        status = fetch_status(
+            trade_date, db_path=self.duckdb_path, web_data_dir=self.web_data_dir
+        )
+        require_stage(status)
+        result.silver_summary = status
+        logger.info(f"[因子计算] 开始: {trade_date}")
         phase_started = time.monotonic()
-        logger.info(f"[数据生成][Phase2] 因子计算开始: {trade_date}")
         factor_results = FactorJobRunner(self.duckdb_path).run(trade_date)
         result.factor_results = [item.to_dict() for item in factor_results]
         failed = [item for item in result.factor_results if not item.get("ok")]
         if failed:
             result.warnings.append(f"因子任务失败: {[item.get('name') for item in failed]}")
+        self._refresh_factor_models(result, trade_date, prev_trade_date, profile)
         logger.info(
-            f"[数据生成][Phase2] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s, "
+            f"[因子计算] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s, "
             f"失败={len(failed)}"
         )
+        return result
 
-        # 分钟成交进度必须来自历史同分钟样本，禁止实时判定使用固定U型假设。
-        try:
-            from core.signals.minute_amount_profile import MinuteAmountProfileTrainer
+    def run_screening(
+        self,
+        trade_date: str,
+        prev_trade_date: str = "",
+        *,
+        profile: str = "default",
+        strategy_ids: Optional[List[str]] = None,
+        primary_strategy: str = "",
+    ) -> ETLDailyResult:
+        """Run screening and snapshots from local factor tables only."""
+        from snapshot import SnapshotWriter
+        from core.etl.stage_status import factor_status, require_stage
 
-            minute_profile = MinuteAmountProfileTrainer().refresh_if_due()
-            if not minute_profile.get("ok"):
-                result.warnings.append(f"分钟成交进度模型不可用: {minute_profile.get('message')}")
-        except Exception as exc:  # noqa: BLE001
-            result.warnings.append(f"分钟成交进度模型训练失败: {exc}")
-            logger.warning(f"[数据生成][分钟成交进度] 训练失败: {exc}")
+        trade_date = str(trade_date)
+        prev_trade_date = str(prev_trade_date or "")
+        result = ETLDailyResult(
+            trade_date=trade_date, prev_trade_date=prev_trade_date, stage="screening"
+        )
+        require_stage(factor_status(trade_date, db_path=self.duckdb_path))
+        from core.screening.strategy_profiles import StrategyProfileRepository
 
-        # 每月首个交易日只使用上一交易日及更早的数据训练，发布本月动态权重。
-        # 训练失败不阻断日常数据生成，筛选会自动回退 YAML 冷启动先验。
-        if prev_trade_date and str(prev_trade_date)[:6] != str(trade_date)[:6]:
-            try:
-                from core.factors.factor_library import FactorLibraryTrainer
-
-                trained = FactorLibraryTrainer(duckdb_path=self.duckdb_path).refresh_if_due(
-                    trade_date, prev_trade_date, profile=profile
-                )
-                if trained:
-                    logger.info(
-                        f"[数据生成][因子库] 本月动态权重已生效: "
-                        f"{trained.get('effective_date')}"
-                    )
-            except Exception as exc:  # noqa: BLE001
-                result.warnings.append(f"动态因子权重训练未完成，使用先验权重: {exc}")
-                logger.warning(f"[数据生成][因子库] 动态权重训练失败，回退先验: {exc}")
+        strategy_repository = StrategyProfileRepository()
+        if strategy_ids is None:
+            enabled_profiles = strategy_repository.list_profiles(enabled_only=True)
+            primary_profile = next((item for item in enabled_profiles if item.get("primary")), None)
+            strategy_ids = [str(item.get("id")) for item in enabled_profiles if item.get("id")]
+            if not strategy_ids:
+                strategy_ids = [str((primary_profile or {}).get("id") or profile)]
+        strategy_ids = strategy_repository.validate_selection(strategy_ids)
+        if primary_strategy not in strategy_ids:
+            primary_strategy = next(
+                (item["id"] for item in strategy_repository.list_profiles(enabled_only=True)
+                 if item.get("primary") and item["id"] in strategy_ids),
+                strategy_ids[0],
+            )
+        logger.info(
+            f"[选股策略] 开始: {trade_date}, combinations={strategy_ids}, "
+            f"primary={primary_strategy}"
+        )
 
         phase_started = time.monotonic()
-        logger.info(f"[数据生成][Phase3] 指标筛选开始: {trade_date}, profile={profile}")
-        screening = ScreeningEngine(
-            duckdb_path=self.duckdb_path,
-            output_dir=self.web_data_dir / "screening",
-        ).run(trade_date, profile=profile, persist=True)
-        result.screening = screening.to_dict()
+        logger.info(f"[选股策略][筛选] 开始: {trade_date}")
+        strategy_results: Dict[str, Dict[str, Any]] = {}
+        screening = None
+        for strategy_id in strategy_ids:
+            strategy_profile = strategy_repository.get_profile(strategy_id) or {}
+            strategy_config = strategy_repository.resolve(strategy_id)
+            output_dir = self.web_data_dir / "screening" / "combinations" / strategy_id
+            current = ScreeningEngine(
+                duckdb_path=self.duckdb_path,
+                output_dir=output_dir,
+            ).run(
+                trade_date,
+                profile=strategy_id,
+                profile_config=strategy_config,
+                persist=True,
+            )
+            payload = current.to_dict()
+            payload["strategy_id"] = strategy_id
+            payload["strategy_name"] = str(strategy_profile.get("name") or strategy_id)
+            payload["strategy_version"] = str(strategy_profile.get("version") or "")
+            payload["strategy_execution"] = dict(strategy_profile.get("execution") or {})
+            payload["position_cap_pct"] = float(strategy_profile.get("position_cap_pct") or 0.0)
+            for bucket_name in ("final", "candidate_pool"):
+                for candidate in payload.get(bucket_name) or []:
+                    if not isinstance(candidate, dict):
+                        continue
+                    candidate["strategy_id"] = strategy_id
+                    candidate["strategy_name"] = payload["strategy_name"]
+                    candidate["strategy_version"] = payload["strategy_version"]
+                    candidate["strategy_execution"] = dict(payload["strategy_execution"])
+                    candidate["position_cap_pct"] = payload["position_cap_pct"]
+            if current.output_path:
+                Path(current.output_path).write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+            strategy_results[strategy_id] = payload
+            logger.info(
+                f"[选股策略][组合] {strategy_id}: ok={current.ok}, "
+                f"候选={len(payload.get('final') or [])}, {current.message}"
+            )
+            if strategy_id == primary_strategy:
+                screening = current
+        if screening is None:
+            raise RuntimeError("未取得主发布策略结果")
+        result.screening = dict(strategy_results[primary_strategy])
+        result.screening["strategy_runs"] = [
+            {
+                "id": strategy_id,
+                "name": payload.get("strategy_name") or strategy_id,
+                "profile": payload.get("profile"),
+                "ok": payload.get("ok"),
+                "message": payload.get("message"),
+                "input_count": payload.get("input_count"),
+                "final_count": len(payload.get("final") or []),
+                "output_path": payload.get("output_path"),
+                "primary": strategy_id == primary_strategy,
+                "weight_source": (payload.get("weight_metadata") or {}).get("requested_weight_source"),
+                "model_type": (payload.get("weight_metadata") or {}).get("model_type"),
+                "fallback_reason": (payload.get("weight_metadata") or {}).get("fallback_reason"),
+            }
+            for strategy_id, payload in strategy_results.items()
+        ]
+        canonical_path = self.web_data_dir / "screening" / f"screening_{trade_date}.json"
+        canonical_path.parent.mkdir(parents=True, exist_ok=True)
+        canonical_path.write_text(
+            json.dumps(result.screening, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        comparison_path = (
+            self.web_data_dir / "screening" / "combinations" / f"strategy_runs_{trade_date}.json"
+        )
+        comparison_path.parent.mkdir(parents=True, exist_ok=True)
+        comparison_path.write_text(
+            json.dumps(
+                {"trade_date": trade_date, "primary": primary_strategy, "results": strategy_results},
+                ensure_ascii=False, indent=2, default=str,
+            ),
+            encoding="utf-8",
+        )
+        result.screening["comparison_path"] = str(comparison_path)
+        try:
+            from core.models.health_monitor import ModelHealthMonitor
+
+            result.screening["model_health"] = ModelHealthMonitor().write(result.screening)
+        except Exception as exc:  # noqa: BLE001
+            result.warnings.append(f"模型健康状态写入失败: {exc}")
         if not screening.ok:
             result.warnings.append(f"筛选失败: {screening.message}")
         logger.info(
-            f"[数据生成][Phase3] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s, "
+            f"[选股策略][筛选] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s, "
             f"候选={len(result.screening.get('final') or [])}"
         )
-
-        # 当前候选与上一交易日计划的当日行情都从 Phase1 全市场日缓存切片落盘。
-        # 后续回测、竞价确认和页面服务不得再为这些股票逐票请求 Tushare daily。
-        current_codes = [str(item.get("code") or "") for item in result.screening.get("final") or []]
-        previous_codes = self._snapshot_plan_codes(prev_trade_date)
-        if hasattr(self.dm, "warm_trade_plan_daily_cache"):
-            result.plan_cache_summary = self.dm.warm_trade_plan_daily_cache(
-                trade_date, current_codes + previous_codes,
-            )
-            logger.info(
-                f"[数据生成][候选行情缓存] {trade_date}: "
-                f"{result.plan_cache_summary.get('cached', 0)}/"
-                f"{result.plan_cache_summary.get('requested', 0)} 只已落本地"
-            )
 
         # 龙头身份按生命周期留痕，历史结果只在未来数据成熟后回填，用于样本外概率校准。
         try:
@@ -182,13 +351,13 @@ class ETLDailyPipeline:
             leader_rows = leader_service.build_pool(trade_date, lookback=20, limit=60).get("rows") or []
             recorded = tracker.record(trade_date, leader_rows)
             matured = tracker.refresh_outcomes(trade_date)
-            logger.info(f"[数据生成][龙头生命周期] 记录={recorded}, 成熟样本回填={matured}")
+            logger.info(f"[选股策略][龙头生命周期] 记录={recorded}, 成熟样本回填={matured}")
         except Exception as exc:  # noqa: BLE001
             result.warnings.append(f"龙头生命周期留痕失败: {exc}")
-            logger.warning(f"[数据生成][龙头生命周期] 失败: {exc}")
+            logger.warning(f"[选股策略][龙头生命周期] 失败: {exc}")
 
         phase_started = time.monotonic()
-        logger.info(f"[数据生成][Phase4] 分析摘要开始: {trade_date}")
+        logger.info(f"[选股策略][分析摘要] 开始: {trade_date}")
         result.gold_summary = build_gold_analysis_summary(
             trade_date,
             duckdb_path=self.duckdb_path,
@@ -196,22 +365,69 @@ class ETLDailyPipeline:
         )
         result.analysis_path = str(self._write_analysis_json(result.gold_summary, self.web_data_dir / "screening", trade_date))
         logger.info(
-            f"[数据生成][Phase4] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
+            f"[选股策略][分析摘要] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
         )
 
         phase_started = time.monotonic()
-        logger.info(f"[数据生成][Phase5] 页面快照开始: {trade_date}")
+        logger.info(f"[选股策略][页面快照] 开始: {trade_date}")
         data_dict = self.build_snapshot_data(result)
         result.snapshot_paths = SnapshotWriter(self.snapshot_dir, self.app_db_path, self.duckdb_path).write(data_dict)
         logger.info(
-            f"[数据生成][Phase5] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
+            f"[选股策略][页面快照] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
         )
 
         logger.info(
-            f"[数据生成] 主流程完成: ok={result.ok}, "
+            f"[选股策略] 完成: ok={result.ok}, "
             f"候选={len(result.screening.get('final') or [])}, snapshot={result.snapshot_paths.get('json', '')}"
         )
         return result
+
+    def _refresh_factor_models(
+        self,
+        result: ETLDailyResult,
+        trade_date: str,
+        prev_trade_date: str,
+        profile: str,
+    ) -> None:
+        """Refresh models that consume factor/Silver history, never remote APIs."""
+        try:
+            from core.signals.minute_amount_profile import MinuteAmountProfileTrainer
+
+            minute_profile = MinuteAmountProfileTrainer().refresh_if_due()
+            if not minute_profile.get("ok"):
+                result.warnings.append(f"分钟成交进度模型不可用: {minute_profile.get('message')}")
+        except Exception as exc:  # noqa: BLE001
+            result.warnings.append(f"分钟成交进度模型训练失败: {exc}")
+            logger.warning(f"[因子计算][分钟成交进度] 训练失败: {exc}")
+
+        if prev_trade_date and str(prev_trade_date)[:6] != str(trade_date)[:6]:
+            try:
+                from core.factors.factor_library import FactorLibraryTrainer
+
+                profiles = [str(profile or "default")]
+                try:
+                    from core.screening.strategy_profiles import StrategyProfileRepository
+
+                    profiles.extend(
+                        str(item.get("weight_profile") or item.get("id") or "")
+                        for item in StrategyProfileRepository().list_profiles(enabled_only=True)
+                        if str(item.get("weight_source") or "").lower() == "lightgbm"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"[因子计算][因子库] 未读取策略模型清单: {exc}")
+                trainer = FactorLibraryTrainer(duckdb_path=self.duckdb_path)
+                for model_profile in dict.fromkeys(item for item in profiles if item):
+                    trained = trainer.refresh_if_due(
+                        trade_date, prev_trade_date, profile=model_profile
+                    )
+                    if trained:
+                        logger.info(
+                            "[因子计算][因子库] 本月动态权重已生效: "
+                            f"profile={model_profile} effective={trained.get('effective_date')}"
+                        )
+            except Exception as exc:  # noqa: BLE001
+                result.warnings.append(f"动态因子权重训练未完成，使用先验权重: {exc}")
+                logger.warning(f"[因子计算][因子库] 动态权重训练失败，回退先验: {exc}")
 
     def build_snapshot_data(self, result: ETLDailyResult) -> Dict[str, Any]:
         screening = result.screening or {}
@@ -284,16 +500,27 @@ class ETLDailyPipeline:
             f"从持仓高点回撤{risk.trailing_stop:.0%}退出；持续上涨继续持有"
         )
         rows = []
-        position = _position_label(market_score)
+        market_regime = str((screening.get("weight_metadata") or {}).get("market_regime") or "")
+        default_position = _position_label(market_score)
         for item in screening.get("final") or []:
             code = str(item.get("code") or "")
             name = str(item.get("name") or "")
             score = _f(item.get("score"))
             reasons = item.get("reasons") or []
+            position_cap = _f(item.get("position_budget_pct"))
+            position = (
+                f"试仓 0%-{position_cap:g}%"
+                if market_regime == "weak" and position_cap > 0
+                else default_position
+            )
             rows.append({
                 "股票代码": code,
                 "股票名称": name,
-                "模式类型": f"指标筛选/{screening.get('profile') or 'default'}",
+                "模式类型": str(
+                    screening.get("strategy_name")
+                    or screening.get("profile")
+                    or "默认短线综合"
+                ),
                 "优先级": item.get("rank"),
                 "综合评分": round(score, 2),
                 "3日强势成功率%": item.get("candidate_probability"),
@@ -301,6 +528,12 @@ class ETLDailyPipeline:
                 "相对基准": item.get("probability_lift"),
                 "3日预期超额收益%": item.get("expected_return_pct"),
                 "止损概率%": item.get("stop_probability"),
+                "成功率80%区间": f"{item.get('probability_ci_low', '--')}% - {item.get('probability_ci_high', '--')}%",
+                "预期超额80%区间": f"{item.get('return_interval_low_pct', '--')}% - {item.get('return_interval_high_pct', '--')}%",
+                "Brier误差": item.get("brier_score"),
+                "校准误差ECE%": item.get("ece"),
+                "模型漂移": item.get("model_drift_status"),
+                "系统结论": item.get("decision_label"),
                 "类似样本": item.get("similar_sample_size"),
                 "可信等级": item.get("confidence_grade") or "D",
                 "建议仓位": position,

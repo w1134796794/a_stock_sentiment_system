@@ -43,9 +43,13 @@
                class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
       </div>
       <div>
-        <label class="block text-[11px] text-slate-500 mb-0.5">初始资金</label>
-        <input id="bt-cap" type="text" placeholder="100000"
-               class="w-28 mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+        <label class="block text-[11px] text-slate-500 mb-0.5">资金预设</label>
+        <select id="bt-cap" class="h-[30px] bg-slate-900 border border-slate-700 rounded-md px-2 text-sm text-slate-300">
+          <option value="50000">5万 · 最多3只</option>
+          <option value="100000" selected>10万 · 最多4只</option>
+          <option value="200000">20万 · 最多5只</option>
+          <option value="1000000">标准 · 最多8只</option>
+        </select>
       </div>
       <div class="relative">
         <label class="block text-[11px] text-slate-500 mb-0.5">回测组合</label>
@@ -74,6 +78,24 @@
           </div>
         </details>
       </div>
+      <div class="relative">
+        <label class="block text-[11px] text-slate-500 mb-0.5">候选策略</label>
+        <details id="bt-strategy-menu" class="relative">
+          <summary class="list-none cursor-pointer h-[30px] min-w-40 px-2 inline-flex items-center justify-between gap-2 rounded-md border border-slate-700 bg-slate-900 text-sm text-slate-300">
+            <span id="bt-strategy-label">默认短线综合</span>
+            <span class="text-slate-500">⌄</span>
+          </summary>
+          <div class="absolute right-0 top-9 z-30 w-56 border border-slate-700 bg-slate-950 shadow-xl rounded-md p-2 space-y-1 max-h-72 overflow-y-auto">
+            {% for profile in strategy_profiles|default([], true) %}
+            <label class="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-slate-800 rounded cursor-pointer">
+              <input type="checkbox" name="bt-strategy" value="{{ profile.id }}"
+                     {% if profile.id == 'default' %}checked{% endif %} class="accent-emerald-500">
+              <span>{{ profile.name }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+      </div>
       <div>
         <label class="block text-[11px] text-slate-500 mb-0.5">入场模型</label>
         <select id="bt-entry-mode" class="h-[30px] bg-slate-900 border border-slate-700 rounded-md px-2 text-sm text-slate-300">
@@ -83,6 +105,14 @@
           <option value="acceleration_only">只做高开加速</option>
           <option value="fixed_gap">原固定区间</option>
           <option value="compare">四组对照</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[11px] text-slate-500 mb-0.5">仓位算法</label>
+        <select id="bt-sizing-mode" class="h-[30px] bg-slate-900 border border-slate-700 rounded-md px-2 text-sm text-slate-300">
+          <option value="fixed_risk" selected>固定账户风险</option>
+          <option value="conservative_kelly">1/4保守凯利</option>
+          <option value="compare">两组对照</option>
         </select>
       </div>
       <div>
@@ -122,6 +152,7 @@
   const resetWrap = document.getElementById('bt-reset-wrap');
   const helpEl = document.getElementById('bt-help');
   const enhancementLabel = document.getElementById('bt-enhancement-label');
+  const strategyLabel = document.getElementById('bt-strategy-label');
   const enhancementNames = {
     capital_flow: '资金流', attention: '热度', leader: '龙头', margin: '融资', risk: '风险'
   };
@@ -144,11 +175,19 @@
   function enhancements() {
     return Array.from(document.querySelectorAll('input[name="bt-enhancement"]:checked')).map(el => el.value);
   }
+  function strategies() {
+    return Array.from(document.querySelectorAll('input[name="bt-strategy"]:checked')).map(el => el.value);
+  }
   document.querySelectorAll('input[name="bt-enhancement"]').forEach(el => el.addEventListener('change', () => {
     const selected = enhancements();
     enhancementLabel.textContent = selected.length
       ? '基线 + ' + selected.map(key => enhancementNames[key]).join(' + ')
       : '基线';
+  }));
+  document.querySelectorAll('input[name="bt-strategy"]').forEach(el => el.addEventListener('change', () => {
+    const selected = strategies();
+    const names = selected.map(id => document.querySelector(`input[name="bt-strategy"][value="${id}"]`)?.parentElement?.innerText?.trim() || id);
+    strategyLabel.textContent = names.length ? names.join(' + ') : '请选择策略';
   }));
   function busy(on) { btn.disabled = on; btn.textContent = on ? '运行中…' : '运行回测'; }
 
@@ -160,7 +199,9 @@
     const body = {
       mode: mode(), initial_capital: val('bt-cap'), risk_control: riskOn,
       max_plan_rank: 0, enhancements: enhancements(),
-      entry_mode: document.getElementById('bt-entry-mode').value
+      entry_mode: document.getElementById('bt-entry-mode').value,
+      position_sizing_mode: document.getElementById('bt-sizing-mode').value,
+      strategy_ids: strategies()
     };
     if (body.mode === 'daily') {
       body.trade_date = val('bt-day');

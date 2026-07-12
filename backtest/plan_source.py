@@ -12,6 +12,11 @@ import pandas as pd
 from core.screening.enhancements import enhancement_label, enhancement_slug, normalize_enhancements
 
 DEFAULT_MAX_BACKTEST_RANK = 0
+ENTRY_MODE_LABELS = {
+    "weak_to_strong": "弱转强",
+    "continuation": "强势延续",
+    "acceleration": "高开加速",
+}
 
 
 def _code6(value: Any) -> str:
@@ -26,6 +31,8 @@ def _position(value: Any) -> str:
     text = str(value or "")
     nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", text)]
     max_pct = max(nums) if nums else 0.0
+    if "试仓" in text or (0 < max_pct <= 8):
+        return "probe"
     if "重" in text or max_pct >= 40:
         return "heavy"
     if "中" in text or max_pct >= 20:
@@ -83,9 +90,18 @@ def _rows_from_snapshot(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _rows_from_screening(
     payload: Dict[str, Any], *, lhb_scenario: str = "", enhancements: Optional[Iterable[str]] = None,
+    strategy_id: str = "", strategy: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     screening = ((payload.get("etl") or {}).get("screening") or {})
     rows = []
+    strategy = dict(strategy or {})
+    resolved_strategy_id = str(strategy_id or screening.get("strategy_id") or screening.get("profile") or "default")
+    strategy_name = str(strategy.get("name") or screening.get("strategy_name") or resolved_strategy_id)
+    strategy_version = str(strategy.get("version") or screening.get("strategy_version") or "")
+    execution = dict(strategy.get("execution") or screening.get("strategy_execution") or {})
+    allowed_modes = [str(item) for item in execution.get("allowed_entry_modes") or []]
+    entry_modes_text = " / ".join(ENTRY_MODE_LABELS.get(item, item) for item in allowed_modes) or "弱转强 / 强势延续"
+    position_cap = _to_number(strategy.get("position_cap_pct"), _to_number(screening.get("position_cap_pct")))
     selected_enhancements = normalize_enhancements(enhancements)
     if enhancements is not None and not lhb_scenario:
         pool = screening.get("candidate_pool") or screening.get("final") or []
@@ -110,11 +126,16 @@ def _rows_from_screening(
         row = {
             "股票代码": item.get("code") or item.get("ts_code"),
             "股票名称": item.get("name"),
-            "模式类型": f"指标筛选/{screening.get('profile') or 'default'}",
+            "模式类型": f"指标筛选/{resolved_strategy_id}",
+            "策略ID": resolved_strategy_id,
+            "策略名称": strategy_name,
+            "策略版本": strategy_version,
+            "策略执行": json.dumps(execution, ensure_ascii=False, sort_keys=True),
+            "策略单票仓位上限%": position_cap,
             "优先级": item.get("rank"),
             "综合评分": item.get("score"),
-            "建议仓位": "中性 20%-30%",
-            "入场区间": "弱转强/强势延续/高开加速按分钟确认",
+            "建议仓位": f"试仓 0%-{position_cap:g}%" if position_cap > 0 else "中性 20%-30%",
+            "入场区间": f"{entry_modes_text}按分钟确认",
             "竞价条件": "开盘仅用于信号分层，10:00前按一分钟行情确认",
             "风险提示": "未确认或信号出现后无可成交分钟则不买入",
             "共振板块": item.get("resonance_sectors") or "",
@@ -196,6 +217,12 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "因子指标": json.dumps(factor_metrics, ensure_ascii=False, sort_keys=True),
         "原始指标": json.dumps(raw_context, ensure_ascii=False, sort_keys=True),
         "回测增强组合": row.get("回测增强组合") or "基线",
+        "策略ID": str(row.get("策略ID") or row.get("strategy_id") or "default"),
+        "策略名称": str(row.get("策略名称") or row.get("strategy_name") or ""),
+        "策略版本": str(row.get("策略版本") or row.get("strategy_version") or ""),
+        "策略执行": str(row.get("策略执行") or row.get("strategy_execution") or ""),
+        "策略单票仓位上限%": _to_number(row.get("策略单票仓位上限%"), _to_number(row.get("position_cap_pct"))),
+        "策略来源": str(row.get("策略来源") or row.get("strategy_sources") or row.get("策略ID") or "default"),
     }
     for factor, value in factor_metrics.items():
         out[f"因子_{factor}"] = value
@@ -239,13 +266,16 @@ def build_backtest_plan_dir(
     max_rank: int = DEFAULT_MAX_BACKTEST_RANK,
     lhb_scenario: str = "",
     enhancements: Optional[Iterable[str]] = None,
+    strategy_ids: Optional[Iterable[str]] = None,
 ) -> Tuple[Path, int, int]:
     """Create a clean plan directory for BacktestEngine from current artifacts.
 
     Returns:
         (plan_dir, file_count, row_count)
     """
-    suffix = f"_{lhb_scenario}" if lhb_scenario else f"_{enhancement_slug(enhancements)}"
+    selected_strategy_ids = list(dict.fromkeys(str(item).strip() for item in strategy_ids or [] if str(item).strip()))
+    strategy_suffix = f"_strategies_{'-'.join(selected_strategy_ids)}" if selected_strategy_ids else ""
+    suffix = f"_{lhb_scenario}" if lhb_scenario else f"_{enhancement_slug(enhancements)}{strategy_suffix}"
     plan_dir = output_dir / f"backtest_trade_plans{suffix}"
     if plan_dir.exists():
         shutil.rmtree(plan_dir)
@@ -271,7 +301,35 @@ def build_backtest_plan_dir(
         rows: List[Dict[str, Any]] = []
         screening = {}
         enhancement_source_found = False
-        if screening_dir:
+        if screening_dir and selected_strategy_ids:
+            try:
+                from core.screening.strategy_profiles import StrategyProfileRepository
+
+                strategy_repository = StrategyProfileRepository()
+            except Exception:
+                strategy_repository = None
+            for strategy_id in selected_strategy_ids:
+                screening_path = Path(screening_dir) / "combinations" / strategy_id / f"screening_{date}.json"
+                # Historical default artifacts predate combination directories. This
+                # compatibility path is intentionally limited to the default strategy.
+                if strategy_id == "default" and not screening_path.exists():
+                    screening_path = Path(screening_dir) / f"screening_{date}.json"
+                screening = _load_json(screening_path)
+                if not screening:
+                    continue
+                enhancement_source_found = True
+                if selected_enhancements and not _has_enhancement_data(screening, selected_enhancements):
+                    missing_enhancement_dates.append(date)
+                    rows = []
+                    break
+                rows.extend(_rows_from_screening(
+                    {"etl": {"screening": screening}}, lhb_scenario=lhb_scenario,
+                    enhancements=enhancements, strategy_id=strategy_id,
+                    strategy=(strategy_repository.get_profile(strategy_id) if strategy_repository else None),
+                ))
+            if selected_enhancements and date in missing_enhancement_dates:
+                continue
+        elif screening_dir:
             screening_path = Path(screening_dir) / f"screening_{date}.json"
             screening = _load_json(screening_path)
             enhancement_source_found = bool(screening)
@@ -282,7 +340,7 @@ def build_backtest_plan_dir(
                 {"etl": {"screening": screening}}, lhb_scenario=lhb_scenario,
                 enhancements=enhancements,
             )
-        if not rows:
+        if not rows and not selected_strategy_ids:
             embedded = ((payload.get("etl") or {}).get("screening") or {})
             enhancement_source_found = enhancement_source_found or bool(embedded)
             if selected_enhancements and embedded and not _has_enhancement_data(embedded, selected_enhancements):
@@ -299,7 +357,7 @@ def build_backtest_plan_dir(
             rows = [row for row in rows if (_rank_value(row) or 999999) <= max_rank]
         bt_rows = [x for x in (_to_backtest_row(row) for row in rows) if x]
 
-        if not bt_rows and screening_dir:
+        if not bt_rows and screening_dir and not selected_strategy_ids:
             screening_path = Path(screening_dir) / f"screening_{date}.json"
             screening = _load_json(screening_path)
             fallback_payload = {"etl": {"screening": screening}}
@@ -317,10 +375,18 @@ def build_backtest_plan_dir(
         df = pd.DataFrame(bt_rows)
         if "优先级" in df.columns:
             df["_rank"] = pd.to_numeric(df["优先级"], errors="coerce").fillna(999999)
-            df = df.sort_values(["_rank", "综合评分"], ascending=[True, False]).drop(columns=["_rank"])
+            df = df.sort_values(["综合评分", "_rank"], ascending=[False, True]).drop(columns=["_rank"])
+        if selected_strategy_ids and "代码" in df.columns:
+            from core.portfolio.strategy_allocator import StrategyPortfolioAllocator
+
+            # The allocator is the sole place where multi-strategy overlap and
+            # concentration are reconciled before the execution engine sees plans.
+            df = pd.DataFrame(StrategyPortfolioAllocator().allocate(df.to_dict("records")))
+            if df.empty:
+                continue
         df.to_csv(plan_dir / f"交易计划_{date}.csv", index=False, encoding="utf-8-sig")
         file_count += 1
-        row_count += len(bt_rows)
+        row_count += len(df)
 
     if missing_enhancement_dates:
         preview = ", ".join(missing_enhancement_dates[:8])

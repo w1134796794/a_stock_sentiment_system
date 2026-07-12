@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from config.settings import CACHE_DIR
+from core.factors.behavior_cycle import BEHAVIOR_STATES, stock_behavior_cycle
 
 from core.factors.jobs.gold_utils import (
     FactorJobResult,
@@ -21,6 +22,14 @@ from core.factors.jobs.gold_utils import (
     now_iso,
 )
 from core.utils.price_limit import get_price_limit_pct_points, limit_progress
+from core.factors.jobs.stock_advanced import (
+    crowding_metrics,
+    late_seal_safety,
+    relative_sector_strength,
+    reseal_resilience,
+    seal_quality,
+    sector_rotation_metrics,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +159,13 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
         "sector_resonance_score": 50.0,
         "sector_flow_score": 50.0,
         "resonance_sectors": "",
+        "primary_sector_code": "",
+        "primary_sector_name": "",
+        "sector_behavior_dominant_state": "",
+        "sector_behavior_dominant_label": "",
     }
+    for state in BEHAVIOR_STATES:
+        neutral[f"sector_behavior_{state}_score"] = 50.0
     if not sector_scores:
         return neutral
     code6 = str(code or "").split(".")[0].zfill(6)
@@ -176,12 +191,19 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
         amount = to_float(values.get("amount_score"), 50.0)
         amount_ratio = to_float(values.get("amount_ratio_score"), 50.0)
         matched.append({
+            "code": sector_code,
             "name": str(values.get("sector_name") or row.get("name") or sector_code),
             "type": sector_type,
             "heat": safe_weighted_score([(momentum, 0.55), (amount, 0.25), (amount_ratio, 0.20)]),
             "persistence": to_float(values.get("persistence_score"), 50.0),
             "mainline": to_float(values.get("mainline_score"), 50.0),
             "flow": to_float(values.get("sector_flow_score"), 50.0),
+            "behavior": {
+                state: to_float(values.get(f"behavior_{state}_score"), 50.0)
+                for state in BEHAVIOR_STATES
+            },
+            "behavior_state": str(values.get("behavior_dominant_state") or ""),
+            "behavior_label": str(values.get("behavior_dominant_label") or ""),
         })
     if not matched:
         return neutral
@@ -198,14 +220,23 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
     resonance = safe_weighted_score([
         (heat, 0.30), (persistence, 0.25), (mainline, 0.35), (dual_resonance, 0.10),
     ])
-    return {
+    result = {
         "sector_heat_score": round(heat, 4),
         "sector_persistence_score": round(persistence, 4),
         "sector_mainline_score": round(mainline, 4),
         "sector_resonance_score": round(resonance, 4),
         "sector_flow_score": round(sector_flow, 4),
         "resonance_sectors": ",".join(item["name"] for item in leaders),
+        "primary_sector_code": str(leaders[0].get("code") or ""),
+        "primary_sector_name": str(leaders[0].get("name") or ""),
+        "sector_behavior_dominant_state": str(leaders[0].get("behavior_state") or ""),
+        "sector_behavior_dominant_label": str(leaders[0].get("behavior_label") or ""),
     }
+    for state in BEHAVIOR_STATES:
+        result[f"sector_behavior_{state}_score"] = round(
+            sum(item["behavior"][state] for item in leaders) / len(leaders), 4,
+        )
+    return result
 
 
 class StockFactorJob:
@@ -220,7 +251,7 @@ class StockFactorJob:
             days=21,
             columns=(
                 "trade_date", "code", "ts_code", "name", "pct_chg", "vol_hand",
-                "amount_yuan", "high", "close", "pre_close", "circ_mv",
+                "amount_yuan", "open", "high", "close", "pre_close", "circ_mv",
             ),
         )
         if stock.empty:
@@ -229,7 +260,7 @@ class StockFactorJob:
             return result
 
         stock["trade_date"] = stock["trade_date"].astype(str)
-        for col in ("pct_chg", "vol_hand", "amount_yuan", "high", "close", "pre_close"):
+        for col in ("pct_chg", "vol_hand", "amount_yuan", "open", "high", "close", "pre_close"):
             stock[col] = pd.to_numeric(stock.get(col), errors="coerce").fillna(0)
         stock = stock.sort_values(["code", "trade_date"])
         today = stock[stock["trade_date"] == str(trade_date)].copy()
@@ -331,9 +362,51 @@ class StockFactorJob:
         for key in (
             "sector_heat_score", "sector_persistence_score", "sector_mainline_score",
             "sector_resonance_score", "resonance_sectors",
-            "sector_flow_score",
+            "sector_flow_score", "primary_sector_code", "primary_sector_name",
+            "sector_behavior_dominant_state", "sector_behavior_dominant_label",
+            *[f"sector_behavior_{state}_score" for state in BEHAVIOR_STATES],
         ):
             today[key] = [item[key] for item in sector_values]
+
+        sector_history = read_recent_trade_dates(
+            con,
+            "factor_sector_wide",
+            trade_date,
+            days=6,
+            columns=(
+                "trade_date", "sector_code", "momentum_score", "mainline_score",
+            ),
+        )
+        rotation_by_sector = sector_rotation_metrics(sector_history)
+        rotation_values = [
+            rotation_by_sector.get(str(code).split(".")[0], {})
+            for code in today["primary_sector_code"]
+        ]
+        today["sector_rotation_momentum_score"] = [
+            item.get("score", 50.0) for item in rotation_values
+        ]
+        today["sector_rotation_age"] = [item.get("age", 0.0) for item in rotation_values]
+        today["sector_rotation_acceleration"] = [
+            item.get("acceleration", 0.0) for item in rotation_values
+        ]
+
+        limit_history = read_recent_trade_dates(
+            con,
+            "limit_up_pool_silver",
+            trade_date,
+            days=5,
+            columns=(
+                "trade_date", "code", "limit_times", "first_time", "last_time", "open_times",
+            ),
+        )
+        crowding_by_code = crowding_metrics(limit_history)
+        crowding_values = [crowding_by_code.get(str(code), {}) for code in today["code"].astype(str)]
+        today["crowding_decay_5d_score"] = [item.get("score", 50.0) for item in crowding_values]
+        today["limit_appearances_5d"] = [item.get("appearances", 0.0) for item in crowding_values]
+
+        relative = relative_sector_strength(today)
+        today["relative_strength_sector_raw"] = relative["relative_strength_sector_raw"]
+        today["relative_strength_sector_score"] = relative["relative_strength_sector_score"]
 
         lhb_frame = read_table(
             con, "factor_lhb_stock_wide", where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)]
@@ -431,6 +504,68 @@ class StockFactorJob:
             ]) if row.board_height > 0 else 50.0
             for row in today.itertuples()
         ]
+        seal_values = [
+            seal_quality(pool_by_code.get(str(row.get("code") or "")) or {}, row.get("amount_yuan"))
+            for _, row in today.iterrows()
+        ]
+        today["intraday_seal_quality_score"] = [value[0] for value in seal_values]
+        today["sealed_order_amount_ratio"] = [value[1] for value in seal_values]
+        prior_first_times: dict[str, list[str]] = {}
+        if not limit_history.empty:
+            prior_rows = limit_history[limit_history["trade_date"].astype(str) < str(trade_date)]
+            for code, rows in prior_rows.groupby(prior_rows["code"].astype(str).str.zfill(6)):
+                prior_first_times[str(code)] = list(rows["first_time"])
+        reseal_scores = []
+        late_seal_scores = []
+        late_seal_delays = []
+        behavior_rows = []
+        for _, row in today.iterrows():
+            code = str(row.get("code") or "")
+            pool = pool_by_code.get(code) or {}
+            reseal_score = reseal_resilience(pool)
+            late_score, late_delay = late_seal_safety(pool, prior_first_times.get(code, []))
+            reseal_scores.append(reseal_score)
+            late_seal_scores.append(late_score)
+            late_seal_delays.append(late_delay)
+            pre_close = to_float(row.get("pre_close"), 0.0)
+            open_gap = (
+                (to_float(row.get("open"), pre_close) / pre_close - 1.0) * 100.0
+                if pre_close > 0 else 0.0
+            )
+            behavior_rows.append(stock_behavior_cycle(
+                open_gap_pct=open_gap,
+                close_pct_chg=row.get("pct_chg"),
+                amount_ratio=row.get("amount_ratio"),
+                amount_ratio_score=row.get("amount_ratio_score"),
+                relative_strength_score=row.get("relative_strength_sector_score"),
+                seal_quality_score=row.get("intraday_seal_quality_score"),
+                reseal_resilience_score=reseal_score,
+                crowding_safety_score=row.get("crowding_decay_5d_score"),
+                late_seal_safety_score=late_score,
+                board_score=row.get("board_score"),
+                sector_states={
+                    state: row.get(f"sector_behavior_{state}_score", 50.0)
+                    for state in BEHAVIOR_STATES
+                },
+            ))
+        today["reseal_resilience_score"] = reseal_scores
+        today["late_seal_safety_score"] = late_seal_scores
+        today["late_seal_delay_minutes"] = late_seal_delays
+        for state in BEHAVIOR_STATES:
+            today[f"behavior_{state}_score"] = [item["scores"][state] for item in behavior_rows]
+            today[f"behavior_{state}_probability"] = [
+                item["probabilities"][state] for item in behavior_rows
+            ]
+        today["behavior_repair_quality_score"] = [
+            item["atomic"]["repair_quality"] for item in behavior_rows
+        ]
+        today["behavior_divergence_resilience_score"] = [
+            item["atomic"]["divergence_resilience"] for item in behavior_rows
+        ]
+        today["behavior_dominant_state"] = [item["dominant_state"] for item in behavior_rows]
+        today["behavior_dominant_label"] = [item["dominant_label"] for item in behavior_rows]
+        today["behavior_dominant_probability"] = [item["dominant_probability"] for item in behavior_rows]
+        today["behavior_data_completeness"] = [item["data_completeness"] for item in behavior_rows]
 
         today["total_score"] = [
             safe_weighted_score([
@@ -463,10 +598,47 @@ class StockFactorJob:
             "sector_resonance_score",
             "sector_flow_score",
             "resonance_sectors",
+            "primary_sector_code",
+            "primary_sector_name",
+            "sector_behavior_dominant_state",
+            "sector_behavior_dominant_label",
+            "sector_behavior_attention_score",
+            "sector_behavior_acceleration_score",
+            "sector_behavior_divergence_score",
+            "sector_behavior_repair_score",
+            "sector_behavior_decay_score",
+            "sector_rotation_momentum_score",
+            "sector_rotation_age",
+            "sector_rotation_acceleration",
+            "crowding_decay_5d_score",
+            "limit_appearances_5d",
+            "relative_strength_sector_raw",
+            "relative_strength_sector_score",
             "board_score",
             "board_height",
             "board_height_score",
             "seal_time_score",
+            "intraday_seal_quality_score",
+            "sealed_order_amount_ratio",
+            "reseal_resilience_score",
+            "late_seal_safety_score",
+            "late_seal_delay_minutes",
+            "behavior_attention_score",
+            "behavior_acceleration_score",
+            "behavior_divergence_score",
+            "behavior_repair_score",
+            "behavior_decay_score",
+            "behavior_attention_probability",
+            "behavior_acceleration_probability",
+            "behavior_divergence_probability",
+            "behavior_repair_probability",
+            "behavior_decay_probability",
+            "behavior_repair_quality_score",
+            "behavior_divergence_resilience_score",
+            "behavior_dominant_state",
+            "behavior_dominant_label",
+            "behavior_dominant_probability",
+            "behavior_data_completeness",
             "float_mv",
             "float_mv_fit_score",
             "lhb_present",
@@ -592,6 +764,26 @@ class StockFactorJob:
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_intraday_seal_quality", raw_value=row["sealed_order_amount_ratio"],
+                    score=row["intraday_seal_quality_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_sector_rotation_momentum", raw_value=row["sector_rotation_age"],
+                    score=row["sector_rotation_momentum_score"], direction="target_range",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_crowding_decay_5d", raw_value=row["limit_appearances_5d"],
+                    score=row["crowding_decay_5d_score"], direction="target_range",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_relative_strength_sector", raw_value=row["relative_strength_sector_raw"],
+                    score=row["relative_strength_sector_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_lhb_net_buy_score", raw_value=row["lhb_net_buy_ratio"],
                     score=row["lhb_net_buy_score"], direction="higher_better",
                 ),
@@ -667,6 +859,14 @@ class StockFactorJob:
                     rank_value=row["rank"], direction="higher_better",
                 ),
             ])
+            for state in BEHAVIOR_STATES:
+                records.append(make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id=f"stk_behavior_{state}",
+                    raw_value=row[f"behavior_{state}_probability"],
+                    score=row[f"behavior_{state}_score"],
+                    direction="lower_better" if state == "decay" else "higher_better",
+                ))
         long = long_records_to_frame(records)
 
         result.rows["factor_stock_wide"] = write_replace_partition(

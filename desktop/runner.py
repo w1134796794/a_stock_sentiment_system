@@ -1,7 +1,7 @@
-"""在管理工具进程内执行「数据生成」，并把日志实时缓冲给前端轮询。
+"""在管理工具进程内执行盘后三阶段任务，并把日志实时缓冲给前端轮询。
 
 设计要点：
-  - 单例 ``CONTROLLER``：同一时刻只允许一个分析在跑。
+  - 取数、因子、选股各自保存状态，共用任务锁，同一时刻只允许一个阶段运行。
   - 分析在后台线程里直接调用 ``main.SentimentSystem``（与命令行 ``python main.py``
     等价），因此打包成 exe 后无需再依赖外部 Python 解释器。
   - 同时捕获两路输出：loguru 日志 + 普通 ``print``，统一写入行缓冲。
@@ -17,7 +17,7 @@ import threading
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.infrastructure.shared_state import TaskLease, TaskStateStore
 
@@ -130,11 +130,22 @@ def _normalize_date(value: Optional[str]) -> Optional[str]:
 
 
 class RunController:
-    """单例分析控制器。"""
+    """盘后单阶段任务控制器。"""
 
-    def __init__(self) -> None:
+    STAGES = {
+        "fetch": ("盘后取数", "fetch_post_close_data", "盘后原始数据与 Silver 标准层已就绪"),
+        "factors": ("因子计算", "run_factor_calculation", "因子宽表与长表已生成"),
+        "screening": ("选股策略", "run_screening_strategy", "候选池、分析摘要和页面快照已生成"),
+        "full": ("完整流水线", "run_daily_analysis", "取数、因子和选股三个阶段已完成"),
+    }
+
+    def __init__(self, stage: str = "full") -> None:
+        if stage not in self.STAGES:
+            raise ValueError(f"未知任务阶段: {stage}")
+        self.stage = stage
+        self.stage_label, self.stage_method, self.stage_done = self.STAGES[stage]
         self._lock = threading.Lock()
-        self._store = TaskStateStore("data_generation")
+        self._store = TaskStateStore(f"pipeline_{stage}")
         self.buffer = LogBuffer(self._store)
         self._lease: Optional[TaskLease] = None
         self.state: str = "idle"  # idle / running / done / partial / error
@@ -145,22 +156,23 @@ class RunController:
         self.total: int = 0
         self.completed: int = 0
         self.failed: List[str] = []
+        self.options: Dict[str, Any] = {}
         self.started_at: Optional[str] = None
         self.finished_at: Optional[str] = None
         self.error: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
 
     # ---- 对外 API -----------------------------------------------------
-    def start(self, date: Optional[str]) -> Tuple[bool, str]:
+    def start(self, date: Optional[str], options: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         date = (date or "").strip() or None
         with self._lock:
             if self.state == "running":
                 return False, "已有分析任务在运行中，请等待完成。"
             from config.settings import TASK_LOCK_TTL_SECONDS
 
-            lease = TaskLease.acquire("data_generation", TASK_LOCK_TTL_SECONDS)
+            lease = TaskLease.acquire("post_close_pipeline", TASK_LOCK_TTL_SECONDS)
             if lease is None:
-                return False, "已有其他 Web Worker 启动了数据生成任务，请等待完成。"
+                return False, "已有盘后任务正在运行，请等待完成。"
             self._lease = lease
             self.buffer.clear()
             self.state = "running"
@@ -172,16 +184,22 @@ class RunController:
             self.total = 1
             self.completed = 0
             self.failed = []
+            self.options = dict(options or {})
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(date,), daemon=True, name="analysis-run"
+                target=self._worker, args=(date, self.options), daemon=True, name="analysis-run"
             )
             self._publish_state()
             self._thread.start()
-        return True, "已启动分析任务。"
+        return True, f"已启动{self.stage_label}任务。"
 
-    def start_batch(self, start_date: Optional[str], end_date: Optional[str]) -> Tuple[bool, str]:
+    def start_batch(
+        self,
+        start_date: Optional[str],
+        end_date: Optional[str],
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str]:
         start = _normalize_date(start_date)
         end = _normalize_date(end_date)
         if not start or not end:
@@ -194,9 +212,9 @@ class RunController:
                 return False, "已有分析任务在运行中，请等待完成。"
             from config.settings import TASK_LOCK_TTL_SECONDS
 
-            lease = TaskLease.acquire("data_generation", TASK_LOCK_TTL_SECONDS)
+            lease = TaskLease.acquire("post_close_pipeline", TASK_LOCK_TTL_SECONDS)
             if lease is None:
-                return False, "已有其他 Web Worker 启动了数据生成任务，请等待完成。"
+                return False, "已有盘后任务正在运行，请等待完成。"
             self._lease = lease
             self.buffer.clear()
             self.state = "running"
@@ -208,19 +226,24 @@ class RunController:
             self.total = 0
             self.completed = 0
             self.failed = []
+            self.options = dict(options or {})
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._batch_worker, args=(start, end), daemon=True, name="analysis-batch-run"
+                target=self._batch_worker,
+                args=(start, end, self.options),
+                daemon=True,
+                name="analysis-batch-run",
             )
             self._publish_state()
             self._thread.start()
-        return True, f"已启动历史批量生成：{start} ~ {end}。"
+        return True, f"已启动{self.stage_label}批量任务：{start} ~ {end}。"
 
     def status(self, since: int = 0) -> Dict:
         lines, nxt = self.buffer.read_from(since)
         current = {
             "state": self.state,
+            "stage": self.stage,
             "mode": self.mode,
             "date": self.date,
             "start_date": self.start_date,
@@ -228,6 +251,7 @@ class RunController:
             "total": self.total,
             "completed": self.completed,
             "failed": list(self.failed),
+            "options": dict(self.options),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
@@ -245,6 +269,7 @@ class RunController:
     def _publish_state(self) -> None:
         self._store.save({
             "state": self.state,
+            "stage": self.stage,
             "mode": self.mode,
             "date": self.date,
             "start_date": self.start_date,
@@ -252,6 +277,7 @@ class RunController:
             "total": self.total,
             "completed": self.completed,
             "failed": list(self.failed),
+            "options": dict(self.options),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
@@ -263,7 +289,7 @@ class RunController:
             lease.release()
 
     # ---- 内部实现 -----------------------------------------------------
-    def _worker(self, date: Optional[str]) -> None:
+    def _worker(self, date: Optional[str], options: Optional[Dict[str, Any]] = None) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -278,12 +304,14 @@ class RunController:
         sys.stdout = _StreamTee(old_out, self.buffer)
         sys.stderr = _StreamTee(old_err, self.buffer)
         try:
-            self.buffer.append_line(f"=== 开始指标数据生成 · 日期={date or '今日(自动取最近交易日)'} ===")
+            self.buffer.append_line(
+                f"=== 开始{self.stage_label} · 日期={date or '今日(自动取最近交易日)'} ==="
+            )
             from main import SentimentSystem  # 惰性导入重依赖
 
             system = SentimentSystem()
-            system.run_daily_analysis(date)
-            self.buffer.append_line("=== 指标数据生成完成，数据仓库、候选池和快照已生成 ===")
+            getattr(system, self.stage_method)(date, **dict(options or {}))
+            self.buffer.append_line(f"=== {self.stage_done} ===")
             self.state = "done"
             self._publish_state()
         except Exception as exc:  # noqa: BLE001
@@ -302,7 +330,12 @@ class RunController:
             self._publish_state()
             self._finish_lease()
 
-    def _batch_worker(self, start_date: str, end_date: str) -> None:
+    def _batch_worker(
+        self,
+        start_date: str,
+        end_date: str,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -325,7 +358,8 @@ class RunController:
             self.total = len(trade_dates)
             self._publish_state()
             self.buffer.append_line(
-                f"=== 开始历史批量生成 · {start_date} ~ {end_date} · 交易日 {len(trade_dates)} 个 ==="
+                f"=== 开始{self.stage_label}批量任务 · {start_date} ~ {end_date} "
+                f"· 交易日 {len(trade_dates)} 个 ==="
             )
             if not trade_dates:
                 raise RuntimeError("区间内没有可运行的交易日，请检查日期范围。")
@@ -338,7 +372,7 @@ class RunController:
                 def heartbeat(current_date=trade_date, started=date_started):
                     while not heartbeat_stop.wait(60.0):
                         loguru.logger.info(
-                            f"[批量生成] {current_date} 仍在运行，累计耗时 "
+                            f"[{self.stage_label}] {current_date} 仍在运行，累计耗时 "
                             f"{time.monotonic() - started:.0f}s"
                         )
 
@@ -351,7 +385,7 @@ class RunController:
                 self.buffer.append_line("")
                 self.buffer.append_line(f"--- [{idx}/{len(trade_dates)}] {trade_date} 开始 ---")
                 try:
-                    system.run_daily_analysis(trade_date)
+                    getattr(system, self.stage_method)(trade_date, **dict(options or {}))
                     self.completed = idx
                     self.date = trade_date
                     self._publish_state()
@@ -375,11 +409,16 @@ class RunController:
                     heartbeat_thread.join(timeout=0.2)
 
             if failures:
-                self.error = f"批量生成完成，失败 {len(failures)} 个交易日: {', '.join(failures)}"
-                self.buffer.append_line(f"=== 历史批量生成结束：成功 {len(trade_dates) - len(failures)}，失败 {len(failures)} ===")
+                self.error = f"批量任务完成，失败 {len(failures)} 个交易日: {', '.join(failures)}"
+                self.buffer.append_line(
+                    f"=== {self.stage_label}批量任务结束：成功 "
+                    f"{len(trade_dates) - len(failures)}，失败 {len(failures)} ==="
+                )
                 self.state = "partial"
             else:
-                self.buffer.append_line(f"=== 历史批量生成完成：{len(trade_dates)} 个交易日全部成功 ===")
+                self.buffer.append_line(
+                    f"=== {self.stage_label}批量任务完成：{len(trade_dates)} 个交易日全部成功 ==="
+                )
                 self.state = "done"
             self._publish_state()
         except Exception as exc:  # noqa: BLE001
@@ -456,7 +495,9 @@ class BacktestController:
               trade_date: Optional[str] = None,
               reset_state: object = False,
               enhancements: object = None,
-              entry_mode: object = "hybrid") -> Tuple[bool, str]:
+              entry_mode: object = "hybrid",
+              position_sizing_mode: object = "fixed_risk",
+              strategy_ids: object = None) -> Tuple[bool, str]:
         from core.screening.enhancements import enhancement_label, normalize_enhancements
         from backtest.minute_entry import ENTRY_COMPARE, ENTRY_HYBRID, ENTRY_MODES
 
@@ -465,6 +506,19 @@ class BacktestController:
         selected_entry_mode = str(entry_mode or ENTRY_HYBRID).strip().lower()
         if selected_entry_mode not in ENTRY_MODES:
             selected_entry_mode = ENTRY_HYBRID
+        selected_sizing_mode = str(position_sizing_mode or "fixed_risk").strip().lower()
+        if selected_sizing_mode not in {"fixed_risk", "conservative_kelly", "compare"}:
+            selected_sizing_mode = "fixed_risk"
+        try:
+            from core.screening.strategy_profiles import StrategyProfileRepository
+
+            selected_strategy_ids = StrategyProfileRepository().validate_selection(
+                strategy_ids if isinstance(strategy_ids, (list, tuple, set)) else []
+            )
+        except Exception:
+            selected_strategy_ids = ["default"]
+        if not selected_strategy_ids:
+            selected_strategy_ids = ["default"]
         start_date = (str(start_date).strip() if start_date else "") or None
         end_date = (str(end_date).strip() if end_date else "") or None
         trade_date = (str(trade_date).strip() if trade_date else "") or None
@@ -473,6 +527,8 @@ class BacktestController:
             mode = "range"
         if mode == "daily" and selected_entry_mode == ENTRY_COMPARE:
             selected_entry_mode = ENTRY_HYBRID
+        if mode == "daily" and selected_sizing_mode == "compare":
+            selected_sizing_mode = "fixed_risk"
         try:
             capital = float(initial_capital) if initial_capital not in (None, "") else 100000.0
         except (TypeError, ValueError):
@@ -507,12 +563,14 @@ class BacktestController:
                     "reset_state": bool(reset_state),
                     "enhancements": selected_enhancements,
                     "entry_mode": selected_entry_mode,
+                    "position_sizing_mode": selected_sizing_mode,
+                    "strategy_ids": selected_strategy_ids,
                 }
                 self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.finished_at = None
                 self._thread = threading.Thread(
                     target=self._worker_daily,
-                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements, selected_entry_mode),
+                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_strategy_ids),
                     daemon=True,
                     name="backtest-run-daily",
                 )
@@ -520,7 +578,10 @@ class BacktestController:
                 self._thread.start()
             mode_txt = "开启风控" if risk_on else "关闭风控"
             reset_txt = "重置接力账户" if reset_state else "承接上一交易日账户"
-            return True, f"已启动单日接力回测：{target}（{combination_label}，{mode_txt}，{reset_txt}）"
+            return True, (
+                f"已启动单日接力回测：{target}（策略 {', '.join(selected_strategy_ids)}，"
+                f"{combination_label}，{mode_txt}，{reset_txt}）"
+            )
 
         # 默认区间：结束=今日，开始=结束前 90 天（交易日历会自动剔除非交易日）
         end = end_date or datetime.now().strftime("%Y%m%d")
@@ -542,16 +603,21 @@ class BacktestController:
                            "initial_capital": capital, "risk_control": risk_on,
                            "max_plan_rank": max_rank, "enhancements": selected_enhancements}
             self.params["entry_mode"] = selected_entry_mode
+            self.params["position_sizing_mode"] = selected_sizing_mode
+            self.params["strategy_ids"] = selected_strategy_ids
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode),
+                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_strategy_ids),
                 daemon=True, name="backtest-run"
             )
             self._publish_state()
             self._thread.start()
         mode = "开启风控" if risk_on else "关闭风控"
-        return True, f"已启动回测：{start} ~ {end}（{combination_label}，{mode}）"
+        return True, (
+            f"已启动回测：{start} ~ {end}（策略 {', '.join(selected_strategy_ids)}，"
+            f"{combination_label}，{mode}）"
+        )
 
     def status(self, since: int = 0) -> Dict:
         lines, nxt = self.buffer.read_from(since)
@@ -574,7 +640,9 @@ class BacktestController:
 
     def _worker(self, start: str, end: str, capital: float,
                 risk_control: bool = True, max_plan_rank: int = 0,
-                enhancements: object = None, entry_mode: str = "hybrid") -> None:
+                enhancements: object = None, entry_mode: str = "hybrid",
+                position_sizing_mode: str = "fixed_risk",
+                strategy_ids: Optional[List[str]] = None) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -590,8 +658,10 @@ class BacktestController:
             from core.screening.enhancements import enhancement_label, normalize_enhancements
             selected_enhancements = normalize_enhancements(enhancements)
             combination_label = enhancement_label(selected_enhancements)
+            selected_strategy_ids = list(strategy_ids or ["default"])
             self.buffer.append_line(
-                f"=== 开始回测 · {start} ~ {end} · {combination_label} · 初始资金 {capital:,.0f} · {mode_txt} ===")
+                f"=== 开始回测 · {start} ~ {end} · 策略 {', '.join(selected_strategy_ids)} · "
+                f"{combination_label} · 初始资金 {capital:,.0f} · {mode_txt} ===")
 
             from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
             from backtest.plan_source import build_backtest_plan_dir
@@ -611,6 +681,7 @@ class BacktestController:
                 end_date=end,
                 max_rank=max_plan_rank,
                 enhancements=selected_enhancements,
+                strategy_ids=selected_strategy_ids,
             )
             if file_count <= 0:
                 self.buffer.append_line(f"!!! 当前数据快照中没有可回测的交易计划：{SNAPSHOT_DIR}")
@@ -626,14 +697,22 @@ class BacktestController:
             config = BacktestConfig.from_risk_config(
                 RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
             )
+            from risk.capital_presets import apply_capital_preset
+            capital_preset = apply_capital_preset(config, capital)
+            self.buffer.append_line(
+                f"账户方案：{capital_preset.label}，最多{capital_preset.max_positions}只，"
+                f"单票上限{capital_preset.max_position_per_stock:.0%}"
+            )
             config.max_plan_rank = max_plan_rank
             config.entry_mode = "hybrid" if entry_mode == "compare" else entry_mode
+            config.position_sizing_mode = "fixed_risk" if position_sizing_mode == "compare" else position_sizing_mode
             self.buffer.append_line(
                 f"退出策略：盈利5%-10%/10%-20%/20%以上分别从高点回撤 "
                 f"{config.trailing_early_stop_pct:.0%}/{config.trailing_mid_stop_pct:.0%}/"
                 f"{config.trailing_stop_pct:.0%} 退出；不设固定止盈"
             )
             entry_comparison = None
+            sizing_comparison = None
             if entry_mode == "compare":
                 from backtest.entry_mode_comparison import run_entry_mode_comparison
 
@@ -649,6 +728,19 @@ class BacktestController:
                 )
                 result = entry_comparison["primary"]
                 engine = entry_comparison["primary_engine"]
+            elif position_sizing_mode == "compare":
+                from backtest.position_sizing_comparison import run_position_sizing_comparison
+
+                self.buffer.append_line("开始仓位对照：固定账户风险 / 1/4保守凯利")
+                sizing_comparison = run_position_sizing_comparison(
+                    data_manager=dm,
+                    base_config=config,
+                    start_date=start,
+                    end_date=end,
+                    trade_plans_dir=Path(trade_plans_dir),
+                )
+                result = sizing_comparison["primary"]
+                engine = sizing_comparison["primary_engine"]
             else:
                 engine = BacktestEngine(dm, config)
                 result = engine.run_backtest(
@@ -667,6 +759,8 @@ class BacktestController:
                 "enhancements": selected_enhancements,
                 "enhancement_label": combination_label,
                 "entry_mode": entry_mode,
+                "position_sizing_mode": position_sizing_mode,
+                "strategy_ids": selected_strategy_ids,
             })
             if entry_comparison is not None:
                 from backtest.entry_mode_comparison import save_entry_mode_comparison
@@ -675,6 +769,13 @@ class BacktestController:
                     entry_comparison, Path(OUTPUT_DIR), run_id
                 )
                 self.buffer.append_line(f"四组入场对照报表已保存：{comparison_path}")
+            if sizing_comparison is not None:
+                from backtest.position_sizing_comparison import save_position_sizing_comparison
+
+                comparison_path = save_position_sizing_comparison(
+                    sizing_comparison, Path(OUTPUT_DIR), run_id
+                )
+                self.buffer.append_line(f"仓位算法对照报表已保存：{comparison_path}")
             if not selected_enhancements and entry_comparison is None:
                 from backtest.lhb_comparison import run_lhb_comparison, save_lhb_comparison
 
@@ -692,6 +793,7 @@ class BacktestController:
                 self.buffer.append_line(f"龙虎榜对照报表已保存：{comparison_path}")
             state_path = self._save_rolling_state(
                 engine, "range", enhancements=selected_enhancements,
+                strategy_ids=selected_strategy_ids,
             )
 
             self.buffer.append_line(f"接力账户状态已同步到 {state_path}，后续可用单日接力继续。")
@@ -717,7 +819,9 @@ class BacktestController:
     def _worker_daily(self, trade_date: str, capital: float,
                       risk_control: bool = True, reset_state: bool = False,
                       max_plan_rank: int = 0, enhancements: object = None,
-                      entry_mode: str = "hybrid") -> None:
+                      entry_mode: str = "hybrid",
+                      position_sizing_mode: str = "fixed_risk",
+                      strategy_ids: Optional[List[str]] = None) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -733,8 +837,10 @@ class BacktestController:
             from core.screening.enhancements import enhancement_label, normalize_enhancements
             selected_enhancements = normalize_enhancements(enhancements)
             combination_label = enhancement_label(selected_enhancements)
+            selected_strategy_ids = list(strategy_ids or ["default"])
             self.buffer.append_line(
-                f"=== 开始单日接力回测 · {trade_date} · {combination_label} · 初始资金 {capital:,.0f} · {mode_txt} ===")
+                f"=== 开始单日接力回测 · {trade_date} · 策略 {', '.join(selected_strategy_ids)} · "
+                f"{combination_label} · 初始资金 {capital:,.0f} · {mode_txt} ===")
 
             from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
             from backtest.plan_source import build_backtest_plan_dir
@@ -763,6 +869,7 @@ class BacktestController:
                 end_date=prev_date,
                 max_rank=max_plan_rank,
                 enhancements=selected_enhancements,
+                strategy_ids=selected_strategy_ids,
             )
             if file_count <= 0:
                 self.buffer.append_line(f"!!! 未找到上一交易日 {prev_date} 的交易计划，无法执行 {trade_date}。")
@@ -776,8 +883,15 @@ class BacktestController:
             config = BacktestConfig.from_risk_config(
                 RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
             )
+            from risk.capital_presets import apply_capital_preset
+            capital_preset = apply_capital_preset(config, capital)
+            self.buffer.append_line(
+                f"账户方案：{capital_preset.label}，最多{capital_preset.max_positions}只，"
+                f"单票上限{capital_preset.max_position_per_stock:.0%}"
+            )
             config.max_plan_rank = max_plan_rank
             config.entry_mode = entry_mode
+            config.position_sizing_mode = position_sizing_mode
             self.buffer.append_line(
                 f"退出策略：盈利5%-10%/10%-20%/20%以上分别从高点回撤 "
                 f"{config.trailing_early_stop_pct:.0%}/{config.trailing_mid_stop_pct:.0%}/"
@@ -805,6 +919,23 @@ class BacktestController:
                             f"!!! 接力账户使用入场模式 {state_entry_mode}，本次选择 {entry_mode}，口径不一致。"
                         )
                         self.error = "接力账户入场模式不一致"
+                        self.state = "error"
+                        return
+                    state_sizing_mode = str(state.get("position_sizing_mode") or "fixed_risk")
+                    if state_sizing_mode != position_sizing_mode:
+                        self.buffer.append_line(
+                            f"!!! 接力账户使用仓位算法 {state_sizing_mode}，本次选择 {position_sizing_mode}，口径不一致。"
+                        )
+                        self.error = "接力账户仓位算法不一致"
+                        self.state = "error"
+                        return
+                    state_strategy_ids = list(state.get("strategy_ids") or ["default"])
+                    if state_strategy_ids != selected_strategy_ids:
+                        self.buffer.append_line(
+                            f"!!! 接力账户使用策略 {', '.join(state_strategy_ids)}，本次选择 "
+                            f"{', '.join(selected_strategy_ids)}，口径不一致。"
+                        )
+                        self.error = "接力账户策略组合不一致"
                         self.state = "error"
                         return
                     last_date = str(state.get("last_date") or "")
@@ -845,9 +976,12 @@ class BacktestController:
                 "enhancements": selected_enhancements,
                 "enhancement_label": combination_label,
                 "entry_mode": entry_mode,
+                "position_sizing_mode": position_sizing_mode,
+                "strategy_ids": selected_strategy_ids,
             })
             state_path = self._save_rolling_state(
                 engine, "daily", state_source=state_source, enhancements=selected_enhancements,
+                strategy_ids=selected_strategy_ids,
             )
 
             self.buffer.append_line(f"接力账户状态已更新到 {trade_date}：{state_path}")
@@ -888,6 +1022,7 @@ class BacktestController:
 
     def _save_rolling_state(
         self, engine, mode: str, state_source: str = "", enhancements: object = None,
+        strategy_ids: Optional[List[str]] = None,
     ) -> Path:
         from core.screening.enhancements import normalize_enhancements
 
@@ -897,7 +1032,11 @@ class BacktestController:
         state["source_mode"] = mode
         state["state_source"] = state_source
         state["enhancements"] = normalize_enhancements(enhancements)
+        state["strategy_ids"] = list(strategy_ids or ["default"])
         state["entry_mode"] = str(getattr(engine.config, "entry_mode", "hybrid"))
+        state["position_sizing_mode"] = str(
+            getattr(engine.config, "position_sizing_mode", "fixed_risk")
+        )
         path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 
@@ -1014,6 +1153,9 @@ class BacktestController:
             pass
 
 
-# 进程级单例
-CONTROLLER = RunController()
+# 进程级单例。CONTROLLER 保留为因子计算别名，兼容原 /api/run。
+FETCH_CONTROLLER = RunController("fetch")
+FACTOR_CONTROLLER = RunController("factors")
+SCREENING_CONTROLLER = RunController("screening")
+CONTROLLER = FACTOR_CONTROLLER
 BACKTEST_CONTROLLER = BacktestController()

@@ -76,28 +76,59 @@ class ScreeningEngine:
         self._confidence_model_type = "manual_prior"
         self._confidence_as_of_date = ""
         self._active_regime = "neutral"
+        self._model_drift: Dict[str, Any] = {"status": "unknown"}
+        self._confidence_drift: Dict[str, Any] = {"status": "unknown"}
+        self._candidate_model_metadata: Dict[str, Any] = {}
+        try:
+            from risk.risk_config import RiskConfig
+            self._risk_config = RiskConfig.load()
+        except Exception:
+            self._risk_config = None
+
+    @staticmethod
+    def _select_drift_references(
+        weight_metadata: Dict[str, Any], market_state: str,
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        by_regime = weight_metadata.get("feature_reference_by_regime") or {}
+        selected = by_regime.get(str(market_state)) or {}
+        if selected:
+            regime_meta = (
+                weight_metadata.get("feature_reference_regime_meta") or {}
+            ).get(str(market_state)) or {}
+            return selected, {
+                "reference_scope": "market_regime",
+                "reference_regime": str(market_state),
+                "reference_sample_size": int(regime_meta.get("sample_size") or 0),
+                "reference_trade_days": int(regime_meta.get("trade_days") or 0),
+            }
+        return weight_metadata.get("feature_reference") or {}, {
+            "reference_scope": "global_fallback",
+            "reference_regime": str(market_state),
+            "reference_sample_size": 0,
+            "reference_trade_days": 0,
+        }
 
     def run(
         self,
         trade_date: str,
         *,
         profile: str = "default",
+        profile_config: Optional[Dict[str, Any]] = None,
         candidate_codes: Optional[Iterable[str]] = None,
         persist: bool = True,
     ) -> ScreeningResult:
         trade_date = str(trade_date)
         profiles = self.load_profiles()
-        profile_name = profile if profile in profiles else "default"
-        if profile_name not in profiles:
+        profile_name = str(profile or "default")
+        if profile_config is None and profile_name not in profiles:
             return ScreeningResult(
                 trade_date=trade_date,
                 profile=profile,
                 ok=False,
                 message=f"screening profile 不存在: {profile}",
             )
-        cfg, weight_metadata = self._runtime_profile(
-            profiles[profile_name] or {}, trade_date, profile_name
-        )
+        source_config = deepcopy(profile_config) if profile_config is not None else (profiles[profile_name] or {})
+        cfg, weight_metadata = self._runtime_profile(source_config, trade_date, profile_name)
 
         result = ScreeningResult(trade_date=trade_date, profile=profile_name)
         result.weight_metadata = weight_metadata
@@ -121,7 +152,25 @@ class ScreeningEngine:
         market_values = pd.to_numeric(candidates.get("mkt_market_score"), errors="coerce") if "mkt_market_score" in candidates else pd.Series(dtype=float)
         if market_values.empty or market_values.dropna().empty:
             market_values = pd.to_numeric(candidates.get("market_score"), errors="coerce") if "market_score" in candidates else pd.Series([50.0])
-        self._active_regime = market_regime(float(market_values.dropna().median()) if not market_values.dropna().empty else 50.0)
+        market_score_value = float(market_values.dropna().median()) if not market_values.dropna().empty else 50.0
+        regime_model = weight_metadata.get("market_regime_model") or {}
+        if regime_model:
+            from core.models.market_regime import MarketRegimeDetector
+
+            self._active_regime = MarketRegimeDetector.predict_current(regime_model, market_score_value)
+        else:
+            self._active_regime = market_regime(market_score_value)
+        from core.signals.trust_algorithms import evaluate_feature_drift
+
+        drift_references, drift_reference_meta = self._select_drift_references(
+            weight_metadata, self._active_regime,
+        )
+        self._model_drift = evaluate_feature_drift(
+            candidates, drift_references,
+        )
+        self._model_drift.update(drift_reference_meta)
+        weight_metadata["feature_drift"] = self._model_drift
+        self._confidence_drift = dict(self._model_drift)
         regime_weights = (weight_metadata.get("regime_weights") or {}).get(self._active_regime)
         if regime_weights:
             cfg.setdefault("ranking", {})["weights"] = dict(regime_weights)
@@ -134,13 +183,88 @@ class ScreeningEngine:
         weight_metadata["market_regime"] = self._active_regime
         weight_metadata["confidence_profile_available"] = bool(self._confidence_profile)
 
+        allowed_regimes = list(cfg.get("allowed_market_regimes") or [])
+        if allowed_regimes and self._active_regime not in allowed_regimes:
+            result.after_hard_filter = 0
+            result.after_priority_filter = 0
+            result.message = (
+                f"当前市场状态 {self._active_regime} 不在策略适用范围 "
+                f"{','.join(allowed_regimes)}，本次不输出候选"
+            )
+            result.weight_metadata = weight_metadata
+            if persist:
+                result.output_path = str(self.persist_result(result))
+            return result
+
         neutral_score = _to_float((cfg.get("missing") or {}).get("neutral_score"), 50.0)
         working = candidates.copy()
         working["_screening_score"] = self._ranking_score(working, cfg, neutral_score)
+        self._candidate_model_metadata = dict(weight_metadata.get("candidate_model") or {})
+        if self._candidate_model_metadata.get("active") and self._model_drift.get("status") == "degraded":
+            self._candidate_model_metadata["active"] = False
+            self._confidence_model_type = "regime_ic_ir_fallback"
+            self._confidence_drift = {
+                **self._model_drift,
+                "status": "fallback_active",
+                "original_status": "degraded",
+            }
+            weight_metadata["candidate_model_runtime"] = "fallback_drift"
+            weight_metadata["fallback_reason"] = "特征漂移超限，已自动切换同市场IC/IR规则筛选"
+        if self._candidate_model_metadata.get("active") and weight_metadata.get("artifact_path"):
+            try:
+                from core.models.candidate_model import CandidateModelRuntime
+
+                runtime = CandidateModelRuntime(
+                    self._candidate_model_metadata,
+                    base_dir=Path(str(weight_metadata["artifact_path"])).parent,
+                )
+                model_result = runtime.score(working)
+                if model_result.get("available"):
+                    working["_lgb_rank_score"] = model_result["rank_score"]
+                    working["_meta_probability"] = model_result["probability"]
+                    working["_model_expected_return"] = model_result.get("expected_return")
+                    working["_model_return_low"] = model_result.get("return_interval_low")
+                    working["_model_return_high"] = model_result.get("return_interval_high")
+                    working["_model_expected_gross_return"] = model_result.get("expected_gross_return")
+                    working["_model_gross_return_low"] = model_result.get("gross_return_interval_low")
+                    working["_model_gross_return_high"] = model_result.get("gross_return_interval_high")
+                    working["_model_stop_probability"] = model_result.get("stop_probability")
+                    working["_shap_explanation"] = model_result["shap"]
+                    weight_metadata["candidate_model_runtime"] = "active"
+                else:
+                    weight_metadata["candidate_model_runtime"] = "fallback_unavailable"
+            except Exception as exc:
+                logger.warning(f"[ScreeningEngine] LightGBM运行失败，回退IC/IR: {exc}")
+                weight_metadata["candidate_model_runtime"] = "fallback_error"
+        requested_model = str(weight_metadata.get("requested_weight_source") or "auto")
+        runtime_status = str(weight_metadata.get("candidate_model_runtime") or "")
+        if (
+            requested_model in {"auto", "lightgbm", "xgboost"}
+            and (not self._candidate_model_metadata.get("active") or runtime_status.startswith("fallback"))
+        ):
+            weight_metadata.setdefault("candidate_model_runtime", "fallback_unavailable")
+            self._confidence_model_type = "regime_ic_ir_fallback"
+            self._confidence_drift = {
+                **self._model_drift,
+                "status": "fallback_active",
+                "original_status": str(self._model_drift.get("status") or "unknown"),
+            }
+            weight_metadata.setdefault(
+                "fallback_reason", "机器学习模型不可用，已使用同市场IC/IR规则筛选",
+            )
+        elif requested_model in {"manual", "ic_ir"}:
+            # Feature drift is a health signal for the optional ML model. A
+            # deliberately selected rule engine keeps its own calibrated grade.
+            self._confidence_drift = {
+                **self._model_drift,
+                "status": "rules_active",
+                "original_status": str(self._model_drift.get("status") or "unknown"),
+            }
         reasons: Dict[str, List[str]] = {str(row.code): [] for row in working.itertuples()}
         rejected: List[Dict[str, Any]] = []
 
         working = self._apply_hard_filters(working, cfg, neutral_score, reasons, rejected, result)
+        working = self._apply_exclusion_filters(working, cfg, neutral_score, rejected, result)
         result.after_hard_filter = int(len(working))
 
         working = self._apply_priority_filters(working, cfg, neutral_score, reasons, rejected, result)
@@ -155,7 +279,7 @@ class ScreeningEngine:
         baseline = scenario_scores["lhb_sector"]
         result.candidate_pool = self._rank(
             working, cfg, neutral_score, reasons,
-            score_series=baseline + self._enhancement_adjustment(working),
+            score_series=baseline + self._enhancement_adjustment(working, cfg),
             base_series=scenario_scores["no_lhb"], model_baseline_series=baseline,
             top_n_override=100,
         )
@@ -187,9 +311,20 @@ class ScreeningEngine:
         model_type = "manual_prior"
         from config.settings import FACTOR_WEIGHT_MODE
 
+        requested_source = str(runtime.get("strategy_weight_source") or "auto").lower()
+        weight_profile = str(runtime.get("strategy_weight_profile") or profile)
         artifact = None
-        if FACTOR_WEIGHT_MODE not in {"prior", "static", "off", "disabled"}:
-            artifact = self.weight_repository.resolve(trade_date, profile)
+        if (
+            requested_source != "manual"
+            and FACTOR_WEIGHT_MODE not in {"prior", "static", "off", "disabled"}
+        ):
+            artifact = self.weight_repository.resolve(trade_date, weight_profile)
+        confidence_artifact = artifact
+        if (
+            confidence_artifact is None
+            and FACTOR_WEIGHT_MODE not in {"prior", "static", "off", "disabled"}
+        ):
+            confidence_artifact = self.weight_repository.resolve(trade_date, "default")
         if artifact is not None:
             ranking["weights"] = artifact.weights
             source = "dynamic_ic_ir"
@@ -198,14 +333,51 @@ class ScreeningEngine:
             model_type = str(artifact.payload.get("model_type") or "ic_ir")
         else:
             ranking["weights"] = prior
+        confidence_payload = confidence_artifact.payload if confidence_artifact else {}
+        if not effective_date and confidence_artifact is not None:
+            effective_date = confidence_artifact.effective_date
+        candidate_model = dict((artifact.payload.get("candidate_model") if artifact else {}) or {})
+        fallback_reason = ""
+        if requested_source in {"manual", "ic_ir"}:
+            candidate_model = {}
+            model_type = "manual_prior" if requested_source == "manual" else "ic_ir"
+            source = "manual_prior" if requested_source == "manual" else source
+        elif requested_source == "lightgbm":
+            if not candidate_model.get("active"):
+                fallback_reason = "LightGBM模型不可用，已降级为IC/IR动态权重"
+                model_type = "ic_ir_fallback"
+        elif requested_source == "xgboost":
+            # XGBoost is an explicit challenger slot. Until a dated artifact is
+            # published, keep the strategy executable with an audited fallback.
+            candidate_model = {}
+            fallback_reason = "XGBoost模型尚无已发布版本，已降级为IC/IR动态权重"
+            model_type = "xgboost_unavailable_ic_ir_fallback"
+            source = "xgboost_fallback_ic_ir"
         return runtime, {
             "source": source,
             "model_type": model_type,
+            "requested_weight_source": requested_source,
+            "weight_profile": weight_profile,
+            "fallback_reason": fallback_reason,
             "effective_date": effective_date,
             "artifact_path": artifact_path,
             "weights": dict(ranking["weights"]),
             "regime_weights": dict((artifact.payload.get("regime_weights") if artifact else {}) or {}),
-            "confidence_profiles": dict((artifact.payload.get("confidence_profiles") if artifact else {}) or {}),
+            "confidence_profiles": dict(confidence_payload.get("confidence_profiles") or {}),
+            "confidence_profile_source": (
+                weight_profile if artifact is not None else "default_shared_baseline"
+                if confidence_artifact is not None else "unavailable"
+            ),
+            "feature_reference": dict(confidence_payload.get("feature_reference") or {}),
+            "feature_reference_by_regime": dict(
+                confidence_payload.get("feature_reference_by_regime") or {}
+            ),
+            "feature_reference_regime_meta": dict(
+                confidence_payload.get("feature_reference_regime_meta") or {}
+            ),
+            "model_diagnostics": dict(confidence_payload.get("model_diagnostics") or {}),
+            "candidate_model": candidate_model,
+            "market_regime_model": dict(confidence_payload.get("market_regime_model") or {}),
         }
 
     def load_candidates(
@@ -371,6 +543,39 @@ class ScreeningEngine:
                 break
         return working
 
+    def _apply_exclusion_filters(
+        self,
+        df: pd.DataFrame,
+        cfg: Dict[str, Any],
+        neutral_score: float,
+        rejected: List[Dict[str, Any]],
+        result: ScreeningResult,
+    ) -> pd.DataFrame:
+        """Reject rows matching any configured exclusion condition."""
+        working = df
+        for rule in cfg.get("exclusion_filters") or []:
+            before = len(working)
+            matched = self._mask(working, rule, neutral_score)
+            removed = working[matched]
+            kept = working[~matched].copy()
+            name = str(rule.get("name") or rule.get("factor") or "排除条件")
+            for row in removed.itertuples():
+                rejected.append(self._reject_row(row, "exclusion_filter", rule, f"命中排除条件：{name}"))
+            result.traces.append(FilterTrace(
+                stage="exclusion_filter",
+                name=name,
+                factor=str(rule.get("factor") or ""),
+                op=str(rule.get("op") or ""),
+                value=rule.get("value"),
+                before_count=before,
+                passed_count=len(kept),
+                kept_count=len(kept),
+            ))
+            working = kept
+            if working.empty:
+                break
+        return working
+
     def _apply_priority_filters(
         self,
         df: pd.DataFrame,
@@ -463,6 +668,27 @@ class ScreeningEngine:
             ["_screening_score", "_lhb_adjustment", "stk_total_score"],
             ascending=[False, False, False],
         ).head(top_n)
+        try:
+            risk_cfg = self._risk_config
+            if risk_cfg is None:
+                raise RuntimeError("risk config unavailable")
+            position_budget_pct = min(
+                risk_cfg.fixed_risk_per_trade / max(risk_cfg.hard_stop_loss, 1e-6),
+                risk_cfg.kelly_max_position,
+                risk_cfg.max_position_per_stock,
+            ) * 100.0
+            account_risk_pct = risk_cfg.fixed_risk_per_trade * 100.0
+        except Exception:
+            position_budget_pct = 0.0
+            account_risk_pct = 0.0
+        position_constraints: List[str] = []
+        if self._active_regime == "weak" and position_budget_pct > 8.0:
+            position_budget_pct = 8.0
+            position_constraints.append("弱市试仓单票不超过8%")
+        strategy_position_cap = _to_float(cfg.get("position_cap_pct"), 0.0)
+        if strategy_position_cap > 0 and position_budget_pct > strategy_position_cap:
+            position_budget_pct = strategy_position_cap
+            position_constraints.append(f"策略单票上限{strategy_position_cap:g}%")
         final: List[Dict[str, Any]] = []
         metric_cols = list(dict.fromkeys(list((ranking_cfg.get("weights") or {}).keys()) + [
             "stk_lhb_net_buy_score",
@@ -479,6 +705,11 @@ class ScreeningEngine:
             "stk_kpl_leader_quality",
             "stk_margin_acceleration",
             "stk_block_trade_risk",
+            "stk_behavior_attention",
+            "stk_behavior_acceleration",
+            "stk_behavior_divergence",
+            "stk_behavior_repair",
+            "stk_behavior_decay",
         ]))
         context_cols = [
             "pct_chg",
@@ -509,6 +740,7 @@ class ScreeningEngine:
             "margin_score",
             "event_risk_score",
             "sector_flow_score",
+            "behavior_data_completeness",
         ]
         for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
             code = str(row.get("code") or "")
@@ -538,28 +770,170 @@ class ScreeningEngine:
                 data_completeness=completeness,
                 regime_match=1.0 if self._confidence_profile else 0.75,
                 tradability=tradability,
+                model_drift=self._confidence_drift,
                 model_type=self._confidence_model_type,
                 as_of_date=self._confidence_as_of_date,
             )
+            profile_sample_size = int(confidence.get("sample_size") or 0)
+            meta_probability = row.get("_meta_probability")
+            has_individual_stop_model = pd.notna(row.get("_model_stop_probability"))
+            from core.models.probability_ensemble import blend_candidate_probability
+
+            raw_meta_probability = (
+                _to_float(meta_probability, math.nan)
+                if pd.notna(meta_probability) and self._candidate_model_metadata.get("active")
+                else None
+            )
+            ensemble = blend_candidate_probability(
+                lightgbm_meta=raw_meta_probability,
+                ic_ir_percentile=score / 100.0,
+                similar_history=confidence["candidate_probability"] / 100.0,
+            )
+            if ensemble.get("available"):
+                from core.signals.trust_algorithms import beta_binomial_interval
+
+                calibrated_probability = float(ensemble["probability"])
+                model_samples = int(self._candidate_model_metadata.get("validation_rows") or 0)
+                effective_samples = min(model_samples, max(
+                    int(self._candidate_model_metadata.get("validation_days") or 1) * 50, 20,
+                )) if raw_meta_probability is not None else profile_sample_size
+                probability_interval = beta_binomial_interval(
+                    calibrated_probability * effective_samples, effective_samples,
+                )
+                confidence = ConfidenceService.assess(
+                    calibrated_probability=calibrated_probability,
+                    baseline_probability=(
+                        _to_float(
+                            self._candidate_model_metadata.get("baseline_probability"),
+                            confidence["baseline_probability"] / 100.0,
+                        )
+                        if raw_meta_probability is not None
+                        else confidence["baseline_probability"] / 100.0
+                    ),
+                    expected_return=(
+                        _to_float(row.get("_model_expected_return"), confidence["expected_return_pct"] / 100.0)
+                        if raw_meta_probability is not None
+                        else confidence["expected_return_pct"] / 100.0
+                    ),
+                    stop_probability=_to_float(
+                        row.get("_model_stop_probability"),
+                        confidence["stop_probability"] / 100.0,
+                    ),
+                    sample_size=effective_samples,
+                    average_mfe=confidence["average_mfe_pct"] / 100.0,
+                    average_mae=confidence["average_mae_pct"] / 100.0,
+                    data_completeness=completeness,
+                    regime_match=1.0,
+                    tradability=tradability,
+                    probability_interval={
+                        "low": probability_interval["lower"],
+                        "high": probability_interval["upper"],
+                    },
+                    return_interval={
+                        "low": _to_float(
+                            row.get("_model_return_low"), confidence["return_interval_low_pct"] / 100.0,
+                        ),
+                        "high": _to_float(
+                            row.get("_model_return_high"), confidence["return_interval_high_pct"] / 100.0,
+                        ),
+                    },
+                    calibration=(
+                        self._candidate_model_metadata.get("calibration") or {}
+                        if raw_meta_probability is not None
+                        else {
+                            "brier_score": confidence.get("brier_score"),
+                            "ece": (
+                                confidence.get("ece") / 100.0
+                                if confidence.get("ece") is not None else None
+                            ),
+                        }
+                    ),
+                    model_drift=self._confidence_drift,
+                    model_type=f"ensemble_{ensemble['mode']}",
+                    as_of_date=self._confidence_as_of_date,
+                )
             final.append({
                 "code": code,
                 "ts_code": str(row.get("ts_code") or ""),
                 "name": str(row.get("name") or ""),
                 "resonance_sectors": str(row.get("resonance_sectors") or ""),
+                "behavior_state": str(row.get("behavior_dominant_state") or ""),
+                "behavior_state_label": str(row.get("behavior_dominant_label") or ""),
+                "behavior_state_probability": round(
+                    _to_float(row.get("behavior_dominant_probability")), 2,
+                ),
+                "behavior_state_probabilities": {
+                    state: round(_to_float(row.get(f"behavior_{state}_probability")), 2)
+                    for state in ("attention", "acceleration", "divergence", "repair", "decay")
+                },
                 "score": score,
                 "base_score": round(_to_float(row.get("_screening_base_score"), score), 4),
                 "model_baseline_score": round(_to_float(row.get("_screening_model_baseline_score"), score), 4),
                 "lhb_adjustment": round(_to_float(row.get("_lhb_adjustment"), 0.0), 4),
                 "signal_adjustment": round(_to_float(row.get("_signal_adjustment"), 0.0), 4),
+                "model_rank_score": round(_to_float(row.get("_lgb_rank_score"), score), 4),
+                "meta_label_probability": (
+                    round(raw_meta_probability * 100.0, 2)
+                    if raw_meta_probability is not None else None
+                ),
+                "probability_ensemble": ensemble,
+                "shap_explanation": row.get("_shap_explanation") if isinstance(row.get("_shap_explanation"), list) else [],
                 "rank": rank,
                 "gold_rank": int(_to_float(row.get("rank"), rank)),
                 "candidate_probability": confidence["candidate_probability"],
                 "baseline_probability": confidence["baseline_probability"],
                 "probability_lift": confidence["probability_lift"],
                 "expected_return_pct": confidence["expected_return_pct"],
+                "expected_excess_return_pct": confidence["expected_return_pct"],
+                "expected_gross_return_pct": round(
+                    _to_float(row.get("_model_expected_gross_return"), math.nan) * 100.0, 2
+                ) if pd.notna(row.get("_model_expected_gross_return")) else None,
+                "gross_return_interval_low_pct": round(
+                    _to_float(row.get("_model_gross_return_low"), math.nan) * 100.0, 2
+                ) if pd.notna(row.get("_model_gross_return_low")) else None,
+                "gross_return_interval_high_pct": round(
+                    _to_float(row.get("_model_gross_return_high"), math.nan) * 100.0, 2
+                ) if pd.notna(row.get("_model_gross_return_high")) else None,
                 "stop_probability": confidence["stop_probability"],
-                "similar_sample_size": confidence["sample_size"],
+                "stop_probability_source": (
+                    "个股样本外止损模型"
+                    if has_individual_stop_model
+                    else "同市场同评分层历史基准"
+                ),
+                "stop_probability_definition": "次日可成交价起3日内先触发-4%，且未先达到+6%",
+                "similar_sample_size": profile_sample_size,
+                "model_validation_sample_size": confidence["sample_size"],
+                "average_mfe_pct": confidence["average_mfe_pct"],
+                "average_mae_pct": confidence["average_mae_pct"],
                 "confidence_grade": confidence["confidence_grade"],
+                "confidence_score": confidence["confidence_score"],
+                "data_completeness": confidence["data_completeness"],
+                "regime_match": confidence["regime_match"],
+                "tradability": confidence["tradability"],
+                "sample_reliability": confidence["sample_reliability"],
+                "model_type": confidence["model_type"],
+                "model_as_of_date": confidence["as_of_date"],
+                "probability_ci_low": confidence["probability_ci_low"],
+                "probability_ci_high": confidence["probability_ci_high"],
+                "return_interval_low_pct": confidence["return_interval_low_pct"],
+                "return_interval_high_pct": confidence["return_interval_high_pct"],
+                "brier_score": confidence["brier_score"],
+                "ece": confidence["ece"],
+                "model_drift_status": confidence["model_drift_status"],
+                "drift_psi": confidence["drift_psi"],
+                "drift_ks": confidence["drift_ks"],
+                "decision_status": confidence["decision_status"],
+                "decision_label": confidence["decision_label"],
+                "position_budget_pct": round(position_budget_pct, 2),
+                "position_budget_reason": "；".join(position_constraints) or "按账户风险预算计算",
+                "worst_expected_loss_pct": round(
+                    min(
+                        account_risk_pct,
+                        position_budget_pct / 100.0
+                        * abs(min(confidence["return_interval_low_pct"], 0.0)),
+                    ), 2
+                ),
+                "trust_layers": confidence["trust_layers"],
                 "confidence": confidence,
                 "reasons": build_screening_reasons(
                     metrics=metrics,
@@ -603,13 +977,16 @@ class ScreeningEngine:
             )
         output["enhanced_all"] = self._rank(
             df, cfg, neutral_score, reasons,
-            score_series=scores["lhb_sector"] + self._enhancement_adjustment(df),
+            score_series=scores["lhb_sector"] + self._enhancement_adjustment(df, cfg),
             base_series=scores["no_lhb"], model_baseline_series=scores["lhb_sector"],
         )
         return output
 
-    def _enhancement_adjustment(self, df: pd.DataFrame) -> pd.Series:
+    def _enhancement_adjustment(self, df: pd.DataFrame, cfg: Optional[Dict[str, Any]] = None) -> pd.Series:
         adjustment = pd.Series(0.0, index=df.index, dtype=float)
+        configured = (cfg or {}).get("enhancements") or {}
+        enabled_keys = configured.get("enabled")
+        enabled_keys = set(enabled_keys) if enabled_keys is not None else None
         factor_switches = {
             "capital_flow": "stk_capital_flow_consensus",
             "attention": "stk_attention_consensus",
@@ -618,6 +995,8 @@ class ScreeningEngine:
             "risk": "stk_block_trade_risk",
         }
         for key, definition in ENHANCEMENT_DEFINITIONS.items():
+            if enabled_keys is not None and key not in enabled_keys:
+                continue
             enabled = True
             try:
                 from core.factors.factor_registry import get_factor_registry
@@ -661,6 +1040,9 @@ class ScreeningEngine:
         self, df: pd.DataFrame, cfg: Dict[str, Any], neutral_score: float,
     ) -> Dict[str, pd.Series]:
         base = self._base_ranking_score(df, cfg, neutral_score)
+        if "_lgb_rank_score" in df.columns:
+            learned = pd.to_numeric(df["_lgb_rank_score"], errors="coerce").fillna(base)
+            base = 0.35 * base + 0.65 * learned
         lhb_cfg = cfg.get("lhb_enhancement") or {}
         if not bool(lhb_cfg.get("enabled", True)):
             return {key: base.copy() for key in ("no_lhb", "net_buy", "institution", "lhb_sector")}

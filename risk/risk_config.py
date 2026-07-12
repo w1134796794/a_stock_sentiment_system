@@ -83,10 +83,14 @@ class RiskConfig:
     slippage: float = 0.002
     min_holding_days: int = 1                 # T+1
 
-    # ---- 凯利仓位占位（R-4 落地用）----
-    kelly_fraction: float = 0.5               # 半凯利
-    kelly_min_samples: int = 20               # 单模式最小样本数，不足回退
-    kelly_max_position: float = 0.25          # 凯利结果单票封顶
+    # ---- 固定风险 / 保守凯利 ----
+    position_sizing_mode: str = "fixed_risk"  # fixed_risk / conservative_kelly
+    fixed_risk_per_trade: float = 0.005        # 单笔最多损失账户权益0.5%
+    kelly_fraction: float = 0.25               # 1/4凯利
+    kelly_min_samples: int = 50                # 单模式最小样本数，不足回退固定风险
+    kelly_max_position: float = 0.10           # 凯利结果单票封顶
+    kelly_credibility: float = 0.80            # 胜率后验可信区间
+    kelly_payoff_haircut: float = 0.80         # 盈亏比保守折价
 
     # ------------------------------------------------------------------
     # 构造 / 加载

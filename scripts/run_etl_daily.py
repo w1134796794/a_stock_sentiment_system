@@ -18,6 +18,7 @@ from config.settings import CACHE_DIR, FACTOR_DB_PATH, TUSHARE_TOKEN, WEB_DATA_D
 from core.data.data_manager_main import DataManager
 from core.data.data_prep import DataPrep
 from core.utils.date_utils import DateUtils
+from core.etl.stage_status import write_fetch_manifest
 
 
 def _parse_args() -> argparse.Namespace:
@@ -64,12 +65,20 @@ def main() -> int:
         silver_dir=Path(args.silver_dir),
         quality_dir=Path(args.quality_dir),
     )
+    manifest = write_fetch_manifest(
+        trade_date,
+        web_data_dir=WEB_DATA_DIR,
+        sources=ds.meta.get("source_fetch_status") or {},
+        writes=(ds.meta.get("silver_persist") or {}).get("writes") or {},
+    )
 
     summary = {
         "trade_date": trade_date,
         "prev_date": prev_date,
         "dataset": ds.summary(),
         "silver": ds.meta.get("silver_persist") or ds.meta.get("silver_persist_error"),
+        "sources": ds.meta.get("source_fetch_status") or {},
+        "manifest": str(manifest),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

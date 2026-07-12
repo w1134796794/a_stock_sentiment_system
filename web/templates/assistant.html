@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}复盘助手 · {{ date }}{% endblock %}
+{% block page_title %}复盘助手{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">今日结论 · 候选行动 · 风险提示</div>{% endblock %}
+
+{% block header_extra %}
+<label class="text-sm text-slate-400" for="assistant-date">复盘日</label>
+<select id="assistant-date" class="bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm mono">
+  {% for d in dates %}<option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>{% endfor %}
+</select>
+<label class="text-sm text-slate-400" for="assistant-capital">账户</label>
+<select id="assistant-capital" class="bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm">
+  <option value="50000" {% if capital <= 75000 %}selected{% endif %}>5万</option>
+  <option value="100000" {% if capital > 75000 and capital <= 150000 %}selected{% endif %}>10万</option>
+  <option value="200000" {% if capital > 150000 %}selected{% endif %}>20万</option>
+</select>
+{% endblock %}
+
+{% block content %}
+<section id="assistant-summary" class="assistant-summary mb-5" aria-live="polite">
+  <div>
+    <div class="text-xs text-slate-500 mb-2">系统结论</div>
+    <div id="assistant-headline" class="text-2xl font-bold text-slate-100">正在整理证据...</div>
+    <div id="assistant-summary-text" class="text-sm text-slate-400 mt-2"></div>
+  </div>
+  <div id="assistant-stance" class="assistant-stance">--</div>
+</section>
+
+<section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6" id="assistant-kpis">
+  <div class="assistant-kpi"><span>市场状态</span><strong id="kpi-regime">--</strong></div>
+  <div class="assistant-kpi"><span>候选股票</span><strong id="kpi-candidates">--</strong></div>
+  <div class="assistant-kpi"><span>等待确认</span><strong id="kpi-actionable" class="text-emerald-300">--</strong></div>
+  <div class="assistant-kpi"><span>高波动风险</span><strong id="kpi-risk" class="text-rose-300">--</strong></div>
+</section>
+
+<div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5 items-start">
+  <section>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-base font-bold">候选行动</h2>
+      <span id="assistant-model-status" class="text-xs text-slate-500"></span>
+    </div>
+    <div id="assistant-candidates" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
+    <div id="assistant-empty" class="hidden border border-slate-800 bg-slate-900/50 rounded-md px-5 py-12 text-center text-sm text-slate-500">今日没有候选数据</div>
+  </section>
+
+  <aside class="assistant-chat xl:sticky xl:top-0">
+    <h2 class="text-base font-bold mb-3">直接问</h2>
+    <div id="assistant-prompts" class="flex flex-wrap gap-2 mb-4"></div>
+    <div id="assistant-answer" class="assistant-answer mb-3">
+      <div class="text-sm text-slate-400">选择一个问题，或输入股票名称、代码。</div>
+    </div>
+    <form id="assistant-form" class="flex gap-2">
+      <input id="assistant-question" class="min-w-0 flex-1 bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" placeholder="例如：和林微纳怎么看" autocomplete="off" />
+      <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white rounded-md px-4 py-2 text-sm font-semibold">发送</button>
+    </form>
+  </aside>
+</div>
+
+<style>
+  .assistant-summary { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1.15rem 1.25rem; border:1px solid rgba(51,65,85,.75); border-left:3px solid #10b981; background:rgba(15,23,42,.58); border-radius:6px; }
+  .assistant-stance { min-width:96px; text-align:center; padding:.55rem .7rem; border:1px solid rgba(16,185,129,.4); color:#6ee7b7; background:rgba(16,185,129,.1); border-radius:6px; font-weight:700; }
+  .assistant-kpi { min-height:82px; border:1px solid rgba(51,65,85,.7); background:rgba(15,23,42,.48); border-radius:6px; padding:.85rem 1rem; }
+  .assistant-kpi span { display:block; color:#64748b; font-size:.72rem; margin-bottom:.35rem; }
+  .assistant-kpi strong { font-size:1.35rem; }
+  .assistant-card { border:1px solid rgba(51,65,85,.72); background:rgba(15,23,42,.55); border-radius:6px; overflow:hidden; }
+  .assistant-card-head { display:flex; align-items:center; gap:.65rem; padding:.85rem 1rem; border-bottom:1px solid rgba(51,65,85,.55); }
+  .assistant-action { margin-left:auto; border-radius:5px; padding:.2rem .55rem; font-size:.72rem; font-weight:700; }
+  .assistant-action.positive { color:#6ee7b7; border:1px solid rgba(16,185,129,.45); background:rgba(16,185,129,.1); }
+  .assistant-action.warning { color:#fde68a; border:1px solid rgba(245,158,11,.45); background:rgba(245,158,11,.1); }
+  .assistant-action.danger { color:#fda4af; border:1px solid rgba(244,63,94,.4); background:rgba(244,63,94,.08); }
+  .assistant-action.muted { color:#cbd5e1; border:1px solid rgba(100,116,139,.45); background:rgba(51,65,85,.22); }
+  .assistant-card-body { padding:.9rem 1rem; }
+  .assistant-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.5rem; }
+  .assistant-metric { min-width:0; border:1px solid rgba(51,65,85,.55); border-radius:5px; padding:.55rem .6rem; }
+  .assistant-metric span { display:block; color:#64748b; font-size:.66rem; margin-bottom:.2rem; }
+  .assistant-metric strong { display:block; font-size:.88rem; overflow-wrap:anywhere; }
+  .assistant-detail { border-top:1px solid rgba(51,65,85,.5); margin-top:.75rem; padding-top:.7rem; font-size:.78rem; color:#94a3b8; line-height:1.65; }
+  .assistant-detail summary { cursor:pointer; color:#cbd5e1; user-select:none; }
+  .assistant-chat { border:1px solid rgba(51,65,85,.72); background:rgba(15,23,42,.55); border-radius:6px; padding:1rem; }
+  .assistant-prompt { border:1px solid rgba(71,85,105,.7); color:#cbd5e1; background:#0f172a; border-radius:5px; padding:.35rem .55rem; font-size:.72rem; }
+  .assistant-prompt:hover { border-color:#10b981; color:#a7f3d0; }
+  .assistant-answer { min-height:150px; border:1px solid rgba(51,65,85,.55); background:#020617; border-radius:5px; padding:.85rem; line-height:1.7; }
+  .assistant-fact { border-left:2px solid #334155; padding-left:.55rem; margin-top:.45rem; color:#94a3b8; font-size:.76rem; }
+  @media (max-width:640px) { .assistant-summary { align-items:flex-start; } .assistant-stance { min-width:78px; } .assistant-metrics { grid-template-columns:1fr 1fr; } }
+</style>
+
+<script>
+  const assistantDate = {{ date | tojson }};
+  const assistantCapital = Number({{ capital | tojson }} || 100000);
+  const escapeAssistant = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const pctAssistant = value => `${Number(value || 0) >= 0 ? '+' : ''}${Number(value || 0).toFixed(2)}%`;
+
+  function candidateHtml(row) {
+    const sectors = (row.sectors || []).map(name => `<span class="stock-sector-tag concept"><span>${escapeAssistant(name)}</span></span>`).join('');
+    return `<article class="assistant-card">
+      <div class="assistant-card-head">
+        <div class="min-w-0"><div class="font-bold truncate">${escapeAssistant(row.name)}</div><div class="text-[11px] text-slate-500 mono">${escapeAssistant(row.code)} · 候选${row.rank}</div></div>
+        <span class="assistant-action ${escapeAssistant(row.tone)}">${escapeAssistant(row.action)}</span>
+      </div>
+      <div class="assistant-card-body">
+        <div class="assistant-metrics">
+          <div class="assistant-metric"><span>证据</span><strong>${escapeAssistant(row.confidence)}</strong></div>
+          <div class="assistant-metric"><span>3日预期</span><strong class="${Number(row.expected_total_return) >= 0 ? 'text-rose-300' : 'text-emerald-300'}">${pctAssistant(row.expected_total_return)}</strong></div>
+          <div class="assistant-metric"><span>先跌5%比例</span><strong>${Number(row.stop_probability).toFixed(1)}%</strong></div>
+        </div>
+        <div class="stock-sector-tags${sectors ? '' : ' empty'}">${sectors || '板块未匹配'}</div>
+        <div class="text-sm text-slate-200 mt-3 leading-6">${escapeAssistant(row.one_line || row.next_step)}</div>
+        <details class="assistant-detail"><summary>查看依据</summary><div class="mt-2">${escapeAssistant(row.reason)}</div><div>${escapeAssistant(row.risk)}</div><div>预期超额收益 ${pctAssistant(row.expected_excess_return)} · 强势成功率 ${Number(row.candidate_probability).toFixed(1)}%</div></details>
+      </div>
+    </article>`;
+  }
+
+  function renderBrief(data) {
+    document.getElementById('assistant-headline').textContent = data.headline || '暂无结论';
+    document.getElementById('assistant-summary-text').textContent = data.summary || '';
+    document.getElementById('assistant-stance').textContent = data.stance || '--';
+    document.getElementById('kpi-regime').textContent = data.market_regime || '--';
+    document.getElementById('kpi-candidates').textContent = `${data.candidate_count || 0}只`;
+    document.getElementById('kpi-actionable').textContent = `${data.actionable_count || 0}只`;
+    document.getElementById('kpi-risk').textContent = `${data.high_risk_count || 0}只`;
+    const preset = data.capital_preset || {};
+    document.getElementById('assistant-model-status').textContent = `${data.model_mode || '模型状态未知'} · ${preset.label || ''}最多${preset.max_positions || '--'}只`;
+    const rows = data.candidates || [];
+    document.getElementById('assistant-candidates').innerHTML = rows.map(candidateHtml).join('');
+    document.getElementById('assistant-empty').classList.toggle('hidden', rows.length > 0);
+    document.getElementById('assistant-prompts').innerHTML = (data.prompts || []).map(text => `<button type="button" class="assistant-prompt" data-question="${escapeAssistant(text)}">${escapeAssistant(text)}</button>`).join('');
+    document.querySelectorAll('.assistant-prompt').forEach(button => button.addEventListener('click', () => askAssistant(button.dataset.question || '')));
+  }
+
+  async function askAssistant(question) {
+    if (!question.trim()) return;
+    const answer = document.getElementById('assistant-answer');
+    answer.innerHTML = '<div class="text-sm text-slate-500">正在核对证据...</div>';
+    const response = await fetch(`/api/assistant/ask?date=${encodeURIComponent(assistantDate)}&capital=${assistantCapital}&question=${encodeURIComponent(question)}`);
+    const data = await response.json();
+    answer.innerHTML = `<div class="text-sm text-slate-200">${escapeAssistant(data.answer || data.error || '暂无答案')}</div>${(data.facts || []).map(item => `<div class="assistant-fact">${escapeAssistant(item)}</div>`).join('')}`;
+  }
+
+  const assistantLocation = () => `/assistant?date=${encodeURIComponent(document.getElementById('assistant-date').value)}&capital=${encodeURIComponent(document.getElementById('assistant-capital').value)}`;
+  document.getElementById('assistant-date').addEventListener('change', () => { location.href = assistantLocation(); });
+  document.getElementById('assistant-capital').addEventListener('change', () => { location.href = assistantLocation(); });
+  document.getElementById('assistant-form').addEventListener('submit', event => { event.preventDefault(); askAssistant(document.getElementById('assistant-question').value); });
+  fetch(`/api/assistant/brief?date=${encodeURIComponent(assistantDate)}&capital=${assistantCapital}`).then(response => response.json()).then(renderBrief).catch(error => {
+    document.getElementById('assistant-headline').textContent = '暂时无法生成结论';
+    document.getElementById('assistant-summary-text').textContent = error.message || '请稍后重试';
+  });
+</script>
+{% endblock %}

@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument("--profile", default="default")
     parser.add_argument("--effective-date", default="")
     parser.add_argument("--walk-forward", action="store_true", help="执行按月滚动样本外验证")
-    parser.add_argument("--train-months", type=int, default=3)
+    parser.add_argument("--train-months", type=int, default=12, help="滚动训练月数，默认约1年")
     args = parser.parse_args()
 
     trainer = FactorLibraryTrainer()

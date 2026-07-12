@@ -26,6 +26,30 @@ INDEX_LABELS = {
     "000688.SH": "科创50",
     "899050.BJ": "北证",
 }
+SOURCE_LABELS = {
+    "stock_daily": "全市场日线",
+    "stock_basic": "股票基础资料",
+    "daily_basic": "每日指标",
+    "limit_up": "涨停池",
+    "limit_down": "跌停池",
+    "limit_up_concepts": "涨停股概念归属",
+    "index_daily": "指数日线",
+    "ths_index": "同花顺板块目录",
+    "ths_daily": "同花顺板块行情",
+    "limit_cpt_list": "最强板块统计",
+    "moneyflow_summary": "全市场资金流",
+    "top_list": "龙虎榜股票",
+    "top_inst": "龙虎榜机构席位",
+    "hm_detail": "知名游资席位",
+    "moneyflow_ths": "同花顺个股资金流",
+    "moneyflow_dc": "东方财富个股资金流",
+    "sector_moneyflow_ths": "板块资金流",
+    "ths_hot": "同花顺热榜",
+    "dc_hot": "东方财富热榜",
+    "kpl_list": "开盘啦榜单",
+    "margin_detail": "融资融券",
+    "block_trade": "大宗交易",
+}
 
 
 def _ok(passed: bool) -> str:
@@ -72,7 +96,7 @@ def health_items() -> List[Dict[str, Any]]:
     return items
 
 
-def etl_artifacts(date: str | None = None) -> Dict[str, Any]:
+def etl_artifacts(date: str | None = None, stage: str = "all") -> Dict[str, Any]:
     """Return the current data artifact status for the run page and APIs."""
     reader = SnapshotReader(SNAPSHOT_DIR)
     target = str(date or reader.latest() or "")
@@ -93,15 +117,49 @@ def etl_artifacts(date: str | None = None) -> Dict[str, Any]:
             ),
         }
 
+    items = [
+        _item("DuckDB 指标仓库", Path(FACTOR_DB_PATH)),
+        _item("数据质量报告", quality),
+        _item("候选池", screening),
+        _item("分析摘要", analysis),
+        _item("页面快照", snapshot),
+    ]
+    if target and stage in {"fetch", "factors"}:
+        from core.etl.stage_status import factor_status, fetch_status
+
+        status = (
+            fetch_status(target, db_path=FACTOR_DB_PATH, web_data_dir=WEB_DATA_DIR)
+            if stage == "fetch"
+            else factor_status(target, db_path=FACTOR_DB_PATH)
+        )
+        items = [
+            {
+                "label": table,
+                "ok": int(rows or 0) > 0,
+                "path": f"{int(rows or 0):,} 行",
+                "updated_at": "",
+            }
+            for table, rows in (status.get("table_rows") or {}).items()
+        ]
+        if stage == "fetch":
+            items.insert(0, _item("数据质量报告", quality))
+            source_items = []
+            for source, meta in (status.get("sources") or {}).items():
+                source_items.append({
+                    "label": SOURCE_LABELS.get(source, source),
+                    "ok": bool(meta.get("ok")),
+                    "path": (
+                        f"{int(meta.get('rows') or 0):,} 行"
+                        if meta.get("ok") else str(meta.get("error") or "接口失败")
+                    ),
+                    "updated_at": "",
+                })
+            items.extend(source_items)
+
     return {
         "date": target,
-        "items": [
-            _item("DuckDB 指标仓库", Path(FACTOR_DB_PATH)),
-            _item("数据质量报告", quality),
-            _item("候选池", screening),
-            _item("分析摘要", analysis),
-            _item("页面快照", snapshot),
-        ],
+        "stage": stage,
+        "items": items,
     }
 
 
@@ -641,20 +699,23 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
 
 
 def overview() -> Dict[str, Any]:
-    from desktop.runner import CONTROLLER
+    from desktop.runner import FACTOR_CONTROLLER, FETCH_CONTROLLER, SCREENING_CONTROLLER
 
     reader = SnapshotReader(SNAPSHOT_DIR)
+    controllers = (FETCH_CONTROLLER, FACTOR_CONTROLLER, SCREENING_CONTROLLER)
+    controller = next((item for item in controllers if item.state == "running"), FACTOR_CONTROLLER)
     return {
         "checks": health_items(),
         "latest": reader.latest(),
         "snapshot_count": len(reader.list_dates()),
         "market": market_overview(reader),
         "run": {
-            "state": CONTROLLER.state,
-            "date": CONTROLLER.date,
-            "started_at": CONTROLLER.started_at,
-            "finished_at": CONTROLLER.finished_at,
-            "error": CONTROLLER.error,
+            "state": controller.state,
+            "stage": controller.stage,
+            "date": controller.date,
+            "started_at": controller.started_at,
+            "finished_at": controller.finished_at,
+            "error": controller.error,
         },
         "now": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "base_dir": str(BASE_DIR),

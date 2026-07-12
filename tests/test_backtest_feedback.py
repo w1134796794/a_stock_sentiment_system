@@ -5,7 +5,11 @@ import pandas as pd
 
 from backtest.backtest_engine import BacktestConfig, BacktestEngine, TradeRecord
 from backtest.attribution import build_attribution_frames
-from backtest.plan_source import build_backtest_plan_dir
+from backtest.plan_source import _position, build_backtest_plan_dir
+
+
+def test_weak_market_trial_position_maps_to_probe_size():
+    assert _position("试仓 0%-8%") == "probe"
 from desktop import backtest as backtest_view
 from core.screening.explanations import FACTOR_LABELS
 

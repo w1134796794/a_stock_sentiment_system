@@ -12,7 +12,7 @@ from backtest.replay_engine import ReplayPlan
 logger = loguru.logger
 
 # Layer4 落盘 CSV 里 仓位 字段 → 仓位比例
-_POSITION_PCT = {"light": 0.10, "medium": 0.15, "heavy": 0.20}
+_POSITION_PCT = {"probe": 0.08, "light": 0.10, "medium": 0.15, "heavy": 0.20}
 
 
 def _clean_str(value) -> str:

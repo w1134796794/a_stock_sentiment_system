@@ -83,6 +83,8 @@ class LeaderPoolService:
     MAX_SECTOR_LEADERS = 8
     CORE_SCORE = 72.0
     SECTOR_SCORE = 64.0
+    EMOTION_SCORE = 66.0
+    MAX_EMOTION_LEADERS = 4
 
     def __init__(
         self, *, screening_dir: Optional[Path] = None, duckdb_path: Optional[Path] = None,
@@ -169,15 +171,34 @@ class LeaderPoolService:
                 sector_codes.add(row["code"])
                 if len(sector_codes) >= self.MAX_SECTOR_LEADERS:
                     break
+            emotion_candidates = [
+                row for row in daily_snapshots
+                if row["code"] not in core_codes
+                and row["code"] not in sector_codes
+                and self._qualifies_emotion_leader(row)
+            ]
+            emotion_candidates.sort(
+                key=lambda row: (-_to_float(row.get("emotion_role_score")), row.get("code") or "")
+            )
+            emotion_codes = {
+                row["code"] for row in emotion_candidates[: self.MAX_EMOTION_LEADERS]
+            }
             for snapshot in daily_snapshots:
                 pool_type = ""
                 if snapshot["code"] in core_codes:
                     pool_type = "核心龙头"
                 elif snapshot["code"] in sector_codes:
                     pool_type = "板块龙头"
+                elif snapshot["code"] in emotion_codes:
+                    pool_type = "情绪龙头"
                 if not pool_type:
                     continue
-                event = {**snapshot, "pool_type": pool_type}
+                event = {
+                    **snapshot,
+                    "pool_type": pool_type,
+                    "primary_role": self._primary_role(snapshot, pool_type),
+                    "leader_roles": self._role_labels(snapshot, pool_type),
+                }
                 leader_history.setdefault(snapshot["code"], []).append(event)
                 by_code[snapshot["code"]]["leader_events"].append(event)
 
@@ -197,8 +218,11 @@ class LeaderPoolService:
             row.pop("pool_type_order", None)
 
         counts: Dict[str, int] = {}
+        role_counts: Dict[str, int] = {}
         for row in selected:
             counts[row["pool_type"]] = counts.get(row["pool_type"], 0) + 1
+            for role in row.get("leader_roles") or []:
+                role_counts[role] = role_counts.get(role, 0) + 1
 
         return {
             "ok": bool(selected),
@@ -207,6 +231,7 @@ class LeaderPoolService:
             "dates": dates,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "counts": counts,
+            "role_counts": role_counts,
             "rows": selected,
         }
 
@@ -251,12 +276,19 @@ class LeaderPoolService:
         seal_quality = self._metric(item, "stk_seal_time_quality", 50.0)
         kpl_score = self._metric(item, "stk_kpl_leader_quality", 50.0)
         attention_score = self._metric(item, "stk_attention_consensus", 50.0)
+        behavior_attention = self._metric(item, "stk_behavior_attention", 50.0)
+        behavior_acceleration = self._metric(item, "stk_behavior_acceleration", 50.0)
+        behavior_divergence = self._metric(item, "stk_behavior_divergence", 50.0)
+        behavior_repair = self._metric(item, "stk_behavior_repair", 50.0)
+        behavior_decay = self._metric(item, "stk_behavior_decay", 50.0)
         market_status = _weighted_score([
-            (board_score, 0.30),
+            (board_score, 0.25),
             (seal_quality, 0.15),
-            (kpl_score, 0.20),
-            (limit_quality, 0.20),
-            (attention_score, 0.15),
+            (kpl_score, 0.15),
+            (limit_quality, 0.15),
+            (attention_score, 0.10),
+            (behavior_acceleration, 0.10),
+            (behavior_repair, 0.10),
         ])
 
         prior_count = len(prior_events)
@@ -288,10 +320,11 @@ class LeaderPoolService:
         event_risk_safety = self._metric(item, "stk_block_trade_risk", 100.0)
         attention_safety = self._metric(item, "stk_attention_crowding_risk", 100.0)
         safety = _weighted_score([
-            (amount_health, 0.40),
-            (event_risk_safety, 0.30),
+            (amount_health, 0.35),
+            (event_risk_safety, 0.25),
             (lhb_crowding_safety, 0.20),
             (attention_safety, 0.10),
+            (100.0 - behavior_decay, 0.10),
         ])
 
         evidence = {
@@ -315,6 +348,28 @@ class LeaderPoolService:
             (capital_recognition, 0.15),
             (safety, 0.10),
         ])
+        relative_strength = self._metric(item, "stk_relative_strength_sector", 50.0)
+        short_term_role_score = _weighted_score([
+            (market_status, 0.30),
+            (behavior_acceleration, 0.25),
+            (seal_quality, 0.20),
+            (limit_quality, 0.15),
+            (safety, 0.10),
+        ])
+        sector_role_score = _weighted_score([
+            (sector_status, 0.40),
+            (sector_resonance, 0.20),
+            (relative_strength, 0.15),
+            (continuity, 0.15),
+            (leader_score, 0.10),
+        ])
+        emotion_role_score = _weighted_score([
+            (attention_score, 0.28),
+            (behavior_attention, 0.24),
+            (kpl_score, 0.18),
+            (board_score, 0.15),
+            (behavior_acceleration, 0.15),
+        ])
 
         source_rank_value = int(_to_float(item.get("rank"), 999))
         sector_names = str(item.get("resonance_sectors") or "")
@@ -327,6 +382,9 @@ class LeaderPoolService:
             "primary_sector": sector_names.split(",", 1)[0].strip(),
             "candidate_score": _to_float(item.get("score"), 0.0),
             "leader_score": round(leader_score, 4),
+            "short_term_role_score": round(short_term_role_score, 4),
+            "sector_role_score": round(sector_role_score, 4),
+            "emotion_role_score": round(emotion_role_score, 4),
             "sector_status_score": round(sector_status, 4),
             "market_status_score": round(market_status, 4),
             "continuity_score": round(continuity, 4),
@@ -358,6 +416,14 @@ class LeaderPoolService:
             "attention_score": round(attention_score, 4),
             "kpl_leader_score": round(kpl_score, 4),
             "event_risk_safety": round(event_risk_safety, 4),
+            "behavior_state": str(item.get("behavior_state") or ""),
+            "behavior_state_label": str(item.get("behavior_state_label") or ""),
+            "behavior_attention_score": round(behavior_attention, 4),
+            "behavior_acceleration_score": round(behavior_acceleration, 4),
+            "behavior_divergence_score": round(behavior_divergence, 4),
+            "behavior_repair_score": round(behavior_repair, 4),
+            "behavior_decay_score": round(behavior_decay, 4),
+            "relative_strength_sector_score": round(relative_strength, 4),
             "candidate_reasons": item.get("reasons") or [],
             "lhb_signal_date": str((item.get("lhb") or {}).get("signal_date") or ""),
             "lhb_effective_date": str((item.get("lhb") or {}).get("effective_date") or ""),
@@ -381,6 +447,45 @@ class LeaderPoolService:
             and _to_float(row.get("sector_status_score")) >= 62.0
             and int(row.get("evidence_count") or 0) >= 2
         )
+
+    def _qualifies_emotion_leader(self, row: Dict[str, Any]) -> bool:
+        return bool(
+            not row.get("severe_risk")
+            and row.get("identity_evidence")
+            and _to_float(row.get("emotion_role_score")) >= self.EMOTION_SCORE
+            and _to_float(row.get("market_status_score")) >= 58.0
+        )
+
+    @staticmethod
+    def _role_labels(row: Dict[str, Any], pool_type: str = "") -> List[str]:
+        """Roles are evidence tags, intentionally not mutually exclusive."""
+        labels: List[str] = []
+        if _to_float(row.get("short_term_role_score")) >= 67.0:
+            labels.append("短线龙头")
+        if _to_float(row.get("sector_role_score")) >= 67.0:
+            labels.append("板块龙头")
+        if _to_float(row.get("emotion_role_score")) >= 68.0:
+            labels.append("情绪龙头")
+        if pool_type == "核心龙头" and "短线龙头" not in labels:
+            labels.insert(0, "短线龙头")
+        if pool_type == "板块龙头" and "板块龙头" not in labels:
+            labels.append("板块龙头")
+        if pool_type == "情绪龙头" and "情绪龙头" not in labels:
+            labels.append("情绪龙头")
+        return labels
+
+    @staticmethod
+    def _primary_role(row: Dict[str, Any], pool_type: str = "") -> str:
+        if pool_type == "核心龙头":
+            return "短线龙头"
+        if pool_type in {"板块龙头", "情绪龙头"}:
+            return pool_type
+        scores = {
+            "短线龙头": _to_float(row.get("short_term_role_score")),
+            "板块龙头": _to_float(row.get("sector_role_score")),
+            "情绪龙头": _to_float(row.get("emotion_role_score")),
+        }
+        return max(scores, key=scores.get)
 
     def _build_pool_row(self, raw: Dict[str, Any], target: str, dates: List[str]) -> Optional[Dict[str, Any]]:
         events = list(raw.get("leader_events") or [])
@@ -407,19 +512,48 @@ class LeaderPoolService:
         leader_age_days = max(target_index - leader_index, 0)
         if current_event:
             pool_type = str(current_event.get("pool_type") or "板块龙头")
-            order = 0 if pool_type == "核心龙头" else 1
-            leader_time_label = "当日核心龙头" if pool_type == "核心龙头" else "当日板块龙头"
+            order = 0 if pool_type == "核心龙头" else 1 if pool_type == "板块龙头" else 2
+            leader_time_label = {
+                "核心龙头": "当日核心龙头",
+                "板块龙头": "当日板块龙头",
+                "情绪龙头": "当日情绪龙头",
+            }.get(pool_type, "当日龙头")
             prior_events = [event for event in events if str(event.get("date") or "") < target]
-            lifecycle_state = "确认龙头" if prior_events else "萌芽龙头"
+            divergence = _to_float(source.get("behavior_divergence_score"), 50.0)
+            repair = _to_float(source.get("behavior_repair_score"), 50.0)
+            decay = _to_float(source.get("behavior_decay_score"), 50.0)
+            if decay >= 68.0 and decay > repair:
+                lifecycle_state = "衰退龙头"
+            elif divergence >= 62.0 and divergence > repair:
+                lifecycle_state = "分歧龙头"
+            else:
+                lifecycle_state = "确认龙头" if prior_events else "萌芽龙头"
         else:
             pool_type = "近期龙头"
-            order = 2
+            order = 3
             leader_time_label = "上一交易日龙头" if leader_age_days == 1 else f"{leader_age_days}个交易日前龙头"
             current_sector = _to_float((current or {}).get("sector_status_score"), 0.0)
             current_safety = _to_float((current or {}).get("safety_score"), 0.0)
-            lifecycle_state = "分歧龙头" if current and current_sector >= 55.0 and current_safety >= 40.0 else "衰退龙头"
+            behavior_repair = _to_float((current or {}).get("behavior_repair_score"), 0.0)
+            behavior_decay = _to_float((current or {}).get("behavior_decay_score"), 50.0)
+            lifecycle_state = (
+                "分歧龙头"
+                if current and current_sector >= 55.0 and current_safety >= 40.0
+                and behavior_repair >= behavior_decay
+                else "衰退龙头"
+            )
 
+        role_event = current_event or last_event
+        leader_roles = list(role_event.get("leader_roles") or [])
+        if not leader_roles:
+            leader_roles = self._role_labels(source, pool_type)
+        primary_role = str(
+            (current_event or last_event).get("primary_role")
+            or self._primary_role(source, pool_type)
+        )
         reasons = self._reasons(pool_type, source_rank, source_date, target, last_event, source)
+        if leader_roles:
+            reasons.insert(0, f"角色标签：{' / '.join(leader_roles)}")
         stats_key = (target, lifecycle_state)
         if stats_key not in self._stats_cache:
             self._stats_cache[stats_key] = self.outcome_tracker.stats(
@@ -444,6 +578,13 @@ class LeaderPoolService:
             "name": name,
             "pool_type": pool_type,
             "pool_type_order": order,
+            "primary_role": primary_role,
+            "leader_roles": leader_roles,
+            "role_scores": {
+                "短线龙头": round(_to_float(source.get("short_term_role_score")), 2),
+                "板块龙头": round(_to_float(source.get("sector_role_score")), 2),
+                "情绪龙头": round(_to_float(source.get("emotion_role_score")), 2),
+            },
             "leader_score": round(_to_float(source.get("leader_score")), 2),
             "latest_rank": latest_rank,
             "source_rank": source_rank,
@@ -461,6 +602,13 @@ class LeaderPoolService:
             "lifecycle_reason": self._lifecycle_reason(lifecycle_state, source, last_event),
             "resonance_sectors": str(source.get("resonance_sectors") or ""),
             "primary_sector": str(source.get("primary_sector") or ""),
+            "behavior_state": str(source.get("behavior_state") or ""),
+            "behavior_state_label": str(source.get("behavior_state_label") or ""),
+            "behavior_attention_score": round(_to_float(source.get("behavior_attention_score")), 2),
+            "behavior_acceleration_score": round(_to_float(source.get("behavior_acceleration_score")), 2),
+            "behavior_divergence_score": round(_to_float(source.get("behavior_divergence_score")), 2),
+            "behavior_repair_score": round(_to_float(source.get("behavior_repair_score")), 2),
+            "behavior_decay_score": round(_to_float(source.get("behavior_decay_score")), 2),
             "latest_score": round(latest_score, 2),
             "last_leader_type": str(last_event.get("pool_type") or ""),
             "pct_chg": round(_to_float(source.get("pct_chg")), 2),
@@ -769,6 +917,7 @@ class IntradayStrengthService:
             "entry_price": signal.get("entry_price"),
             "success_probability": signal.get("success_probability"),
             "historical_samples": signal.get("historical_samples"),
+            "historical_stats_basis": signal.get("historical_stats_basis") or "",
             "average_mfe_pct": signal.get("average_mfe_pct"),
             "average_mae_pct": signal.get("average_mae_pct"),
             "data_completeness": signal.get("data_completeness"),

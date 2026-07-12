@@ -14,6 +14,16 @@ import pandas as pd
 import yaml
 from loguru import logger
 
+from core.signals.trust_algorithms import (
+    ADWINDetector,
+    beta_binomial_interval,
+    block_bootstrap_mean,
+    calibration_metrics,
+    conformal_residual_interval,
+    distribution_reference,
+    purged_month_split,
+)
+
 
 _SAFE_FACTOR = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
@@ -129,7 +139,7 @@ class FactorLibraryTrainer:
         profile_path: Optional[Path] = None,
         repository: Optional[DynamicWeightRepository] = None,
         horizon_days: int = 3,
-        min_daily_samples: int = 30,
+        min_daily_samples: int = 20,
     ) -> None:
         from config.settings import BASE_DIR, FACTOR_DB_PATH
 
@@ -144,13 +154,47 @@ class FactorLibraryTrainer:
         cfg = (data.get("screening_profiles") or {}).get(profile) or {}
         weights = ((cfg.get("ranking") or {}).get("prior_weights")
                    or (cfg.get("ranking") or {}).get("weights") or {})
+        if not weights:
+            try:
+                from core.screening.strategy_profiles import StrategyProfileRepository
+
+                strategy = StrategyProfileRepository().get_profile(profile) or {}
+                weights = {
+                    str(item.get("factor") or ""): float(item.get("weight") or 0.0)
+                    for item in strategy.get("ranking_factors") or []
+                    if str(item.get("factor") or "")
+                }
+            except Exception:
+                weights = {}
         invalid = [key for key in weights if not _SAFE_FACTOR.match(str(key))]
         if invalid:
             raise ValueError(f"invalid factor identifiers: {invalid}")
         return _normalize_weights(weights)
 
+    @staticmethod
+    def _normalize_training_scope(scope: Any) -> str:
+        value = str(scope or "all").strip().lower()
+        return value if value in {"all", "near_limit"} else "all"
+
+    def training_scope(self, profile: str = "default") -> str:
+        """Read the model universe from the versioned strategy configuration."""
+        try:
+            from core.screening.strategy_profiles import StrategyProfileRepository
+
+            strategy = StrategyProfileRepository().get_profile(profile) or {}
+            return self._normalize_training_scope(strategy.get("training_scope"))
+        except Exception:
+            return "all"
+
+    def _apply_training_scope(self, frame: pd.DataFrame, scope: str) -> pd.DataFrame:
+        if frame.empty or self._normalize_training_scope(scope) != "near_limit":
+            return frame
+        limit_progress = pd.to_numeric(frame.get("limit_progress"), errors="coerce").fillna(0.0)
+        liquidity = pd.to_numeric(frame.get("liquidity_score"), errors="coerce").fillna(0.0)
+        return frame[(limit_progress >= 0.95) & (liquidity >= 35.0)].copy()
+
     def load_training_frame(
-        self, start_date: str, end_date: str, factors: Sequence[str],
+        self, start_date: str, end_date: str, factors: Sequence[str], *, training_scope: str = "all",
     ) -> pd.DataFrame:
         if not self.duckdb_path.exists():
             return pd.DataFrame()
@@ -191,18 +235,21 @@ class FactorLibraryTrainer:
             AND l.factor_id IN ({','.join('?' for _ in factor_ids)})
           GROUP BY l.trade_date, l.entity_id
         )
-        SELECT f.*{tech_column}, w.resonance_sectors, w.limit_pct,
+        SELECT f.*{tech_column}, w.resonance_sectors, w.limit_pct, w.limit_progress, w.liquidity_score,
                m.market_score,
                p.entry_date, p.future_date, p.entry_open,
                (p.future_close / NULLIF(p.entry_open, 0) - 1.0) AS raw_forward_return,
                (GREATEST(p.high_1, p.high_2, p.high_3) / NULLIF(p.entry_open, 0) - 1.0) AS mfe_3d,
                (LEAST(p.low_1, p.low_2, p.low_3) / NULLIF(p.entry_open, 0) - 1.0) AS mae_3d,
                CASE
-                 WHEN p.low_1 <= p.entry_open * 0.95 THEN 1
-                 WHEN p.high_1 >= p.entry_open * 1.08 THEN 0
-                 WHEN p.low_2 <= p.entry_open * 0.95 THEN 1
-                 WHEN p.high_2 >= p.entry_open * 1.08 THEN 0
-                 WHEN p.low_3 <= p.entry_open * 0.95 THEN 1
+                 WHEN p.low_1 <= p.entry_open * 0.96 AND p.high_1 >= p.entry_open * 1.06 THEN NULL
+                 WHEN p.low_1 <= p.entry_open * 0.96 THEN 1
+                 WHEN p.high_1 >= p.entry_open * 1.06 THEN 0
+                 WHEN p.low_2 <= p.entry_open * 0.96 AND p.high_2 >= p.entry_open * 1.06 THEN NULL
+                 WHEN p.low_2 <= p.entry_open * 0.96 THEN 1
+                 WHEN p.high_2 >= p.entry_open * 1.06 THEN 0
+                 WHEN p.low_3 <= p.entry_open * 0.96 AND p.high_3 >= p.entry_open * 1.06 THEN NULL
+                 WHEN p.low_3 <= p.entry_open * 0.96 THEN 1
                  ELSE 0
                END AS stop_before_profit,
                CASE WHEN p.entry_open > 0 AND p.entry_volume > 0
@@ -238,13 +285,22 @@ class FactorLibraryTrainer:
         frame["market_regime"] = np.select(
             [score >= 70.0, score < 45.0], ["strong", "weak"], default="neutral",
         )
-        frame["label_success"] = (
+        strong = (
             (pd.to_numeric(frame["tradable_next_day"], errors="coerce").fillna(0) > 0)
-            & (pd.to_numeric(frame["mfe_3d"], errors="coerce").fillna(0) >= 0.05)
+            & (pd.to_numeric(frame["mfe_3d"], errors="coerce").fillna(0) >= 0.08)
             & (frame["next_3d_excess_return"].fillna(0) > 0)
-            & (pd.to_numeric(frame["stop_before_profit"], errors="coerce").fillna(1) == 0)
-        ).astype(int)
-        return frame
+        )
+        avoid = (
+            (pd.to_numeric(frame["mae_3d"], errors="coerce").fillna(0) <= -0.04)
+            & (pd.to_numeric(frame["mfe_3d"], errors="coerce").fillna(0) < 0.02)
+        )
+        frame["label_class"] = np.select([strong, avoid], [2, 0], default=1).astype(int)
+        frame["label_name"] = frame["label_class"].map({2: "strong_buy", 1: "hold", 0: "avoid"})
+        frame["label_strong_buy"] = (frame["label_class"] == 2).astype(int)
+        frame["label_hold"] = (frame["label_class"] == 1).astype(int)
+        frame["label_avoid"] = (frame["label_class"] == 0).astype(int)
+        frame["label_success"] = frame["label_strong_buy"]
+        return self._apply_training_scope(frame, training_scope)
 
     def factor_metrics(self, frame: pd.DataFrame, factors: Sequence[str]) -> Dict[str, Dict[str, float]]:
         metrics: Dict[str, Dict[str, float]] = {}
@@ -317,6 +373,8 @@ class FactorLibraryTrainer:
     ) -> Dict[str, float]:
         daily_ic: List[float] = []
         daily_excess: List[float] = []
+        daily_selected_returns: List[float] = []
+        total_days = int(frame["trade_date"].astype(str).nunique()) if not frame.empty else 0
         for _, group in frame.groupby("trade_date", sort=True):
             if len(group) < self.min_daily_samples:
                 continue
@@ -340,15 +398,40 @@ class FactorLibraryTrainer:
                 daily_ic.append(float(corr))
             selected = target.loc[score[valid].nlargest(min(top_n, int(valid.sum()))).index]
             daily_excess.append(float(selected.mean() - target[valid].mean()))
+            daily_selected_returns.append(float(selected.mean()))
         ic = pd.Series(daily_ic, dtype=float)
         excess = pd.Series(daily_excess, dtype=float)
+        selected_returns = pd.Series(daily_selected_returns, dtype=float)
         excess_ir = float(excess.mean() / excess.std(ddof=1)) if len(excess) > 1 and excess.std(ddof=1) > 0 else 0.0
+        gains = float(selected_returns[selected_returns > 0].sum())
+        losses = abs(float(selected_returns[selected_returns < 0].sum()))
+        profit_factor = gains / losses if losses > 1e-12 else (10.0 if gains > 0 else 0.0)
+        if selected_returns.empty:
+            total_return = max_drawdown = calmar_ratio = 0.0
+        else:
+            equity = (1.0 + selected_returns.clip(lower=-0.95)).cumprod()
+            drawdown = equity / equity.cummax() - 1.0
+            total_return = float(equity.iloc[-1] - 1.0)
+            max_drawdown = float(drawdown.min())
+            calmar_ratio = total_return / abs(max_drawdown) if max_drawdown < -1e-12 else min(total_return * 10.0, 10.0)
+        coverage = len(selected_returns) / total_days if total_days else 0.0
+        objective = (
+            0.45 * math.log1p(min(max(profit_factor, 0.0), 10.0))
+            + 0.35 * max(min(calmar_ratio, 10.0), -5.0)
+            + 0.15 * coverage
+            + 0.05 * (float(ic.mean()) if not ic.empty else 0.0)
+        )
         return {
             "days": int(len(excess)),
             "rank_ic": float(ic.mean()) if not ic.empty else 0.0,
             "top_excess_return": float(excess.mean()) if not excess.empty else 0.0,
             "top_excess_win_rate": float((excess > 0).mean()) if not excess.empty else 0.0,
-            "objective": excess_ir + 0.5 * (float(ic.mean()) if not ic.empty else 0.0),
+            "excess_ir": excess_ir,
+            "profit_factor": float(profit_factor),
+            "calmar_ratio": float(calmar_ratio),
+            "max_drawdown": float(max_drawdown),
+            "coverage": float(coverage),
+            "objective": float(objective),
         }
 
     @staticmethod
@@ -448,6 +531,8 @@ class FactorLibraryTrainer:
             return pd.to_numeric(source, errors="coerce")
 
         rows: List[Dict[str, Any]] = []
+        prediction_by_index = pd.Series(math.nan, index=data.index, dtype=float)
+        return_prediction_by_index = pd.Series(math.nan, index=data.index, dtype=float)
         for _, group in data.groupby("score_bin", observed=True):
             def group_numeric(name: str, fallback: str = "") -> pd.Series:
                 if name in group.columns:
@@ -471,6 +556,8 @@ class FactorLibraryTrainer:
                 "stop_probability": float(stop.mean()) if stop.notna().any() else 0.5,
                 "average_mfe": float(mfe.mean()) if mfe.notna().any() else 0.0,
                 "average_mae": float(mae.mean()) if mae.notna().any() else 0.0,
+                "_index": list(group.index),
+                "_returns": [float(value) for value in target.dropna().tolist()],
             })
         rows.sort(key=lambda row: row["score_center"])
         fitted_probability = self._isotonic_increasing(
@@ -484,6 +571,42 @@ class FactorLibraryTrainer:
             row["observed_expected_return"] = row["expected_return"]
             row["success_probability"] = float(probability)
             row["expected_return"] = float(expected)
+            posterior = beta_binomial_interval(
+                float(row["observed_success_probability"]) * int(row["sample_size"]),
+                int(row["sample_size"]),
+            )
+            returns = row.pop("_returns")
+            interval = conformal_residual_interval(
+                returns,
+                [float(expected)] * len(returns),
+                alpha=0.20,
+            )
+            row["probability_ci_low"] = float(posterior["lower"])
+            row["probability_ci_high"] = float(posterior["upper"])
+            row["return_interval_low"] = float(expected - interval["radius"])
+            row["return_interval_high"] = float(expected + interval["radius"])
+            row["conformal_radius"] = float(interval["radius"])
+            indices = row.pop("_index")
+            prediction_by_index.loc[indices] = float(probability)
+            return_prediction_by_index.loc[indices] = float(expected)
+        calibration = calibration_metrics(
+            numeric("label_success"), prediction_by_index, bins=10,
+        )
+        conformal = conformal_residual_interval(
+            numeric("next_3d_excess_return"), return_prediction_by_index, alpha=0.20,
+        )
+        bootstrap = block_bootstrap_mean(
+            numeric("next_3d_excess_return"), data["trade_date"], simulations=500,
+        )
+        daily_errors = pd.DataFrame({
+            "trade_date": data["trade_date"].astype(str),
+            "error": (numeric("label_success") - prediction_by_index) ** 2,
+        }).dropna().groupby("trade_date", as_index=False)["error"].mean()
+        detector = ADWINDetector(delta=0.01, min_window=10)
+        change_dates = [
+            str(row.trade_date) for row in daily_errors.itertuples()
+            if detector.update(row.error)
+        ]
         rows.sort(key=lambda row: row["score_center"], reverse=True)
         return {
             "sample_size": int(len(data)),
@@ -493,6 +616,15 @@ class FactorLibraryTrainer:
             "average_mfe": float(numeric("mfe_3d", 0.0).mean()),
             "average_mae": float(numeric("mae_3d", 0.0).mean()),
             "monotonic_top3": monotonic,
+            "calibration": calibration,
+            "conformal": conformal,
+            "bootstrap": bootstrap,
+            "adwin": {
+                "status": "changed" if change_dates else "stable",
+                "change_dates": change_dates,
+                "latest_change_date": change_dates[-1] if change_dates else "",
+                "daily_samples": int(len(daily_errors)),
+            },
             "bins": rows,
         }
 
@@ -500,6 +632,18 @@ class FactorLibraryTrainer:
         self, frame: pd.DataFrame, prior: Mapping[str, float],
     ) -> Tuple[Dict[str, float], Dict[str, Any]]:
         factors = list(prior)
+        market_regime_model = self._fit_market_regime(frame)
+        regime_frame = frame
+        date_states = market_regime_model.get("date_states") or {}
+        if date_states:
+            regime_frame = frame.copy()
+            hmm_regime = regime_frame["trade_date"].astype(str).map(date_states)
+            fallback_regime = (
+                regime_frame["market_regime"]
+                if "market_regime" in regime_frame.columns
+                else pd.Series("neutral", index=regime_frame.index)
+            )
+            regime_frame["market_regime"] = hmm_regime.fillna(fallback_regime)
         months = frame["trade_date"].astype(str).str.slice(0, 6)
         unique_months = sorted(months.dropna().unique())
         tune_mask = months == unique_months[-1] if len(unique_months) > 1 else pd.Series(False, index=frame.index)
@@ -529,12 +673,30 @@ class FactorLibraryTrainer:
         )
         regime_weights: Dict[str, Dict[str, float]] = {}
         rejected_regimes: Dict[str, str] = {}
+        feature_reference = {
+            factor: distribution_reference(pd.to_numeric(frame.get(factor), errors="coerce"))
+            for factor in factors
+        }
+        feature_reference_by_regime: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        feature_reference_regime_meta: Dict[str, Dict[str, int]] = {}
         confidence_profiles: Dict[str, Dict[str, Any]] = {
             "all": self._confidence_profile(frame, final_weights),
         }
-        if "market_regime" in frame.columns:
+        if "market_regime" in regime_frame.columns:
             for regime in ("strong", "neutral", "weak"):
-                subset = frame[frame["market_regime"] == regime]
+                subset = regime_frame[regime_frame["market_regime"] == regime]
+                regime_days = int(subset["trade_date"].astype(str).nunique())
+                if len(subset) >= 200 and regime_days >= 5:
+                    feature_reference_by_regime[regime] = {
+                        factor: distribution_reference(
+                            pd.to_numeric(subset.get(factor), errors="coerce")
+                        )
+                        for factor in factors
+                    }
+                    feature_reference_regime_meta[regime] = {
+                        "sample_size": int(len(subset)),
+                        "trade_days": regime_days,
+                    }
                 if subset.empty or subset["trade_date"].nunique() < 10:
                     continue
                 regime_metrics = self.factor_metrics(subset, factors)
@@ -556,20 +718,61 @@ class FactorLibraryTrainer:
             "regime_weights": regime_weights,
             "rejected_regime_models": rejected_regimes,
             "confidence_profiles": confidence_profiles,
+            "feature_reference": feature_reference,
+            "feature_reference_by_regime": feature_reference_by_regime,
+            "feature_reference_regime_meta": feature_reference_regime_meta,
             "lightgbm": {
                 "available": self._lightgbm_available(),
                 "status": "optional_next_stage" if self._lightgbm_available() else "dependency_missing_ic_ir_fallback",
             },
+            "market_regime_model": market_regime_model,
+            "market_regime_assignment": (
+                "gaussian_hmm_3_state"
+                if date_states else "threshold_fallback"
+            ),
             "selected_hyperparameters": {
                 "prior_blend": best["prior_blend"],
                 "max_weight": best["max_weight"],
             },
             "tuning_evaluation": {key: best[key] for key in (
-                "days", "rank_ic", "top_excess_return", "top_excess_win_rate", "objective"
+                "days", "rank_ic", "top_excess_return", "top_excess_win_rate",
+                "profit_factor", "calmar_ratio", "max_drawdown", "coverage", "objective"
             )},
             "search_trials": trials,
         }
         return final_weights, report
+
+    @staticmethod
+    def _fit_market_regime(frame: pd.DataFrame) -> Dict[str, Any]:
+        try:
+            from core.models.market_regime import MarketRegimeDetector
+
+            return MarketRegimeDetector.fit(frame)
+        except Exception as exc:
+            return {"status": "fit_failed", "method": "threshold_fallback", "reason": str(exc)}
+
+    def _fit_candidate_model(
+        self,
+        frame: pd.DataFrame,
+        *,
+        features: Sequence[str],
+        weights: Mapping[str, float],
+        profile: str,
+        effective_date: str,
+    ) -> Dict[str, Any]:
+        try:
+            from core.models.candidate_model import CandidateModelTrainer
+
+            return CandidateModelTrainer().fit_and_save(
+                frame,
+                features=features,
+                base_scores=self._score_frame(frame, weights),
+                directory=self.repository.profile_dir(profile),
+                effective_date=effective_date,
+            )
+        except Exception as exc:
+            logger.warning(f"[FactorLibrary] LightGBM候选模型训练失败，保留IC/IR基线: {exc}")
+            return {"status": "fit_failed", "active": False, "reason": str(exc)}
 
     @staticmethod
     def _lightgbm_available() -> bool:
@@ -589,25 +792,63 @@ class FactorLibraryTrainer:
         effective_date: str = "",
     ) -> Dict[str, Any]:
         prior = self.prior_weights(profile)
-        frame = self.load_training_frame(start_date, end_date, list(prior))
+        training_scope = self.training_scope(profile)
+        frame = self.load_training_frame(
+            start_date, end_date, list(prior), training_scope=training_scope,
+        )
         if frame.empty or frame["trade_date"].nunique() < 20:
             raise RuntimeError("动态权重训练样本不足，至少需要 20 个有效交易日")
         weights, report = self.fit_frame(frame, prior)
-        gate_passed = bool((report.get("confidence_profiles") or {}).get("all", {}).get("monotonic_top3"))
+        monthly_gate = self._rolling_month_gate(frame, prior)
+        gate_passed = bool(
+            (report.get("confidence_profiles") or {}).get("all", {}).get("monotonic_top3")
+            and monthly_gate.get("passed")
+        )
         if not gate_passed:
             weights = prior
             report["confidence_profiles"]["all"] = self._confidence_profile(frame, weights)
         report["publication_gate"] = {
             "passed": gate_passed,
-            "reason": "候选前3个分组预期收益单调" if gate_passed else "动态模型未通过排名单调性，生产权重回退冷启动先验",
+            "reason": (
+                "收益分组单调，且最近3个样本外月份至少2个月Rank IC为正"
+                if gate_passed else "动态模型未通过收益单调性或连续月样本外闸门，生产权重回退冷启动先验"
+            ),
+            "monthly_oos": monthly_gate,
         }
-        outcome_rows = self.persist_outcome_labels(frame)
         if not effective_date:
             effective_date = (datetime.strptime(str(end_date), "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
+        candidate_frame = frame.copy()
+        candidate_states = (report.get("market_regime_model") or {}).get("date_states") or {}
+        if candidate_states:
+            candidate_frame["market_regime"] = (
+                candidate_frame["trade_date"].astype(str).map(candidate_states)
+                .fillna(candidate_frame.get("market_regime", "neutral"))
+            )
+        candidate_model = self._fit_candidate_model(
+            candidate_frame,
+            features=list(prior),
+            weights=weights,
+            profile=profile,
+            effective_date=str(effective_date),
+        )
+        candidate_model["training_scope"] = training_scope
+        report["candidate_model"] = candidate_model
+        report["lightgbm"] = {
+            "available": self._lightgbm_available(),
+            "status": candidate_model.get("status", "not_trained"),
+            "active": bool(candidate_model.get("active")),
+        }
+        outcome_rows = self.persist_outcome_labels(frame)
         payload: Dict[str, Any] = {
-            "schema_version": 1,
-            "model_type": "ic_ir_constrained_blend" if gate_passed else "prior_fallback_unstable_dynamic_model",
+            "schema_version": 2,
+            "model_type": (
+                "lightgbm_rank_meta_with_ic_ir_fallback"
+                if candidate_model.get("active")
+                else "ic_ir_constrained_blend" if gate_passed
+                else "prior_fallback_unstable_dynamic_model"
+            ),
             "profile": profile,
+            "training_scope": training_scope,
             "effective_date": str(effective_date),
             "trained_at": datetime.now().isoformat(timespec="seconds"),
             "train_start": str(frame["trade_date"].min()),
@@ -633,12 +874,13 @@ class FactorLibraryTrainer:
         columns = [
             "trade_date", "code", "entry_date", "future_date", "market_regime",
             "primary_sector", "next_3d_excess_return", "mfe_3d", "mae_3d",
-            "stop_before_profit", "tradable_next_day", "label_success",
+            "stop_before_profit", "tradable_next_day", "label_class", "label_name",
+            "label_strong_buy", "label_hold", "label_avoid", "label_success",
         ]
         if frame.empty or not self.duckdb_path.exists() or not set(columns).issubset(frame.columns):
             return 0
         labels = frame[columns].copy()
-        labels["label_version"] = "candidate_v2_executable_3d"
+        labels["label_version"] = "candidate_v3_three_tier_3d_stop4_profit6"
         labels["computed_at"] = datetime.now().isoformat(timespec="seconds")
         import duckdb  # type: ignore
 
@@ -649,13 +891,33 @@ class FactorLibraryTrainer:
                 "CREATE TABLE IF NOT EXISTS signal_outcome_wide AS "
                 "SELECT * FROM _signal_outcomes WHERE 1=0"
             )
+            source_schema = {
+                str(row[0]): str(row[1])
+                for row in con.execute("DESCRIBE _signal_outcomes").fetchall()
+            }
+            target_columns = {
+                str(row[1])
+                for row in con.execute("PRAGMA table_info('signal_outcome_wide')").fetchall()
+            }
+            for column, column_type in source_schema.items():
+                if column not in target_columns:
+                    escaped = column.replace('"', '""')
+                    con.execute(
+                        f'ALTER TABLE signal_outcome_wide ADD COLUMN "{escaped}" {column_type}'
+                    )
             start = str(labels["trade_date"].min())
             end = str(labels["trade_date"].max())
             con.execute(
                 "DELETE FROM signal_outcome_wide WHERE CAST(trade_date AS VARCHAR) BETWEEN ? AND ?",
                 [start, end],
             )
-            con.execute("INSERT INTO signal_outcome_wide SELECT * FROM _signal_outcomes")
+            quoted_columns = ", ".join(
+                f'"{column.replace(chr(34), chr(34) * 2)}"' for column in labels.columns
+            )
+            con.execute(
+                f"INSERT INTO signal_outcome_wide ({quoted_columns}) "
+                f"SELECT {quoted_columns} FROM _signal_outcomes"
+            )
         finally:
             try:
                 con.unregister("_signal_outcomes")
@@ -670,10 +932,13 @@ class FactorLibraryTrainer:
         end_date: str,
         *,
         profile: str = "default",
-        train_months: int = 3,
+        train_months: int = 12,
     ) -> Dict[str, Any]:
         prior = self.prior_weights(profile)
-        frame = self.load_training_frame(start_date, end_date, list(prior))
+        training_scope = self.training_scope(profile)
+        frame = self.load_training_frame(
+            start_date, end_date, list(prior), training_scope=training_scope,
+        )
         if frame.empty:
             return {"folds": [], "summary": {"folds": 0}}
         frame = frame.copy()
@@ -683,17 +948,36 @@ class FactorLibraryTrainer:
         for index in range(max(int(train_months), 1), len(months)):
             train_keys = months[index - train_months:index]
             validation_key = months[index]
-            train = frame[frame["month"].isin(train_keys)]
-            validation = frame[frame["month"] == validation_key]
+            candidate = frame[frame["month"].isin([*train_keys, validation_key])].copy()
+            validation_rows = candidate[candidate["month"] == validation_key]
+            validation_start = str(validation_rows["trade_date"].min())
+            validation_end = str(validation_rows["trade_date"].max())
+            train, validation, split_audit = purged_month_split(
+                candidate,
+                validation_start=validation_start,
+                validation_end=validation_end,
+                embargo_days=self.horizon_days,
+            )
+            train = train[train["month"].isin(train_keys)]
             if train["trade_date"].nunique() < 20 or validation.empty:
                 continue
             weights, report = self.fit_frame(train, prior)
             evaluation = self.evaluate_weights(validation, weights)
             effective = str(validation["trade_date"].min())
+            candidate_model = self._fit_candidate_model(
+                train,
+                features=list(prior),
+                weights=weights,
+                profile=profile,
+                effective_date=effective,
+            )
+            candidate_model["training_scope"] = training_scope
+            report["candidate_model"] = candidate_model
             payload = {
-                "schema_version": 1,
-                "model_type": "ic_ir_constrained_blend",
+                "schema_version": 2,
+                "model_type": "lightgbm_rank_meta_with_ic_ir_fallback" if candidate_model.get("active") else "ic_ir_constrained_blend",
                 "profile": profile,
+                "training_scope": training_scope,
                 "effective_date": effective,
                 "trained_at": datetime.now().isoformat(timespec="seconds"),
                 "train_start": str(train["trade_date"].min()),
@@ -705,6 +989,7 @@ class FactorLibraryTrainer:
                 "weights": weights,
                 **report,
                 "oos_evaluation": evaluation,
+                "purged_split": split_audit,
             }
             path = self.repository.publish(payload)
             folds.append({
@@ -712,6 +997,8 @@ class FactorLibraryTrainer:
                 "train_months": train_keys,
                 "validation_month": validation_key,
                 "path": str(path),
+                "purged_rows": split_audit["purged_rows"],
+                "embargo_dates": split_audit["embargo_dates"],
                 **evaluation,
             })
         summary = {
@@ -728,7 +1015,7 @@ class FactorLibraryTrainer:
         previous_trade_date: str,
         *,
         profile: str = "default",
-        lookback_days: int = 150,
+        lookback_days: int = 300,
     ) -> Optional[Dict[str, Any]]:
         """Publish once per month using data ending at the previous trade date."""
         if not previous_trade_date:
@@ -736,11 +1023,44 @@ class FactorLibraryTrainer:
         current = self.repository.resolve(trade_date, profile)
         if current and current.effective_date[:6] == str(trade_date)[:6]:
             return None
-        end = datetime.strptime(str(previous_trade_date), "%Y%m%d")
-        start = (end - timedelta(days=max(int(lookback_days), 60))).strftime("%Y%m%d")
+        try:
+            from core.utils.date_utils import DateUtils
+
+            start = DateUtils().get_n_trade_dates_before(max(int(lookback_days), 120), str(previous_trade_date))
+        except Exception:
+            end = datetime.strptime(str(previous_trade_date), "%Y%m%d")
+            start = (end - timedelta(days=max(int(lookback_days * 1.5), 180))).strftime("%Y%m%d")
         return self.train_and_publish(
             start, str(previous_trade_date), profile=profile, effective_date=str(trade_date)
         )
+
+    def _rolling_month_gate(
+        self, frame: pd.DataFrame, prior: Mapping[str, float], months: int = 3,
+    ) -> Dict[str, Any]:
+        """Require positive OOS rank IC in at least two of three consecutive months."""
+        data = frame.copy()
+        data["_month"] = data["trade_date"].astype(str).str.slice(0, 6)
+        month_keys = sorted(data["_month"].dropna().unique())[-max(int(months), 1):]
+        folds = []
+        for month in month_keys:
+            validation = data[data["_month"] == month]
+            train = data[data["_month"] < month]
+            if train["trade_date"].astype(str).nunique() < 40 or validation.empty:
+                continue
+            metrics = self.factor_metrics(train, list(prior))
+            redundant = self._redundant_factors(train, list(prior), metrics)
+            learned = self._learned_weights(metrics, redundant)
+            weights = self.blend_weights(prior, learned, 0.50, 0.25)
+            evaluation = self.evaluate_weights(validation, weights)
+            folds.append({"month": str(month), **evaluation})
+        positive = sum(float(row.get("rank_ic") or 0.0) > 0 for row in folds)
+        return {
+            "passed": len(folds) >= 3 and positive >= 2,
+            "required_folds": 3,
+            "positive_required": 2,
+            "positive_folds": int(positive),
+            "folds": folds,
+        }
 
 
 __all__ = ["DynamicWeightRepository", "FactorLibraryTrainer", "WeightArtifact"]

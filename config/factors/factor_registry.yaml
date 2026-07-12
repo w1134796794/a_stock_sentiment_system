@@ -783,6 +783,188 @@ factors:
     enabled: true
     params: {}
 
+  stk_intraday_seal_quality:
+    id: "D9"
+    name: "封板综合质量"
+    category: "stock_tech"
+    sub_category: "board"
+    description: "综合首封时间、反复开板和封单成交额占比；仅使用当日涨停池客观字段"
+    data_source: "limit_up_pool"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.08
+    enabled: true
+    params: {}
+
+  stk_sector_rotation_momentum:
+    id: "D10"
+    name: "板块轮动动量"
+    category: "stock_tech"
+    sub_category: "sector"
+    description: "所属主板块动量、主线加速度和连续活跃天数的目标区间评分"
+    data_source: "factor_sector_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.08
+    enabled: true
+    params: {lookback_days: 6}
+
+  stk_crowding_decay_5d:
+    id: "D11"
+    name: "近5日拥挤衰减"
+    category: "stock_tech"
+    sub_category: "risk"
+    description: "按近5个交易日涨停出现次数评估接力拥挤，重复过多逐级降分"
+    data_source: "limit_up_pool"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.05
+    enabled: true
+    params: {lookback_days: 5}
+
+  stk_relative_strength_sector:
+    id: "D12"
+    name: "个股相对板块强度"
+    category: "stock_tech"
+    sub_category: "sector"
+    description: "当日个股涨幅相对所属主板块成分股中位数的横截面分位"
+    data_source: "stock_daily+sector_membership"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.07
+    enabled: true
+    params: {}
+
+  sec_behavior_attention:
+    id: "BH1"
+    name: "板块注意形成"
+    category: "behavior"
+    sub_category: "sector_state"
+    description: "板块首次转强、排名跃升、成交额异常和动量加速度的综合证据"
+    data_source: "sector_daily_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  sec_behavior_acceleration:
+    id: "BH2"
+    name: "板块一致加速"
+    category: "behavior"
+    sub_category: "sector_state"
+    description: "板块动量、持续性、合理量能和资金承接共同增强"
+    data_source: "factor_sector_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  sec_behavior_divergence:
+    id: "BH3"
+    name: "板块分歧释放"
+    category: "behavior"
+    sub_category: "sector_state"
+    description: "动量减速、排名回落、量能过热和资金承接走弱"
+    data_source: "factor_sector_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  sec_behavior_repair:
+    id: "BH4"
+    name: "板块弱转强修复"
+    category: "behavior"
+    sub_category: "sector_state"
+    description: "板块由弱转强、排名修复并获得量能和资金确认"
+    data_source: "factor_sector_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  sec_behavior_decay:
+    id: "BH5"
+    name: "板块拥挤衰退"
+    category: "behavior"
+    sub_category: "sector_state"
+    description: "高位持续后动量、排名、量能和资金同步衰减"
+    data_source: "factor_sector_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_behavior_attention:
+    id: "BH6"
+    name: "个股注意形成"
+    category: "behavior"
+    sub_category: "stock_state"
+    description: "板块注意扩散叠加个股相对强度、量能和市场身位"
+    data_source: "factor_stock_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_behavior_acceleration:
+    id: "BH7"
+    name: "个股一致加速"
+    category: "behavior"
+    sub_category: "stock_state"
+    description: "封板稳定、板块同步、相对强势且成交结构健康"
+    data_source: "factor_stock_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_behavior_divergence:
+    id: "BH8"
+    name: "个股分歧释放"
+    category: "behavior"
+    sub_category: "stock_state"
+    description: "炸板、量能过热、封板推迟和板块分歧的组合证据"
+    data_source: "factor_stock_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_behavior_repair:
+    id: "BH9"
+    name: "个股弱转强修复"
+    category: "behavior"
+    sub_category: "stock_state"
+    description: "低开修复、分歧承接、相对板块强度和量能确认"
+    data_source: "factor_stock_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_behavior_decay:
+    id: "BH10"
+    name: "个股拥挤衰退"
+    category: "behavior"
+    sub_category: "stock_state"
+    description: "重复涨停拥挤、封板推迟、相对强度和板块热度下降"
+    data_source: "factor_stock_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
   stk_capital_flow_persistence:
     id: "SIG2"
     name: "资金流持续性"

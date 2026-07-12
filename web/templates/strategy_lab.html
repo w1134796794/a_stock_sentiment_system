@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}策略实验室{% endblock %}
+{% block page_title %}策略实验室{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">策略候选对照 · 共识合并 · 组合建议</div>{% endblock %}
+
+{% block header_extra %}
+<label class="text-sm text-slate-400">交易日</label>
+<select id="lab-date" class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
+  {% for d in dates %}<option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>{% endfor %}
+</select>
+<button id="lab-refresh" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold">刷新</button>
+{% endblock %}
+
+{% block content %}
+<section class="border-b border-slate-800 pb-4 mb-5">
+  <div class="text-xs text-slate-500 mb-2">参与组合的策略</div>
+  <div id="lab-strategies" class="flex flex-wrap gap-2">
+    {% for profile in strategy_profiles %}
+    <label class="lab-check">
+      <input type="checkbox" value="{{ profile.id }}" {% if profile.primary %}checked{% endif %}>
+      <span>{{ profile.name }}</span>
+    </label>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+  <div class="lab-kpi"><b id="lab-input">--</b><span>策略候选</span></div>
+  <div class="lab-kpi"><b id="lab-unique">--</b><span>去重后</span></div>
+  <div class="lab-kpi"><b id="lab-consensus">--</b><span>多策略共识</span></div>
+  <div class="lab-kpi"><b id="lab-count">--</b><span>可执行标的</span></div>
+  <div class="lab-kpi"><b id="lab-weight">--</b><span>建议总仓位</span></div>
+</section>
+
+<section class="mb-6">
+  <div class="flex items-center justify-between mb-3"><h2 class="text-base font-bold">策略产物</h2><span class="text-xs text-slate-500">仅显示已生成的当日候选</span></div>
+  <div id="lab-profile-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+</section>
+
+<section>
+  <div class="flex items-center justify-between mb-3"><h2 class="text-base font-bold">组合建议</h2><span class="text-xs text-slate-500">先合并重复股票，再按策略共识和板块上限分配</span></div>
+  <div id="lab-allocation" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+  <div id="lab-empty" class="hidden py-10 text-center text-sm text-slate-500">所选策略在该交易日没有可组合的候选。</div>
+</section>
+
+<style>
+  .lab-check { display:inline-flex; align-items:center; gap:.45rem; border:1px solid rgba(51,65,85,.8); background:rgba(15,23,42,.55); border-radius:.45rem; padding:.38rem .6rem; font-size:.78rem; color:#cbd5e1; cursor:pointer; }
+  .lab-check:has(input:checked) { border-color:rgba(16,185,129,.6); color:#6ee7b7; background:rgba(16,185,129,.10); }
+  .lab-check input { accent-color:#10b981; }
+  .lab-kpi { border:1px solid rgba(51,65,85,.75); background:rgba(15,23,42,.55); border-radius:.5rem; padding:.75rem .8rem; min-height:70px; }
+  .lab-kpi b { display:block; font-size:1.32rem; color:#f8fafc; font-family:ui-monospace, monospace; }
+  .lab-kpi span { font-size:.7rem; color:#64748b; }
+  .lab-card { border:1px solid rgba(51,65,85,.75); background:rgba(15,23,42,.50); border-radius:.5rem; padding:.9rem; min-width:0; }
+  .lab-name { font-size:1rem; font-weight:800; color:#f1f5f9; }
+  .lab-code { font-family:ui-monospace, monospace; font-size:.72rem; color:#64748b; margin-top:.12rem; }
+  .lab-pill { display:inline-flex; align-items:center; border:1px solid rgba(71,85,105,.8); border-radius:.3rem; padding:.1rem .35rem; font-size:.67rem; color:#cbd5e1; background:rgba(2,6,23,.34); }
+  .lab-pill.consensus { color:#6ee7b7; border-color:rgba(16,185,129,.45); }
+  .lab-meta { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.45rem; margin-top:.75rem; }
+  .lab-meta div { border:1px solid rgba(51,65,85,.55); background:rgba(2,6,23,.32); border-radius:.4rem; padding:.45rem; min-width:0; }
+  .lab-meta span { display:block; color:#64748b; font-size:.64rem; margin-bottom:.15rem; }
+  .lab-meta b { font-size:.78rem; color:#e2e8f0; overflow-wrap:anywhere; }
+</style>
+
+<script>
+  const dateEl = document.getElementById('lab-date');
+  const refreshEl = document.getElementById('lab-refresh');
+  const esc = value => String(value ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const selectedStrategies = () => Array.from(document.querySelectorAll('#lab-strategies input:checked')).map(el => el.value);
+  const entryText = mode => ({weak_to_strong:'弱转强', continuation:'强势延续', acceleration:'高开加速'})[mode] || mode;
+
+  function render(data) {
+    const summary = data.summary || {};
+    document.getElementById('lab-input').textContent = summary.input_candidates ?? 0;
+    document.getElementById('lab-unique').textContent = summary.unique_candidates ?? 0;
+    document.getElementById('lab-consensus').textContent = summary.consensus_count ?? 0;
+    document.getElementById('lab-count').textContent = summary.allocated_count ?? 0;
+    document.getElementById('lab-weight').textContent = `${Number(summary.total_weight_pct || 0).toFixed(1)}%`;
+    document.getElementById('lab-profile-grid').innerHTML = (data.strategies || []).map(row => `
+      <article class="lab-card"><div class="flex justify-between gap-3"><div><div class="lab-name">${esc(row.name)}</div><div class="lab-code">${esc(row.id)} · ${esc(row.version)}</div></div><span class="lab-pill ${row.available ? 'consensus' : ''}">${row.available ? '已生成' : '未生成'}</span></div>
+      <div class="lab-meta"><div><span>候选</span><b>${row.candidate_count || 0}</b></div><div><span>适用市场</span><b>${esc((row.market_regimes || []).join(' / ') || '--')}</b></div><div><span>入场</span><b>${esc((row.entry_modes || []).map(entryText).join(' / ') || '--')}</b></div></div></article>`).join('');
+    const allocations = data.allocation || [];
+    document.getElementById('lab-empty').classList.toggle('hidden', allocations.length > 0);
+    document.getElementById('lab-allocation').innerHTML = allocations.map(row => `
+      <article class="lab-card"><div class="flex justify-between gap-3"><a href="/stock/${esc(row.代码)}?date=${esc(data.trade_date)}" class="min-w-0 hover:text-emerald-300"><div class="lab-name">${esc(row.名称 || row.name || row.代码)}</div><div class="lab-code">${esc(row.代码)} · ${esc(row.组合板块 || '未分类')}</div></a><span class="lab-pill consensus">${Number(row['组合建议仓位%'] || 0).toFixed(1)}%</span></div>
+      <div class="flex flex-wrap gap-1.5 mt-3"><span class="lab-pill">组合评分 ${Number(row['策略组合评分'] || 0).toFixed(1)}</span><span class="lab-pill consensus">${esc(row.策略共识 || row.策略名称 || '--')}</span></div><div class="text-xs text-slate-400 mt-3 leading-5">${esc(row.组合分配说明 || '')}</div></article>`).join('');
+  }
+
+  async function loadLab() {
+    refreshEl.disabled = true; refreshEl.textContent = '加载中...';
+    const params = new URLSearchParams({date: dateEl.value, strategy_ids: selectedStrategies().join(',')});
+    try { const response = await fetch('/api/strategy-lab?' + params); const data = await response.json(); if (!data.ok) throw new Error(data.error || '加载失败'); render(data); }
+    catch (error) { document.getElementById('lab-allocation').innerHTML = `<div class="text-sm text-rose-300">${esc(error)}</div>`; }
+    finally { refreshEl.disabled = false; refreshEl.textContent = '刷新'; }
+  }
+  refreshEl.addEventListener('click', loadLab); dateEl.addEventListener('change', loadLab);
+  document.querySelectorAll('#lab-strategies input').forEach(el => el.addEventListener('change', loadLab));
+  loadLab();
+</script>
+{% endblock %}

@@ -120,6 +120,11 @@ class RealtimePayloadCache:
         stored_at = float((envelope or {}).get("stored_at") or 0.0)
         if not force and envelope and time() - stored_at <= self.ttl_seconds:
             return deepcopy(stale)
+        # Each Web worker owns the same refresh loop. Treat a very recent forced
+        # refresh from another worker as current so one market tick is fetched once.
+        min_refresh_interval = min(max(self.ttl_seconds / 3.0, 1.0), 5.0)
+        if force and envelope and time() - stored_at < min_refresh_interval:
+            return deepcopy(stale)
 
         lock_ttl = max(int(self.wait_timeout_seconds * 2), 30)
         token = self.backend.acquire_lock(lock_key, lock_ttl)
@@ -139,6 +144,8 @@ class RealtimePayloadCache:
             latest = self.backend.get_json(cache_key)
             latest_at = float((latest or {}).get("stored_at") or 0.0)
             if not force and latest and time() - latest_at <= self.ttl_seconds:
+                return deepcopy(latest.get("value"))
+            if force and latest and latest_at > stored_at:
                 return deepcopy(latest.get("value"))
             value = loader()
             now = time()

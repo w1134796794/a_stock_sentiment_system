@@ -18,6 +18,7 @@ from backtest.minute_entry import (
 from backtest.trade_calendar import TradeCalendar
 from core.realtime.models import normalize_stock_code
 from core.realtime.sector_breadth import RealtimeSectorBreadthProvider
+from core.factors.behavior_cycle import intraday_behavior_cycle
 from core.signals.confidence_service import ConfidenceService, HistoricalSignalStatsRepository
 from core.signals.minute_amount_profile import MinuteAmountProfileRepository
 from core.utils.price_limit import limit_up_price
@@ -70,6 +71,7 @@ class RealtimeEntrySignalService:
         quotes: Dict[str, Dict[str, Any]],
         *,
         market_date: str,
+        execution: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         source_rows = [dict(row or {}) for row in rows or []]
         market_date = str(market_date or "").replace("-", "")[:8]
@@ -99,6 +101,7 @@ class RealtimeEntrySignalService:
                 previous.get(code) or {},
                 market_date,
                 source_rows,
+                execution or {},
             )
         return out
 
@@ -112,6 +115,7 @@ class RealtimeEntrySignalService:
         previous: Dict[str, Any],
         market_date: str,
         all_rows: List[Dict[str, Any]],
+        execution: Dict[str, Any],
     ) -> Dict[str, Any]:
         code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
         name = str(quote.get("name") or row.get("name") or "")
@@ -136,6 +140,23 @@ class RealtimeEntrySignalService:
 
         gap = open_price / pre_close - 1.0
         mode = self._mode_for_gap(gap)
+        allowed_modes = {
+            str(item).strip()
+            for item in (execution.get("allowed_entry_modes") or [])
+            if str(item).strip()
+        }
+        if allowed_modes and mode not in allowed_modes:
+            allowed_text = "、".join(MODE_LABELS.get(item, item) for item in sorted(allowed_modes))
+            return self._payload(
+                EntryDecision(
+                    "rejected",
+                    signal=MODE_LABELS.get(mode, ""),
+                    reason=f"该策略仅允许{allowed_text}，当前开盘分层不适用",
+                    open_gap_pct=gap,
+                ),
+                mode,
+                market_date,
+            )
         auction = self._auction(code, market_date) if mode == ENTRY_CONTINUATION else {}
         amount_ratio = self._metric(row, "amount_ratio", 0.0)
         previous_amount = self._previous_amount_yuan(previous)
@@ -192,7 +213,7 @@ class RealtimeEntrySignalService:
             status = "observe"
             status_text = "观察"
         signal_name = decision.signal or MODE_LABELS.get(mode, "")
-        stats = self.signal_stats.get(signal_name, as_of_date=market_date)
+        stats = self.signal_stats.get(signal_name, as_of_date=market_date) if signal_name else {}
         sector_complete = float((sector_detail or {}).get("data_completeness") or 0.0)
         data_completeness = min(float(decision.data_completeness), sector_complete or float(decision.data_completeness))
         confidence = ConfidenceService.assess(
@@ -207,6 +228,16 @@ class RealtimeEntrySignalService:
             tradability=0.0 if decision.status == "signal_unfilled" else 1.0,
             model_type=f"entry_{mode}",
             as_of_date=market_date,
+        )
+        behavior = intraday_behavior_cycle(
+            entry_mode=mode,
+            signal_status=decision.status,
+            amount_pace=decision.amount_pace,
+            sector_confirmed=decision.sector_confirmed,
+            hold_minutes=decision.hold_minutes,
+            false_break_count=decision.false_break_count,
+            pullback_quality=decision.pullback_quality,
+            active_buy_ratio=decision.active_buy_ratio,
         )
         return {
             "market_date": market_date,
@@ -230,11 +261,18 @@ class RealtimeEntrySignalService:
             "pullback_quality": decision.pullback_quality,
             "active_buy_ratio": decision.active_buy_ratio,
             "confidence": confidence,
-            "success_probability": confidence["candidate_probability"],
-            "historical_samples": confidence["sample_size"],
-            "average_mfe_pct": confidence["average_mfe_pct"],
-            "average_mae_pct": confidence["average_mae_pct"],
+            "success_probability": confidence["candidate_probability"] if stats else None,
+            "historical_samples": confidence["sample_size"] if stats else None,
+            "average_mfe_pct": confidence["average_mfe_pct"] if stats else None,
+            "average_mae_pct": confidence["average_mae_pct"] if stats else None,
             "confidence_grade": confidence["confidence_grade"],
+            "historical_stats_basis": signal_name or "",
+            "behavior_state": behavior["dominant_state"],
+            "behavior_state_label": behavior["dominant_label"],
+            "behavior_state_probability": behavior["dominant_probability"],
+            "behavior_state_scores": behavior["scores"],
+            "behavior_state_probabilities": behavior["probabilities"],
+            "behavior_atomic_evidence": behavior["atomic"],
         }
 
     def _minute_frame(self, code: str, market_date: str) -> pd.DataFrame:

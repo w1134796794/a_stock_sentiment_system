@@ -32,7 +32,7 @@
   <nav id="data-tabs" class="card border border-slate-800 rounded-xl p-2 flex flex-wrap gap-1.5">
     {% set ns = namespace(first=true, any=false) %}
     {% for s in sections %}
-      {% if (s.name in category.names) or (category.signals and s.kind == 'signals') %}
+      {% if (s.name in category.names) or (s.category == cat) or (category.signals and s.kind == 'signals') %}
       {% set ns.any = true %}
       <button
         class="dtab {% if ns.first %}active{% endif %}"
@@ -41,7 +41,7 @@
         onclick="setActiveTab(this)"
         {% if ns.first %}hx-trigger="load, click"{% endif %}>
         <span>{{ s.name }}</span>
-        <span class="dtab-count mono">{{ s.rows|length }}</span>
+        <span class="dtab-count mono">{{ s.tab_count if s.tab_count is defined else s.rows|length }}</span>
       </button>
       {% set ns.first = false %}
       {% endif %}

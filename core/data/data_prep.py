@@ -48,6 +48,22 @@ class DataPrep:
     def __init__(self, data_manager: Any):
         self.dm = data_manager
 
+    @staticmethod
+    def _record_source(
+        ds: MarketDataset,
+        source: str,
+        *,
+        ok: bool,
+        rows: int = 0,
+        error: str = "",
+    ) -> None:
+        statuses = ds.meta.setdefault("source_fetch_status", {})
+        statuses[str(source)] = {
+            "ok": bool(ok),
+            "rows": int(rows or 0),
+            "error": str(error or ""),
+        }
+
     def build(self,
               trade_date: str,
               prev_trade_date: str = "",
@@ -217,7 +233,9 @@ class DataPrep:
                 ds.all_daily[str(trade_date)] = df
                 ds.prefetched.add("all_daily")
                 logger.info(f"[DataPrep] all_daily 预取：{len(df)} 行 @ {trade_date}")
+                self._record_source(ds, "stock_daily", ok=True, rows=len(df))
         except Exception as e:
+            self._record_source(ds, "stock_daily", ok=False, error=str(e))
             logger.warning(f"[DataPrep] all_daily 预取失败（将回退 dm）：{e}")
 
     def _prefetch_daily_basic(self, ds: MarketDataset, trade_date: str) -> None:
@@ -230,7 +248,12 @@ class DataPrep:
                 ds.daily_basic[str(trade_date)] = df
                 ds.prefetched.add("daily_basic")
                 logger.info(f"[DataPrep] daily_basic 预取：{len(df)} 行 @ {trade_date}")
+            self._record_source(
+                ds, "daily_basic", ok=isinstance(df, pd.DataFrame),
+                rows=len(df) if isinstance(df, pd.DataFrame) else 0,
+            )
         except Exception as e:
+            self._record_source(ds, "daily_basic", ok=False, error=str(e))
             logger.warning(f"[DataPrep] daily_basic 预取失败（将回退 dm）：{e}")
 
     def _prefetch_stock_basic(self, ds: MarketDataset) -> None:
@@ -242,7 +265,12 @@ class DataPrep:
             if isinstance(df, pd.DataFrame) and not df.empty:
                 ds.put_call("stock_basic", df, "stock_basic")
                 logger.info(f"[DataPrep] stock_basic 预取：{len(df)} 行")
+            self._record_source(
+                ds, "stock_basic", ok=isinstance(df, pd.DataFrame),
+                rows=len(df) if isinstance(df, pd.DataFrame) else 0,
+            )
         except Exception as e:
+            self._record_source(ds, "stock_basic", ok=False, error=str(e))
             logger.warning(f"[DataPrep] stock_basic 预取失败（不影响主流程）：{e}")
 
     def _prefetch_limit_up_concepts(
@@ -250,13 +278,16 @@ class DataPrep:
     ) -> None:
         """预取涨停股概念归属，生成概念连板梯队所需的按日缓存。"""
         if not stock_codes or not hasattr(self.dm, "cache_limit_up_stock_concepts"):
+            self._record_source(ds, "limit_up_concepts", ok=True, rows=0)
             return
         try:
             frame = self.dm.cache_limit_up_stock_concepts(stock_codes, str(trade_date))
             if isinstance(frame, pd.DataFrame):
                 ds.meta["limit_up_concept_relations"] = len(frame)
                 ds.prefetched.add("limit_up_concepts")
+                self._record_source(ds, "limit_up_concepts", ok=True, rows=len(frame))
         except Exception as e:
+            self._record_source(ds, "limit_up_concepts", ok=False, error=str(e))
             logger.warning(f"[DataPrep] 涨停股概念归属预取失败（不影响主流程）：{e}")
 
     def _prefetch_index_daily(self, ds: MarketDataset, index_codes: Iterable[str],
@@ -280,6 +311,7 @@ class DataPrep:
         end = str(trade_date)
         codes = [str(c) for c in index_codes if c]
         n_ok = 0
+        errors = []
         for code in codes:
             for lb in lookbacks:
                 try:
@@ -291,7 +323,12 @@ class DataPrep:
                     ds.put_call(key, self.dm.get_index_daily(code, start, end), "index_daily")
                     n_ok += 1
                 except Exception as e:  # noqa: BLE001 —— 预取永不致命
+                    errors.append(str(e))
                     logger.debug(f"[DataPrep] index_daily {code} {start}~{end} 预取失败（将回退 dm）：{e}")
+        self._record_source(
+            ds, "index_daily", ok=not errors and n_ok > 0, rows=n_ok,
+            error="; ".join(errors[:3]),
+        )
         logger.info(f"[DataPrep] index_daily 预取：{len(codes)} 指数 × {len(lookbacks)} 窗口，成功 {n_ok} 次")
 
     def _prefetch_limit_up(self, ds: MarketDataset, trade_date: str, history_days: int) -> None:
@@ -306,6 +343,7 @@ class DataPrep:
         if str(trade_date) not in dates:
             dates = [str(trade_date)] + list(dates)
         n_ok = 0
+        errors = []
         for d in dates:
             try:
                 df = self.dm.get_limit_up_pool(d)
@@ -314,10 +352,16 @@ class DataPrep:
                     if not df.empty:
                         n_ok += 1
             except Exception as e:
+                errors.append(str(e))
                 logger.debug(f"[DataPrep] limit_up {d} 预取失败（将回退 dm）：{e}")
         if ds.limit_up:
             ds.prefetched.add("limit_up")
         logger.info(f"[DataPrep] limit_up 预取：{len(ds.limit_up)} 个交易日，非空 {n_ok} 个")
+        self._record_source(
+            ds, "limit_up", ok=not errors and bool(ds.limit_up),
+            rows=sum(len(frame) for frame in ds.limit_up.values()),
+            error="; ".join(errors[:3]),
+        )
 
     def _prefetch_limit_down(self, ds: MarketDataset, trade_date: str) -> None:
         """预取当日跌停池，严格来自 Tushare limit_list_d。"""
@@ -329,7 +373,9 @@ class DataPrep:
                 ds.limit_down[str(trade_date)] = df
                 ds.prefetched.add("limit_down")
                 logger.info(f"[DataPrep] limit_down 预取：{len(df)} 行 @ {trade_date}")
+                self._record_source(ds, "limit_down", ok=True, rows=len(df))
         except Exception as e:
+            self._record_source(ds, "limit_down", ok=False, error=str(e))
             logger.warning(f"[DataPrep] limit_down 预取失败（将回退 dm）：{e}")
 
     def _prefetch_lhb(self, ds: MarketDataset, trade_date: str) -> None:
@@ -339,10 +385,13 @@ class DataPrep:
         def fetch(domain: str, key: str, fn) -> None:
             try:
                 value = fn()
-                ds.put_call(key, value if isinstance(value, pd.DataFrame) else pd.DataFrame(), domain)
+                frame = value if isinstance(value, pd.DataFrame) else pd.DataFrame()
+                ds.put_call(key, frame, domain)
+                self._record_source(ds, domain, ok=True, rows=len(frame))
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[DataPrep] {domain} {date} 预取失败，按空数据降级: {exc}")
                 ds.put_call(key, pd.DataFrame(), domain)
+                self._record_source(ds, domain, ok=False, error=str(exc))
 
         if hasattr(self.dm, "get_top_list"):
             fetch("top_list", call_key("top_list", trade_date=date), lambda: self.dm.get_top_list(date))
@@ -360,6 +409,7 @@ class DataPrep:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[DataPrep] hm_detail {date} 初始化失败，按空数据降级: {exc}")
             ds.put_call(call_key("hm_detail", trade_date=date), pd.DataFrame(), "hm_detail")
+            self._record_source(ds, "hm_detail", ok=False, error=str(exc))
 
         counts = {
             domain: sum(
@@ -394,6 +444,9 @@ class DataPrep:
                         frame = value
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[DataPrep] {domain} {date} 预取失败，按空数据降级: {exc}")
+                self._record_source(ds, domain, ok=False, error=str(exc))
+            else:
+                self._record_source(ds, domain, ok=True, rows=len(frame))
             ds.put_call(call_key(domain, trade_date=date), frame, domain)
             counts[domain] = len(frame)
         logger.info(f"[DataPrep] 短线增强数据预取 @ {date}: {counts}")
@@ -419,10 +472,19 @@ class DataPrep:
         """
         dm = self.dm
 
+        source_stats = {}
+
         def _try(domain: str, key: str, fetch) -> None:
             try:
-                ds.put_call(key, fetch(), domain)
+                value = fetch()
+                ds.put_call(key, value, domain)
+                stat = source_stats.setdefault(domain, {"ok": True, "rows": 0, "errors": []})
+                if isinstance(value, pd.DataFrame):
+                    stat["rows"] += len(value)
             except Exception as e:  # noqa: BLE001 —— 预取永不致命
+                stat = source_stats.setdefault(domain, {"ok": True, "rows": 0, "errors": []})
+                stat["ok"] = False
+                stat["errors"].append(str(e))
                 logger.debug(f"[DataPrep] {domain} 预取失败（将回退 dm）：{e}")
 
         if hasattr(dm, "get_ths_index"):
@@ -462,6 +524,12 @@ class DataPrep:
 
         prefetched = [k for k in ("ths_index", "ths_daily", "limit_cpt_list", "moneyflow_summary")
                       if k in ds.prefetched]
+        for domain in ("ths_index", "ths_daily", "limit_cpt_list", "moneyflow_summary"):
+            stat = source_stats.get(domain, {"ok": False, "rows": 0, "errors": ["接口不可用"]})
+            self._record_source(
+                ds, domain, ok=stat["ok"], rows=stat["rows"],
+                error="; ".join(stat["errors"][:3]),
+            )
         logger.info(f"[DataPrep] 板块/资金流预取：{prefetched}"
                     f"（板块按日窗口 {len(sector_dates)} 天，调用缓存 {len(ds.calls)} 条）")
 

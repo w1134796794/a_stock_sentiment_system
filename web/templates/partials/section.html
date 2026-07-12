@@ -2,7 +2,9 @@
   <div class="flex items-center justify-between mb-3">
     <div class="font-semibold text-slate-200">{{ section.name }}</div>
     <div class="text-xs text-slate-500 mono">
-      {% if section.blocks %}{{ section.blocks|length }} 表{% else %}{{ section.rows|length }} 行 · {{ section.columns|length }} 列{% endif %}
+      {% if section.kind == 'decision_pool' %}
+        可执行 {{ section.tab_count }} · 暂不参与 {{ section.groups[2].rows|length }}
+      {% elif section.blocks %}{{ section.blocks|length }} 表{% else %}{{ section.rows|length }} 行 · {{ section.columns|length }} 列{% endif %}
     </div>
   </div>
 
@@ -34,10 +36,27 @@
     </div>
   {% endmacro %}
 
+  {% macro render_trust_layers(v) %}
+    <div class="trust-grid">
+      {% for key, label in [('data', '数据'), ('model', '模型'), ('trading', '交易'), ('portfolio', '组合')] %}
+      {% set layer = v.get(key, {}) %}
+      <div class="trust-cell">
+        <span class="trust-label">{{ label }}可信度</span>
+        <strong class="mono">
+          {% if layer.get('score') is not none %}{{ layer.get('score') | num2 }}{% elif layer.get('grade') %}{{ layer.get('grade') }}{% else %}待账户校验{% endif %}
+        </strong>
+        <span class="trust-note">{{ layer.get('description') or '--' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  {% endmacro %}
+
   {# ---------- 单个字段值渲染：标量 / 字典(key_metrics, 递归) / 列表(validation_rules) ---------- #}
   {% macro render_value(v) %}
     {%- if v is mapping -%}
-      {%- if v.get('total_penalty') is not none and 'breakdown' in v -%}
+      {%- if 'data' in v and 'model' in v and 'trading' in v and 'portfolio' in v -%}
+        {{ render_trust_layers(v) }}
+      {%- elif v.get('total_penalty') is not none and 'breakdown' in v -%}
         {{ render_conf(v) }}
       {%- elif v -%}
       <div class="md-kv">
@@ -62,8 +81,10 @@
   {% else %}
     {% set name_prefs = ['sector_name', '板块名称', '概念名称', '股票名称', 'stock_name', '名称', 'name'] %}
     {% set code_prefs = ['sector_code', '板块代码', '股票代码', 'stock_code', 'code', '代码', 'ts_code'] %}
-    {% set metric_prefs = ['候选概率', 'candidate_probability', '预期收益%', 'expected_return_pct',
-                           '可信等级', 'confidence_grade', '止损概率%', 'stop_probability',
+    {% set metric_prefs = ['候选概率', 'candidate_probability', '3日预期总收益%', 'expected_gross_return_pct',
+                           '预期收益%', 'expected_return_pct',
+                           '行为阶段', 'behavior_state_label', '阶段置信度%', 'behavior_state_probability',
+                           '可信等级', 'confidence_grade', '3日先触发-4%概率%', 'stop_probability',
                            '模式类型', 'pattern_type', '板块类型', '类型', 'type', '置信度', 'confidence',
                            '主线主题评分', '涨停家数', 'limit_up_count', '当日主线评分', '近10日上榜天数',
                            '综合评分', 'composite_score', 'mainline_score', '动量评分', 'momentum_score',
@@ -424,8 +445,85 @@
     {%- endif -%}
   {% endmacro %}
 
+  {% macro render_decision_pool(section) %}
+    <div class="dp-toolbar">
+      <div class="dp-active">
+        <span class="dp-regime">{{ section.market_regime_label }}</span>
+        <span class="dp-caption">今日适用策略</span>
+        {% for name in section.active_strategy_names %}<span class="dp-strategy">{{ name }}</span>{% endfor %}
+      </div>
+      {% if section.hidden_strategy_names %}
+      <details class="dp-hidden">
+        <summary>查看已收起策略 {{ section.hidden_strategy_names|length }}</summary>
+        <div>{{ section.hidden_strategy_names|join('、') }}</div>
+      </details>
+      {% endif %}
+    </div>
+    {% if section.training_diagnostic and section.training_diagnostic.triggered %}
+    <div class="dp-diagnostic">
+      <b>训练诊断已触发</b>
+      <span>{{ section.training_diagnostic.message }}</span>
+    </div>
+    {% endif %}
+
+    {% for group in section.groups %}
+      {% set collapsed = group.key == 'inactive' %}
+      {% if collapsed %}<details class="dp-group dp-group--inactive"><summary class="dp-group-head">{% else %}<section class="dp-group"><div class="dp-group-head">{% endif %}
+        <span><b>{{ group.name }}</b><small>{{ group.meaning }}</small></span>
+        <span class="dp-count mono">{{ group.rows|length }}</span>
+      {% if collapsed %}</summary>{% else %}</div>{% endif %}
+
+      {% if group.rows %}
+      <div class="dp-grid">
+        {% for row in group.rows %}
+        <article class="dp-card dp-card--{{ group.key }}">
+          <header class="dp-card-head">
+            <span><b>{{ row.get('name') or row.get('股票名称') or row.get('code') }}</b><small class="mono">{{ row.get('code') }}</small></span>
+            <span class="dp-head-badges">
+              <span class="dp-model">模型 {{ row.get('模型状态') }}</span>
+              <span class="dp-grade dp-grade--{{ row.get('股票等级')|lower }}">股票 {{ row.get('股票等级') }}</span>
+              <span class="dp-action">{{ row.get('行动分组') }}</span>
+            </span>
+          </header>
+          <div class="dp-conclusion">{{ row.get('一句话结论') }}</div>
+          <dl class="dp-six">
+            <div><dt>策略共识</dt><dd><b class="mono">{{ row.get('策略共识显示') }}</b><span>{{ row.get('命中策略')|join('、') }}</span></dd></div>
+            <div><dt>所属主线</dt><dd><b>{{ row.get('所属主线') }}</b><span>板块强度 {{ row.get('板块强度说明') }} {{ row.get('板块强度')|num2 }}</span></dd></div>
+            <div><dt>次日确认条件</dt><dd>{{ row.get('明日入场模式') }}</dd></div>
+            <div><dt>失效条件</dt><dd>{{ row.get('失效条件') }}</dd></div>
+            <div><dt>建议仓位</dt><dd class="dp-position">{{ row.get('建议仓位') }}</dd></div>
+          </dl>
+          <details class="dp-evidence">
+            <summary>专业证据</summary>
+            <div class="dp-evidence-grid">
+              <div><span>候选概率</span><b>{{ row.get('candidate_probability')|num2 }}%</b></div>
+              <div><span>预期超额</span><b>{{ row.get('expected_return_pct')|num2 }}%</b></div>
+              <div><span>止损概率</span><b>{{ row.get('stop_probability')|num2 }}%</b></div>
+              <div><span>可信等级</span><b>{{ row.get('confidence_grade') or '--' }}</b></div>
+              <div><span>验证样本</span><b>{{ row.get('model_validation_sample_size')|num2 }}</b></div>
+              <div><span>数据完整度</span><b>{{ row.get('data_completeness')|num2 }}%</b></div>
+            </div>
+            {% if row.get('所属行业') %}<div class="dp-proof-row"><span>所属行业</span>{{ render_value(row.get('所属行业')) }}</div>{% endif %}
+            {% if row.get('共振板块') %}<div class="dp-proof-row"><span>共振板块</span>{{ render_value(row.get('共振板块')) }}</div>{% endif %}
+            {% if row.get('reasons') %}<div class="dp-proof-row"><span>筛选依据</span>{{ render_value(row.get('reasons')) }}</div>{% endif %}
+            {% if row.get('命中指标') %}<div class="dp-proof-row"><span>命中指标</span>{{ render_value(row.get('命中指标')) }}</div>{% endif %}
+            {% if row.get('shap_explanation') %}<div class="dp-proof-row"><span>模型解释</span>{{ render_value(row.get('shap_explanation')) }}</div>{% endif %}
+          </details>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="dp-empty">今日没有进入“{{ group.name }}”的股票</div>
+      {% endif %}
+
+      {% if collapsed %}</details>{% else %}</section>{% endif %}
+    {% endfor %}
+  {% endmacro %}
+
   {% set _view = view | default('table') %}
-  {% if _view == 'smart' %}
+  {% if section.kind == 'decision_pool' %}
+    {{ render_decision_pool(section) }}
+  {% elif _view == 'smart' %}
     {{ render_smart(section.columns, section.rows, section.name) }}
   {% else %}
     {% set _render = render_echelon if _view == 'echelon' else (render_master_detail if _view == 'detail' else render_table) %}
@@ -445,6 +543,70 @@
   <div class="mt-3 text-[11px] text-slate-500 leading-relaxed">{{ section.note }}</div>
   {% endif %}
 </div>
+
+{% if section.kind == 'decision_pool' %}
+<style>
+  .dp-toolbar { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:1rem; }
+  .dp-active { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem; }
+  .dp-regime,.dp-strategy,.dp-action { border:1px solid rgba(16,185,129,.32); border-radius:6px; padding:.16rem .5rem; }
+  .dp-regime { color:#6ee7b7; background:rgba(16,185,129,.12); font-weight:700; }
+  .dp-caption { color:#64748b; font-size:.75rem; margin-left:.2rem; }
+  .dp-strategy { color:#cbd5e1; font-size:.75rem; background:rgba(15,23,42,.7); }
+  .dp-hidden { color:#64748b; font-size:.75rem; text-align:right; }
+  .dp-hidden summary { cursor:pointer; color:#94a3b8; }
+  .dp-hidden div { margin-top:.35rem; max-width:32rem; line-height:1.6; }
+  .dp-diagnostic { display:flex; gap:.65rem; align-items:flex-start; margin:.7rem 0 1rem; padding:.65rem .75rem;
+                   border:1px solid rgba(245,158,11,.35); border-radius:8px; background:rgba(120,53,15,.12); }
+  .dp-diagnostic b { color:#fcd34d; white-space:nowrap; }
+  .dp-diagnostic span { color:#cbd5e1; line-height:1.5; }
+  .dp-group { display:block; margin-top:1rem; }
+  .dp-group-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.65rem; }
+  .dp-group-head b { color:#e2e8f0; }
+  .dp-group-head small { color:#64748b; margin-left:.65rem; font-weight:400; }
+  .dp-count { color:#94a3b8; }
+  .dp-group--inactive { border-top:1px solid rgba(51,65,85,.65); padding-top:.85rem; }
+  .dp-group--inactive > summary { cursor:pointer; list-style:none; }
+  .dp-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:.75rem; }
+  .dp-card { border:1px solid rgba(51,65,85,.75); border-radius:8px; background:rgba(15,23,42,.52); padding:.9rem; min-width:0; }
+  .dp-card--focus { border-color:rgba(16,185,129,.48); }
+  .dp-card--inactive { opacity:.82; }
+  .dp-card-head { display:flex; justify-content:space-between; align-items:center; gap:.75rem; }
+  .dp-card-head b { color:#f1f5f9; font-size:1rem; }
+  .dp-card-head small { color:#64748b; margin-left:.45rem; }
+  .dp-head-badges { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:.35rem; }
+  .dp-model,.dp-grade { color:#94a3b8; border:1px solid rgba(100,116,139,.35); border-radius:6px; padding:.16rem .45rem; font-size:.7rem; }
+  .dp-grade--a { color:#6ee7b7; border-color:rgba(16,185,129,.42); }
+  .dp-grade--b { color:#7dd3fc; border-color:rgba(56,189,248,.42); }
+  .dp-grade--c { color:#fcd34d; border-color:rgba(245,158,11,.42); }
+  .dp-action { color:#6ee7b7; font-size:.7rem; white-space:nowrap; }
+  .dp-card--watch .dp-action { color:#fcd34d; border-color:rgba(245,158,11,.35); }
+  .dp-card--inactive .dp-action { color:#94a3b8; border-color:rgba(100,116,139,.35); }
+  .dp-conclusion { margin:.7rem 0; color:#cbd5e1; line-height:1.55; }
+  .dp-six { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.55rem; }
+  .dp-six > div { border:1px solid rgba(51,65,85,.65); border-radius:6px; padding:.55rem .65rem; min-width:0; }
+  .dp-six > div:first-child,.dp-six > div:nth-child(2) { min-height:4.25rem; }
+  .dp-six dt { color:#64748b; font-size:.7rem; margin-bottom:.2rem; }
+  .dp-six dd { color:#dbe4f0; line-height:1.45; overflow-wrap:anywhere; }
+  .dp-six dd span { display:block; color:#94a3b8; font-size:.72rem; margin-top:.15rem; }
+  .dp-position { color:#6ee7b7 !important; font-weight:700; }
+  .dp-evidence { margin-top:.7rem; border-top:1px solid rgba(51,65,85,.55); padding-top:.55rem; }
+  .dp-evidence summary { cursor:pointer; color:#64748b; font-size:.75rem; }
+  .dp-evidence-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.45rem; margin-top:.6rem; }
+  .dp-evidence-grid > div { background:rgba(2,6,23,.42); border-radius:6px; padding:.45rem; }
+  .dp-evidence-grid span { display:block; color:#64748b; font-size:.68rem; }
+  .dp-evidence-grid b { color:#cbd5e1; font-size:.8rem; }
+  .dp-proof-row { margin-top:.55rem; color:#cbd5e1; font-size:.75rem; line-height:1.5; }
+  .dp-proof-row > span { display:block; color:#64748b; margin-bottom:.2rem; }
+  .dp-empty { color:#64748b; border:1px dashed rgba(51,65,85,.7); border-radius:8px; padding:.8rem; font-size:.8rem; }
+  @media (max-width:720px) {
+    .dp-toolbar { display:block; }
+    .dp-hidden { text-align:left; margin-top:.65rem; }
+    .dp-grid,.dp-six { grid-template-columns:1fr; }
+    .dp-evidence-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .dp-group-head small { display:block; margin:.15rem 0 0; }
+  }
+</style>
+{% endif %}
 
 {% if (view | default('table')) in ['detail', 'smart'] %}
 <style>
@@ -476,6 +638,11 @@
   .md-kv-row { display:grid; grid-template-columns:minmax(4.8rem, max-content) minmax(0, 1fr); gap:.5rem; }
   .md-kv-k { color:#94a3b8; min-width:0; }
   .md-kv-v { color:#e2e8f0; overflow-wrap:anywhere; min-width:0; }
+  .trust-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:.5rem; width:100%; }
+  .trust-cell { min-width:0; border:1px solid #243146; background:#0b1324; padding:.6rem .7rem; }
+  .trust-label { display:block; color:#94a3b8; font-size:.7rem; }
+  .trust-cell strong { display:block; color:#e2e8f0; margin:.15rem 0; }
+  .trust-note { display:block; color:#64748b; font-size:.68rem; line-height:1.35; }
   .md-tags { display:flex; flex-wrap:wrap; gap:.3rem; }
   .md-tag { background:rgba(15,23,42,.7); border:1px solid rgba(51,65,85,.6); border-radius:.35rem; padding:.05rem .4rem; font-size:.74rem; color:#cbd5e1; }
   /* 置信扣分明细 */
@@ -502,6 +669,7 @@
     .md-detail { grid-template-columns:repeat(auto-fit, minmax(min(100%, 136px), 1fr)); padding:.7rem; gap:.55rem; }
     .md-field { padding:.5rem .55rem; }
     .md-kv-row { grid-template-columns:1fr; gap:.08rem; }
+    .trust-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
   }
 </style>
 {% endif %}

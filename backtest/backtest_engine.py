@@ -17,6 +17,7 @@ import loguru
 
 from backtest.matching_rules import limit_up_price, open_gap_pct
 from backtest.minute_entry import (
+    ENTRY_ACCELERATION,
     ENTRY_COMPARE,
     ENTRY_CONTINUATION,
     ENTRY_FIXED,
@@ -42,6 +43,15 @@ class BacktestConfig:
     max_positions: int = 8  # 最多同时持仓只数（仅风控开启时生效）
     max_sector_concentration: float = 0.4  # 单一板块最大仓位（仅风控开启时生效）
     max_plan_rank: int = 0  # 0=不按名次截断，全部候选交给买点规则判断
+
+    # 仓位算法：固定账户风险或基于历史已平仓样本的保守凯利。
+    position_sizing_mode: str = "fixed_risk"
+    fixed_risk_per_trade: float = 0.005
+    kelly_fraction: float = 0.25
+    kelly_min_samples: int = 50
+    kelly_max_position: float = 0.10
+    kelly_credibility: float = 0.80
+    kelly_payoff_haircut: float = 0.80
 
     # 入场与市场分层
     entry_mode: str = ENTRY_HYBRID  # 默认按分钟执行弱转强+强势延续
@@ -114,6 +124,13 @@ class BacktestConfig:
             max_total_position=float(risk_config.max_total_position),
             max_positions=int(risk_config.max_positions),
             max_sector_concentration=float(risk_config.max_sector_concentration),
+            position_sizing_mode=str(getattr(risk_config, "position_sizing_mode", "fixed_risk")),
+            fixed_risk_per_trade=float(getattr(risk_config, "fixed_risk_per_trade", 0.005)),
+            kelly_fraction=float(getattr(risk_config, "kelly_fraction", 0.25)),
+            kelly_min_samples=int(getattr(risk_config, "kelly_min_samples", 50)),
+            kelly_max_position=float(getattr(risk_config, "kelly_max_position", 0.10)),
+            kelly_credibility=float(getattr(risk_config, "kelly_credibility", 0.80)),
+            kelly_payoff_haircut=float(getattr(risk_config, "kelly_payoff_haircut", 0.80)),
             min_open_gap=float(risk_config.min_open_gap),
             max_open_gap=float(risk_config.max_open_gap),
             # 入场和退出阈值是本轮历史样本验证后的模拟交易策略，不反向修改全局风控。
@@ -167,6 +184,13 @@ class TradeRecord:
     entry_time: str = ""
     mfe_pct: float = 0.0
     mae_pct: float = 0.0
+    sizing_method: str = ""
+    sizing_rationale: str = ""
+    sizing_sample_size: int = 0
+    strategy_id: str = "default"
+    strategy_name: str = ""
+    strategy_version: str = ""
+    strategy_sources: str = ""
 
 
 class BacktestEngine:
@@ -187,6 +211,7 @@ class BacktestEngine:
         self._last_entry_gap: Dict[str, float] = {}
         self._last_entry_signal: Dict[str, str] = {}
         self._last_entry_meta: Dict[str, Dict[str, Any]] = {}
+        self._last_sizing_meta: Dict[str, Any] = {}
         self._minute_frames: Dict[Tuple[str, str], pd.DataFrame] = {}
         self._auction_rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
         self._sector_peers: Dict[str, List[str]] = {}
@@ -409,7 +434,33 @@ class BacktestEngine:
             return
 
         position_size = self._calculate_position_size(plan)
+        sizing_meta = dict(self._last_sizing_meta)
+        if position_size <= 0:
+            logger.info(
+                f"{stock_name} 仓位模型拒绝开仓: {sizing_meta.get('rationale') or '无正期望'}"
+            )
+            return
         current_position_value = sum(pos['market_value'] for pos in self.current_positions.values())
+        strategy_id = str(plan.get('策略ID') or 'default')
+        strategy_name = str(plan.get('策略名称') or strategy_id)
+        strategy_version = str(plan.get('策略版本') or '')
+        strategy_sources = str(plan.get('策略来源') or strategy_id)
+        execution = self._plan_execution(plan)
+        strategy_position_cap = self._float(plan.get('策略单票仓位上限%')) / 100.0
+        if strategy_position_cap > 0:
+            position_size = min(position_size, self.total_capital * strategy_position_cap)
+        portfolio_position_cap = self._float(plan.get('组合建议仓位%')) / 100.0
+        if portfolio_position_cap > 0:
+            position_size = min(position_size, self.total_capital * portfolio_position_cap)
+        strategy_max_positions = int(execution.get('max_positions') or 0)
+        if strategy_max_positions > 0:
+            strategy_open_count = sum(
+                1 for position in self.current_positions.values()
+                if str(position.get('strategy_id') or 'default') == strategy_id
+            )
+            if strategy_open_count >= strategy_max_positions:
+                logger.info(f"{strategy_name} 已达策略持仓上限{strategy_max_positions}只，跳过 {stock_name}")
+                return
 
         # 组合层风控闸门（仅风控开启时施加：持仓数 / 单票 / 总仓 / 板块集中度）
         if self.config.risk_control:
@@ -543,6 +594,13 @@ class BacktestEngine:
             'max_favorable_price': entry_price,
             'min_adverse_price': entry_price,
             'last_close': self._float((self._get_stock_daily_bar(stock_code, date) or {}).get('close'), entry_price),
+            'sizing_method': str(sizing_meta.get('method') or ''),
+            'sizing_rationale': str(sizing_meta.get('rationale') or ''),
+            'sizing_sample_size': int(sizing_meta.get('sample_size') or 0),
+            'strategy_id': strategy_id,
+            'strategy_name': strategy_name,
+            'strategy_version': strategy_version,
+            'strategy_sources': strategy_sources,
         }
 
         logger.info(f"[{date}] 买入 {stock_name}({stock_code}): {shares}股 @ {entry_price:.2f}, 成本:{actual_cost+commission:.2f}")
@@ -577,6 +635,13 @@ class BacktestEngine:
             amount_ratio=amount_ratio,
             entry_signal=entry_signal,
             entry_time=str(entry_meta.get('entry_time') or '09:30:00'),
+            sizing_method=str(sizing_meta.get('method') or ''),
+            sizing_rationale=str(sizing_meta.get('rationale') or ''),
+            sizing_sample_size=int(sizing_meta.get('sample_size') or 0),
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            strategy_version=strategy_version,
+            strategy_sources=strategy_sources,
         )
         self.trade_history.append(trade_record)
 
@@ -751,9 +816,46 @@ class BacktestEngine:
         board_position = self._float(plan.get('因子_stk_board_position'))
         return leader_quality >= 65.0 or (mainline >= 75.0 and board_position >= 60.0)
 
+    @staticmethod
+    def _plan_execution(plan: pd.Series) -> Dict[str, Any]:
+        raw = plan.get('策略执行')
+        if isinstance(raw, dict):
+            return dict(raw)
+        try:
+            return dict(json.loads(str(raw or '{}')) or {})
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+
+    def _entry_mode_for_plan(self, plan: pd.Series, gap: float) -> Optional[str]:
+        """Resolve the actual minute mode, constrained by the source strategy."""
+        configured = self.config.entry_mode if self.config.entry_mode in ENTRY_MODES else ENTRY_HYBRID
+        if configured == ENTRY_COMPARE:
+            configured = ENTRY_HYBRID
+        if configured == ENTRY_FIXED:
+            return ENTRY_FIXED
+        if configured == ENTRY_HYBRID:
+            if self.config.weak_entry_min_gap <= gap <= self.config.weak_entry_max_gap:
+                resolved = ENTRY_WEAK
+            elif self.config.weak_entry_max_gap < gap <= self.config.continuation_max_gap:
+                resolved = ENTRY_CONTINUATION
+            elif gap > self.config.continuation_max_gap:
+                resolved = ENTRY_ACCELERATION
+            else:
+                return None
+        else:
+            resolved = configured
+        allowed = {
+            str(item).strip()
+            for item in self._plan_execution(plan).get('allowed_entry_modes') or []
+            if str(item).strip()
+        }
+        if allowed and resolved not in allowed:
+            return None
+        return resolved
+
     def _record_entry_attempt(
         self, plan: pd.Series, date: str, stock_code: str, stock_name: str,
-        decision: EntryDecision,
+        decision: EntryDecision, *, entry_mode: str,
     ) -> None:
         self.entry_attempts.append({
             'date': str(date),
@@ -761,7 +863,10 @@ class BacktestEngine:
             'stock_name': stock_name,
             'plan_rank': self._int(plan.get('优先级')),
             'plan_score': self._float(plan.get('综合评分')),
-            'entry_mode': self.config.entry_mode,
+            'entry_mode': entry_mode,
+            'strategy_id': str(plan.get('策略ID') or 'default'),
+            'strategy_name': str(plan.get('策略名称') or ''),
+            'strategy_version': str(plan.get('策略版本') or ''),
             'signal': decision.signal,
             'status': decision.status,
             'reason': decision.reason,
@@ -825,9 +930,13 @@ class BacktestEngine:
         if prev_close and prev_close > 0:
             lu_price = limit_up_price(prev_close, stock_code, stock_name)
 
-        entry_mode = self.config.entry_mode if self.config.entry_mode in ENTRY_MODES else ENTRY_HYBRID
-        if entry_mode == ENTRY_COMPARE:
-            entry_mode = ENTRY_HYBRID
+        entry_mode = self._entry_mode_for_plan(plan, gap)
+        if entry_mode is None:
+            allowed = self._plan_execution(plan).get('allowed_entry_modes') or []
+            logger.info(
+                f"{stock_name} 当前开盘分层不在策略允许入场模式内: {','.join(str(item) for item in allowed)}"
+            )
+            return False, 0
         if entry_mode != ENTRY_FIXED:
             previous_date = self.calendar.prev(date)
             previous_bar = self._get_stock_daily_bar(stock_code, previous_date) or {}
@@ -856,7 +965,7 @@ class BacktestEngine:
                     self._daily_amount_yuan(previous_bar), "10:00:00"
                 )[1],
             )
-            self._record_entry_attempt(plan, date, stock_code, stock_name, decision)
+            self._record_entry_attempt(plan, date, stock_code, stock_name, decision, entry_mode=entry_mode)
             if not decision.filled:
                 logger.info(
                     f"{stock_name} {decision.signal or '分钟入场'} {decision.status}: {decision.reason}"
@@ -950,7 +1059,7 @@ class BacktestEngine:
         )
 
     def _calculate_position_size(self, plan: pd.Series) -> float:
-        """计算仓位大小"""
+        """Use only prior closed trades to size the next order without look-ahead."""
         position_map = {
             'light': 0.1,
             'medium': 0.15,
@@ -963,8 +1072,64 @@ class BacktestEngine:
         # 热点共振增加仓位
         if plan.get('热点共振', False):
             position_pct *= 1.2
+        position_pct = min(position_pct, self.config.max_position_per_stock)
 
-        return self.total_capital * position_pct
+        from risk.kelly_sizer import KellySizer
+        from risk.risk_config import RiskConfig
+
+        sizing_config = RiskConfig(
+            max_position_per_stock=self.config.max_position_per_stock,
+            position_sizing_mode=self.config.position_sizing_mode,
+            fixed_risk_per_trade=self.config.fixed_risk_per_trade,
+            kelly_fraction=self.config.kelly_fraction,
+            kelly_min_samples=self.config.kelly_min_samples,
+            kelly_max_position=self.config.kelly_max_position,
+            kelly_credibility=self.config.kelly_credibility,
+            kelly_payoff_haircut=self.config.kelly_payoff_haircut,
+        )
+        sizer = KellySizer(sizing_config)
+        mode = str(self.config.position_sizing_mode or "fixed_risk").strip().lower()
+        closed = [
+            row for row in self.trade_history
+            if str(row.action).upper().startswith("SELL")
+            and str(row.pattern_type) == str(plan.get('模式') or row.pattern_type)
+        ]
+        if mode == "conservative_kelly":
+            wins = [float(row.pnl_pct) for row in closed if float(row.pnl_pct) > 0]
+            losses = [abs(float(row.pnl_pct)) for row in closed if float(row.pnl_pct) < 0]
+            win_rate = len(wins) / len(closed) if closed else 0.0
+            avg_win = float(np.mean(wins)) if wins else 0.0
+            avg_loss = float(np.mean(losses)) if losses else 0.0
+            payoff = avg_win / avg_loss if avg_loss > 0 else 0.0
+            result = sizer.size(
+                win_rate=win_rate,
+                payoff_ratio=payoff,
+                n=len(closed),
+                base_position_pct=position_pct,
+                stop_distance=self.config.stop_loss_pct,
+                data_quality=self._quality_ratio(plan, "数据完整度", "data_completeness"),
+                regime_match=self._quality_ratio(plan, "市场适配度", "regime_match"),
+                tradability=self._quality_ratio(plan, "可成交系数", "tradability"),
+            )
+        else:
+            result = sizer.fixed_risk_size(
+                self.config.stop_loss_pct, base_position_pct=position_pct,
+            )
+        result["sample_size"] = len(closed)
+        self._last_sizing_meta = result
+        return self.total_capital * float(result.get("position_pct") or 0.0)
+
+    @staticmethod
+    def _quality_ratio(plan: pd.Series, *keys: str) -> float:
+        for key in keys:
+            value = plan.get(key)
+            if value not in (None, ""):
+                try:
+                    number = float(value)
+                    return min(max(number / 100.0 if number > 1.0 else number, 0.0), 1.0)
+                except (TypeError, ValueError):
+                    continue
+        return 1.0
 
     def _entry_gap_position_multiplier(self, gap: float) -> float:
         """Reduce size near the upper edge of the allowed opening-gap range."""
@@ -1155,6 +1320,13 @@ class BacktestEngine:
             entry_time=str(position.get('entry_time') or ''),
             mfe_pct=(float(position.get('max_favorable_price') or position['entry_price']) / position['entry_price'] - 1.0),
             mae_pct=(float(position.get('min_adverse_price') or position['entry_price']) / position['entry_price'] - 1.0),
+            sizing_method=str(position.get('sizing_method') or ''),
+            sizing_rationale=str(position.get('sizing_rationale') or ''),
+            sizing_sample_size=int(position.get('sizing_sample_size') or 0),
+            strategy_id=str(position.get('strategy_id') or 'default'),
+            strategy_name=str(position.get('strategy_name') or ''),
+            strategy_version=str(position.get('strategy_version') or ''),
+            strategy_sources=str(position.get('strategy_sources') or ''),
         )
 
         self.trade_history.append(trade_record)

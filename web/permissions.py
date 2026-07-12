@@ -35,14 +35,6 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "roles": ALL_ROLES,
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'),
             },
-            {
-                "key": "report",
-                "label": "交易计划",
-                "href": "/report",
-                "prefix": "/report",
-                "roles": ALL_ROLES,
-                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V9m4 8V5m4 12v-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>'),
-            },
         ],
     },
     {
@@ -50,7 +42,7 @@ MENU_GROUPS: List[Dict[str, Any]] = [
         "items": [
             {
                 "key": "strategy",
-                "label": "指标筛选",
+                "label": "候选股",
                 "href": "/data/strategy",
                 "prefix": "/data/strategy",
                 "roles": ALL_ROLES,
@@ -107,6 +99,35 @@ MENU_GROUPS: List[Dict[str, Any]] = [
         ],
     },
     {
+        "label": "策略",
+        "items": [
+            {
+                "key": "screening_run",
+                "label": "选股策略",
+                "href": "/screening-run",
+                "prefix": "/screening-run",
+                "roles": ADMIN_ONLY,
+                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/><path d="M4 4l3 3M20 4l-3 3"/></svg>'),
+            },
+            {
+                "key": "strategies",
+                "label": "策略组合",
+                "href": "/strategies",
+                "prefix": "/strategies",
+                "roles": ADMIN_ONLY,
+                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="currentColor"/><circle cx="16" cy="12" r="2" fill="currentColor"/><circle cx="11" cy="18" r="2" fill="currentColor"/></svg>'),
+            },
+            {
+                "key": "strategy_lab",
+                "label": "策略实验室",
+                "href": "/strategy-lab",
+                "prefix": "/strategy-lab",
+                "roles": ADMIN_ONLY,
+                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"/><path d="M8 17v-5M12 17V7M16 17v-8M20 17v-3"/><path d="M3 19h18"/></svg>'),
+            },
+        ],
+    },
+    {
         "label": "回测",
         "items": [
             {
@@ -147,8 +168,16 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h8M8 13h5"/><path d="M17 12v4M15 14h4"/></svg>'),
             },
             {
+                "key": "fetch",
+                "label": "盘后取数",
+                "href": "/fetch",
+                "prefix": "/fetch",
+                "roles": ADMIN_ONLY,
+                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>'),
+            },
+            {
                 "key": "run",
-                "label": "生成数据",
+                "label": "因子计算",
                 "href": "/run",
                 "prefix": "/run",
                 "roles": ADMIN_ONLY,
@@ -196,7 +225,9 @@ PUBLIC_PREFIXES = ("/static/",)
 # Page-like paths and docs that must be admin only even for GET.
 ADMIN_PAGE_PREFIXES = (
     "/admin",
+    "/fetch",
     "/run",
+    "/screening-run",
     "/config",
     "/factors",
     "/logs",
@@ -207,7 +238,12 @@ ADMIN_PAGE_PREFIXES = (
 # GET APIs that expose admin state, config, logs, or task state.
 ADMIN_GET_API_PREFIXES = (
     "/api/admin",
+    "/api/fetch",
     "/api/run",
+    "/api/screening-run",
+    "/api/strategies",
+    "/api/strategy-lab",
+    "/api/pipeline",
     "/api/logs",
     "/api/config",
     "/api/factors",
@@ -215,12 +251,17 @@ ADMIN_GET_API_PREFIXES = (
 )
 
 # These capabilities remain administrator-only regardless of database settings.
-FORCED_ADMIN_KEYS = frozenset({"users", "permissions", "run", "config", "factors", "logs"})
+FORCED_ADMIN_KEYS = frozenset({
+    "users", "permissions", "fetch", "run", "screening_run", "strategies", "strategy_lab", "config", "factors", "logs"
+})
 
 PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "overview": ("/", "/api/overview"),
-    "report": ("/report", "/api/etl/analysis"),
-    "strategy": ("/data/strategy", "/api/etl/screening"),
+    "strategy": (
+        "/data/strategy", "/report", "/assistant",
+        "/api/etl/screening", "/api/etl/analysis", "/api/agent", "/api/assistant",
+        "/api/automation/status",
+    ),
     "sector": ("/data/sector",),
     "limitup": ("/data/limitup",),
     "lhb": ("/data/lhb",),
@@ -231,7 +272,11 @@ PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "drawdown": ("/drawdown",),
     "users": ("/admin/users", "/api/admin/users"),
     "permissions": ("/admin/permissions", "/api/admin/permissions"),
+    "fetch": ("/fetch", "/api/fetch"),
     "run": ("/run", "/api/run", "/api/etl/artifacts"),
+    "screening_run": ("/screening-run", "/api/screening-run", "/api/pipeline/artifacts"),
+    "strategies": ("/strategies", "/api/strategies"),
+    "strategy_lab": ("/strategy-lab", "/api/strategy-lab"),
     "config": ("/config", "/api/config"),
     "factors": ("/factors", "/api/factors"),
     "logs": ("/logs", "/api/logs"),

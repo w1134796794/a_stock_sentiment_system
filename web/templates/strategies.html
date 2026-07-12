@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+{% block title %}策略组合 · 管理控制台{% endblock %}
+{% block page_title %}策略组合{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">组合已有因子，不重新取数或计算</div>{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)] gap-4 min-h-[76vh]">
+  <aside class="border border-slate-800 bg-slate-900/45 rounded-lg overflow-hidden">
+    <div class="flex items-center justify-between px-3 py-3 border-b border-slate-800">
+      <div>
+        <div class="font-bold">组合方案</div>
+        <div id="profile-count" class="text-[11px] text-slate-500 mt-0.5"></div>
+      </div>
+      <button id="new-profile" type="button" class="icon-command" title="新建策略组合" aria-label="新建策略组合">＋</button>
+    </div>
+    <div id="profile-list" class="p-2 space-y-1"></div>
+  </aside>
+
+  <main class="border border-slate-800 bg-slate-900/45 rounded-lg overflow-hidden min-w-0">
+    <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800">
+      <div>
+        <div id="editor-title" class="font-bold">编辑方案</div>
+        <div id="editor-status" class="text-[11px] text-slate-500 mt-0.5">修改仅影响后续选股任务</div>
+      </div>
+      <div class="flex gap-2">
+        <button id="duplicate-profile" type="button" class="secondary-command">复制</button>
+        <button id="delete-profile" type="button" class="danger-command">删除</button>
+        <button id="save-profile" type="button" class="primary-command">保存</button>
+      </div>
+    </div>
+
+    <div class="p-4 space-y-6">
+      <section>
+        <h2 class="section-title">基本信息</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+          <label class="field"><span>策略标识</span><input id="profile-id" placeholder="例如 weak_to_strong"></label>
+          <label class="field"><span>显示名称</span><input id="profile-name" placeholder="例如 弱转强"></label>
+          <label class="field"><span>基础方案</span><select id="base-profile"></select></label>
+          <label class="field"><span>输出数量</span><input id="top-n" type="number" min="1" max="100" value="10"></label>
+          <label class="field"><span>单票仓位上限%</span><input id="position-cap-pct" type="number" min="0" max="100" step="1" value="0"><small>0 表示使用系统风控上限</small></label>
+        </div>
+        <label class="field mt-3"><span>说明</span><textarea id="profile-description" rows="2" placeholder="说明该组合适用的行情和选股目标"></textarea></label>
+        <div class="flex flex-wrap gap-5 mt-3 text-sm">
+          <label class="toggle-line"><input id="profile-enabled" type="checkbox"> 启用方案</label>
+          <label class="toggle-line"><input id="profile-primary" type="checkbox"> 设为自动任务主方案</label>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">股票池与市场</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="field"><span>股票池范围</span><select id="stock-pool"></select></label>
+          <label class="field">
+            <span>权重来源</span>
+            <select id="weight-source"></select>
+            <small id="model-hint"></small>
+          </label>
+        </div>
+        <div class="mt-3">
+          <div class="field-label">适用市场状态</div>
+          <div id="market-regimes" class="flex flex-wrap gap-2 mt-1"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">次日执行规则</h2>
+        <div class="text-[11px] text-slate-500 mb-3">候选只在次日按分钟行情确认；这里的配置会同时用于实时确认和回测。</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <label class="field"><span>确认截止时间</span><input id="execution-deadline" type="time" step="60" value="10:00"><small>超过该时间仍未确认则取消。</small></label>
+          <label class="field"><span>候选有效交易日</span><input id="execution-age" type="number" min="1" max="5" value="1"><small>默认只观察次日，避免过期信号。</small></label>
+          <label class="field"><span>同策略最多持仓数</span><input id="execution-max-positions" type="number" min="0" max="20" value="0"><small>0 表示只使用账户总持仓限制。</small></label>
+        </div>
+        <div class="mt-3">
+          <div class="field-label">允许的入场模式</div>
+          <div id="execution-modes" class="flex flex-wrap gap-2 mt-1"></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="section-title mb-0">必选条件</h2>
+          <button type="button" class="secondary-command" data-add-filter="required">添加条件</button>
+        </div>
+        <div id="required-filters" class="space-y-2"></div>
+      </section>
+
+      <section>
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="section-title mb-0">排除条件</h2>
+          <button type="button" class="secondary-command" data-add-filter="excluded">添加条件</button>
+        </div>
+        <div id="excluded-filters" class="space-y-2"></div>
+      </section>
+
+      <section>
+        <div class="flex flex-wrap items-end justify-between gap-3 mb-2">
+          <div>
+            <h2 class="section-title mb-0">排序因子组合</h2>
+            <div class="text-[11px] text-slate-500 mt-1">正权重偏好高分，负权重偏好低分；动态模型会以此作为冷启动先验。</div>
+          </div>
+          <input id="factor-search" class="compact-input w-64" placeholder="搜索因子名称或标识">
+        </div>
+        <div class="border border-slate-800 rounded-lg overflow-hidden">
+          <div class="grid grid-cols-[36px_minmax(180px,1fr)_130px] gap-2 px-3 py-2 bg-slate-950/50 text-xs text-slate-500">
+            <span></span><span>因子</span><span>权重</span>
+          </div>
+          <div id="factor-list" class="max-h-[420px] overflow-auto divide-y divide-slate-800/70"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">增强信号</h2>
+        <div class="flex flex-wrap gap-5 text-sm">
+          <label class="toggle-line"><input id="enhance-lhb" type="checkbox"> 龙虎榜增强</label>
+          <label class="toggle-line"><input id="enhance-capital" type="checkbox"> 资金流共识增强</label>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<style>
+  .section-title { font-size:.9rem; font-weight:800; color:#e2e8f0; margin-bottom:.65rem; }
+  .field { display:block; min-width:0; }
+  .field > span,.field-label { display:block; font-size:.72rem; color:#94a3b8; margin-bottom:.3rem; }
+  .field input,.field select,.field textarea,.compact-input { width:100%; background:#020617; border:1px solid #334155; border-radius:.4rem; color:#e2e8f0; padding:.48rem .65rem; font-size:.82rem; outline:none; }
+  .field textarea { resize:vertical; }
+  .field input:focus,.field select:focus,.field textarea:focus,.compact-input:focus { border-color:#10b981; }
+  .field small { display:block; color:#64748b; font-size:.68rem; margin-top:.3rem; }
+  .toggle-line { display:inline-flex; align-items:center; gap:.45rem; color:#cbd5e1; }
+  .toggle-line input { accent-color:#10b981; }
+  .primary-command,.secondary-command,.danger-command { border-radius:.4rem; padding:.45rem .8rem; font-size:.78rem; font-weight:800; }
+  .primary-command { background:#059669; color:white; }
+  .primary-command:hover { background:#10b981; }
+  .secondary-command { border:1px solid #475569; color:#cbd5e1; }
+  .secondary-command:hover { border-color:#10b981; color:#6ee7b7; }
+  .danger-command { border:1px solid rgba(244,63,94,.45); color:#fda4af; }
+  .danger-command:hover { background:rgba(244,63,94,.1); }
+  .icon-command { width:2rem; height:2rem; display:inline-flex; align-items:center; justify-content:center; border:1px solid #475569; border-radius:.4rem; color:#6ee7b7; font-size:1.1rem; }
+  .profile-item { width:100%; text-align:left; border:1px solid transparent; border-radius:.4rem; padding:.65rem .7rem; }
+  .profile-item:hover { background:rgba(30,41,59,.6); }
+  .profile-item.active { border-color:rgba(16,185,129,.55); background:rgba(16,185,129,.10); }
+  .filter-row { display:grid; grid-template-columns:minmax(130px,.8fr) minmax(190px,1.4fr) 110px minmax(150px,1fr) 34px; gap:.5rem; align-items:center; }
+  .filter-row input,.filter-row select { min-width:0; background:#020617; border:1px solid #334155; border-radius:.4rem; color:#e2e8f0; padding:.42rem .55rem; font-size:.76rem; }
+  .factor-row { display:grid; grid-template-columns:36px minmax(180px,1fr) 130px; gap:.5rem; align-items:center; padding:.55rem .75rem; }
+  .factor-row:hover { background:rgba(30,41,59,.45); }
+  .factor-row input[type=number] { width:100%; background:#020617; border:1px solid #334155; border-radius:.4rem; padding:.35rem .5rem; color:#e2e8f0; }
+  @media (max-width: 900px) { .filter-row { grid-template-columns:1fr 1fr; } .filter-row .filter-remove { justify-self:end; } }
+</style>
+
+<script>
+(function () {
+  const state = {{ strategy_state|tojson }};
+  const LABELS = {
+    pools: {all:'全部有因子数据的股票', liquid:'流动性合格股票', near_limit:'涨停或接近涨停股票'},
+    regimes: {strong:'强市', neutral:'震荡市', weak:'弱市'},
+    sources: {manual:'人工权重', ic_ir:'IC/IR动态权重', lightgbm:'LightGBM', xgboost:'XGBoost'},
+    entryModes: {weak_to_strong:'弱转强', continuation:'强势延续', acceleration:'高开加速'},
+  };
+  let profiles = state.profiles || [];
+  let current = null;
+  let isNew = false;
+  const factors = state.factors || [];
+  const factorMap = Object.fromEntries(factors.map(item => [item.id, item]));
+
+  const byId = id => document.getElementById(id);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const option = (value, label) => `<option value="${esc(value)}">${esc(label)}</option>`;
+
+  function setOptions() {
+    byId('base-profile').innerHTML = (state.base_profiles || ['default']).map(v => option(v, v)).join('');
+    byId('stock-pool').innerHTML = state.stock_pools.map(v => option(v, LABELS.pools[v] || v)).join('');
+    byId('weight-source').innerHTML = state.weight_sources.map(v => option(v, LABELS.sources[v] || v)).join('');
+    byId('market-regimes').innerHTML = state.market_regimes.map(v => `
+      <label class="toggle-line border border-slate-700 rounded px-2.5 py-1.5">
+        <input type="checkbox" value="${esc(v)}"> ${esc(LABELS.regimes[v] || v)}
+      </label>`).join('');
+    byId('execution-modes').innerHTML = (state.entry_modes || []).map(v => `
+      <label class="toggle-line border border-slate-700 rounded px-2.5 py-1.5">
+        <input type="checkbox" value="${esc(v)}"> ${esc(LABELS.entryModes[v] || v)}
+      </label>`).join('');
+  }
+
+  function renderProfiles() {
+    byId('profile-count').textContent = `${profiles.length} 个方案`;
+    byId('profile-list').innerHTML = profiles.map(item => `
+      <button type="button" class="profile-item ${current && current.id === item.id && !isNew ? 'active' : ''}" data-profile="${esc(item.id)}">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-semibold text-sm">${esc(item.name)}</span>
+          <span class="text-[10px] ${item.enabled ? 'text-emerald-300' : 'text-slate-600'}">${item.enabled ? '启用' : '停用'}</span>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-1 truncate">${esc(LABELS.sources[item.weight_source] || item.weight_source)} · 输出${item.top_n}${item.position_cap_pct ? ` · 单票≤${item.position_cap_pct}%` : ''}</div>
+        ${item.primary ? '<div class="text-[10px] text-amber-300 mt-1">自动任务主方案</div>' : ''}
+      </button>`).join('');
+    document.querySelectorAll('[data-profile]').forEach(button => button.addEventListener('click', () => {
+      loadProfile(profiles.find(item => item.id === button.dataset.profile));
+    }));
+  }
+
+  function emptyProfile(copy) {
+    const source = copy || profiles[0] || {};
+    return {
+      id:'', name: copy ? `${source.name} 副本` : '新策略组合', description:source.description || '',
+      enabled:true, primary:false, protected:false, base_profile:source.base_profile || 'default',
+      stock_pool:source.stock_pool || 'all', required_filters:structuredClone(source.required_filters || []),
+      exclusion_filters:structuredClone(source.exclusion_filters || []),
+      ranking_factors:structuredClone(source.ranking_factors || [{factor:'tech_score',weight:.2}]),
+      weight_source:source.weight_source || 'manual', weight_profile:source.weight_profile || 'default',
+      enhancements:structuredClone(source.enhancements || {lhb:true,capital_flow:true}),
+      market_regimes:structuredClone(source.market_regimes || ['strong','neutral','weak']), top_n:source.top_n || 10,
+      position_cap_pct:source.position_cap_pct || 0,
+      execution:structuredClone(source.execution || {allowed_entry_modes:['weak_to_strong','continuation'],confirmation_deadline:'10:00:00',candidate_max_age_days:1,max_positions:0}),
+    };
+  }
+
+  function loadProfile(profile, newMode=false) {
+    if (!profile) return;
+    current = structuredClone(profile);
+    isNew = newMode;
+    byId('profile-id').value = current.id || '';
+    byId('profile-id').disabled = !newMode;
+    byId('profile-name').value = current.name || '';
+    byId('profile-description').value = current.description || '';
+    byId('base-profile').value = current.base_profile || 'default';
+    byId('top-n').value = current.top_n || 10;
+    byId('position-cap-pct').value = current.position_cap_pct || 0;
+    byId('execution-deadline').value = String(current.execution?.confirmation_deadline || '10:00:00').slice(0, 5);
+    byId('execution-age').value = current.execution?.candidate_max_age_days || 1;
+    byId('execution-max-positions').value = current.execution?.max_positions || 0;
+    byId('profile-enabled').checked = current.enabled !== false;
+    byId('profile-primary').checked = !!current.primary;
+    byId('stock-pool').value = current.stock_pool || 'all';
+    byId('weight-source').value = current.weight_source || 'manual';
+    byId('enhance-lhb').checked = current.enhancements?.lhb !== false;
+    byId('enhance-capital').checked = current.enhancements?.capital_flow !== false;
+    document.querySelectorAll('#market-regimes input').forEach(input => input.checked = (current.market_regimes || []).includes(input.value));
+    document.querySelectorAll('#execution-modes input').forEach(input => input.checked = (current.execution?.allowed_entry_modes || []).includes(input.value));
+    renderFilters('required', current.required_filters || []);
+    renderFilters('excluded', current.exclusion_filters || []);
+    renderFactors();
+    updateModelHint();
+    byId('delete-profile').disabled = !!current.protected || newMode;
+    byId('delete-profile').classList.toggle('opacity-40', !!current.protected || newMode);
+    byId('editor-title').textContent = newMode ? '新建策略组合' : current.name;
+    byId('editor-status').textContent = current.protected ? '内置方案不可删除，可以修改、停用或复制' : '修改仅影响后续选股任务';
+    renderProfiles();
+  }
+
+  function factorOptions(selected) {
+    const source = selected && !factorMap[selected]
+      ? [{id:selected,name:selected}, ...factors]
+      : factors;
+    return source.map(item => option(item.id, `${item.name} · ${item.id}`)).join('').replace(`value="${selected}"`, `value="${selected}" selected`);
+  }
+
+  function renderFilters(kind, rows) {
+    const target = byId(kind === 'required' ? 'required-filters' : 'excluded-filters');
+    target.innerHTML = rows.length ? rows.map((row, index) => `
+      <div class="filter-row" data-filter-kind="${kind}" data-index="${index}">
+        <input data-field="name" value="${esc(row.name || '')}" placeholder="条件名称">
+        <select data-field="factor">${factorOptions(row.factor)}</select>
+        <select data-field="op">${state.operators.map(v => option(v,v)).join('').replace(`value="${row.op}"`, `value="${row.op}" selected`)}</select>
+        <input data-field="value" value="${esc(Array.isArray(row.value) ? row.value.join(',') : row.value)}" placeholder="阈值；区间用逗号">
+        <button type="button" class="filter-remove icon-command" title="删除条件">×</button>
+      </div>`).join('') : '<div class="text-xs text-slate-600 py-2">未设置</div>';
+    target.querySelectorAll('.filter-remove').forEach(button => button.addEventListener('click', () => {
+      const row = button.closest('.filter-row');
+      current[kind === 'required' ? 'required_filters' : 'exclusion_filters'].splice(Number(row.dataset.index), 1);
+      renderFilters(kind, current[kind === 'required' ? 'required_filters' : 'exclusion_filters']);
+    }));
+  }
+
+  function syncFilters(kind) {
+    const id = kind === 'required' ? 'required-filters' : 'excluded-filters';
+    const rows = [];
+    document.querySelectorAll(`#${id} .filter-row`).forEach(element => {
+      const valueText = element.querySelector('[data-field=value]').value.trim();
+      let value = valueText;
+      if (valueText.includes(',')) value = valueText.split(',').map(part => parseValue(part.trim()));
+      else value = parseValue(valueText);
+      rows.push({
+        name: element.querySelector('[data-field=name]').value.trim(),
+        factor: element.querySelector('[data-field=factor]').value,
+        op: element.querySelector('[data-field=op]').value,
+        value,
+        reason:'',
+      });
+    });
+    return rows;
+  }
+
+  function parseValue(value) {
+    if (value === '') return '';
+    const number = Number(value);
+    return Number.isFinite(number) ? number : value;
+  }
+
+  function renderFactors() {
+    const query = byId('factor-search').value.trim().toLowerCase();
+    const selected = Object.fromEntries((current.ranking_factors || []).map(row => [row.factor, Number(row.weight)]));
+    const visible = factors.filter(item => !query || `${item.name} ${item.id}`.toLowerCase().includes(query));
+    byId('factor-list').innerHTML = visible.map(item => `
+      <label class="factor-row" data-factor-row="${esc(item.id)}">
+        <input type="checkbox" class="accent-emerald-500" ${selected[item.id] !== undefined ? 'checked' : ''}>
+        <span class="min-w-0"><b class="text-sm text-slate-200">${esc(item.name)}</b><span class="mono text-[11px] text-slate-500 ml-2">${esc(item.id)}</span><small class="block text-[10px] text-slate-600 truncate">${esc(item.description || '')}</small></span>
+        <input type="number" step="0.01" min="-1" max="1" value="${selected[item.id] ?? 0.1}" ${selected[item.id] === undefined ? 'disabled' : ''}>
+      </label>`).join('');
+    document.querySelectorAll('[data-factor-row] input[type=checkbox]').forEach(input => input.addEventListener('change', () => {
+      input.closest('[data-factor-row]').querySelector('input[type=number]').disabled = !input.checked;
+    }));
+  }
+
+  function collectProfile() {
+    const ranking = [];
+    document.querySelectorAll('[data-factor-row]').forEach(row => {
+      if (row.querySelector('input[type=checkbox]').checked) {
+        ranking.push({factor:row.dataset.factorRow, weight:Number(row.querySelector('input[type=number]').value || 0)});
+      }
+    });
+    return {
+      name:byId('profile-name').value.trim(), description:byId('profile-description').value.trim(),
+      enabled:byId('profile-enabled').checked, primary:byId('profile-primary').checked,
+      protected:!!current?.protected, base_profile:byId('base-profile').value,
+      stock_pool:byId('stock-pool').value, required_filters:syncFilters('required'),
+      exclusion_filters:syncFilters('excluded'), ranking_factors:ranking,
+      weight_source:byId('weight-source').value, weight_profile:byId('base-profile').value,
+      enhancements:{lhb:byId('enhance-lhb').checked,capital_flow:byId('enhance-capital').checked},
+      market_regimes:[...document.querySelectorAll('#market-regimes input:checked')].map(input => input.value),
+      top_n:Number(byId('top-n').value || 10),
+      position_cap_pct:Number(byId('position-cap-pct').value || 0),
+      execution:{
+        allowed_entry_modes:[...document.querySelectorAll('#execution-modes input:checked')].map(input => input.value),
+        confirmation_deadline:`${byId('execution-deadline').value || '10:00'}:00`,
+        candidate_max_age_days:Number(byId('execution-age').value || 1),
+        max_positions:Number(byId('execution-max-positions').value || 0),
+      },
+    };
+  }
+
+  function updateModelHint() {
+    const source = byId('weight-source').value;
+    if (source === 'manual') byId('model-hint').textContent = '严格使用当前设置的因子权重。';
+    else if (source === 'ic_ir') byId('model-hint').textContent = '使用交易日前已发布的滚动IC/IR权重。';
+    else if (source === 'lightgbm') byId('model-hint').textContent = state.model_dependencies.lightgbm ? '使用已发布模型；模型缺失或漂移时降级IC/IR。' : '当前环境未安装LightGBM，将降级IC/IR。';
+    else byId('model-hint').textContent = 'XGBoost为挑战模型；没有已发布版本时明确降级IC/IR。';
+  }
+
+  async function refreshProfiles(selectId) {
+    const response = await fetch('/api/strategies');
+    const data = await response.json();
+    profiles = data.profiles || [];
+    loadProfile(profiles.find(item => item.id === selectId) || profiles[0]);
+  }
+
+  document.querySelectorAll('[data-add-filter]').forEach(button => button.addEventListener('click', () => {
+    const kind = button.dataset.addFilter;
+    const key = kind === 'required' ? 'required_filters' : 'exclusion_filters';
+    current[key] = syncFilters(kind);
+    current[key].push({name:'新条件',factor:factors[0]?.id || 'tech_score',op:'>=',value:50});
+    renderFilters(kind, current[key]);
+  }));
+  byId('new-profile').addEventListener('click', () => loadProfile(emptyProfile(), true));
+  byId('duplicate-profile').addEventListener('click', () => loadProfile(emptyProfile(collectProfile()), true));
+  byId('factor-search').addEventListener('input', renderFactors);
+  byId('weight-source').addEventListener('change', updateModelHint);
+  byId('save-profile').addEventListener('click', async () => {
+    const id = byId('profile-id').value.trim();
+    if (!id) { byId('editor-status').textContent = '请填写策略标识'; return; }
+    const response = await fetch('/api/strategies/' + encodeURIComponent(id), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collectProfile())});
+    const data = await response.json();
+    if (!response.ok || !data.ok) { byId('editor-status').textContent = data.error || '保存失败'; return; }
+    await refreshProfiles(id);
+    byId('editor-status').textContent = '已保存，可在选股任务中选择运行';
+  });
+  byId('delete-profile').addEventListener('click', async () => {
+    if (!current || current.protected || !confirm(`删除策略“${current.name}”？`)) return;
+    const response = await fetch('/api/strategies/' + encodeURIComponent(current.id), {method:'DELETE'});
+    const data = await response.json();
+    if (!response.ok || !data.ok) { byId('editor-status').textContent = data.error || '删除失败'; return; }
+    await refreshProfiles();
+  });
+
+  setOptions();
+  loadProfile(profiles[0] || emptyProfile(), profiles.length === 0);
+})();
+</script>
+{% endblock %}

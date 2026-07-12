@@ -1,6 +1,7 @@
 import pandas as pd
 
-from backtest.minute_entry import ENTRY_CONTINUATION, ENTRY_WEAK, MinuteEntryEvaluator
+from backtest.minute_entry import ENTRY_CONTINUATION, ENTRY_WEAK, EntryDecision, MinuteEntryEvaluator
+from core.realtime.entry_signal_service import RealtimeEntrySignalService
 from core.signals.confidence_service import ConfidenceService
 from core.signals.minute_amount_profile import MinuteAmountProfileRepository, MinuteAmountProfileTrainer
 
@@ -66,6 +67,19 @@ def test_confidence_grade_uses_relative_edge_for_strict_event_label():
     assert result["confidence_score"] == 26.23
 
 
+def test_confidence_exposes_four_trust_layers_and_abstains_on_drift():
+    result = ConfidenceService.assess(
+        calibrated_probability=0.6,
+        baseline_probability=0.3,
+        expected_return=0.02,
+        sample_size=200,
+        model_drift={"status": "degraded", "max_psi": 0.4},
+    )
+    assert set(result["trust_layers"]) == {"data", "model", "trading", "portfolio"}
+    assert result["decision_status"] == "model_degraded"
+    assert result["confidence_grade"] == "D"
+
+
 def test_missing_sector_or_auction_is_data_insufficient():
     weak = MinuteEntryEvaluator().evaluate(
         mode=ENTRY_WEAK, bars=_minute_bars(), open_gap=0, prev_close=10,
@@ -96,3 +110,20 @@ def test_minute_amount_profile_is_learned_from_cache(tmp_path):
     assert result["ok"] is True
     assert 0 < fraction < 1
     assert samples > 0
+
+
+def test_unclassified_realtime_signal_does_not_publish_fake_history():
+    class FailingStats:
+        def get(self, *_args, **_kwargs):
+            raise AssertionError("empty signal must not query historical statistics")
+
+    service = RealtimeEntrySignalService(signal_stats_repository=FailingStats())
+    payload = service._payload(
+        EntryDecision("observing", reason="行情日期不一致"), "", "20260702",
+    )
+
+    assert payload["success_probability"] is None
+    assert payload["historical_samples"] is None
+    assert payload["average_mfe_pct"] is None
+    assert payload["average_mae_pct"] is None
+    assert payload["historical_stats_basis"] == ""

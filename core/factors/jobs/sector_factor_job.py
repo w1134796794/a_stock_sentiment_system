@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from core.factors.behavior_cycle import BEHAVIOR_STATES, sector_behavior_cycle
+
 from core.factors.jobs.gold_utils import (
     FactorJobResult,
     long_records_to_frame,
@@ -54,6 +56,9 @@ class SectorFactorJob:
             sector.loc[missing_amount & can_calc_amount, "vol_hand"]
             * sector.loc[missing_amount & can_calc_amount, "close"]
         )
+        sector["rank_percentile"] = sector.groupby("trade_date")["pct_chg"].rank(
+            method="average", pct=True,
+        )
         today = sector[sector["trade_date"] == str(trade_date)].copy()
         if today.empty:
             result.ok = False
@@ -70,18 +75,30 @@ class SectorFactorJob:
         ).groupby("sector_code")["positive"].sum()
 
         ratio_scores = []
+        ratio_values = []
         persistence_scores = []
+        positive_streaks = []
         for _, row in today.iterrows():
             code = str(row.get("sector_code") or "")
             base = to_float(avg_amount_5.get(code), to_float(row.get("amount_yuan")))
             ratio = to_float(row.get("amount_yuan")) / base if base > 0 else 1.0
+            ratio_values.append(ratio)
             ratio_scores.append(score_between(ratio, 0.5, 2.5))
             pos_days = to_float(positive_days_3.get(code), 0.0)
             current_pos = 1.0 if to_float(row.get("pct_chg")) > 0 else 0.0
             persistence_scores.append((pos_days + current_pos) / 4.0 * 100.0)
+            code_rows = sector[sector["sector_code"].astype(str) == code].sort_values("trade_date")
+            streak = 0
+            for value in reversed(list(code_rows["pct_chg"])):
+                if to_float(value) <= 0:
+                    break
+                streak += 1
+            positive_streaks.append(streak)
 
+        today["amount_ratio"] = ratio_values
         today["amount_ratio_score"] = ratio_scores
         today["persistence_score"] = persistence_scores
+        today["positive_streak"] = positive_streaks
         signal = read_table(
             con, "factor_signal_sector_wide",
             where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)],
@@ -134,6 +151,38 @@ class SectorFactorJob:
             ])
             for row in today.itertuples()
         ]
+        previous_by_code = (
+            hist.drop_duplicates("sector_code", keep="last")
+            .set_index("sector_code").to_dict("index")
+            if not hist.empty else {}
+        )
+        behavior_rows = []
+        for _, row in today.iterrows():
+            previous = previous_by_code.get(row.get("sector_code")) or {}
+            behavior_rows.append(sector_behavior_cycle(
+                pct_chg=row.get("pct_chg"),
+                previous_pct_chg=previous.get("pct_chg"),
+                amount_ratio=row.get("amount_ratio"),
+                current_rank_percentile=row.get("rank_percentile"),
+                previous_rank_percentile=previous.get("rank_percentile"),
+                persistence_score=row.get("persistence_score"),
+                flow_score=row.get("sector_flow_score"),
+                positive_streak=row.get("positive_streak"),
+            ))
+        for state in BEHAVIOR_STATES:
+            today[f"behavior_{state}_score"] = [item["scores"][state] for item in behavior_rows]
+            today[f"behavior_{state}_probability"] = [
+                item["probabilities"][state] for item in behavior_rows
+            ]
+        for atomic in (
+            "first_activation", "rank_improvement", "momentum_acceleration",
+            "amount_surprise", "breadth_acceleration", "reversal", "fresh_stage",
+        ):
+            today[f"behavior_{atomic}_score"] = [item["atomic"][atomic] for item in behavior_rows]
+        today["behavior_dominant_state"] = [item["dominant_state"] for item in behavior_rows]
+        today["behavior_dominant_label"] = [item["dominant_label"] for item in behavior_rows]
+        today["behavior_dominant_probability"] = [item["dominant_probability"] for item in behavior_rows]
+        today["behavior_data_completeness"] = [item["data_completeness"] for item in behavior_rows]
         today["rank"] = today["mainline_score"].rank(method="dense", ascending=False).astype(int)
 
         wide = today[[
@@ -157,6 +206,29 @@ class SectorFactorJob:
             "signal_date",
             "effective_date",
             "mainline_score",
+            "amount_ratio",
+            "positive_streak",
+            "behavior_attention_score",
+            "behavior_acceleration_score",
+            "behavior_divergence_score",
+            "behavior_repair_score",
+            "behavior_decay_score",
+            "behavior_attention_probability",
+            "behavior_acceleration_probability",
+            "behavior_divergence_probability",
+            "behavior_repair_probability",
+            "behavior_decay_probability",
+            "behavior_first_activation_score",
+            "behavior_rank_improvement_score",
+            "behavior_momentum_acceleration_score",
+            "behavior_amount_surprise_score",
+            "behavior_breadth_acceleration_score",
+            "behavior_reversal_score",
+            "behavior_fresh_stage_score",
+            "behavior_dominant_state",
+            "behavior_dominant_label",
+            "behavior_dominant_probability",
+            "behavior_data_completeness",
             "rank",
         ]].copy()
         wide["computed_at"] = now_iso()
@@ -208,6 +280,14 @@ class SectorFactorJob:
                     score=row["mainline_score"], rank_value=row["rank"], direction="higher_better",
                 ),
             ])
+            for state in BEHAVIOR_STATES:
+                records.append(make_long_record(
+                    trade_date=trade_date, entity_type="sector", entity_id=entity_id,
+                    factor_id=f"sec_behavior_{state}",
+                    raw_value=row[f"behavior_{state}_probability"],
+                    score=row[f"behavior_{state}_score"],
+                    direction="higher_better",
+                ))
         long = long_records_to_frame(records)
 
         result.rows["factor_sector_wide"] = write_replace_partition(

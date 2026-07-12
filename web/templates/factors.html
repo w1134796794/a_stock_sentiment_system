@@ -154,6 +154,61 @@
   {% endif %}
 </section>
 
+{# ===================== 2. 模型可信度 ===================== #}
+{% set diag = state.dynamic_weights %}
+<section class="mb-8" id="model-trust">
+  <div class="flex items-center justify-between gap-3 mb-3">
+    <h2 class="text-lg font-bold text-emerald-300">模型可信度</h2>
+    <span class="text-xs mono {% if diag.feature_drift.status == 'degraded' %}text-rose-300{% elif diag.feature_drift.status == 'watch' %}text-amber-300{% else %}text-emerald-300{% endif %}">
+      漂移 {{ {'stable':'稳定','watch':'关注','degraded':'已降级','unknown':'待检测'}.get(diag.feature_drift.status, '待检测') }}
+    </span>
+  </div>
+  <div class="grid grid-cols-2 lg:grid-cols-6 gap-2 mb-3">
+    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">Brier</div><div class="mono text-lg text-slate-100">{{ diag.calibration.brier_score | round(4) if diag.calibration.brier_score is defined and diag.calibration.brier_score is not none else '--' }}</div></div>
+    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">ECE</div><div class="mono text-lg text-slate-100">{{ (diag.calibration.ece * 100) | round(2) ~ '%' if diag.calibration.ece is defined and diag.calibration.ece is not none else '--' }}</div></div>
+    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">校准样本</div><div class="mono text-lg text-slate-100">{{ diag.calibration.sample_size or '--' }}</div></div>
+    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">80%区间覆盖</div><div class="mono text-lg text-slate-100">{{ ((diag.conformal.evaluation_coverage if diag.conformal.evaluation_coverage is defined else diag.conformal.empirical_coverage) * 100) | round(1) ~ '%' if diag.conformal.evaluation_coverage is defined or diag.conformal.empirical_coverage is defined else '--' }}</div></div>
+    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">PSI</div><div class="mono text-lg text-slate-100">{{ diag.feature_drift.max_psi | round(3) if diag.feature_drift.max_psi is defined else '--' }}</div></div>
+    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">KS</div><div class="mono text-lg text-slate-100">{{ diag.feature_drift.max_ks | round(3) if diag.feature_drift.max_ks is defined else '--' }}</div></div>
+    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">ADWIN变点</div><div class="mono text-lg text-slate-100">{{ diag.adwin.latest_change_date or '稳定' }}</div></div>
+  </div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-3 mb-3">
+    <div class="border border-slate-800 bg-slate-900/40 rounded-lg p-3 min-h-[250px]">
+      <div class="flex justify-between mb-2"><h3 class="font-semibold text-slate-200">概率校准曲线</h3><span class="text-xs text-slate-500">越接近对角线越可靠</span></div>
+      <canvas id="calibration-chart" height="210" aria-label="概率校准曲线"></canvas>
+    </div>
+    <div class="border border-slate-800 bg-slate-900/40 rounded-lg p-3 min-h-[250px]">
+      <div class="flex justify-between mb-2"><h3 class="font-semibold text-slate-200">候选分组单调性</h3><span class="text-xs text-slate-500">左侧为高分组</span></div>
+      <canvas id="decile-chart" height="210" aria-label="候选分组收益"></canvas>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+    <div class="border border-slate-800 rounded-lg overflow-auto">
+      <div class="px-3 py-2 font-semibold text-slate-200 bg-slate-900/60">模型与区间</div>
+      <table class="w-full text-xs">
+        <tbody>
+          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">生产模型</td><td class="px-3 py-2 mono text-right">{{ diag.candidate_model.model_type or diag.model_type or '--' }}</td></tr>
+          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">LightGBM闸门</td><td class="px-3 py-2 mono text-right">{{ {'active':'已启用','rejected_oos_gate':'样本外未通过','dependency_missing':'依赖缺失'}.get(diag.candidate_model.status, diag.candidate_model.status or '--') }}</td></tr>
+          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">TreeSHAP</td><td class="px-3 py-2 mono text-right">{{ diag.candidate_model.shap_method or '--' }}</td></tr>
+          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">样本外Rank IC</td><td class="px-3 py-2 mono text-right">{{ diag.candidate_model.rank_ic | round(4) if diag.candidate_model.rank_ic is defined else '--' }}</td></tr>
+          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">前十分位超额</td><td class="px-3 py-2 mono text-right">{{ (diag.candidate_model.top_decile_excess_return * 100) | round(2) ~ '%' if diag.candidate_model.top_decile_excess_return is defined else '--' }}</td></tr>
+          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">市场状态模型</td><td class="px-3 py-2 mono text-right">{{ diag.market_regime_model.method or 'threshold_fallback' }}</td></tr>
+          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">Bootstrap超额收益</td><td class="px-3 py-2 mono text-right">{{ (diag.bootstrap.p10 * 100) | round(2) if diag.bootstrap.p10 is defined else '--' }}% / {{ (diag.bootstrap.median * 100) | round(2) if diag.bootstrap.median is defined else '--' }}% / {{ (diag.bootstrap.p90 * 100) | round(2) if diag.bootstrap.p90 is defined else '--' }}%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="border border-slate-800 rounded-lg overflow-auto max-h-64">
+      <div class="px-3 py-2 font-semibold text-slate-200 bg-slate-900/60 sticky top-0">按月样本外验证</div>
+      <table class="w-full text-xs">
+        <thead class="text-slate-500"><tr><th class="px-3 py-2 text-left">生效月</th><th class="px-3 py-2 text-right">Rank IC</th><th class="px-3 py-2 text-right">Top超额</th><th class="px-3 py-2 text-right">正收益率</th></tr></thead>
+        <tbody>{% for row in diag.versions %}<tr class="border-t border-slate-800"><td class="px-3 py-2 mono">{{ row.effective_date }}</td><td class="px-3 py-2 mono text-right">{{ row.rank_ic | round(4) if row.rank_ic is not none else '--' }}</td><td class="px-3 py-2 mono text-right">{{ (row.top_excess_return * 100) | round(2) ~ '%' if row.top_excess_return is not none else '--' }}</td><td class="px-3 py-2 mono text-right">{{ (row.top_excess_win_rate * 100) | round(1) ~ '%' if row.top_excess_win_rate is not none else '--' }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
 {# ===================== 1. 因子开关 ===================== #}
 <section class="mb-8">
   <h2 class="text-lg font-bold text-emerald-300 mb-3">因子开关</h2>
@@ -204,6 +259,32 @@
 
 <script>
 (function () {
+  const calibration = {{ (state.dynamic_weights.calibration.curve or []) | tojson }};
+  const deciles = {{ (state.dynamic_weights.deciles or []) | tojson }};
+  function drawChart(id, rows, xKey, series) {
+    const canvas = document.getElementById(id);
+    if (!canvas || !rows.length) return;
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth || 600, height = Number(canvas.getAttribute('height')) || 210;
+    canvas.width = width * ratio; canvas.height = height * ratio;
+    const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
+    const pad = {l:38,r:14,t:12,b:28}, w = width-pad.l-pad.r, h = height-pad.t-pad.b;
+    ctx.strokeStyle='#334155'; ctx.lineWidth=1;
+    for(let i=0;i<=4;i++){const y=pad.t+h*i/4;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(width-pad.r,y);ctx.stroke();}
+    series.forEach(s => {
+      ctx.strokeStyle=s.color; ctx.lineWidth=2; ctx.beginPath();
+      rows.forEach((row,i)=>{const x=pad.l+(rows.length===1?w/2:w*i/(rows.length-1));const raw=Number(row[s.key]||0);const y=pad.t+h-(raw-s.min)/(s.max-s.min||1)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+    });
+    ctx.fillStyle='#64748b';ctx.font='11px sans-serif';ctx.textAlign='center';
+    rows.forEach((row,i)=>{if(rows.length<=12||i%Math.ceil(rows.length/10)===0){const x=pad.l+(rows.length===1?w/2:w*i/(rows.length-1));ctx.fillText(String(row[xKey] ?? i+1),x,height-8);}});
+  }
+  drawChart('calibration-chart', calibration, 'bin', [
+    {key:'predicted',color:'#38bdf8',min:0,max:1},{key:'observed',color:'#34d399',min:0,max:1}
+  ]);
+  const returns = deciles.map(r=>Number(r.expected_return||0));
+  const lo = Math.min(-0.001,...returns), hi = Math.max(0.001,...returns);
+  drawChart('decile-chart', deciles, 'decile', [{key:'expected_return',color:'#34d399',min:lo,max:hi}]);
+
   const toast = document.getElementById('fp-toast');
   function showToast(msg, ok) {
     toast.textContent = msg;

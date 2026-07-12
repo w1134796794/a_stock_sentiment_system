@@ -84,7 +84,7 @@ def test_realtime_overlay_uses_shared_minute_entry_signals(tmp_path):
     assert payload["candidate_date"] == "20260616"
     assert payload["market_date"] == "20260617"
     assert payload["counts"] == {"confirmed": 1, "cancelled": 0, "observe": 2, "unfilled": 0}
-    assert (tmp_path / "overlay_20260616.json").exists()
+    assert (tmp_path / "overlay_20260616_20260617_default.json").exists()
 
 
 def test_realtime_overlay_does_not_fallback_to_snapshot_plans(tmp_path):
@@ -105,4 +105,4 @@ def test_realtime_overlay_does_not_fallback_to_snapshot_plans(tmp_path):
     payload = service.build_overlay("20260616")
 
     assert payload["rows"] == []
-    assert payload["source"] == "候选日指标筛选未生成"
+    assert payload["source"] == "候选策略尚未生成"
