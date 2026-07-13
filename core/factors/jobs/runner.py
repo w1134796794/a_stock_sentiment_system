@@ -7,7 +7,7 @@ from typing import Iterable, List, Optional
 
 from loguru import logger
 
-from core.factors.jobs.gold_utils import FactorJobResult, connect_duckdb
+from core.factors.jobs.gold_utils import FactorJobResult, connect_duckdb, release_process_memory
 from core.factors.jobs.market_factor_job import MarketFactorJob
 from core.factors.jobs.lhb_factor_job import LHBFactorJob
 from core.factors.jobs.sector_factor_job import SectorFactorJob
@@ -61,6 +61,8 @@ class FactorJobRunner:
                     f"[Phase2][{job_name}] 完成: {trade_date}, ok={result.ok}, "
                     f"耗时={time.monotonic() - job_started:.1f}s, rows={result.rows}"
                 )
+                del job
+                release_process_memory()
         return results
 
 

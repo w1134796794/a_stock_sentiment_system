@@ -84,6 +84,33 @@ def test_fetch_skips_complete_date_without_touching_data_manager(tmp_path):
     assert result.silver_summary["skipped"] is True
 
 
+def test_factor_stage_never_trains_models_implicitly(tmp_path, monkeypatch):
+    db_path = tmp_path / "factors.duckdb"
+    web_data = tmp_path / "webdata"
+    _write_quality(web_data)
+    _seed_partition(
+        db_path,
+        ("stock_daily_silver", "sector_daily_silver", "index_daily_silver"),
+    )
+
+    pipeline = ETLDailyPipeline(
+        object(), duckdb_path=db_path, web_data_dir=web_data,
+        snapshot_dir=tmp_path / "snapshots", app_db_path=tmp_path / "app.sqlite",
+    )
+    monkeypatch.setattr(
+        "core.factors.jobs.runner.FactorJobRunner.run", lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        pipeline, "_refresh_factor_models",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("factor stage trained models")),
+    )
+
+    result = pipeline.compute_factors(DATE, "20260702")
+
+    assert result.stage == "factors"
+    assert result.factor_results == []
+
+
 def test_interface_manifest_distinguishes_core_ready_from_all_sources_complete(tmp_path):
     db_path = tmp_path / "factors.duckdb"
     web_data = tmp_path / "webdata"

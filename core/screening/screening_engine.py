@@ -73,6 +73,7 @@ class ScreeningEngine:
             weight_repository = DynamicWeightRepository()
         self.weight_repository = weight_repository
         self._confidence_profile: Dict[str, Any] = {}
+        self._weight_metadata: Dict[str, Any] = {}
         self._confidence_model_type = "manual_prior"
         self._confidence_as_of_date = ""
         self._active_regime = "neutral"
@@ -129,6 +130,7 @@ class ScreeningEngine:
             )
         source_config = deepcopy(profile_config) if profile_config is not None else (profiles[profile_name] or {})
         cfg, weight_metadata = self._runtime_profile(source_config, trade_date, profile_name)
+        self._weight_metadata = dict(weight_metadata)
 
         result = ScreeningResult(trade_date=trade_date, profile=profile_name)
         result.weight_metadata = weight_metadata
@@ -815,6 +817,14 @@ class ScreeningEngine:
                         if raw_meta_probability is not None
                         else confidence["expected_return_pct"] / 100.0
                     ),
+                    expected_gross_return=(
+                        _to_float(
+                            row.get("_model_expected_gross_return"),
+                            confidence.get("expected_gross_return_pct", confidence["expected_return_pct"]) / 100.0,
+                        )
+                        if raw_meta_probability is not None
+                        else confidence.get("expected_gross_return_pct", confidence["expected_return_pct"]) / 100.0
+                    ),
                     stop_probability=_to_float(
                         row.get("_model_stop_probability"),
                         confidence["stop_probability"] / 100.0,
@@ -835,6 +845,16 @@ class ScreeningEngine:
                         ),
                         "high": _to_float(
                             row.get("_model_return_high"), confidence["return_interval_high_pct"] / 100.0,
+                        ),
+                    },
+                    gross_return_interval={
+                        "low": _to_float(
+                            row.get("_model_gross_return_low"),
+                            confidence.get("gross_return_interval_low_pct", confidence["return_interval_low_pct"]) / 100.0,
+                        ),
+                        "high": _to_float(
+                            row.get("_model_gross_return_high"),
+                            confidence.get("gross_return_interval_high_pct", confidence["return_interval_high_pct"]) / 100.0,
                         ),
                     },
                     calibration=(
@@ -885,15 +905,10 @@ class ScreeningEngine:
                 "probability_lift": confidence["probability_lift"],
                 "expected_return_pct": confidence["expected_return_pct"],
                 "expected_excess_return_pct": confidence["expected_return_pct"],
-                "expected_gross_return_pct": round(
-                    _to_float(row.get("_model_expected_gross_return"), math.nan) * 100.0, 2
-                ) if pd.notna(row.get("_model_expected_gross_return")) else None,
-                "gross_return_interval_low_pct": round(
-                    _to_float(row.get("_model_gross_return_low"), math.nan) * 100.0, 2
-                ) if pd.notna(row.get("_model_gross_return_low")) else None,
-                "gross_return_interval_high_pct": round(
-                    _to_float(row.get("_model_gross_return_high"), math.nan) * 100.0, 2
-                ) if pd.notna(row.get("_model_gross_return_high")) else None,
+                "expected_gross_return_pct": confidence.get("expected_gross_return_pct"),
+                "gross_return_interval_low_pct": confidence.get("gross_return_interval_low_pct"),
+                "gross_return_interval_high_pct": confidence.get("gross_return_interval_high_pct"),
+                "forecast_horizon_days": int(self._weight_metadata.get("horizon_days") or 3),
                 "stop_probability": confidence["stop_probability"],
                 "stop_probability_source": (
                     "个股样本外止损模型"

@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import gc
+import os
 from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
@@ -160,10 +162,30 @@ def write_replace_partition(
 
 def connect_duckdb(path: Path):
     import duckdb  # type: ignore
+    from config.settings import DUCKDB_MEMORY_LIMIT, DUCKDB_TEMP_DIR, DUCKDB_THREADS
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    return duckdb.connect(str(path))
+    Path(DUCKDB_TEMP_DIR).mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(path))
+    con.execute("SET memory_limit = ?", [str(DUCKDB_MEMORY_LIMIT)])
+    con.execute("SET threads = ?", [max(1, int(DUCKDB_THREADS))])
+    con.execute("SET temp_directory = ?", [str(DUCKDB_TEMP_DIR)])
+    con.execute("SET preserve_insertion_order = false")
+    return con
+
+
+def release_process_memory() -> None:
+    """Release completed Pandas/DuckDB allocations, including glibc arenas on Linux."""
+    gc.collect()
+    if os.name != "posix":
+        return
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 @dataclass

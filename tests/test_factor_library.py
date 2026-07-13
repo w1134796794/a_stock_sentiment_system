@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from core.factors.factor_library import DynamicWeightRepository, FactorLibraryTrainer
+from core.factors.strategy_training import strategy_training_spec
 
 
 def test_repository_never_loads_future_weight_version(tmp_path):
@@ -211,3 +212,31 @@ def test_near_limit_training_scope_keeps_only_comparable_strong_stocks(tmp_path)
     scoped = trainer._apply_training_scope(frame, "near_limit")
 
     assert scoped["code"].tolist() == ["000001", "000004"]
+
+
+def test_strategy_training_horizons_are_independent():
+    assert strategy_training_spec("first_board_launch").horizon_days == 2
+    assert strategy_training_spec("ultra_short_board").horizon_days == 2
+    assert strategy_training_spec("weak_to_strong").horizon_days == 3
+    assert strategy_training_spec("capital_resonance").horizon_days == 3
+    assert strategy_training_spec("trend_follow").horizon_days == 5
+    assert strategy_training_spec("trend_follow").max_horizon_days == 10
+
+
+def test_rolling_oos_scores_never_train_on_validation_future(tmp_path):
+    rows = []
+    for date in pd.bdate_range("2026-01-05", periods=100):
+        for index in range(25):
+            rows.append({
+                "trade_date": date.strftime("%Y%m%d"),
+                "future_date": (date + pd.offsets.BDay(3)).strftime("%Y%m%d"),
+                "factor_a": float(index),
+                "target_return": float(index) / 1000,
+            })
+    trainer = FactorLibraryTrainer(
+        repository=DynamicWeightRepository(tmp_path), min_daily_samples=20,
+    )
+    scored = trainer._rolling_oos_scored_frame(pd.DataFrame(rows), {"factor_a": 1.0})
+    assert not scored.empty
+    assert (scored["oos_train_end"].astype(str) < scored["trade_date"].astype(str)).all()
+    assert scored["trade_date"].astype(str).str[:6].nunique() >= 2

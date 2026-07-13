@@ -497,7 +497,9 @@
             <summary>专业证据</summary>
             <div class="dp-evidence-grid">
               <div><span>候选概率</span><b>{{ row.get('candidate_probability')|num2 }}%</b></div>
-              <div><span>预期超额</span><b>{{ row.get('expected_return_pct')|num2 }}%</b></div>
+              <div><span>预计{{ row.get('forecast_horizon_days') or 3 }}日总收益</span><b>{{ row.get('expected_gross_return_pct')|num2 }}%</b></div>
+              <div><span>预计{{ row.get('forecast_horizon_days') or 3 }}日超额</span><b>{{ row.get('expected_return_pct')|num2 }}%</b></div>
+              <div><span>总收益80%区间</span><b>{{ row.get('gross_return_interval_low_pct')|num2 }}% ～ {{ row.get('gross_return_interval_high_pct')|num2 }}%</b></div>
               <div><span>止损概率</span><b>{{ row.get('stop_probability')|num2 }}%</b></div>
               <div><span>可信等级</span><b>{{ row.get('confidence_grade') or '--' }}</b></div>
               <div><span>验证样本</span><b>{{ row.get('model_validation_sample_size')|num2 }}</b></div>

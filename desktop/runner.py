@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import sys
 import json
+import os
+import subprocess
 import time
 import threading
 import traceback
@@ -289,6 +291,33 @@ class RunController:
             lease.release()
 
     # ---- 内部实现 -----------------------------------------------------
+    def _run_isolated_factor_process(self, date: Optional[str]) -> None:
+        """Run one factor partition outside the Web process so RSS is reclaimed per day."""
+        from config.settings import BASE_DIR
+
+        command = [sys.executable, str(Path(BASE_DIR) / "main.py"), "--mode", "factors"]
+        if date:
+            command.extend(["--date", str(date)])
+        env = dict(os.environ)
+        env["PYTHONUNBUFFERED"] = "1"
+        process = subprocess.Popen(
+            command,
+            cwd=str(BASE_DIR),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            self.buffer.append_line(line.rstrip("\r\n"))
+        return_code = process.wait()
+        if return_code != 0:
+            raise RuntimeError(f"因子子进程退出码 {return_code}")
+
     def _worker(self, date: Optional[str], options: Optional[Dict[str, Any]] = None) -> None:
         import loguru
 
@@ -307,10 +336,13 @@ class RunController:
             self.buffer.append_line(
                 f"=== 开始{self.stage_label} · 日期={date or '今日(自动取最近交易日)'} ==="
             )
-            from main import SentimentSystem  # 惰性导入重依赖
+            if self.stage == "factors":
+                self._run_isolated_factor_process(date)
+            else:
+                from main import SentimentSystem  # 惰性导入重依赖
 
-            system = SentimentSystem()
-            getattr(system, self.stage_method)(date, **dict(options or {}))
+                system = SentimentSystem()
+                getattr(system, self.stage_method)(date, **dict(options or {}))
             self.buffer.append_line(f"=== {self.stage_done} ===")
             self.state = "done"
             self._publish_state()
@@ -364,7 +396,7 @@ class RunController:
             if not trade_dates:
                 raise RuntimeError("区间内没有可运行的交易日，请检查日期范围。")
 
-            system = SentimentSystem()
+            system = None if self.stage == "factors" else SentimentSystem()
             for idx, trade_date in enumerate(trade_dates, 1):
                 date_started = time.monotonic()
                 heartbeat_stop = threading.Event()
@@ -385,7 +417,10 @@ class RunController:
                 self.buffer.append_line("")
                 self.buffer.append_line(f"--- [{idx}/{len(trade_dates)}] {trade_date} 开始 ---")
                 try:
-                    getattr(system, self.stage_method)(trade_date, **dict(options or {}))
+                    if self.stage == "factors":
+                        self._run_isolated_factor_process(trade_date)
+                    else:
+                        getattr(system, self.stage_method)(trade_date, **dict(options or {}))
                     self.completed = idx
                     self.date = trade_date
                     self._publish_state()

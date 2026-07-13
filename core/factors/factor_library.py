@@ -195,11 +195,13 @@ class FactorLibraryTrainer:
 
     def load_training_frame(
         self, start_date: str, end_date: str, factors: Sequence[str], *, training_scope: str = "all",
+        profile: str = "default", horizon_days: Optional[int] = None,
     ) -> pd.DataFrame:
         if not self.duckdb_path.exists():
             return pd.DataFrame()
         import duckdb  # type: ignore
 
+        horizon = max(int(horizon_days or self.horizon_days), 1)
         factor_ids = [factor for factor in factors if factor != "tech_score"]
         for factor in factor_ids:
             if not _SAFE_FACTOR.match(factor):
@@ -222,8 +224,8 @@ class FactorLibraryTrainer:
                  LEAD(high, 2) OVER stock_window AS high_2,
                  LEAD(low, 3) OVER stock_window AS low_3,
                  LEAD(high, 3) OVER stock_window AS high_3,
-                 LEAD(close, {self.horizon_days}) OVER stock_window AS future_close,
-                 LEAD(trade_date, {self.horizon_days}) OVER stock_window AS future_date
+                 LEAD(close, {horizon}) OVER stock_window AS future_close,
+                 LEAD(trade_date, {horizon}) OVER stock_window AS future_date
           FROM stock_daily_silver
           WINDOW stock_window AS (PARTITION BY code ORDER BY trade_date)
         ), factor_pivot AS (
@@ -300,7 +302,29 @@ class FactorLibraryTrainer:
         frame["label_hold"] = (frame["label_class"] == 1).astype(int)
         frame["label_avoid"] = (frame["label_class"] == 0).astype(int)
         frame["label_success"] = frame["label_strong_buy"]
-        return self._apply_training_scope(frame, training_scope)
+        frame = self._apply_training_scope(frame, training_scope)
+        from core.factors.strategy_training import STRATEGY_TRAINING_SPECS, StrategyMinuteTrainingBuilder
+
+        if profile in STRATEGY_TRAINING_SPECS:
+            try:
+                from core.screening.strategy_profiles import StrategyProfileRepository
+
+                strategy = StrategyProfileRepository().get_profile(profile) or {}
+                execution = strategy.get("execution") or {}
+                modes = execution.get("allowed_entry_modes") or execution.get("entry_modes") or []
+            except Exception:
+                modes = []
+            builder = StrategyMinuteTrainingBuilder(duckdb_path=self.duckdb_path)
+            frame = builder.apply(
+                frame,
+                strategy_id=profile,
+                horizon_days=horizon,
+                allowed_entry_modes=modes,
+            )
+            self._last_strategy_training_audit = builder.audit
+        else:
+            self._last_strategy_training_audit = {}
+        return frame
 
     def factor_metrics(self, frame: pd.DataFrame, factors: Sequence[str]) -> Dict[str, Dict[str, float]]:
         metrics: Dict[str, Dict[str, float]] = {}
@@ -510,7 +534,8 @@ class FactorLibraryTrainer:
         if frame.empty:
             return {"sample_size": 0, "bins": [], "monotonic_top3": False}
         data = frame.copy()
-        data["model_score"] = self._score_frame(data, weights)
+        if "model_score" not in data.columns:
+            data["model_score"] = self._score_frame(data, weights)
         monotonic = False
         try:
             validation_bins = pd.qcut(data["model_score"], q=10, duplicates="drop")
@@ -533,6 +558,7 @@ class FactorLibraryTrainer:
         rows: List[Dict[str, Any]] = []
         prediction_by_index = pd.Series(math.nan, index=data.index, dtype=float)
         return_prediction_by_index = pd.Series(math.nan, index=data.index, dtype=float)
+        gross_prediction_by_index = pd.Series(math.nan, index=data.index, dtype=float)
         for _, group in data.groupby("score_bin", observed=True):
             def group_numeric(name: str, fallback: str = "") -> pd.Series:
                 if name in group.columns:
@@ -543,6 +569,7 @@ class FactorLibraryTrainer:
 
             success = group_numeric("label_success")
             target = group_numeric("next_3d_excess_return", "target_return")
+            gross = group_numeric("raw_forward_return")
             stop = group_numeric("stop_before_profit")
             mfe = group_numeric("mfe_3d")
             mae = group_numeric("mae_3d")
@@ -553,11 +580,13 @@ class FactorLibraryTrainer:
                 "sample_size": int(len(group)),
                 "success_probability": float(success.mean()) if success.notna().any() else 0.5,
                 "expected_return": float(target.mean()) if target.notna().any() else 0.0,
+                "expected_gross_return": float(gross.mean()) if gross.notna().any() else 0.0,
                 "stop_probability": float(stop.mean()) if stop.notna().any() else 0.5,
                 "average_mfe": float(mfe.mean()) if mfe.notna().any() else 0.0,
                 "average_mae": float(mae.mean()) if mae.notna().any() else 0.0,
                 "_index": list(group.index),
                 "_returns": [float(value) for value in target.dropna().tolist()],
+                "_gross_returns": [float(value) for value in gross.dropna().tolist()],
             })
         rows.sort(key=lambda row: row["score_center"])
         fitted_probability = self._isotonic_increasing(
@@ -566,16 +595,22 @@ class FactorLibraryTrainer:
         fitted_return = self._isotonic_increasing(
             [row["expected_return"] for row in rows], [row["sample_size"] for row in rows],
         )
-        for row, probability, expected in zip(rows, fitted_probability, fitted_return):
+        fitted_gross = self._isotonic_increasing(
+            [row["expected_gross_return"] for row in rows], [row["sample_size"] for row in rows],
+        )
+        for row, probability, expected, gross_expected in zip(rows, fitted_probability, fitted_return, fitted_gross):
             row["observed_success_probability"] = row["success_probability"]
             row["observed_expected_return"] = row["expected_return"]
             row["success_probability"] = float(probability)
             row["expected_return"] = float(expected)
+            row["observed_expected_gross_return"] = row["expected_gross_return"]
+            row["expected_gross_return"] = float(gross_expected)
             posterior = beta_binomial_interval(
                 float(row["observed_success_probability"]) * int(row["sample_size"]),
                 int(row["sample_size"]),
             )
             returns = row.pop("_returns")
+            gross_returns = row.pop("_gross_returns")
             interval = conformal_residual_interval(
                 returns,
                 [float(expected)] * len(returns),
@@ -586,9 +621,17 @@ class FactorLibraryTrainer:
             row["return_interval_low"] = float(expected - interval["radius"])
             row["return_interval_high"] = float(expected + interval["radius"])
             row["conformal_radius"] = float(interval["radius"])
+            gross_interval = conformal_residual_interval(
+                gross_returns,
+                [float(gross_expected)] * len(gross_returns),
+                alpha=0.20,
+            )
+            row["gross_return_interval_low"] = float(gross_expected - gross_interval["radius"])
+            row["gross_return_interval_high"] = float(gross_expected + gross_interval["radius"])
             indices = row.pop("_index")
             prediction_by_index.loc[indices] = float(probability)
             return_prediction_by_index.loc[indices] = float(expected)
+            gross_prediction_by_index.loc[indices] = float(gross_expected)
         calibration = calibration_metrics(
             numeric("label_success"), prediction_by_index, bins=10,
         )
@@ -612,6 +655,7 @@ class FactorLibraryTrainer:
             "sample_size": int(len(data)),
             "success_probability": float(numeric("label_success", 0.5).mean()),
             "expected_return": float((numeric("next_3d_excess_return") if "next_3d_excess_return" in data else numeric("target_return", 0.0)).mean()),
+            "expected_gross_return": float(numeric("raw_forward_return", 0.0).mean()),
             "stop_probability": float(numeric("stop_before_profit", 0.5).mean()),
             "average_mfe": float(numeric("mfe_3d", 0.0).mean()),
             "average_mae": float(numeric("mae_3d", 0.0).mean()),
@@ -783,6 +827,44 @@ class FactorLibraryTrainer:
         except Exception:
             return False
 
+    def _rolling_oos_scored_frame(
+        self,
+        frame: pd.DataFrame,
+        prior: Mapping[str, float],
+        *,
+        min_train_months: int = 2,
+    ) -> pd.DataFrame:
+        """Generate point-in-time scores; every row is scored by earlier months only."""
+        if frame.empty:
+            return frame.iloc[0:0].copy()
+        data = frame.copy()
+        data["_month"] = data["trade_date"].astype(str).str[:6]
+        months = sorted(data["_month"].dropna().unique())
+        scored: List[pd.DataFrame] = []
+        for index, month in enumerate(months):
+            if index < max(int(min_train_months), 1):
+                continue
+            validation = data[data["_month"] == month].copy()
+            if validation.empty:
+                continue
+            cutoff = str(validation["trade_date"].min())
+            training = data[
+                (data["_month"] < month)
+                & (data.get("future_date", data["trade_date"]).astype(str) < cutoff)
+            ].copy()
+            if training["trade_date"].astype(str).nunique() < 20:
+                continue
+            metrics = self.factor_metrics(training, list(prior))
+            redundant = self._redundant_factors(training, list(prior), metrics)
+            learned = self._learned_weights(metrics, redundant)
+            weights = self.blend_weights(prior, learned, 0.50, 0.25)
+            validation["model_score"] = self._score_frame(validation, weights)
+            validation["oos_train_end"] = str(training["trade_date"].max())
+            scored.append(validation)
+        if not scored:
+            return frame.iloc[0:0].copy()
+        return pd.concat(scored, ignore_index=True).drop(columns=["_month"], errors="ignore")
+
     def train_and_publish(
         self,
         start_date: str,
@@ -791,14 +873,32 @@ class FactorLibraryTrainer:
         profile: str = "default",
         effective_date: str = "",
     ) -> Dict[str, Any]:
+        from core.factors.strategy_training import strategy_training_spec
+
+        spec = strategy_training_spec(profile, self.horizon_days)
         prior = self.prior_weights(profile)
         training_scope = self.training_scope(profile)
         frame = self.load_training_frame(
             start_date, end_date, list(prior), training_scope=training_scope,
+            profile=profile, horizon_days=spec.horizon_days,
         )
         if frame.empty or frame["trade_date"].nunique() < 20:
-            raise RuntimeError("动态权重训练样本不足，至少需要 20 个有效交易日")
+            audit = getattr(self, "_last_strategy_training_audit", {})
+            raise RuntimeError(f"动态权重训练样本不足，至少需要20个有效交易日；真实买点审计={audit}")
         weights, report = self.fit_frame(frame, prior)
+        oos_frame = self._rolling_oos_scored_frame(frame, prior)
+        if oos_frame.empty or oos_frame["trade_date"].astype(str).nunique() < 5:
+            raise RuntimeError("滚动样本外校准不足：至少需要5个有预测的验证交易日，禁止使用训练集内校准")
+        report["confidence_profiles"] = {
+            "all": self._confidence_profile(oos_frame, weights),
+        }
+        for regime in ("strong", "neutral", "weak"):
+            subset = oos_frame[oos_frame.get("market_regime", "neutral") == regime]
+            if not subset.empty:
+                report["confidence_profiles"][regime] = self._confidence_profile(subset, weights)
+        report["calibration_source"] = "purged_monthly_walk_forward_oos"
+        report["oos_calibration_rows"] = int(len(oos_frame))
+        report["oos_calibration_months"] = int(oos_frame["trade_date"].astype(str).str[:6].nunique())
         monthly_gate = self._rolling_month_gate(frame, prior)
         gate_passed = bool(
             (report.get("confidence_profiles") or {}).get("all", {}).get("monotonic_top3")
@@ -806,7 +906,9 @@ class FactorLibraryTrainer:
         )
         if not gate_passed:
             weights = prior
-            report["confidence_profiles"]["all"] = self._confidence_profile(frame, weights)
+            prior_oos = oos_frame.copy()
+            prior_oos["model_score"] = self._score_frame(prior_oos, weights)
+            report["confidence_profiles"]["all"] = self._confidence_profile(prior_oos, weights)
         report["publication_gate"] = {
             "passed": gate_passed,
             "reason": (
@@ -838,7 +940,7 @@ class FactorLibraryTrainer:
             "status": candidate_model.get("status", "not_trained"),
             "active": bool(candidate_model.get("active")),
         }
-        outcome_rows = self.persist_outcome_labels(frame)
+        outcome_rows = self.persist_outcome_labels(frame, profile=profile)
         payload: Dict[str, Any] = {
             "schema_version": 2,
             "model_type": (
@@ -853,7 +955,10 @@ class FactorLibraryTrainer:
             "trained_at": datetime.now().isoformat(timespec="seconds"),
             "train_start": str(frame["trade_date"].min()),
             "train_end": str(frame["trade_date"].max()),
-            "horizon_days": self.horizon_days,
+            "horizon_days": spec.horizon_days,
+            "max_horizon_days": spec.max_horizon_days,
+            "label_source": "confirmed_minute_next_open" if getattr(self, "_last_strategy_training_audit", {}) else "next_day_open",
+            "strategy_training_audit": getattr(self, "_last_strategy_training_audit", {}),
             "training_rows": int(len(frame)),
             "training_days": int(frame["trade_date"].nunique()),
             "outcome_rows": outcome_rows,
@@ -869,7 +974,7 @@ class FactorLibraryTrainer:
         )
         return payload
 
-    def persist_outcome_labels(self, frame: pd.DataFrame) -> int:
+    def persist_outcome_labels(self, frame: pd.DataFrame, *, profile: str = "default") -> int:
         """Persist point-in-time candidate outcomes for audit and later calibration."""
         columns = [
             "trade_date", "code", "entry_date", "future_date", "market_regime",
@@ -877,10 +982,14 @@ class FactorLibraryTrainer:
             "stop_before_profit", "tradable_next_day", "label_class", "label_name",
             "label_strong_buy", "label_hold", "label_avoid", "label_success",
         ]
+        optional = [
+            "entry_time", "entry_signal", "raw_forward_return", "label_horizon_days", "label_source",
+        ]
         if frame.empty or not self.duckdb_path.exists() or not set(columns).issubset(frame.columns):
             return 0
-        labels = frame[columns].copy()
-        labels["label_version"] = "candidate_v3_three_tier_3d_stop4_profit6"
+        labels = frame[columns + [name for name in optional if name in frame.columns]].copy()
+        labels["profile"] = str(profile)
+        labels["label_version"] = "strategy_v1_real_minute_entry_oos"
         labels["computed_at"] = datetime.now().isoformat(timespec="seconds")
         import duckdb  # type: ignore
 
@@ -908,8 +1017,9 @@ class FactorLibraryTrainer:
             start = str(labels["trade_date"].min())
             end = str(labels["trade_date"].max())
             con.execute(
-                "DELETE FROM signal_outcome_wide WHERE CAST(trade_date AS VARCHAR) BETWEEN ? AND ?",
-                [start, end],
+                "DELETE FROM signal_outcome_wide WHERE CAST(trade_date AS VARCHAR) BETWEEN ? AND ? "
+                "AND COALESCE(CAST(profile AS VARCHAR), 'default') = ?",
+                [start, end, str(profile)],
             )
             quoted_columns = ", ".join(
                 f'"{column.replace(chr(34), chr(34) * 2)}"' for column in labels.columns

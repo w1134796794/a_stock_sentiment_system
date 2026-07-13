@@ -54,6 +54,7 @@ class ConfidenceService:
         calibrated_probability: Any,
         baseline_probability: Any = None,
         expected_return: Any = 0.0,
+        expected_gross_return: Any = None,
         stop_probability: Any = 0.5,
         sample_size: Any = 0,
         average_mfe: Any = 0.0,
@@ -63,6 +64,7 @@ class ConfidenceService:
         tradability: Any = 1.0,
         probability_interval: Optional[Mapping[str, Any]] = None,
         return_interval: Optional[Mapping[str, Any]] = None,
+        gross_return_interval: Optional[Mapping[str, Any]] = None,
         calibration: Optional[Mapping[str, Any]] = None,
         model_drift: Optional[Mapping[str, Any]] = None,
         model_type: str = "",
@@ -76,6 +78,7 @@ class ConfidenceService:
         )
         probability_lift = probability / max(baseline, 0.01)
         expected = _float(expected_return)
+        expected_gross = _float(expected_gross_return, expected)
         samples = max(int(_float(sample_size, 0.0)), 0)
         data_ratio = _ratio(data_completeness)
         regime_ratio = _ratio(regime_match)
@@ -121,11 +124,13 @@ class ConfidenceService:
             decision_label = "观察，不主动参与"
         probability_interval = dict(probability_interval or {})
         return_interval = dict(return_interval or {})
+        gross_return_interval = dict(gross_return_interval or {})
         result = {
             "candidate_probability": round(probability * 100.0, 2),
             "baseline_probability": round(baseline * 100.0, 2),
             "probability_lift": round(probability_lift, 2),
             "expected_return_pct": round(expected * 100.0, 2),
+            "expected_gross_return_pct": round(expected_gross * 100.0, 2),
             "stop_probability": round(_ratio(stop_probability, 0.5) * 100.0, 2),
             "sample_size": samples,
             "average_mfe_pct": round(_float(average_mfe) * 100.0, 2),
@@ -142,6 +147,8 @@ class ConfidenceService:
             "probability_ci_high": round(_ratio(probability_interval.get("high"), probability) * 100.0, 2),
             "return_interval_low_pct": round(_float(return_interval.get("low"), expected) * 100.0, 2),
             "return_interval_high_pct": round(_float(return_interval.get("high"), expected) * 100.0, 2),
+            "gross_return_interval_low_pct": round(_float(gross_return_interval.get("low"), expected_gross) * 100.0, 2),
+            "gross_return_interval_high_pct": round(_float(gross_return_interval.get("high"), expected_gross) * 100.0, 2),
             "brier_score": None if (calibration or {}).get("brier_score") is None else round(_float((calibration or {}).get("brier_score")), 4),
             "ece": None if (calibration or {}).get("ece") is None else round(_float((calibration or {}).get("ece")) * 100.0, 2),
             "model_drift_status": drift_status,
@@ -243,9 +250,9 @@ class ConfidenceService:
             if len(points) == 1:
                 return max(lower, min(upper, points[0][1]))
             if value <= points[0][0]:
-                left, right = points[0], points[1]
-            elif value >= points[-1][0]:
-                left, right = points[-2], points[-1]
+                return max(lower, min(upper, points[0][1]))
+            if value >= points[-1][0]:
+                return max(lower, min(upper, points[-1][1]))
             else:
                 left, right = points[0], points[-1]
                 for index in range(1, len(points)):
@@ -265,6 +272,9 @@ class ConfidenceService:
             expected_return=interpolate(
                 "expected_return", _float(payload.get("expected_return"), 0.0), lower=-0.50, upper=0.50,
             ),
+            expected_gross_return=interpolate(
+                "expected_gross_return", _float(payload.get("expected_gross_return"), 0.0), lower=-0.50, upper=0.50,
+            ),
             stop_probability=interpolate(
                 "stop_probability", _float(payload.get("stop_probability"), 0.5), lower=0.0, upper=1.0,
             ),
@@ -281,6 +291,10 @@ class ConfidenceService:
             return_interval={
                 "low": interpolate("return_interval_low", 0.0, lower=-1.0, upper=1.0),
                 "high": interpolate("return_interval_high", 0.0, lower=-1.0, upper=1.0),
+            },
+            gross_return_interval={
+                "low": interpolate("gross_return_interval_low", 0.0, lower=-1.0, upper=1.0),
+                "high": interpolate("gross_return_interval_high", 0.0, lower=-1.0, upper=1.0),
             },
             calibration=payload.get("calibration") or {},
             model_drift=model_drift,

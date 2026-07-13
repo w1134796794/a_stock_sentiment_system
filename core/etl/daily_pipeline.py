@@ -197,7 +197,9 @@ class ETLDailyPipeline:
         failed = [item for item in result.factor_results if not item.get("ok")]
         if failed:
             result.warnings.append(f"因子任务失败: {[item.get('name') for item in failed]}")
-        self._refresh_factor_models(result, trade_date, prev_trade_date, profile)
+        logger.info(
+            "[因子计算] 模型训练已解耦，本阶段只生成因子；策略模型请在策略训练任务中单独运行"
+        )
         logger.info(
             f"[因子计算] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s, "
             f"失败={len(failed)}"
@@ -417,13 +419,21 @@ class ETLDailyPipeline:
                     logger.debug(f"[因子计算][因子库] 未读取策略模型清单: {exc}")
                 trainer = FactorLibraryTrainer(duckdb_path=self.duckdb_path)
                 for model_profile in dict.fromkeys(item for item in profiles if item):
-                    trained = trainer.refresh_if_due(
-                        trade_date, prev_trade_date, profile=model_profile
-                    )
-                    if trained:
-                        logger.info(
-                            "[因子计算][因子库] 本月动态权重已生效: "
-                            f"profile={model_profile} effective={trained.get('effective_date')}"
+                    try:
+                        trained = trainer.refresh_if_due(
+                            trade_date, prev_trade_date, profile=model_profile
+                        )
+                        if trained:
+                            logger.info(
+                                "[因子计算][因子库] 本月动态权重已生效: "
+                                f"profile={model_profile} effective={trained.get('effective_date')}"
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        result.warnings.append(
+                            f"策略模型 {model_profile} 训练未完成，继续使用该策略回退规则: {exc}"
+                        )
+                        logger.warning(
+                            f"[因子计算][因子库] profile={model_profile} 训练失败: {exc}"
                         )
             except Exception as exc:  # noqa: BLE001
                 result.warnings.append(f"动态因子权重训练未完成，使用先验权重: {exc}")

@@ -90,7 +90,7 @@ strategies:
     protected: true
     base_profile: momentum_repair
     stock_pool: liquid
-    weight_source: ic_ir
+    weight_source: lightgbm
     weight_profile: momentum_repair
     enhancements:
       lhb: true
@@ -155,8 +155,8 @@ strategies:
       weight: 0.08
     - factor: stk_sector_rotation_momentum
       weight: 0.08
-    weight_source: manual
-    weight_profile: default
+    weight_source: lightgbm
+    weight_profile: trend_follow
     enhancements:
       lhb: false
       capital_flow: true
@@ -217,8 +217,8 @@ strategies:
       weight: 0.16
     - factor: stk_board_height
       weight: -0.1
-    weight_source: manual
-    weight_profile: default
+    weight_source: lightgbm
+    weight_profile: first_board_launch
     enhancements:
       lhb: true
       capital_flow: true
@@ -287,8 +287,8 @@ strategies:
       weight: 0.06
     - factor: stk_liquidity_percentile
       weight: 0.04
-    weight_source: manual
-    weight_profile: default
+    weight_source: lightgbm
+    weight_profile: ultra_short_board
     enhancements:
       lhb: true
       capital_flow: true
@@ -347,8 +347,8 @@ strategies:
       weight: 0.08
     - factor: stk_liquidity_percentile
       weight: 0.06
-    weight_source: manual
-    weight_profile: default
+    weight_source: lightgbm
+    weight_profile: weak_to_strong
     enhancements:
       lhb: true
       capital_flow: true
@@ -414,8 +414,8 @@ strategies:
       weight: 0.06
     - factor: stk_capital_flow_consensus
       weight: 0.04
-    weight_source: manual
-    weight_profile: default
+    weight_source: lightgbm
+    weight_profile: mainline_leader
     enhancements:
       lhb: true
       capital_flow: true
@@ -474,8 +474,8 @@ strategies:
       weight: 0.09
     - factor: stk_liquidity_percentile
       weight: 0.08
-    weight_source: manual
-    weight_profile: default
+    weight_source: lightgbm
+    weight_profile: capital_resonance
     enhancements:
       lhb: true
       capital_flow: true

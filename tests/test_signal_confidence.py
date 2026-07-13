@@ -52,6 +52,21 @@ def test_confidence_profile_interpolates_per_stock_score():
     assert lower["expected_return_pct"] < higher["expected_return_pct"]
 
 
+def test_confidence_profile_clamps_scores_outside_historical_bins():
+    profile = {"bins": [
+        {"score_center": 60, "sample_size": 100, "success_probability": 0.20,
+         "expected_return": -0.01, "expected_gross_return": 0.01},
+        {"score_center": 80, "sample_size": 100, "success_probability": 0.40,
+         "expected_return": 0.04, "expected_gross_return": 0.06},
+    ]}
+    below = ConfidenceService.from_profile(profile, score=20)
+    above = ConfidenceService.from_profile(profile, score=120)
+    assert below["candidate_probability"] == 20.0
+    assert above["candidate_probability"] == 40.0
+    assert below["expected_gross_return_pct"] == 1.0
+    assert above["expected_gross_return_pct"] == 6.0
+
+
 def test_confidence_grade_uses_relative_edge_for_strict_event_label():
     result = ConfidenceService.assess(
         calibrated_probability=0.2654,

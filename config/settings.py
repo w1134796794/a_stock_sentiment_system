@@ -58,6 +58,9 @@ OUTPUT_DIR = _env_path("OUTPUT_DIR", WEB_DATA_DIR / "output")
 SNAPSHOT_DIR = WEB_DATA_DIR / "snapshots"        # 每日整页 JSON 快照
 APP_DB_PATH = WEB_DATA_DIR / "app.sqlite"        # 结构化索引（计划/信号/快照）
 FACTOR_DB_PATH = WEB_DATA_DIR / "factors.duckdb"  # 因子大表（定量查询，可选）
+DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", "1400MB").strip() or "1400MB"
+DUCKDB_THREADS = max(1, int(os.getenv("DUCKDB_THREADS", "1")))
+DUCKDB_TEMP_DIR = _env_path("DUCKDB_TEMP_DIR", WEB_DATA_DIR / "duckdb_tmp")
 KB_DB_PATH = WEB_DATA_DIR / "kb.sqlite"          # 知识库块存储（向量 + 词法）
 WINRATE_PATH = WEB_DATA_DIR / "winrate_matrix.json"  # 周期×模式胜率矩阵（复盘工具产物）
 
