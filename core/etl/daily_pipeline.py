@@ -391,53 +391,11 @@ class ETLDailyPipeline:
         prev_trade_date: str,
         profile: str,
     ) -> None:
-        """Refresh models that consume factor/Silver history, never remote APIs."""
-        try:
-            from core.signals.minute_amount_profile import MinuteAmountProfileTrainer
-
-            minute_profile = MinuteAmountProfileTrainer().refresh_if_due()
-            if not minute_profile.get("ok"):
-                result.warnings.append(f"分钟成交进度模型不可用: {minute_profile.get('message')}")
-        except Exception as exc:  # noqa: BLE001
-            result.warnings.append(f"分钟成交进度模型训练失败: {exc}")
-            logger.warning(f"[因子计算][分钟成交进度] 训练失败: {exc}")
-
-        if prev_trade_date and str(prev_trade_date)[:6] != str(trade_date)[:6]:
-            try:
-                from core.factors.factor_library import FactorLibraryTrainer
-
-                profiles = [str(profile or "default")]
-                try:
-                    from core.screening.strategy_profiles import StrategyProfileRepository
-
-                    profiles.extend(
-                        str(item.get("weight_profile") or item.get("id") or "")
-                        for item in StrategyProfileRepository().list_profiles(enabled_only=True)
-                        if str(item.get("weight_source") or "").lower() == "lightgbm"
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug(f"[因子计算][因子库] 未读取策略模型清单: {exc}")
-                trainer = FactorLibraryTrainer(duckdb_path=self.duckdb_path)
-                for model_profile in dict.fromkeys(item for item in profiles if item):
-                    try:
-                        trained = trainer.refresh_if_due(
-                            trade_date, prev_trade_date, profile=model_profile
-                        )
-                        if trained:
-                            logger.info(
-                                "[因子计算][因子库] 本月动态权重已生效: "
-                                f"profile={model_profile} effective={trained.get('effective_date')}"
-                            )
-                    except Exception as exc:  # noqa: BLE001
-                        result.warnings.append(
-                            f"策略模型 {model_profile} 训练未完成，继续使用该策略回退规则: {exc}"
-                        )
-                        logger.warning(
-                            f"[因子计算][因子库] profile={model_profile} 训练失败: {exc}"
-                        )
-            except Exception as exc:  # noqa: BLE001
-                result.warnings.append(f"动态因子权重训练未完成，使用先验权重: {exc}")
-                logger.warning(f"[因子计算][因子库] 动态权重训练失败，回退先验: {exc}")
+        """Legacy compatibility hook; model training is an explicit strategy task."""
+        logger.info(
+            "[因子计算] 忽略旧的自动训练入口: "
+            f"date={trade_date}, prev={prev_trade_date or '-'}, profile={profile or 'default'}"
+        )
 
     def build_snapshot_data(self, result: ETLDailyResult) -> Dict[str, Any]:
         screening = result.screening or {}
