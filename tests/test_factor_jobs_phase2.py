@@ -104,6 +104,42 @@ def test_stock_sector_scores_use_cached_concept_and_industry(tmp_path):
     assert "特色板块" not in scores["resonance_sectors"]
 
 
+def test_stock_sector_scores_exclude_security_attributes_from_mainline(tmp_path):
+    membership_dir = tmp_path / "sector" / "stock_sectors"
+    membership_dir.mkdir(parents=True)
+    pd.DataFrame([
+        {"ts_code": "885001.TI", "name": "融资融券", "type": "N"},
+        {"ts_code": "885003.TI", "name": "国家大基金持股", "type": "N"},
+        {"ts_code": "885002.TI", "name": "空气能热泵", "type": "N"},
+        {"ts_code": "881001.TI", "name": "通用设备", "type": "I"},
+    ]).to_csv(membership_dir / "920088.BJ.csv", index=False)
+    sector_scores = {
+        "885001": {
+            "sector_name": "融资融券", "momentum_score": 100, "amount_score": 100,
+            "amount_ratio_score": 100, "persistence_score": 100, "mainline_score": 100,
+        },
+        "885003": {
+            "sector_name": "国家大基金持股", "momentum_score": 95, "amount_score": 95,
+            "amount_ratio_score": 95, "persistence_score": 95, "mainline_score": 95,
+        },
+        "885002": {
+            "sector_name": "空气能热泵", "momentum_score": 80, "amount_score": 80,
+            "amount_ratio_score": 80, "persistence_score": 80, "mainline_score": 80,
+        },
+        "881001": {
+            "sector_name": "通用设备", "momentum_score": 70, "amount_score": 70,
+            "amount_ratio_score": 70, "persistence_score": 70, "mainline_score": 70,
+        },
+    }
+
+    scores = _stock_sector_scores("920088", sector_scores, tmp_path)
+
+    assert scores["primary_sector_name"] == "空气能热泵"
+    assert scores["resonance_sectors"] == "空气能热泵,通用设备"
+    assert "融资融券" not in scores["resonance_sectors"]
+    assert "国家大基金持股" not in scores["resonance_sectors"]
+
+
 @pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
 def test_phase2_factor_jobs_write_gold_tables(tmp_path):
     duckdb = _duckdb()

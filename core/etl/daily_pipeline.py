@@ -85,9 +85,16 @@ class ETLDailyPipeline:
         factors = self.compute_factors(trade_date, prev_trade_date, profile=profile)
         selected = self.run_screening(trade_date, prev_trade_date, profile=profile)
         # 仅旧的完整流水线保留候选行情兼容缓存。三个独立阶段均不调用此 DataManager 方法。
-        current_codes = [
-            str(item.get("code") or "") for item in selected.screening.get("final") or []
-        ]
+        decision_rows = (
+            (selected.screening.get("decision_pool") or {}).get("rows")
+            or selected.screening.get("final")
+            or []
+        )
+        current_codes = list(dict.fromkeys(
+            str(item.get("code") or item.get("代码") or item.get("股票代码") or "")
+            for item in decision_rows
+            if item.get("code") or item.get("代码") or item.get("股票代码")
+        ))
         previous_codes = self._snapshot_plan_codes(prev_trade_date)
         if hasattr(self.dm, "warm_trade_plan_daily_cache"):
             selected.plan_cache_summary = self.dm.warm_trade_plan_daily_cache(
@@ -229,15 +236,21 @@ class ETLDailyPipeline:
 
         strategy_repository = StrategyProfileRepository()
         if strategy_ids is None:
-            enabled_profiles = strategy_repository.list_profiles(enabled_only=True)
+            enabled_profiles = strategy_repository.list_profiles(
+                enabled_only=True, scope="production",
+            )
             primary_profile = next((item for item in enabled_profiles if item.get("primary")), None)
             strategy_ids = [str(item.get("id")) for item in enabled_profiles if item.get("id")]
             if not strategy_ids:
                 strategy_ids = [str((primary_profile or {}).get("id") or profile)]
-        strategy_ids = strategy_repository.validate_selection(strategy_ids)
+        strategy_ids = strategy_repository.validate_selection(
+            strategy_ids, scope="production",
+        )
         if primary_strategy not in strategy_ids:
             primary_strategy = next(
-                (item["id"] for item in strategy_repository.list_profiles(enabled_only=True)
+                (item["id"] for item in strategy_repository.list_profiles(
+                    enabled_only=True, scope="production",
+                )
                  if item.get("primary") and item["id"] in strategy_ids),
                 strategy_ids[0],
             )
@@ -290,6 +303,16 @@ class ETLDailyPipeline:
             )
             if strategy_id == primary_strategy:
                 screening = current
+        failed_strategies = [
+            f"{strategy_id}: {payload.get('message') or 'unknown error'}"
+            for strategy_id, payload in strategy_results.items()
+            if not payload.get("ok")
+        ]
+        if failed_strategies:
+            raise RuntimeError(
+                "Strategy combination screening was incomplete: "
+                + "; ".join(failed_strategies)
+            )
         if screening is None:
             raise RuntimeError("未取得主发布策略结果")
         result.screening = dict(strategy_results[primary_strategy])
@@ -329,11 +352,49 @@ class ETLDailyPipeline:
         )
         result.screening["comparison_path"] = str(comparison_path)
         try:
-            from core.models.health_monitor import ModelHealthMonitor
+            from core.portfolio.decision_pool_service import DecisionPoolService
 
-            result.screening["model_health"] = ModelHealthMonitor().write(result.screening)
+            profiles_by_id = {
+                strategy_id: strategy_repository.get_profile(strategy_id) or {}
+                for strategy_id in strategy_results
+            }
+            market_state = dict(
+                (result.screening.get("weight_metadata") or {}).get("market_state_snapshot") or {}
+            )
+            decision_pool = DecisionPoolService().build(
+                strategy_results,
+                profiles_by_id,
+                market_score=float(market_state.get("score") or 50.0),
+                market_regime=str(market_state.get("regime") or ""),
+                market_state=market_state,
+            )
+            decision_path = DecisionPoolService.persist(
+                decision_pool,
+                self.web_data_dir / "screening",
+                trade_date,
+            )
+            result.screening["decision_pool"] = decision_pool
+            result.screening["decision_pool_path"] = str(decision_path)
+            production_final = [
+                dict(row)
+                for row in decision_pool.get("rows") or []
+                if row.get("execution_eligible")
+            ]
+            result.screening["final"] = production_final
+            result.screening["final_count"] = len(production_final)
+            # Re-write the canonical artifact after attaching the production plan.
+            canonical_path.write_text(
+                json.dumps(result.screening, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            logger.info(
+                f"[选股策略][生产决策池] {trade_date}: "
+                f"可执行={decision_pool.get('decision_count', 0)}, path={decision_path}"
+            )
         except Exception as exc:  # noqa: BLE001
-            result.warnings.append(f"模型健康状态写入失败: {exc}")
+            result.warnings.append(f"生产决策池生成失败: {exc}")
+            logger.warning(f"[选股策略][生产决策池] 失败: {exc}")
+        result.screening["production_engine"] = "rules_only"
         if not screening.ok:
             result.warnings.append(f"筛选失败: {screening.message}")
         logger.info(
@@ -476,6 +537,9 @@ class ETLDailyPipeline:
             score = _f(item.get("score"))
             reasons = item.get("reasons") or []
             position_cap = _f(item.get("position_budget_pct"))
+            market_total_position_cap = _f(
+                item.get("market_total_position_cap_pct"), 100.0
+            )
             position = (
                 f"试仓 0%-{position_cap:g}%"
                 if market_regime == "weak" and position_cap > 0
@@ -505,6 +569,8 @@ class ETLDailyPipeline:
                 "类似样本": item.get("similar_sample_size"),
                 "可信等级": item.get("confidence_grade") or "D",
                 "建议仓位": position,
+                "策略单票仓位上限%": position_cap,
+                "市场总仓位上限%": market_total_position_cap,
                 "入场区间": "弱转强/强势延续/高开加速按分钟确认",
                 "止损": "实时取消线或-3%",
                 "止盈": trailing_text,

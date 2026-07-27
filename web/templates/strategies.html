@@ -60,6 +60,11 @@
           <div class="field-label">适用市场状态</div>
           <div id="market-regimes" class="flex flex-wrap gap-2 mt-1"></div>
         </div>
+        <div class="mt-3">
+          <div class="field-label">适用情绪阶段</div>
+          <div id="emotion-phases" class="flex flex-wrap gap-2 mt-1"></div>
+          <div class="text-[10px] text-slate-600 mt-1">情绪阶段决定策略是否出手；强/中/弱状态仅用于模型分层。</div>
+        </div>
       </section>
 
       <section>
@@ -154,6 +159,7 @@
   const LABELS = {
     pools: {all:'全部有因子数据的股票', liquid:'流动性合格股票', near_limit:'涨停或接近涨停股票'},
     regimes: {strong:'强市', neutral:'震荡市', weak:'弱市'},
+    phases: {freeze:'冰点', warm:'回暖', active:'活跃', boom:'高潮', decline:'退潮'},
     sources: {manual:'人工权重', ic_ir:'IC/IR动态权重', lightgbm:'LightGBM', xgboost:'XGBoost'},
     entryModes: {weak_to_strong:'弱转强', continuation:'强势延续', acceleration:'高开加速'},
   };
@@ -174,6 +180,10 @@
     byId('market-regimes').innerHTML = state.market_regimes.map(v => `
       <label class="toggle-line border border-slate-700 rounded px-2.5 py-1.5">
         <input type="checkbox" value="${esc(v)}"> ${esc(LABELS.regimes[v] || v)}
+      </label>`).join('');
+    byId('emotion-phases').innerHTML = (state.emotion_phases || []).map(v => `
+      <label class="toggle-line border border-slate-700 rounded px-2.5 py-1.5">
+        <input type="checkbox" value="${esc(v)}"> ${esc(LABELS.phases[v] || v)}
       </label>`).join('');
     byId('execution-modes').innerHTML = (state.entry_modes || []).map(v => `
       <label class="toggle-line border border-slate-700 rounded px-2.5 py-1.5">
@@ -208,6 +218,7 @@
       weight_source:source.weight_source || 'manual', weight_profile:source.weight_profile || 'default',
       enhancements:structuredClone(source.enhancements || {lhb:true,capital_flow:true}),
       market_regimes:structuredClone(source.market_regimes || ['strong','neutral','weak']), top_n:source.top_n || 10,
+      emotion_phases:structuredClone(source.emotion_phases || ['freeze','warm','active','boom','decline']),
       position_cap_pct:source.position_cap_pct || 0,
       execution:structuredClone(source.execution || {allowed_entry_modes:['weak_to_strong','continuation'],confirmation_deadline:'10:00:00',candidate_max_age_days:1,max_positions:0}),
     };
@@ -234,6 +245,7 @@
     byId('enhance-lhb').checked = current.enhancements?.lhb !== false;
     byId('enhance-capital').checked = current.enhancements?.capital_flow !== false;
     document.querySelectorAll('#market-regimes input').forEach(input => input.checked = (current.market_regimes || []).includes(input.value));
+    document.querySelectorAll('#emotion-phases input').forEach(input => input.checked = (current.emotion_phases || []).includes(input.value));
     document.querySelectorAll('#execution-modes input').forEach(input => input.checked = (current.execution?.allowed_entry_modes || []).includes(input.value));
     renderFilters('required', current.required_filters || []);
     renderFilters('excluded', current.exclusion_filters || []);
@@ -326,6 +338,7 @@
       weight_source:byId('weight-source').value, weight_profile:byId('base-profile').value,
       enhancements:{lhb:byId('enhance-lhb').checked,capital_flow:byId('enhance-capital').checked},
       market_regimes:[...document.querySelectorAll('#market-regimes input:checked')].map(input => input.value),
+      emotion_phases:[...document.querySelectorAll('#emotion-phases input:checked')].map(input => input.value),
       top_n:Number(byId('top-n').value || 10),
       position_cap_pct:Number(byId('position-cap-pct').value || 0),
       execution:{

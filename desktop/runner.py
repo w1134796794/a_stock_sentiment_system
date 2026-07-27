@@ -532,6 +532,7 @@ class BacktestController:
               enhancements: object = None,
               entry_mode: object = "hybrid",
               position_sizing_mode: object = "fixed_risk",
+              exit_policy_mode: object = "strategy",
               strategy_ids: object = None) -> Tuple[bool, str]:
         from core.screening.enhancements import enhancement_label, normalize_enhancements
         from backtest.minute_entry import ENTRY_COMPARE, ENTRY_HYBRID, ENTRY_MODES
@@ -544,16 +545,26 @@ class BacktestController:
         selected_sizing_mode = str(position_sizing_mode or "fixed_risk").strip().lower()
         if selected_sizing_mode not in {"fixed_risk", "conservative_kelly", "compare"}:
             selected_sizing_mode = "fixed_risk"
+        from backtest.exit_policy import EXIT_POLICIES
+        selected_exit_policy = str(exit_policy_mode or "strategy").strip().lower()
+        if selected_exit_policy not in EXIT_POLICIES:
+            selected_exit_policy = "strategy"
         try:
             from core.screening.strategy_profiles import StrategyProfileRepository
 
-            selected_strategy_ids = StrategyProfileRepository().validate_selection(
+            strategy_repository = StrategyProfileRepository()
+            requested_strategy_ids = (
                 strategy_ids if isinstance(strategy_ids, (list, tuple, set)) else []
             )
+            selected_strategy_ids = (
+                strategy_repository.validate_selection(requested_strategy_ids)
+                if requested_strategy_ids
+                else strategy_repository.default_selection()
+            )
         except Exception:
-            selected_strategy_ids = ["default"]
+            selected_strategy_ids = []
         if not selected_strategy_ids:
-            selected_strategy_ids = ["default"]
+            return False, "没有可运行的生产策略，请先检查策略配置。"
         start_date = (str(start_date).strip() if start_date else "") or None
         end_date = (str(end_date).strip() if end_date else "") or None
         trade_date = (str(trade_date).strip() if trade_date else "") or None
@@ -599,13 +610,14 @@ class BacktestController:
                     "enhancements": selected_enhancements,
                     "entry_mode": selected_entry_mode,
                     "position_sizing_mode": selected_sizing_mode,
+                    "exit_policy_mode": selected_exit_policy,
                     "strategy_ids": selected_strategy_ids,
                 }
                 self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.finished_at = None
                 self._thread = threading.Thread(
                     target=self._worker_daily,
-                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_strategy_ids),
+                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_exit_policy, selected_strategy_ids),
                     daemon=True,
                     name="backtest-run-daily",
                 )
@@ -639,11 +651,12 @@ class BacktestController:
                            "max_plan_rank": max_rank, "enhancements": selected_enhancements}
             self.params["entry_mode"] = selected_entry_mode
             self.params["position_sizing_mode"] = selected_sizing_mode
+            self.params["exit_policy_mode"] = selected_exit_policy
             self.params["strategy_ids"] = selected_strategy_ids
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_strategy_ids),
+                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_exit_policy, selected_strategy_ids),
                 daemon=True, name="backtest-run"
             )
             self._publish_state()
@@ -677,6 +690,7 @@ class BacktestController:
                 risk_control: bool = True, max_plan_rank: int = 0,
                 enhancements: object = None, entry_mode: str = "hybrid",
                 position_sizing_mode: str = "fixed_risk",
+                exit_policy_mode: str = "strategy",
                 strategy_ids: Optional[List[str]] = None) -> None:
         import loguru
 
@@ -741,6 +755,7 @@ class BacktestController:
             config.max_plan_rank = max_plan_rank
             config.entry_mode = "hybrid" if entry_mode == "compare" else entry_mode
             config.position_sizing_mode = "fixed_risk" if position_sizing_mode == "compare" else position_sizing_mode
+            config.exit_policy_mode = exit_policy_mode
             self.buffer.append_line(
                 f"退出策略：盈利5%-10%/10%-20%/20%以上分别从高点回撤 "
                 f"{config.trailing_early_stop_pct:.0%}/{config.trailing_mid_stop_pct:.0%}/"
@@ -748,6 +763,7 @@ class BacktestController:
             )
             entry_comparison = None
             sizing_comparison = None
+            architecture_comparison = None
             if entry_mode == "compare":
                 from backtest.entry_mode_comparison import run_entry_mode_comparison
 
@@ -781,6 +797,39 @@ class BacktestController:
                 result = engine.run_backtest(
                     start_date=start, end_date=end, trade_plans_dir=str(trade_plans_dir))
 
+            from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
+
+            if (
+                set(selected_strategy_ids) == set(PRODUCTION_STRATEGY_IDS)
+                and entry_mode != "compare"
+                and position_sizing_mode != "compare"
+            ):
+                legacy_plan_dir, legacy_files, legacy_rows = build_backtest_plan_dir(
+                    snapshot_dir=Path(SNAPSHOT_DIR),
+                    output_dir=Path(WEB_DATA_DIR),
+                    screening_dir=Path(WEB_DATA_DIR) / "screening",
+                    start_date=start,
+                    end_date=end,
+                    max_rank=max_plan_rank,
+                    enhancements=selected_enhancements,
+                    strategy_ids=[],
+                )
+                if legacy_files > 0:
+                    from backtest.architecture_comparison import run_architecture_comparison
+
+                    self.buffer.append_line(
+                        f"开始精简链路对照：旧默认链路 {legacy_rows} 条候选 / "
+                        f"精简规则链路 {row_count} 条候选"
+                    )
+                    architecture_comparison = run_architecture_comparison(
+                        data_manager=dm,
+                        base_config=config,
+                        start_date=start,
+                        end_date=end,
+                        slim_result=result,
+                        legacy_trade_plans_dir=Path(legacy_plan_dir),
+                    )
+
             report = PerformanceAnalyzer().generate_performance_report(result)
             self.buffer.append_text("\n" + report + "\n")
 
@@ -811,6 +860,13 @@ class BacktestController:
                     sizing_comparison, Path(OUTPUT_DIR), run_id
                 )
                 self.buffer.append_line(f"仓位算法对照报表已保存：{comparison_path}")
+            if architecture_comparison is not None:
+                from backtest.architecture_comparison import save_architecture_comparison
+
+                comparison_path = save_architecture_comparison(
+                    architecture_comparison, Path(OUTPUT_DIR), run_id,
+                )
+                self.buffer.append_line(f"精简链路对照报表已保存：{comparison_path}")
             if not selected_enhancements and entry_comparison is None:
                 from backtest.lhb_comparison import run_lhb_comparison, save_lhb_comparison
 
@@ -856,6 +912,7 @@ class BacktestController:
                       max_plan_rank: int = 0, enhancements: object = None,
                       entry_mode: str = "hybrid",
                       position_sizing_mode: str = "fixed_risk",
+                      exit_policy_mode: str = "strategy",
                       strategy_ids: Optional[List[str]] = None) -> None:
         import loguru
 
@@ -927,6 +984,7 @@ class BacktestController:
             config.max_plan_rank = max_plan_rank
             config.entry_mode = entry_mode
             config.position_sizing_mode = position_sizing_mode
+            config.exit_policy_mode = exit_policy_mode
             self.buffer.append_line(
                 f"退出策略：盈利5%-10%/10%-20%/20%以上分别从高点回撤 "
                 f"{config.trailing_early_stop_pct:.0%}/{config.trailing_mid_stop_pct:.0%}/"

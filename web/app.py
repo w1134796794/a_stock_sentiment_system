@@ -349,7 +349,23 @@ COLUMN_LABELS: Dict[str, str] = {
     "drift_ks": "因子漂移KS",
     "position_budget_pct": "建议风险仓位%",
     "position_budget_reason": "仓位约束",
+    "market_total_position_cap_pct": "市场总仓位上限%",
+    "market_position_scale": "市场仓位系数",
+    "strategy_position_multiplier": "策略仓位系数",
     "worst_expected_loss_pct": "最坏账户亏损%",
+    "emotion_phase": "情绪阶段代码",
+    "emotion_phase_label": "情绪周期定位",
+    "emotion_phase_reasons": "阶段判断依据",
+    "market_risk_flags": "市场风险标记",
+    "market_risk_labels": "市场风险提示",
+    "F1_cycle_duration": "强周期持续天数",
+    "F2_market_emotion_divergence": "大盘与短线情绪背离",
+    "cycle_duration": "强周期持续天数",
+    "market_emotion_divergence": "大盘与短线情绪背离",
+    "echelon_integrity": "连板梯队完整度",
+    "prev_limit_up_premium": "昨日涨停今日平均溢价%",
+    "prev_limit_up_positive": "昨日涨停今日收红比例",
+    "prev_first_board_gap_up": "昨日首板今日高开比例",
     "lifecycle_state": "龙头阶段",
     "lifecycle_reason": "阶段说明",
     "behavior_state_label": "行为阶段",
@@ -1548,7 +1564,7 @@ def _external_screening_sections(date: str) -> List[Dict[str, Any]]:
     repository = StrategyProfileRepository()
     profiles = {
         str(item.get("id")): item
-        for item in repository.list_profiles(enabled_only=True)
+        for item in repository.list_profiles(enabled_only=True, scope="production")
     }
     market_score = 50.0
     snapshot_path = Path(WEB_DATA_DIR) / "snapshots" / f"{date}.json"
@@ -1573,27 +1589,18 @@ def _external_screening_sections(date: str) -> List[Dict[str, Any]]:
         profiles,
         market_score=market_score,
         market_regime=persisted_regime,
-    )
-    from core.models.health_monitor import ModelHealthMonitor
-
-    no_ab_streak = ModelHealthMonitor().no_ab_streak(date)
-    training_diagnostic = {
-        "triggered": no_ab_streak >= 3,
-        "streak": no_ab_streak,
-        "message": (
-            f"连续{no_ab_streak}个交易日没有A/B级候选：请运行训练诊断，检查标签、校准、漂移基准和发布闸门。"
-            if no_ab_streak >= 3 else ""
+        market_state=(
+            ((payloads.get(primary) or {}).get("weight_metadata") or {})
+            .get("market_state_snapshot")
+            or {}
         ),
-    }
+    )
     rows = decision["rows"]
     columns = list(dict.fromkeys(
         [
             "code", "name", "一句话结论", "策略共识显示", "命中策略", "所属主线",
-            "共振板块", "板块强度", "模型状态", "股票等级", "预期超额收益%",
+            "共振板块", "板块强度", "增强证据", "否决条件",
             "明日入场模式", "失效条件", "建议仓位",
-            "candidate_probability", "expected_return_pct", "stop_probability",
-            "confidence_grade", "model_validation_sample_size", "data_completeness",
-            "model_drift_status", "trust_layers", "shap_explanation", "reasons", "metrics", "context",
         ]
         + [key for row in rows for key in row if not str(key).startswith("_")]
     ))
@@ -1610,7 +1617,6 @@ def _external_screening_sections(date: str) -> List[Dict[str, Any]]:
         "market_regime_label": decision["regime_label"],
         "active_strategy_names": decision["active_strategy_names"],
         "hidden_strategy_names": decision["hidden_strategy_names"],
-        "training_diagnostic": training_diagnostic,
         "groups": decision["groups"],
         "columns": columns,
         "rows": rows,
@@ -1967,9 +1973,27 @@ def dragon_page(request: Request, date: Optional[str] = None) -> Any:
 
 @app.get("/intraday", response_class=HTMLResponse)
 def intraday_page(request: Request, date: Optional[str] = None) -> Any:
-    """盘中转强：因子龙头池叠加实时行情确认。"""
+    """盘中转强：龙头池或策略候选叠加实时行情确认。"""
     market_date = _realtime_market_date()
     candidate_date = date or _realtime_candidate_date(market_date)
+    strategy_profiles = [{
+        "id": "leader_pool",
+        "name": "近期龙头池",
+        "candidate_count": None,
+        "available": True,
+        "primary": True,
+    }]
+    try:
+        from core.realtime.overlay_service import RealtimeOverlayService
+
+        for profile in RealtimeOverlayService().profile_summaries(candidate_date):
+            if profile.get("id") != "decision_pool":
+                continue
+            item = dict(profile)
+            item["primary"] = False
+            strategy_profiles.append(item)
+    except Exception:  # pragma: no cover - leader observation remains available
+        pass
     return templates.TemplateResponse(
         request,
         "intraday.html",
@@ -1978,6 +2002,7 @@ def intraday_page(request: Request, date: Optional[str] = None) -> Any:
             "candidate_date": candidate_date,
             "market_date": market_date,
             "dates": _list_dates(),
+            "strategy_profiles": strategy_profiles,
         },
     )
 
@@ -1997,7 +2022,10 @@ def realtime_page(request: Request) -> Any:
     try:
         from core.realtime.overlay_service import RealtimeOverlayService
 
-        strategy_profiles = RealtimeOverlayService().profile_summaries(candidate_date)
+        strategy_profiles = [
+            item for item in RealtimeOverlayService().profile_summaries(candidate_date)
+            if item.get("id") == "decision_pool"
+        ]
     except Exception:  # pragma: no cover - page should remain usable without snapshots
         strategy_profiles = []
     return templates.TemplateResponse(
@@ -2100,7 +2128,9 @@ def _pipeline_stage_page(request: Request, stage: str) -> Any:
     if stage == "screening":
         from core.screening.strategy_profiles import StrategyProfileRepository
 
-        strategy_profiles = StrategyProfileRepository().list_profiles(enabled_only=True)
+        strategy_profiles = StrategyProfileRepository().list_profiles(
+            enabled_only=True, scope="production",
+        )
     return templates.TemplateResponse(
         request,
         "run.html",
@@ -2133,6 +2163,7 @@ def strategies_page(request: Request) -> Any:
     import importlib.util
 
     from core.screening.strategy_profiles import (
+        EMOTION_PHASES,
         ENTRY_MODES,
         MARKET_REGIMES,
         STOCK_POOLS,
@@ -2155,6 +2186,7 @@ def strategies_page(request: Request) -> Any:
                 "operators": list(SUPPORTED_OPERATORS),
                 "stock_pools": list(STOCK_POOLS),
                 "market_regimes": list(MARKET_REGIMES),
+                "emotion_phases": list(EMOTION_PHASES),
                 "entry_modes": list(ENTRY_MODES),
                 "weight_sources": list(WEIGHT_SOURCES),
                 "model_dependencies": {
@@ -2369,7 +2401,9 @@ def api_screening_run(payload: dict = Body(default={})) -> Any:
     _clear_data_caches()
     data = dict(payload or {})
     try:
-        strategy_ids = StrategyProfileRepository().validate_selection(data.get("strategy_ids") or [])
+        strategy_ids = StrategyProfileRepository().validate_selection(
+            data.get("strategy_ids") or [], scope="production",
+        )
         primary = str(data.get("primary_strategy") or "")
         if primary not in strategy_ids:
             primary = strategy_ids[0]
@@ -3032,6 +3066,7 @@ def api_leader_pool(
 def api_intraday_strength(
     date: Optional[str] = None,
     market_date: Optional[str] = None,
+    profile: str = "leader_pool",
     lookback: int = 10,
     limit: int = 30,
     stale_after_seconds: int = 90,
@@ -3051,12 +3086,16 @@ def api_intraday_strength(
         return service.build(
             trade_date,
             market_date=quote_date,
+            profile=profile,
             lookback=normalized_lookback,
             limit=normalized_limit,
         )
 
     payload = _get_cached_realtime_payload(
-        ("intraday-strength", trade_date, quote_date, normalized_lookback, normalized_limit),
+        (
+            "intraday-strength", trade_date, quote_date, profile,
+            normalized_lookback, normalized_limit,
+        ),
         load_payload,
     )
     snapshot = _load_snapshot(trade_date) if trade_date else None
@@ -3242,13 +3281,13 @@ def _df_to_intraday_line(df, trade_date: str) -> List[Dict[str, Any]]:
 
 @app.get("/config", response_class=HTMLResponse)
 def config_page(request: Request) -> Any:
-    """参数配置页：把全系统可调参数开放到网页编辑。"""
-    from config.config_registry import build_registry
+    """参数配置页：只展示日常运行和风控所需的核心参数。"""
+    from config.config_registry import build_simple_registry
 
     return templates.TemplateResponse(
         request,
         "config.html",
-        {"registry": build_registry(), "dates": _list_dates()},
+        {"registry": build_simple_registry(), "dates": _list_dates()},
     )
 
 
@@ -3490,7 +3529,9 @@ def backtest_page(request: Request, run: Optional[str] = None) -> Any:
     from desktop.backtest import backtest_overview
     from core.screening.strategy_profiles import StrategyProfileRepository
 
-    strategy_profiles = StrategyProfileRepository().list_profiles(enabled_only=True)
+    strategy_profiles = StrategyProfileRepository().list_profiles(
+        enabled_only=True, scope="production",
+    )
 
     return templates.TemplateResponse(
         request, "backtest.html", {
@@ -3509,7 +3550,9 @@ def drawdown_page(request: Request, run: Optional[str] = None) -> Any:
     return templates.TemplateResponse(
         request, "drawdown.html", {
             "dd": drawdown_overview(run),
-            "strategy_profiles": StrategyProfileRepository().list_profiles(enabled_only=True),
+            "strategy_profiles": StrategyProfileRepository().list_profiles(
+                enabled_only=True, scope="production",
+            ),
         }
     )
 
@@ -3543,6 +3586,7 @@ def api_backtest_run(payload: dict = Body(default={})) -> Any:
         enhancements=p.get("enhancements"),
         entry_mode=p.get("entry_mode") or "hybrid",
         position_sizing_mode=p.get("position_sizing_mode") or "fixed_risk",
+        exit_policy_mode=p.get("exit_policy_mode") or "strategy",
         strategy_ids=p.get("strategy_ids"))
     return JSONResponse({"started": ok, "message": msg})
 

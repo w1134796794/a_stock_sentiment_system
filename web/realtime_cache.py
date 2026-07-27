@@ -84,6 +84,7 @@ class RealtimePayloadCache:
             raise RuntimeError(error or "实时数据缓存刷新超时")
 
         try:
+            load_started = monotonic()
             value = loader()
             entry = _Entry(
                 value=deepcopy(value),
@@ -93,6 +94,11 @@ class RealtimePayloadCache:
             with self._lock:
                 self._entries[key] = entry
                 self._errors.pop(key, None)
+                self._last_success_meta = {
+                    "updated_at": entry.updated_at,
+                    "latency_ms": round((monotonic() - load_started) * 1000.0, 1),
+                    "source": self._source_name(value),
+                }
             return deepcopy(value)
         except Exception as exc:
             with self._lock:
@@ -147,8 +153,15 @@ class RealtimePayloadCache:
                 return deepcopy(latest.get("value"))
             if force and latest and latest_at > stored_at:
                 return deepcopy(latest.get("value"))
+            load_started = monotonic()
             value = loader()
             now = time()
+            success_meta = {
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "latency_ms": round((monotonic() - load_started) * 1000.0, 1),
+                "source": self._source_name(value),
+                "last_error": "",
+            }
             self.backend.set_json(
                 cache_key,
                 {
@@ -160,10 +173,18 @@ class RealtimePayloadCache:
             )
             with self._lock:
                 self._errors.pop(key, None)
+            self.backend.set_json("realtime:stats", success_meta, ttl_seconds=86400 * 7)
             return deepcopy(value)
         except Exception as exc:
             with self._lock:
                 self._errors[key] = str(exc)
+            try:
+                meta = dict(self.backend.get_json("realtime:stats") or {})
+                meta["last_error"] = str(exc)
+                meta["last_error_at"] = datetime.now().isoformat(timespec="seconds")
+                self.backend.set_json("realtime:stats", meta, ttl_seconds=86400 * 7)
+            except Exception:
+                pass
             if stale is not None:
                 return deepcopy(stale)
             raise
@@ -174,13 +195,20 @@ class RealtimePayloadCache:
         if self.backend.is_shared:
             with self._lock:
                 errors = list(self._errors.values())
+            try:
+                meta = dict(self.backend.get_json("realtime:stats") or {})
+            except Exception:
+                meta = {}
             return {
                 "entries": None,
                 "inflight": None,
                 "ttl_seconds": self.ttl_seconds,
-                "latest_updated_at": "",
+                "latest_updated_at": str(meta.get("updated_at") or ""),
                 "oldest_age_seconds": 0.0,
-                "last_error": errors[-1] if errors else "",
+                "last_error": errors[-1] if errors else str(meta.get("last_error") or ""),
+                "last_error_at": str(meta.get("last_error_at") or ""),
+                "source": str(meta.get("source") or ""),
+                "latency_ms": meta.get("latency_ms"),
                 "storage": "redis",
             }
         now = monotonic()
@@ -197,5 +225,20 @@ class RealtimePayloadCache:
             "latest_updated_at": latest,
             "oldest_age_seconds": round(oldest_age, 2),
             "last_error": errors[-1] if errors else "",
+            "source": str(getattr(self, "_last_success_meta", {}).get("source") or ""),
+            "latency_ms": getattr(self, "_last_success_meta", {}).get("latency_ms"),
             "storage": "memory",
         }
+
+    @staticmethod
+    def _source_name(value: Any) -> str:
+        if isinstance(value, dict):
+            for key in ("data_source", "source", "行情源", "数据源"):
+                if value.get(key):
+                    return str(value.get(key))
+            rows = value.get("rows") or value.get("items") or []
+            if rows and isinstance(rows[0], dict):
+                for key in ("data_source", "source", "行情源", "数据源"):
+                    if rows[0].get(key):
+                        return str(rows[0].get(key))
+        return "unknown"

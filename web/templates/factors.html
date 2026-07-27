@@ -1,348 +1,174 @@
 {% extends "base.html" %}
-{% block title %}指标因子{% endblock %}
-{% block page_title %}指标因子{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">启用状态 · 指标数据 · 开关管理</div>{% endblock %}
+{% block title %}核心因子{% endblock %}
+{% block page_title %}核心因子{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">市场过滤 · 三套策略 · 核心证据</div>{% endblock %}
 
 {% block content %}
-<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-  <div class="card border border-slate-800 rounded-xl p-4">
-    <div class="text-xs text-slate-400 mb-1">启用指标</div>
-    <div class="text-2xl font-bold mono text-emerald-300">{{ state.factor_enabled }} / {{ state.factor_total }}</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+  <div class="card border border-slate-800 rounded-lg p-4">
+    <div class="text-xs text-slate-500">核心因子</div>
+    <div class="text-2xl font-bold mono text-emerald-300">{{ state.factor_total }}</div>
   </div>
-  <div class="card border border-slate-800 rounded-xl p-4">
-    <div class="text-xs text-slate-400 mb-1">当前方案</div>
-    <div class="text-lg font-bold mono text-sky-300">{{ state.active_profile or 'default' }}</div>
+  <div class="card border border-slate-800 rounded-lg p-4">
+    <div class="text-xs text-slate-500">当前启用</div>
+    <div class="text-2xl font-bold mono text-sky-300">{{ state.factor_enabled }}</div>
   </div>
-  <div class="card border border-slate-800 rounded-xl p-4">
-    <div class="text-xs text-slate-400 mb-1">参数覆盖</div>
-    <div class="text-2xl font-bold mono text-slate-200">{{ state.override_count }}</div>
-  </div>
-</div>
-
-<div class="sticky top-0 z-10 -mx-6 px-6 py-3 bg-slate-950/90 backdrop-blur border-b border-slate-800 mb-5">
-  <div class="flex items-center gap-3 flex-wrap text-sm text-slate-400">
-    <input id="fp-search" type="text" placeholder="搜索指标 / 分组 / 描述…"
-           class="flex-1 min-w-[220px] bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500">
-    <label class="flex items-center gap-1.5 cursor-pointer select-none">
-      <input id="fp-only-enabled" type="checkbox" class="h-4 w-4 accent-emerald-500"> 只看启用
-    </label>
-    <label class="flex items-center gap-1.5 cursor-pointer select-none">
-      <input id="fp-only-changed" type="checkbox" class="h-4 w-4 accent-amber-500"> 只看已改
-    </label>
-    <span id="fp-toast" class="hidden"></span>
-    <div class="flex-1"></div>
-    <button id="fp-reset-all"
-            class="border border-rose-700 text-rose-300 hover:bg-rose-900/30 text-sm rounded-md px-3 py-1.5">全部重置</button>
+  <div class="card border border-slate-800 rounded-lg p-4">
+    <div class="text-xs text-slate-500">最近计算日</div>
+    <div class="text-xl font-bold mono text-slate-200">{{ state.latest_factor_trade_date or '--' }}</div>
   </div>
 </div>
 
-{# ===================== 0. 当前启用指标 + 最新因子值 ===================== #}
-<section class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-8">
-  <div class="card border border-slate-800 rounded-xl p-4">
-    <div class="flex items-center justify-between gap-3 mb-3">
-      <h2 class="text-lg font-bold text-emerald-300">启用中的指标</h2>
-      <span class="mono text-xs text-slate-500">{{ state.factor_enabled }} / {{ state.factor_total }}</span>
+<section class="mb-6">
+  <div class="flex items-center justify-between gap-3 mb-3">
+    <div>
+      <h2 class="text-lg font-bold text-slate-100">策略使用方式</h2>
+      <div class="text-xs text-slate-500 mt-1">必选条件决定能否入池，排除条件负责否决，排序因子只比较已通过门槛的股票。</div>
     </div>
-    {% if state.snapshot_enabled_factors %}
-    <div class="mb-3">
-      <div class="text-xs text-slate-500 mb-1">当前快照使用</div>
-      <div class="flex flex-wrap gap-1.5">
-        {% for fid in state.snapshot_enabled_factors %}
-        <span class="mono text-[11px] px-2 py-1 rounded border border-sky-700/60 bg-sky-950/30 text-sky-200">{{ fid }}</span>
-        {% endfor %}
+  </div>
+  <div class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+    {% for strategy in state.strategy_factor_roles %}
+    <article class="card border border-slate-800 rounded-lg p-4">
+      <h3 class="font-bold text-emerald-300 mb-3">{{ strategy.label }}</h3>
+      <div class="space-y-3 text-sm">
+        <div>
+          <div class="text-xs text-slate-500 mb-1">必须满足</div>
+          <div class="flex flex-wrap gap-1.5">
+            {% for item in strategy.required %}<span class="px-2 py-1 border border-emerald-800/70 text-emerald-200 rounded">{{ item }}</span>{% endfor %}
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500 mb-1">直接排除</div>
+          <div class="flex flex-wrap gap-1.5">
+            {% for item in strategy.excluded %}<span class="px-2 py-1 border border-rose-900/70 text-rose-200 rounded">{{ item }}</span>{% endfor %}
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500 mb-1">用于排序</div>
+          <div class="text-slate-300 leading-6">{{ strategy.ranked | join('、') }}</div>
+        </div>
       </div>
-    </div>
-    {% endif %}
-    <div class="max-h-72 overflow-auto pr-1">
-      <div class="flex flex-wrap gap-1.5">
-        {% for f in state.enabled_factor_list %}
-        <span class="text-[11px] px-2 py-1 rounded border border-slate-700 bg-slate-900/70 text-slate-200"
-              title="{{ f.category_label }} · {{ f.description }}">
-          <span class="mono text-emerald-300">{{ f.factor_id }}</span>
-          <span class="text-slate-400">{{ f.name }}</span>
-        </span>
-        {% endfor %}
-      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
+  <div class="card border border-slate-800 rounded-lg p-4">
+    <h2 class="text-lg font-bold text-slate-100 mb-3">核心因子目录</h2>
+    <div class="space-y-2">
+      {% for group in state.core_catalog %}
+      <details class="border border-slate-800 rounded-lg overflow-hidden" {% if loop.first %}open{% endif %}>
+        <summary class="cursor-pointer px-3 py-2 bg-slate-900/50 font-semibold text-slate-200">
+          {{ group.label }} <span class="text-xs mono text-slate-500">{{ group.factors|length }}</span>
+        </summary>
+        <div class="divide-y divide-slate-800">
+          {% for factor in group.factors %}
+          <div class="px-3 py-2">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-slate-100">{{ factor.name }}</span>
+              {% if not factor.available %}<span class="text-[10px] text-amber-300 border border-amber-800 rounded px-1">计算层指标</span>{% endif %}
+            </div>
+            <div class="mono text-[11px] text-sky-300 mt-0.5">{{ factor.factor_id }}</div>
+            <div class="text-xs text-slate-500 mt-1">{{ factor.description }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
     </div>
   </div>
 
-  <div class="card border border-slate-800 rounded-xl p-4">
+  <div class="card border border-slate-800 rounded-lg p-4">
     <div class="flex items-center justify-between gap-3 mb-3">
-      <h2 class="text-lg font-bold text-emerald-300">最新指标数据</h2>
+      <h2 class="text-lg font-bold text-slate-100">最新覆盖</h2>
       <span class="mono text-xs text-slate-500">{{ state.latest_factor_trade_date or '--' }}</span>
     </div>
     {% if state.latest_factor_summary %}
-    <div class="overflow-auto max-h-72 border border-slate-800 rounded-lg">
+    <div class="overflow-auto max-h-[620px] border border-slate-800 rounded-lg">
       <table class="w-full text-xs">
-        <thead class="bg-slate-950/90 sticky top-0 text-slate-500">
-          <tr class="text-left">
-            <th class="px-3 py-2 font-medium">层级</th>
-            <th class="px-3 py-2 font-medium">指标ID</th>
-            <th class="px-3 py-2 font-medium text-right">实体数</th>
-            <th class="px-3 py-2 font-medium text-right">原值均值</th>
-            <th class="px-3 py-2 font-medium text-right">评分均值</th>
-            <th class="px-3 py-2 font-medium text-right">评分区间</th>
+        <thead class="bg-slate-950 sticky top-0 text-slate-500">
+          <tr>
+            <th class="px-3 py-2 text-left font-medium">因子</th>
+            <th class="px-3 py-2 text-right font-medium">覆盖实体</th>
+            <th class="px-3 py-2 text-right font-medium">平均分</th>
+            <th class="px-3 py-2 text-right font-medium">区间</th>
           </tr>
         </thead>
         <tbody>
-          {% for r in state.latest_factor_summary %}
-          <tr class="border-t border-slate-800/70 hover:bg-slate-800/20">
-            <td class="px-3 py-1.5 mono text-slate-400">{{ r.entity_type }}</td>
-            <td class="px-3 py-1.5 mono text-slate-200">{{ r.factor_id }}</td>
-            <td class="px-3 py-1.5 mono text-right text-slate-300">{{ r.entity_count }}</td>
-            <td class="px-3 py-1.5 mono text-right text-slate-400">{{ r.avg_raw_value | num2 if r.avg_raw_value is not none else '--' }}</td>
-            <td class="px-3 py-1.5 mono text-right text-emerald-300">{{ r.avg_score | num2 if r.avg_score is not none else '--' }}</td>
-            <td class="px-3 py-1.5 mono text-right text-slate-400">{{ r.min_score | num2 if r.min_score is not none else '--' }} - {{ r.max_score | num2 if r.max_score is not none else '--' }}</td>
+          {% for row in state.latest_factor_summary %}
+          <tr class="border-t border-slate-800/70">
+            <td class="px-3 py-2">
+              <div class="mono text-slate-200">{{ row.factor_id }}</div>
+              <div class="text-[10px] text-slate-500">{{ {'market':'市场','sector':'板块','stock':'个股'}.get(row.entity_type, row.entity_type) }}</div>
+            </td>
+            <td class="px-3 py-2 text-right mono text-slate-300">{{ row.entity_count }}</td>
+            <td class="px-3 py-2 text-right mono text-emerald-300">{{ row.avg_score | num2 if row.avg_score is not none else '--' }}</td>
+            <td class="px-3 py-2 text-right mono text-slate-400">{{ row.min_score | num2 if row.min_score is not none else '--' }} - {{ row.max_score | num2 if row.max_score is not none else '--' }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     {% else %}
-    <div class="text-sm text-slate-500 border border-slate-800 rounded-lg px-3 py-6">暂无指标数据</div>
+    <div class="border border-slate-800 rounded-lg p-5 text-sm text-slate-500">尚未找到核心因子计算结果。</div>
     {% endif %}
   </div>
 </section>
 
-{# ===================== 1. 动态权重 ===================== #}
-<section class="card border border-slate-800 rounded-xl p-4 mb-8">
-  <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
-    <div>
-      <h2 class="text-lg font-bold text-emerald-300">筛选权重</h2>
-      <div class="text-xs text-slate-500 mt-0.5">
-        {{ state.dynamic_weights.source }}
-        {% if state.dynamic_weights.effective_date %} · 生效 {{ state.dynamic_weights.effective_date }}{% endif %}
-        {% if state.dynamic_weights.train_start %} · 训练 {{ state.dynamic_weights.train_start }} - {{ state.dynamic_weights.train_end }}{% endif %}
-      </div>
-    </div>
-    {% if state.dynamic_weights.selected_hyperparameters %}
-    <div class="text-xs text-slate-400 mono">
-      先验收缩 {{ (state.dynamic_weights.selected_hyperparameters.prior_blend * 100) | round(0) }}%
-      · 单因子上限 {{ (state.dynamic_weights.selected_hyperparameters.max_weight * 100) | round(0) }}%
-    </div>
-    {% endif %}
-  </div>
-  {% if state.dynamic_weights.rows %}
-  <div class="overflow-auto border border-slate-800 rounded-lg">
-    <table class="w-full text-xs">
-      <thead class="bg-slate-950/90 text-slate-500">
-        <tr class="text-left">
-          <th class="px-3 py-2 font-medium">因子</th>
-          <th class="px-3 py-2 font-medium text-right">当前权重</th>
-          <th class="px-3 py-2 font-medium text-right">先验权重</th>
-          <th class="px-3 py-2 font-medium text-right">平均IC</th>
-          <th class="px-3 py-2 font-medium text-right">IC-IR</th>
-          <th class="px-3 py-2 font-medium text-right">正IC占比</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in state.dynamic_weights.rows %}
-        <tr class="border-t border-slate-800/70">
-          <td class="px-3 py-1.5 mono text-slate-200">{{ row.factor }}</td>
-          <td class="px-3 py-1.5 mono text-right text-emerald-300">{{ (row.weight * 100) | round(2) }}%</td>
-          <td class="px-3 py-1.5 mono text-right text-slate-400">{{ (row.prior * 100) | round(2) }}%</td>
-          <td class="px-3 py-1.5 mono text-right text-slate-300">{{ row.ic_mean | round(4) if row.ic_mean is not none else '--' }}</td>
-          <td class="px-3 py-1.5 mono text-right text-slate-300">{{ row.ic_ir | round(2) if row.ic_ir is not none else '--' }}</td>
-          <td class="px-3 py-1.5 mono text-right text-slate-300">{{ (row.positive_ratio * 100) | round(1) ~ '%' if row.positive_ratio is defined and row.positive_ratio is not none else '--' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div class="text-sm text-rose-300">{{ state.dynamic_weights.error or '暂无可用权重' }}</div>
-  {% endif %}
-</section>
-
-{# ===================== 2. 模型可信度 ===================== #}
-{% set diag = state.dynamic_weights %}
-<section class="mb-8" id="model-trust">
+{% if state.factor_groups %}
+<section class="mb-6">
   <div class="flex items-center justify-between gap-3 mb-3">
-    <h2 class="text-lg font-bold text-emerald-300">模型可信度</h2>
-    <span class="text-xs mono {% if diag.feature_drift.status == 'degraded' %}text-rose-300{% elif diag.feature_drift.status == 'watch' %}text-amber-300{% else %}text-emerald-300{% endif %}">
-      漂移 {{ {'stable':'稳定','watch':'关注','degraded':'已降级','unknown':'待检测'}.get(diag.feature_drift.status, '待检测') }}
-    </span>
-  </div>
-  <div class="grid grid-cols-2 lg:grid-cols-6 gap-2 mb-3">
-    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">Brier</div><div class="mono text-lg text-slate-100">{{ diag.calibration.brier_score | round(4) if diag.calibration.brier_score is defined and diag.calibration.brier_score is not none else '--' }}</div></div>
-    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">ECE</div><div class="mono text-lg text-slate-100">{{ (diag.calibration.ece * 100) | round(2) ~ '%' if diag.calibration.ece is defined and diag.calibration.ece is not none else '--' }}</div></div>
-    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">校准样本</div><div class="mono text-lg text-slate-100">{{ diag.calibration.sample_size or '--' }}</div></div>
-    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">80%区间覆盖</div><div class="mono text-lg text-slate-100">{{ ((diag.conformal.evaluation_coverage if diag.conformal.evaluation_coverage is defined else diag.conformal.empirical_coverage) * 100) | round(1) ~ '%' if diag.conformal.evaluation_coverage is defined or diag.conformal.empirical_coverage is defined else '--' }}</div></div>
-    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">PSI</div><div class="mono text-lg text-slate-100">{{ diag.feature_drift.max_psi | round(3) if diag.feature_drift.max_psi is defined else '--' }}</div></div>
-    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">KS</div><div class="mono text-lg text-slate-100">{{ diag.feature_drift.max_ks | round(3) if diag.feature_drift.max_ks is defined else '--' }}</div></div>
-    <div class="border border-slate-800 bg-slate-900/60 rounded-lg p-3"><div class="text-xs text-slate-500">ADWIN变点</div><div class="mono text-lg text-slate-100">{{ diag.adwin.latest_change_date or '稳定' }}</div></div>
-  </div>
-
-  <div class="grid grid-cols-1 xl:grid-cols-2 gap-3 mb-3">
-    <div class="border border-slate-800 bg-slate-900/40 rounded-lg p-3 min-h-[250px]">
-      <div class="flex justify-between mb-2"><h3 class="font-semibold text-slate-200">概率校准曲线</h3><span class="text-xs text-slate-500">越接近对角线越可靠</span></div>
-      <canvas id="calibration-chart" height="210" aria-label="概率校准曲线"></canvas>
+    <div>
+      <h2 class="text-lg font-bold text-slate-100">核心开关</h2>
+      <div class="text-xs text-slate-500 mt-1">日常不需要调整；关闭后会影响使用该因子的策略。</div>
     </div>
-    <div class="border border-slate-800 bg-slate-900/40 rounded-lg p-3 min-h-[250px]">
-      <div class="flex justify-between mb-2"><h3 class="font-semibold text-slate-200">候选分组单调性</h3><span class="text-xs text-slate-500">左侧为高分组</span></div>
-      <canvas id="decile-chart" height="210" aria-label="候选分组收益"></canvas>
-    </div>
+    <span id="fp-toast" class="text-sm"></span>
   </div>
-
-  <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-    <div class="border border-slate-800 rounded-lg overflow-auto">
-      <div class="px-3 py-2 font-semibold text-slate-200 bg-slate-900/60">模型与区间</div>
-      <table class="w-full text-xs">
-        <tbody>
-          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">生产模型</td><td class="px-3 py-2 mono text-right">{{ diag.candidate_model.model_type or diag.model_type or '--' }}</td></tr>
-          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">LightGBM闸门</td><td class="px-3 py-2 mono text-right">{{ {'active':'已启用','rejected_oos_gate':'样本外未通过','dependency_missing':'依赖缺失'}.get(diag.candidate_model.status, diag.candidate_model.status or '--') }}</td></tr>
-          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">TreeSHAP</td><td class="px-3 py-2 mono text-right">{{ diag.candidate_model.shap_method or '--' }}</td></tr>
-          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">样本外Rank IC</td><td class="px-3 py-2 mono text-right">{{ diag.candidate_model.rank_ic | round(4) if diag.candidate_model.rank_ic is defined else '--' }}</td></tr>
-          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">前十分位超额</td><td class="px-3 py-2 mono text-right">{{ (diag.candidate_model.top_decile_excess_return * 100) | round(2) ~ '%' if diag.candidate_model.top_decile_excess_return is defined else '--' }}</td></tr>
-          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">市场状态模型</td><td class="px-3 py-2 mono text-right">{{ diag.market_regime_model.method or 'threshold_fallback' }}</td></tr>
-          <tr class="border-t border-slate-800"><td class="px-3 py-2 text-slate-500">Bootstrap超额收益</td><td class="px-3 py-2 mono text-right">{{ (diag.bootstrap.p10 * 100) | round(2) if diag.bootstrap.p10 is defined else '--' }}% / {{ (diag.bootstrap.median * 100) | round(2) if diag.bootstrap.median is defined else '--' }}% / {{ (diag.bootstrap.p90 * 100) | round(2) if diag.bootstrap.p90 is defined else '--' }}%</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="border border-slate-800 rounded-lg overflow-auto max-h-64">
-      <div class="px-3 py-2 font-semibold text-slate-200 bg-slate-900/60 sticky top-0">按月样本外验证</div>
-      <table class="w-full text-xs">
-        <thead class="text-slate-500"><tr><th class="px-3 py-2 text-left">生效月</th><th class="px-3 py-2 text-right">Rank IC</th><th class="px-3 py-2 text-right">Top超额</th><th class="px-3 py-2 text-right">正收益率</th></tr></thead>
-        <tbody>{% for row in diag.versions %}<tr class="border-t border-slate-800"><td class="px-3 py-2 mono">{{ row.effective_date }}</td><td class="px-3 py-2 mono text-right">{{ row.rank_ic | round(4) if row.rank_ic is not none else '--' }}</td><td class="px-3 py-2 mono text-right">{{ (row.top_excess_return * 100) | round(2) ~ '%' if row.top_excess_return is not none else '--' }}</td><td class="px-3 py-2 mono text-right">{{ (row.top_excess_win_rate * 100) | round(1) ~ '%' if row.top_excess_win_rate is not none else '--' }}</td></tr>{% endfor %}</tbody>
-      </table>
-    </div>
-  </div>
-</section>
-
-{# ===================== 1. 因子开关 ===================== #}
-<section class="mb-8">
-  <h2 class="text-lg font-bold text-emerald-300 mb-3">因子开关</h2>
-  {% for g in state.factor_groups %}
-  <details class="card border border-slate-800 rounded-xl mb-3 overflow-hidden" data-factor-group
-           {% if g.overridden_count or loop.first %}open{% endif %}>
-    <summary class="cursor-pointer select-none px-4 py-2.5 font-semibold text-slate-200 hover:bg-slate-800/40 flex items-center gap-2">
-      <span>{{ g.label }}</span>
-      <span class="text-xs text-slate-500 mono">启用 {{ g.enabled_count }} / {{ g.factors|length }}</span>
-      {% if g.overridden_count %}
-      <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">已改 {{ g.overridden_count }}</span>
-      {% endif %}
+  {% for group in state.factor_groups %}
+  <details class="card border border-slate-800 rounded-lg mb-2 overflow-hidden">
+    <summary class="cursor-pointer px-4 py-2.5 font-semibold text-slate-200">
+      {{ group.label }} <span class="text-xs text-slate-500 mono">启用 {{ group.enabled_count }} / {{ group.factors|length }}</span>
     </summary>
-    <div class="border-t border-slate-800">
-      <table class="w-full text-sm">
-        <tbody>
-          {% for f in g.factors %}
-          <tr class="border-b border-slate-800/60 hover:bg-slate-800/20" data-factor-row
-              data-enabled="{{ 'true' if f.enabled else 'false' }}"
-              data-overridden="{{ 'true' if f.overridden else 'false' }}"
-              data-name="{{ f.factor_id|lower }} {{ f.name|lower }} {{ f.sub_category|lower }} {{ f.description|lower }}">
-            <td class="px-4 py-2 align-top w-12">
-              <input type="checkbox" class="fp-factor h-4 w-4 accent-emerald-500"
-                     data-scope="yaml" data-path="{{ f.override_path }}" data-type="bool"
-                     {% if f.enabled %}checked{% endif %}>
-            </td>
-            <td class="px-4 py-2 align-top">
-              <div class="flex items-center gap-2">
-                <span class="mono text-slate-200">{{ f.factor_id }}</span>
-                <span class="text-slate-400">{{ f.name }}</span>
-                {% if f.overridden %}
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300">已改</span>
-                {% endif %}
-              </div>
-              {% if f.description %}
-              <div class="text-xs text-slate-500 mt-0.5">{{ f.description }}</div>
-              {% endif %}
-            </td>
-            <td class="px-4 py-2 align-top text-xs text-slate-500">{{ f.sub_category }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="border-t border-slate-800 divide-y divide-slate-800/70">
+      {% for factor in group.factors %}
+      <label class="flex items-start gap-3 px-4 py-3 hover:bg-slate-800/20 cursor-pointer">
+        <input type="checkbox" class="fp-factor mt-0.5 h-4 w-4 accent-emerald-500"
+               data-scope="yaml" data-path="{{ factor.override_path }}"
+               {% if factor.enabled %}checked{% endif %}>
+        <span>
+          <span class="text-sm text-slate-100">{{ factor.name }}</span>
+          <span class="mono text-xs text-sky-300 ml-1">{{ factor.factor_id }}</span>
+          <span class="block text-xs text-slate-500 mt-1">{{ factor.description }}</span>
+        </span>
+      </label>
+      {% endfor %}
     </div>
   </details>
   {% endfor %}
 </section>
+{% endif %}
 
 <script>
-(function () {
-  const calibration = {{ (state.dynamic_weights.calibration.curve or []) | tojson }};
-  const deciles = {{ (state.dynamic_weights.deciles or []) | tojson }};
-  function drawChart(id, rows, xKey, series) {
-    const canvas = document.getElementById(id);
-    if (!canvas || !rows.length) return;
-    const ratio = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth || 600, height = Number(canvas.getAttribute('height')) || 210;
-    canvas.width = width * ratio; canvas.height = height * ratio;
-    const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
-    const pad = {l:38,r:14,t:12,b:28}, w = width-pad.l-pad.r, h = height-pad.t-pad.b;
-    ctx.strokeStyle='#334155'; ctx.lineWidth=1;
-    for(let i=0;i<=4;i++){const y=pad.t+h*i/4;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(width-pad.r,y);ctx.stroke();}
-    series.forEach(s => {
-      ctx.strokeStyle=s.color; ctx.lineWidth=2; ctx.beginPath();
-      rows.forEach((row,i)=>{const x=pad.l+(rows.length===1?w/2:w*i/(rows.length-1));const raw=Number(row[s.key]||0);const y=pad.t+h-(raw-s.min)/(s.max-s.min||1)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
-    });
-    ctx.fillStyle='#64748b';ctx.font='11px sans-serif';ctx.textAlign='center';
-    rows.forEach((row,i)=>{if(rows.length<=12||i%Math.ceil(rows.length/10)===0){const x=pad.l+(rows.length===1?w/2:w*i/(rows.length-1));ctx.fillText(String(row[xKey] ?? i+1),x,height-8);}});
-  }
-  drawChart('calibration-chart', calibration, 'bin', [
-    {key:'predicted',color:'#38bdf8',min:0,max:1},{key:'observed',color:'#34d399',min:0,max:1}
-  ]);
-  const returns = deciles.map(r=>Number(r.expected_return||0));
-  const lo = Math.min(-0.001,...returns), hi = Math.max(0.001,...returns);
-  drawChart('decile-chart', deciles, 'decile', [{key:'expected_return',color:'#34d399',min:lo,max:hi}]);
-
+(() => {
   const toast = document.getElementById('fp-toast');
-  function showToast(msg, ok) {
-    toast.textContent = msg;
-    toast.className = 'text-sm ' + (ok ? 'text-emerald-300' : 'text-rose-300');
-  }
-
-  async function applyUpdate(scope, path, value) {
-    try {
-      const r = await fetch('/api/config', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates: [{ scope, path, value }] })
-      });
-      const data = await r.json();
-      if ((data.errors || []).length) { showToast('保存出错：' + JSON.stringify(data.errors), false); return false; }
-      showToast('已应用 · ' + path, true);
-      return true;
-    } catch (err) { showToast('保存失败: ' + err, false); return false; }
-  }
-
-  document.querySelectorAll('.fp-factor').forEach(cb => {
-    cb.addEventListener('change', () => applyUpdate(cb.dataset.scope, cb.dataset.path, cb.checked));
-  });
-
-  document.getElementById('fp-reset-all').addEventListener('click', async () => {
-    if (!confirm('确定清空全部参数覆盖、恢复到代码/文件默认值？（含其它页面的覆盖）')) return;
-    await fetch('/api/config/reset', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+  document.querySelectorAll('.fp-factor').forEach(input => {
+    input.addEventListener('change', async () => {
+      try {
+        const response = await fetch('/api/config', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({updates: [{scope: input.dataset.scope, path: input.dataset.path, value: input.checked}]})
+        });
+        const data = await response.json();
+        const ok = response.ok && !(data.errors || []).length;
+        toast.textContent = ok ? '已保存' : '保存失败';
+        toast.className = ok ? 'text-sm text-emerald-300' : 'text-sm text-rose-300';
+      } catch (error) {
+        toast.textContent = '保存失败';
+        toast.className = 'text-sm text-rose-300';
+      }
     });
-    showToast('已全部重置，即将刷新…', true);
-    setTimeout(() => location.reload(), 600);
-  });
-
-  const search = document.getElementById('fp-search');
-  const onlyEnabled = document.getElementById('fp-only-enabled');
-  const onlyChanged = document.getElementById('fp-only-changed');
-  function applyFactorFilters() {
-    const q = (search?.value || '').trim().toLowerCase();
-    const enabledOnly = !!onlyEnabled?.checked;
-    const changedOnly = !!onlyChanged?.checked;
-    const active = !!q || enabledOnly || changedOnly;
-    document.querySelectorAll('[data-factor-group]').forEach(group => {
-      let visible = 0;
-      group.querySelectorAll('[data-factor-row]').forEach(row => {
-        const hitQ = !q || (row.dataset.name || '').includes(q);
-        const hitEnabled = !enabledOnly || row.dataset.enabled === 'true';
-        const hitChanged = !changedOnly || row.dataset.overridden === 'true';
-        const hit = hitQ && hitEnabled && hitChanged;
-        row.style.display = hit ? '' : 'none';
-        if (hit) visible++;
-      });
-      group.style.display = visible ? '' : 'none';
-      if (active && visible) group.open = true;
-    });
-  }
-  [search, onlyEnabled, onlyChanged].forEach(el => {
-    if (!el) return;
-    el.addEventListener('input', applyFactorFilters);
-    el.addEventListener('change', applyFactorFilters);
   });
 })();
 </script>

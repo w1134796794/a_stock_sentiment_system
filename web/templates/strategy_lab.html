@@ -77,7 +77,7 @@
     document.getElementById('lab-weight').textContent = `${Number(summary.total_weight_pct || 0).toFixed(1)}%`;
     document.getElementById('lab-profile-grid').innerHTML = (data.strategies || []).map(row => `
       <article class="lab-card"><div class="flex justify-between gap-3"><div><div class="lab-name">${esc(row.name)}</div><div class="lab-code">${esc(row.id)} · ${esc(row.version)}</div></div><span class="lab-pill ${row.available ? 'consensus' : ''}">${row.available ? '已生成' : '未生成'}</span></div>
-      <div class="lab-meta"><div><span>候选</span><b>${row.candidate_count || 0}</b></div><div><span>适用市场</span><b>${esc((row.market_regimes || []).join(' / ') || '--')}</b></div><div><span>入场</span><b>${esc((row.entry_modes || []).map(entryText).join(' / ') || '--')}</b></div></div></article>`).join('');
+      <div class="lab-meta"><div><span>候选</span><b>${row.candidate_count || 0}</b></div><div><span>运行模式</span><b>${esc(row.diagnostics?.model?.runtime_text || '--')}</b></div><div><span>因子覆盖</span><b>${Number(row.diagnostics?.factor_coverage?.coverage_pct || 0).toFixed(0)}%</b></div><div><span>分钟覆盖</span><b>${Number(row.diagnostics?.market_data_coverage?.minute_coverage_pct || 0).toFixed(0)}%</b></div><div><span>训练样本</span><b>${row.diagnostics?.model?.filled_samples || 0}</b></div><div><span>样本外月份</span><b>${row.diagnostics?.model?.oos_months || 0}</b></div></div><div class="text-xs text-slate-400 mt-3">${esc((row.diagnostics?.diagnosis || []).join('；'))}</div></article>`).join('');
     const allocations = data.allocation || [];
     document.getElementById('lab-empty').classList.toggle('hidden', allocations.length > 0);
     document.getElementById('lab-allocation').innerHTML = allocations.map(row => `

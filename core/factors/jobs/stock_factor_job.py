@@ -30,6 +30,7 @@ from core.factors.jobs.stock_advanced import (
     seal_quality,
     sector_rotation_metrics,
 )
+from core.factors.sector_taxonomy import is_trade_theme_sector
 
 
 # ---------------------------------------------------------------------------
@@ -190,9 +191,12 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
         momentum = to_float(values.get("momentum_score"), 50.0)
         amount = to_float(values.get("amount_score"), 50.0)
         amount_ratio = to_float(values.get("amount_ratio_score"), 50.0)
+        sector_name = str(values.get("sector_name") or row.get("name") or sector_code)
+        if not is_trade_theme_sector(sector_name, sector_type):
+            continue
         matched.append({
             "code": sector_code,
-            "name": str(values.get("sector_name") or row.get("name") or sector_code),
+            "name": sector_name,
             "type": sector_type,
             "heat": safe_weighted_score([(momentum, 0.55), (amount, 0.25), (amount_ratio, 0.20)]),
             "persistence": to_float(values.get("persistence_score"), 50.0),
@@ -367,6 +371,9 @@ class StockFactorJob:
             *[f"sector_behavior_{state}_score" for state in BEHAVIOR_STATES],
         ):
             today[key] = [item[key] for item in sector_values]
+        today["sector_mapping_available"] = (
+            today["primary_sector_code"].fillna("").astype(str).str.len() > 0
+        ).astype(int)
 
         sector_history = read_recent_trade_dates(
             con,
@@ -411,6 +418,7 @@ class StockFactorJob:
         lhb_frame = read_table(
             con, "factor_lhb_stock_wide", where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)]
         )
+        lhb_source_available = not lhb_frame.empty
         lhb_by_code = (
             lhb_frame.assign(code=lhb_frame["code"].astype(str).str.split(".").str[0].str.zfill(6))
             .drop_duplicates("code", keep="last").set_index("code").to_dict("index")
@@ -434,6 +442,7 @@ class StockFactorJob:
         lhb_values = [lhb_by_code.get(str(code), lhb_defaults) for code in today["code"].astype(str)]
         for key, default in lhb_defaults.items():
             today[key] = [item.get(key, default) for item in lhb_values]
+        today["lhb_source_available"] = int(lhb_source_available)
 
         signal_frame = read_table(
             con, "factor_signal_stock_wide",
@@ -454,6 +463,34 @@ class StockFactorJob:
                 "signal_date": "short_signal_date", "effective_date": "short_effective_date",
             })
             today = today.merge(signal_frame.drop_duplicates("code", keep="last"), on="code", how="left")
+        optional_source_tables = {
+            "capital_flow_source_available": "stock_capital_flow_silver",
+            "attention_source_available": "stock_attention_silver",
+            "leader_source_available": "stock_leader_signal_silver",
+            "margin_source_available": "stock_margin_silver",
+            "event_source_available": "stock_event_silver",
+        }
+        for availability_column, table_name in optional_source_tables.items():
+            source = read_table(
+                con, table_name,
+                where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)],
+            )
+            today[availability_column] = int(not source.empty)
+            result.record_source(
+                table_name, available=not source.empty, rows=len(source),
+                freshness_date=str(trade_date), required=False,
+            )
+            if source.empty:
+                result.disable_enhancement(availability_column.removesuffix("_source_available"))
+        result.record_source(
+            "factor_lhb_stock_wide", available=lhb_source_available,
+            rows=len(lhb_frame), freshness_date=str(trade_date), required=False,
+        )
+        result.record_source(
+            "sector_membership", available=bool(today["sector_mapping_available"].any()),
+            rows=int(today["sector_mapping_available"].sum()),
+            freshness_date=str(trade_date), required=True,
+        )
         signal_defaults = {
             "capital_flow_consensus_score": 50.0, "capital_flow_persistence_score": 50.0,
             "capital_flow_adjustment": 0.0, "attention_score": 50.0,
@@ -584,6 +621,29 @@ class StockFactorJob:
         today["enhanced_total_score"] = (today["total_score"] + today["signal_total_adjustment"]).clip(0, 100)
         today["rank"] = today["total_score"].rank(method="dense", ascending=False).astype(int)
 
+        # Keep neutral defaults during internal calculations, then persist
+        # unavailable optional evidence as NULL so downstream code can
+        # distinguish "not fetched" from a genuinely neutral observation.
+        optional_columns = {
+            "lhb_source_available": [
+                "lhb_net_buy_score", "institution_net_buy_score",
+                "institution_consensus_score", "repeat_persistence_score",
+                "sector_lhb_resonance_score", "lhb_composite_score",
+                "crowding_penalty_score",
+            ],
+            "capital_flow_source_available": [
+                "capital_flow_consensus_score", "capital_flow_persistence_score",
+            ],
+            "attention_source_available": ["attention_score", "attention_crowding_penalty"],
+            "leader_source_available": ["leader_quality_score"],
+            "margin_source_available": ["margin_score"],
+            "event_source_available": ["event_risk_score"],
+        }
+        for availability_column, columns in optional_columns.items():
+            if not bool(pd.to_numeric(today[availability_column], errors="coerce").fillna(0).max()):
+                for column in columns:
+                    today[column] = pd.NA
+
         wide = today[[
             "trade_date",
             "code",
@@ -600,6 +660,7 @@ class StockFactorJob:
             "resonance_sectors",
             "primary_sector_code",
             "primary_sector_name",
+            "sector_mapping_available",
             "sector_behavior_dominant_state",
             "sector_behavior_dominant_label",
             "sector_behavior_attention_score",
@@ -642,6 +703,7 @@ class StockFactorJob:
             "float_mv",
             "float_mv_fit_score",
             "lhb_present",
+            "lhb_source_available",
             "lhb_net_buy_score",
             "institution_net_buy_score",
             "institution_consensus_score",
@@ -671,6 +733,11 @@ class StockFactorJob:
             "flow_source_count",
             "attention_source_count",
             "kpl_present",
+            "capital_flow_source_available",
+            "attention_source_available",
+            "leader_source_available",
+            "margin_source_available",
+            "event_source_available",
             "signal_total_adjustment",
             "enhanced_total_score",
             "total_score",
@@ -724,22 +791,30 @@ class StockFactorJob:
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_sector_heat_score", raw_value=row["sector_heat_score"],
+                    factor_id="stk_sector_heat_score", raw_value=(
+                        row["sector_heat_score"] if row["sector_mapping_available"] else None
+                    ),
                     score=row["sector_heat_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_sector_persistence_score", raw_value=row["sector_persistence_score"],
+                    factor_id="stk_sector_persistence_score", raw_value=(
+                        row["sector_persistence_score"] if row["sector_mapping_available"] else None
+                    ),
                     score=row["sector_persistence_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_sector_mainline_score", raw_value=row["sector_mainline_score"],
+                    factor_id="stk_sector_mainline_score", raw_value=(
+                        row["sector_mainline_score"] if row["sector_mapping_available"] else None
+                    ),
                     score=row["sector_mainline_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_sector_resonance_score", raw_value=row["sector_resonance_score"],
+                    factor_id="stk_sector_resonance_score", raw_value=(
+                        row["sector_resonance_score"] if row["sector_mapping_available"] else None
+                    ),
                     score=row["sector_resonance_score"], direction="higher_better",
                 ),
                 make_long_record(
@@ -784,73 +859,101 @@ class StockFactorJob:
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_lhb_net_buy_score", raw_value=row["lhb_net_buy_ratio"],
+                    factor_id="stk_lhb_net_buy_score", raw_value=(
+                        row["lhb_net_buy_ratio"] if row["lhb_source_available"] else None
+                    ),
                     score=row["lhb_net_buy_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_lhb_institution_score", raw_value=row["institution_net_buy_ratio"],
+                    factor_id="stk_lhb_institution_score", raw_value=(
+                        row["institution_net_buy_ratio"] if row["lhb_source_available"] else None
+                    ),
                     score=row["institution_net_buy_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_lhb_institution_consensus", raw_value=row["institution_consensus_score"],
+                    factor_id="stk_lhb_institution_consensus", raw_value=(
+                        row["institution_consensus_score"] if row["lhb_source_available"] else None
+                    ),
                     score=row["institution_consensus_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_lhb_repeat_persistence", raw_value=row["appearance_days_5d"],
+                    factor_id="stk_lhb_repeat_persistence", raw_value=(
+                        row["appearance_days_5d"] if row["lhb_source_available"] else None
+                    ),
                     score=row["repeat_persistence_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_lhb_sector_resonance", raw_value=row["sector_lhb_resonance_score"],
+                    factor_id="stk_lhb_sector_resonance", raw_value=(
+                        row["sector_lhb_resonance_score"] if row["lhb_source_available"] else None
+                    ),
                     score=row["sector_lhb_resonance_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_lhb_composite_score", raw_value=row["lhb_composite_score"],
+                    factor_id="stk_lhb_composite_score", raw_value=(
+                        row["lhb_composite_score"] if row["lhb_source_available"] else None
+                    ),
                     score=row["lhb_composite_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_lhb_crowding_risk", raw_value=row["crowding_penalty_score"],
+                    factor_id="stk_lhb_crowding_risk", raw_value=(
+                        row["crowding_penalty_score"] if row["lhb_source_available"] else None
+                    ),
                     score=100.0 - to_float(row["crowding_penalty_score"]), direction="lower_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_capital_flow_consensus", raw_value=row["capital_flow_adjustment"],
+                    factor_id="stk_capital_flow_consensus", raw_value=(
+                        row["capital_flow_adjustment"] if row["capital_flow_source_available"] else None
+                    ),
                     score=row["capital_flow_consensus_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_capital_flow_persistence", raw_value=row["capital_flow_persistence_score"],
+                    factor_id="stk_capital_flow_persistence", raw_value=(
+                        row["capital_flow_persistence_score"] if row["capital_flow_source_available"] else None
+                    ),
                     score=row["capital_flow_persistence_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_attention_consensus", raw_value=row["attention_source_count"],
+                    factor_id="stk_attention_consensus", raw_value=(
+                        row["attention_source_count"] if row["attention_source_available"] else None
+                    ),
                     score=row["attention_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_attention_crowding_risk", raw_value=row["attention_crowding_penalty"],
+                    factor_id="stk_attention_crowding_risk", raw_value=(
+                        row["attention_crowding_penalty"] if row["attention_source_available"] else None
+                    ),
                     score=100.0 - to_float(row["attention_crowding_penalty"]) * 10.0,
                     direction="lower_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_kpl_leader_quality", raw_value=row["kpl_present"],
+                    factor_id="stk_kpl_leader_quality", raw_value=(
+                        row["kpl_present"] if row["leader_source_available"] else None
+                    ),
                     score=row["leader_quality_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_margin_acceleration", raw_value=row["margin_adjustment"],
+                    factor_id="stk_margin_acceleration", raw_value=(
+                        row["margin_adjustment"] if row["margin_source_available"] else None
+                    ),
                     score=row["margin_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
-                    factor_id="stk_block_trade_risk", raw_value=row["event_risk_score"],
+                    factor_id="stk_block_trade_risk", raw_value=(
+                        row["event_risk_score"] if row["event_source_available"] else None
+                    ),
                     score=100.0 - to_float(row["event_risk_score"]), direction="lower_better",
                 ),
                 make_long_record(

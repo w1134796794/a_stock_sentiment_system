@@ -60,6 +60,53 @@ _RISK_DESCRIPTIONS = {
     "time_stop_profit_threshold": "时间止损使用的最低收益阈值。",
 }
 
+_SIMPLE_SETTINGS = {
+    "DUCKDB_MEMORY_LIMIT",
+    "DUCKDB_THREADS",
+    "REDIS_URL",
+}
+
+_SIMPLE_RISK = {
+    "enabled",
+    "initial_capital",
+    "max_positions",
+    "max_position_per_stock",
+    "max_total_position",
+    "max_sector_concentration",
+    "fixed_risk_per_trade",
+    "hard_stop_loss",
+    "trailing_activation",
+    "trailing_stop",
+    "time_stop_days",
+    "slippage",
+    "commission_rate",
+    "stamp_duty_rate",
+    "market_entry_threshold",
+    "market_strong_threshold",
+}
+
+_FIELD_LABELS = {
+    "DUCKDB_MEMORY_LIMIT": "数据库内存上限",
+    "DUCKDB_THREADS": "数据库线程数",
+    "REDIS_URL": "Redis连接地址",
+    "enabled": "启用风控",
+    "initial_capital": "初始资金",
+    "max_positions": "最多持仓只数",
+    "max_position_per_stock": "单票仓位上限",
+    "max_total_position": "总仓位上限",
+    "max_sector_concentration": "单一板块仓位上限",
+    "fixed_risk_per_trade": "单笔风险预算",
+    "hard_stop_loss": "硬止损比例",
+    "trailing_activation": "移动止盈启动涨幅",
+    "trailing_stop": "高点回撤退出比例",
+    "time_stop_days": "最长观察天数",
+    "slippage": "模拟滑点",
+    "commission_rate": "佣金比例",
+    "stamp_duty_rate": "印花税比例",
+    "market_entry_threshold": "停止开仓市场分",
+    "market_strong_threshold": "强市市场分",
+}
+
 
 # ---------------------------------------------------------------------------
 # 类型推断 / 强制转换
@@ -276,6 +323,56 @@ def build_registry() -> Dict[str, Any]:
         sc = store.get(scope, {})
         override_count += _count_leaves(sc)
     return {"sections": sections, "override_count": override_count}
+
+
+def build_simple_registry() -> Dict[str, Any]:
+    """Return the small set of parameters needed for normal operation."""
+    registry = build_registry()
+    sections: List[Dict[str, Any]] = []
+    allowed = {
+        "settings": _SIMPLE_SETTINGS,
+        "risk": _SIMPLE_RISK,
+    }
+    section_labels = {
+        "settings": "运行资源",
+        "risk": "账户与风控",
+    }
+    group_labels = {
+        "settings": "数据库与缓存",
+        "risk": "仓位、退出与成本",
+    }
+    for section in registry["sections"]:
+        scope = section["scope"]
+        if scope not in allowed:
+            continue
+        fields = []
+        for group in section["groups"]:
+            for item in group["fields"]:
+                if item["path"] not in allowed[scope]:
+                    continue
+                field = dict(item)
+                field["display_name"] = _FIELD_LABELS.get(item["key"], item["key"])
+                fields.append(field)
+        if fields:
+            sections.append({
+                "scope": scope,
+                "label": section_labels[scope],
+                "groups": [{
+                    "key": f"simple_{scope}",
+                    "label": group_labels[scope],
+                    "fields": fields,
+                }],
+            })
+    return {
+        "sections": sections,
+        "override_count": sum(
+            1
+            for section in sections
+            for group in section["groups"]
+            for field in group["fields"]
+            if field["overridden"]
+        ),
+    }
 
 
 def _count_leaves(d: Any) -> int:

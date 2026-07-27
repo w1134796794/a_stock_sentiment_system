@@ -62,6 +62,12 @@ def _to_number(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _json_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value or "")
+
+
 def _rank_value(row: Dict[str, Any]) -> Optional[int]:
     value = row.get("优先级") if row.get("优先级") not in (None, "") else row.get("rank")
     try:
@@ -131,7 +137,12 @@ def _rows_from_screening(
             "策略名称": strategy_name,
             "策略版本": strategy_version,
             "策略执行": json.dumps(execution, ensure_ascii=False, sort_keys=True),
-            "策略单票仓位上限%": position_cap,
+            "策略单票仓位上限%": _to_number(
+                item.get("position_budget_pct"), position_cap,
+            ),
+            "市场总仓位上限%": _to_number(
+                item.get("market_total_position_cap_pct"), 100.0,
+            ),
             "优先级": item.get("rank"),
             "综合评分": item.get("score"),
             "建议仓位": f"试仓 0%-{position_cap:g}%" if position_cap > 0 else "中性 20%-30%",
@@ -187,11 +198,21 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for key, value in row.items()
         if str(key).startswith("因子_")
     }
+    nested_metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    factor_metrics.update({
+        str(key): _to_number(value)
+        for key, value in nested_metrics.items()
+    })
     raw_context = {
         key.replace("原始_", "", 1): _to_number(value)
         for key, value in row.items()
         if str(key).startswith("原始_")
     }
+    nested_context = row.get("context") if isinstance(row.get("context"), dict) else {}
+    raw_context.update({
+        str(key): _to_number(value)
+        for key, value in nested_context.items()
+    })
 
     out = {
         "模式": mode,
@@ -220,15 +241,66 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "策略ID": str(row.get("策略ID") or row.get("strategy_id") or "default"),
         "策略名称": str(row.get("策略名称") or row.get("strategy_name") or ""),
         "策略版本": str(row.get("策略版本") or row.get("strategy_version") or ""),
-        "策略执行": str(row.get("策略执行") or row.get("strategy_execution") or ""),
+        "策略执行": _json_text(row.get("策略执行") or row.get("strategy_execution") or ""),
         "策略单票仓位上限%": _to_number(row.get("策略单票仓位上限%"), _to_number(row.get("position_cap_pct"))),
         "策略来源": str(row.get("策略来源") or row.get("strategy_sources") or row.get("策略ID") or "default"),
+        "组合建议仓位%": _to_number(
+            row.get("组合建议仓位%"), _to_number(row.get("执行仓位上限%")),
+        ),
+        "市场总仓位上限%": _to_number(
+            row.get("市场总仓位上限%"),
+            _to_number(row.get("market_total_position_cap_pct"), 100.0),
+        ),
+        "行动分组": str(row.get("行动分组") or row.get("action_group") or ""),
     }
     for factor, value in factor_metrics.items():
         out[f"因子_{factor}"] = value
     for key, value in raw_context.items():
         out[f"原始_{key}"] = value
     return out
+
+
+def _production_decision_rows(
+    payloads: Dict[str, Dict[str, Any]], strategy_repository: Any,
+) -> List[Dict[str, Any]]:
+    from core.portfolio.decision_pool_service import DecisionPoolService
+
+    profiles = {
+        strategy_id: strategy_repository.get_profile(strategy_id) or {}
+        for strategy_id in payloads
+    }
+    market_state: Dict[str, Any] = {}
+    for payload in payloads.values():
+        market_state = dict(
+            (payload.get("weight_metadata") or {}).get("market_state_snapshot") or {}
+        )
+        if market_state:
+            break
+    decision = DecisionPoolService().build(
+        payloads,
+        profiles,
+        market_score=_to_number(market_state.get("score"), 50.0),
+        market_regime=str(market_state.get("regime") or ""),
+        market_state=market_state,
+    )
+    rows: List[Dict[str, Any]] = []
+    for rank, source in enumerate(decision.get("rows") or [], start=1):
+        if not source.get("execution_eligible"):
+            continue
+        row = dict(source)
+        row.update({
+            "模式类型": "生产决策池",
+            "策略名称": "生产决策池",
+            "优先级": rank,
+            "综合评分": row.get("策略组合评分") or row.get("score") or 0.0,
+            "建议仓位": row.get("建议仓位") or "",
+            "入场区间": f"{row.get('明日入场模式') or '分钟条件'}按分钟确认",
+            "竞价条件": "开盘仅用于信号分层，10:00前按一分钟行情确认",
+            "风险提示": row.get("失效条件") or "未确认或无可成交分钟则不买入",
+            "策略执行": row.get("strategy_execution") or {},
+        })
+        rows.append(row)
+    return rows
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
@@ -287,6 +359,12 @@ def build_backtest_plan_dir(
     row_count = 0
     missing_enhancement_dates: List[str] = []
     selected_enhancements = normalize_enhancements(enhancements)
+    try:
+        from core.portfolio.decision_pool_service import PRODUCTION_STRATEGIES
+
+        production_selection = set(selected_strategy_ids) == set(PRODUCTION_STRATEGIES)
+    except Exception:
+        production_selection = False
 
     for path in sorted(Path(snapshot_dir).glob("*.json")):
         payload = _load_json(path)
@@ -299,6 +377,7 @@ def build_backtest_plan_dir(
             continue
 
         rows: List[Dict[str, Any]] = []
+        strategy_payloads: Dict[str, Dict[str, Any]] = {}
         screening = {}
         enhancement_source_found = False
         if screening_dir and selected_strategy_ids:
@@ -317,6 +396,7 @@ def build_backtest_plan_dir(
                 screening = _load_json(screening_path)
                 if not screening:
                     continue
+                strategy_payloads[strategy_id] = screening
                 enhancement_source_found = True
                 if selected_enhancements and not _has_enhancement_data(screening, selected_enhancements):
                     missing_enhancement_dates.append(date)
@@ -329,6 +409,8 @@ def build_backtest_plan_dir(
                 ))
             if selected_enhancements and date in missing_enhancement_dates:
                 continue
+            if production_selection and strategy_repository is not None:
+                rows = _production_decision_rows(strategy_payloads, strategy_repository)
         elif screening_dir:
             screening_path = Path(screening_dir) / f"screening_{date}.json"
             screening = _load_json(screening_path)
@@ -347,6 +429,8 @@ def build_backtest_plan_dir(
                 missing_enhancement_dates.append(date)
                 continue
             rows = _rows_from_screening(payload, lhb_scenario=lhb_scenario, enhancements=enhancements)
+        if not rows and production_selection:
+            continue
         if not rows:
             if selected_enhancements and not enhancement_source_found:
                 missing_enhancement_dates.append(date)
@@ -376,7 +460,7 @@ def build_backtest_plan_dir(
         if "优先级" in df.columns:
             df["_rank"] = pd.to_numeric(df["优先级"], errors="coerce").fillna(999999)
             df = df.sort_values(["综合评分", "_rank"], ascending=[False, True]).drop(columns=["_rank"])
-        if selected_strategy_ids and "代码" in df.columns:
+        if selected_strategy_ids and "代码" in df.columns and not production_selection:
             from core.portfolio.strategy_allocator import StrategyPortfolioAllocator
 
             # The allocator is the sole place where multi-strategy overlap and

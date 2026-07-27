@@ -1,3 +1,5 @@
+import json
+
 from core.realtime.overlay_service import RealtimeOverlayService
 
 
@@ -106,3 +108,43 @@ def test_realtime_overlay_does_not_fallback_to_snapshot_plans(tmp_path):
 
     assert payload["rows"] == []
     assert payload["source"] == "候选策略尚未生成"
+
+
+def test_realtime_overlay_defaults_to_the_persisted_decision_pool(tmp_path):
+    screening_dir = tmp_path / "screening"
+    decision_path = screening_dir / "decision_pool" / "decision_pool_20260616.json"
+    decision_path.parent.mkdir(parents=True)
+    decision_path.write_text(json.dumps({
+        "schema_version": 1,
+        "decision_count": 1,
+        "rows": [
+            {
+                "code": "000001", "name": "平安银行", "score": 88,
+                "execution_eligible": True, "行动分组": "重点确认",
+                "建议仓位": "确认后参考 10%", "执行仓位上限%": 10,
+                "策略来源": "mainline_leader,weak_to_strong",
+                "allowed_entry_modes": ["weak_to_strong", "continuation"],
+                "共振板块": ["银行", "跨境支付"],
+            },
+            {
+                "code": "600000", "name": "浦发银行",
+                "execution_eligible": False, "行动分组": "暂不参与",
+            },
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    service = RealtimeOverlayService(
+        FakeQuoteService(), screening_dir=screening_dir,
+        output_dir=tmp_path, entry_signal_service=FakeEntrySignalService(),
+    )
+
+    payload = service.build_overlay("20260616", market_date="20260617")
+
+    assert payload["profile"] == "decision_pool"
+    assert payload["strategy"]["name"] == "今日决策池"
+    assert [row["code"] for row in payload["rows"]] == ["000001"]
+    row = payload["rows"][0]
+    assert row["strategy_sources"] == "mainline_leader,weak_to_strong"
+    assert row["action_group"] == "重点确认"
+    assert row["strategy_execution"]["allowed_entry_modes"] == [
+        "weak_to_strong", "continuation",
+    ]

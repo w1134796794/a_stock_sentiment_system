@@ -7,6 +7,23 @@ from core.factors.factor_library import DynamicWeightRepository, FactorLibraryTr
 from core.factors.strategy_training import strategy_training_spec
 
 
+def test_strategy_sized_cross_section_can_use_three_daily_samples(tmp_path):
+    trainer = FactorLibraryTrainer(
+        repository=DynamicWeightRepository(tmp_path), min_daily_samples=3,
+    )
+    frame = pd.DataFrame({
+        "trade_date": ["20260105"] * 3,
+        "factor_a": [1.0, 2.0, 3.0],
+        "target_return": [-0.01, 0.0, 0.02],
+    })
+
+    metrics = trainer.factor_metrics(frame, ["factor_a"])
+
+    assert trainer.min_daily_samples == 3
+    assert metrics["factor_a"]["daily_samples"] == 1
+    assert metrics["factor_a"]["ic_mean"] == 1.0
+
+
 def test_repository_never_loads_future_weight_version(tmp_path):
     repo = DynamicWeightRepository(tmp_path)
     repo.publish({

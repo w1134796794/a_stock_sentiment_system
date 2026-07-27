@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}盘中转强 · 管理控制台{% endblock %}
 {% block page_title %}盘中转强{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">候选 {{ candidate_date or '--' }} · 行情 {{ market_date or '--' }} · 近期龙头盘中转强观察</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">候选 {{ candidate_date or '--' }} · 行情 {{ market_date or '--' }} · 只看买点、失效和行动</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
@@ -26,6 +26,10 @@
 {% endblock %}
 
 {% block content %}
+<section class="card border border-slate-800 rounded-xl p-3 mb-4">
+  <div id="strategy-tabs" class="flex flex-wrap gap-2"></div>
+</section>
+
 <section class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
   <div class="is-kpi"><div id="kpi-confirmed" class="is-kpi-v mono text-emerald-300">--</div><div class="is-kpi-l">确认</div></div>
   <div class="is-kpi"><div id="kpi-unfilled" class="is-kpi-v mono text-sky-300">--</div><div class="is-kpi-l">信号正确·无法成交</div></div>
@@ -35,7 +39,7 @@
 
 <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
   <div class="flex items-center gap-2 mb-4">
-    <h2 class="font-bold mr-auto">近期龙头转强确认</h2>
+    <h2 id="strength-title" class="font-bold mr-auto">近期龙头转强确认</h2>
     <span id="pool-date" class="is-pill mono">--</span>
     <span id="pool-updated" class="text-xs text-slate-500 mono">--</span>
   </div>
@@ -48,6 +52,12 @@
   .is-kpi-v { font-size:1.65rem; font-weight:900; line-height:1.1; overflow-wrap:anywhere; }
   .is-kpi-l { font-size:.72rem; color:#64748b; margin-top:.3rem; }
   .is-pill { font-size:.68rem; font-weight:800; border-radius:.45rem; padding:.12rem .5rem; background:rgba(100,116,139,.18); color:#cbd5e1; border:1px solid rgba(100,116,139,.42); }
+  .is-strategy-tab { display:inline-flex; align-items:center; gap:.45rem; padding:.42rem .7rem; border:1px solid rgba(71,85,105,.8); border-radius:.5rem; color:#cbd5e1; font-size:.78rem; font-weight:800; }
+  .is-strategy-tab b { color:#94a3b8; font-size:.72rem; }
+  .is-strategy-tab:hover { border-color:rgba(16,185,129,.65); color:#a7f3d0; }
+  .is-strategy-tab.active { background:rgba(16,185,129,.14); border-color:rgba(16,185,129,.65); color:#6ee7b7; }
+  .is-strategy-tab.active b { color:#34d399; }
+  .is-strategy-tab.disabled { opacity:.42; cursor:not-allowed; }
   .is-card { border:1px solid rgba(51,65,85,.72); background:rgba(15,23,42,.48); border-radius:.75rem; padding:.9rem; min-width:0; }
   .is-card.confirmed { border-color:rgba(16,185,129,.58); }
   .is-card.turning { border-color:rgba(56,189,248,.48); }
@@ -77,6 +87,11 @@
 <script>
   const initialDate = {{ (date or '')|tojson }};
   const initialMarketDate = {{ (market_date or '')|tojson }};
+  const strategyProfiles = {{ (strategy_profiles or [])|tojson }};
+  let activeProfile = (strategyProfiles.find(item => item.primary && item.available)
+    || strategyProfiles.find(item => item.available)
+    || strategyProfiles[0]
+    || {}).id || 'leader_pool';
   const els = {
     date: document.getElementById('date-select'),
     lookback: document.getElementById('lookback-select'),
@@ -114,6 +129,38 @@
     document.getElementById('rt-clock').textContent = d.toLocaleTimeString('zh-CN', { hour12:false });
   }
 
+  function renderStrategyTabs() {
+    const host = document.getElementById('strategy-tabs');
+    if (!strategyProfiles.length) {
+      host.innerHTML = '<span class="text-sm text-slate-500 px-2 py-1">暂无可观察来源</span>';
+      return;
+    }
+    host.innerHTML = strategyProfiles.map(item => {
+      const count = item.candidate_count === null || item.candidate_count === undefined
+        ? '--'
+        : Number(item.candidate_count || 0);
+      const label = item.id === 'decision_pool'
+        ? '昨日候选 · 当日确认'
+        : item.id === 'leader_pool'
+          ? '龙头弱转强观察'
+          : (item.name || item.id);
+      return `
+        <button type="button" data-strategy-profile="${esc(item.id)}"
+                class="is-strategy-tab ${item.id === activeProfile ? 'active' : ''} ${item.available ? '' : 'disabled'}"
+                ${item.available ? '' : 'disabled'}>
+          <span>${esc(label)}</span>
+          <b class="mono">${count}</b>
+        </button>`;
+    }).join('');
+    host.querySelectorAll('[data-strategy-profile]').forEach(button => {
+      button.addEventListener('click', () => {
+        activeProfile = button.dataset.strategyProfile || 'leader_pool';
+        renderStrategyTabs();
+        loadStrength();
+      });
+    });
+  }
+
   async function loadStrength() {
     els.refresh.disabled = true;
     els.spin.classList.remove('hidden');
@@ -122,6 +169,7 @@
     const params = new URLSearchParams({ limit: '30', lookback: els.lookback.value || '5' });
     if (els.date && els.date.value) params.set('date', els.date.value);
     if (initialMarketDate) params.set('market_date', initialMarketDate);
+    params.set('profile', activeProfile);
     try {
       const r = await fetch('/api/intraday-strength?' + params.toString());
       const j = await r.json();
@@ -143,6 +191,10 @@
     document.getElementById('kpi-cancelled').textContent = counts.cancelled || 0;
     document.getElementById('pool-date').textContent = `候选 ${j.candidate_date || j.trade_date || '--'} · 行情 ${j.market_date || '--'}`;
     document.getElementById('pool-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
+    const strategy = j.strategy || {};
+    document.getElementById('strength-title').textContent = activeProfile === 'decision_pool'
+      ? '昨日候选 · 当日确认'
+      : '龙头弱转强观察';
     if (!rows.length) {
       els.grid.innerHTML = '';
       els.empty.classList.remove('hidden');
@@ -159,29 +211,17 @@
         </div>
         ${renderStockSectorTags(row)}
         <div class="is-metrics">
-          <div class="is-metric"><span>入场模式</span><strong>${esc(row.entry_mode_text || '等待分类')}</strong></div>
-          <div class="is-metric"><span>行为阶段</span><strong>${esc(row.behavior_state_label || '状态不明确')}</strong></div>
-          <div class="is-metric"><span>阶段置信度</span><strong class="mono">${row.behavior_state_probability == null ? '--' : num(row.behavior_state_probability) + '%'}</strong></div>
-          <div class="is-metric"><span>转强分</span><strong class="mono">${num(row.turn_score)}</strong></div>
-          <div class="is-metric"><span>池分</span><strong class="mono">${num(row.leader_score)}</strong></div>
+          <div class="is-metric"><span>入场模式</span><strong>${esc(row.entry_mode_text || '待开盘确认')}</strong></div>
+          <div class="is-metric"><span>命中策略</span><strong>${esc(row.strategy_sources || row.strategy_name || strategy.name || '--')}</strong></div>
           <div class="is-metric"><span>开盘</span><strong class="${clsPct(row.open_gap_pct)}">${pct(row.open_gap_pct)}</strong></div>
           <div class="is-metric"><span>实时涨幅</span><strong class="${clsPct(row.change_pct)}">${pct(row.change_pct)}</strong></div>
-          <div class="is-metric"><span>涨停幅度</span><strong class="mono">${row.limit_pct == null ? '--' : num(row.limit_pct, 0) + 'cm'}</strong></div>
-          <div class="is-metric"><span>涨停进度</span><strong class="mono">${row.limit_progress == null ? '--' : Math.round(Number(row.limit_progress) * 100) + '%'}</strong></div>
           <div class="is-metric"><span>现价</span><strong class="mono">${px(row.last_price)}</strong></div>
           <div class="is-metric"><span>开盘后</span><strong class="${clsPct(row.intraday_lift_pct)}">${pct(row.intraday_lift_pct)}</strong></div>
-          <div class="is-metric"><span>池排名</span><strong class="mono">#${esc(row.pool_rank || '--')}</strong></div>
-          <div class="is-metric"><span>来源名次</span><strong class="mono">${row.source_rank ? '#' + row.source_rank : '--'}</strong></div>
-          <div class="is-metric"><span>龙头日期</span><strong class="mono">${esc(row.last_leader_date || '--')}</strong></div>
-          <div class="is-metric"><span>龙头阶段</span><strong>${esc(row.lifecycle_state || '--')}</strong></div>
-          <div class="is-metric"><span>历史成功率${row.historical_stats_basis ? ' · ' + esc(row.historical_stats_basis) : ''}</span><strong class="mono">${row.success_probability == null ? '--' : num(row.success_probability) + '%'}</strong></div>
-          <div class="is-metric"><span>同模式历史样本</span><strong class="mono">${row.historical_samples == null ? '--' : row.historical_samples + '次'}</strong></div>
-          <div class="is-metric"><span>平均MFE / MAE</span><strong class="mono">${row.average_mfe_pct == null ? '--' : num(row.average_mfe_pct) + '% / ' + num(row.average_mae_pct || 0) + '%'}</strong></div>
-          <div class="is-metric"><span>数据完整度</span><strong class="mono">${row.data_completeness == null ? '--' : num(row.data_completeness, 0) + '%'}</strong></div>
-          <div class="is-metric"><span>可信等级</span><strong class="mono">${esc(row.confidence_grade || 'D')}</strong></div>
+          <div class="is-metric"><span>${activeProfile === 'decision_pool' ? '观察顺序' : '龙头日期'}</span><strong class="mono">${activeProfile === 'decision_pool' ? '#' + esc(row.pool_rank || '--') : esc(row.last_leader_date || '--')}</strong></div>
+          <div class="is-metric"><span>${activeProfile === 'decision_pool' ? '建议仓位' : '龙头阶段'}</span><strong>${esc(row.suggested_position || row.position_advice || row.lifecycle_state || '--')}</strong></div>
         </div>
-        <div class="is-reason">${esc(row.reason || '--')}</div>
-        <div class="is-action">${esc(row.action || '')}</div>
+        <div class="is-reason"><b>确认依据：</b>${esc(row.reason || '等待分钟买点确认')}</div>
+        <div class="is-action"><b>当前行动：</b>${esc(row.action || '继续观察')}</div>
       </article>`).join('');
   }
 
@@ -190,6 +230,7 @@
   els.lookback.addEventListener('change', loadStrength);
   clock();
   setInterval(clock, 1000);
+  renderStrategyTabs();
   loadStrength();
 </script>
 {% endblock %}

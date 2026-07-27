@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from core.realtime.entry_signal_service import classify_entry_mode, entry_mode_text
 from core.realtime.models import normalize_stock_code
 from core.signals.confidence_service import ConfidenceService
 from core.signals.leader_outcome import LeaderOutcomeTracker
@@ -19,7 +21,8 @@ def _to_float(value: Any, default: float = 0.0) -> float:
     try:
         if value is None:
             return default
-        return float(value)
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else default
     except Exception:
         return default
 
@@ -81,9 +84,13 @@ class LeaderPoolService:
 
     MAX_CORE_LEADERS = 3
     MAX_SECTOR_LEADERS = 8
+    MAX_BOARD_LEADERS = 8
+    MAX_TREND_LEADERS = 8
     CORE_SCORE = 72.0
     SECTOR_SCORE = 64.0
     EMOTION_SCORE = 66.0
+    BOARD_SCORE = 66.0
+    TREND_SCORE = 66.0
     MAX_EMOTION_LEADERS = 4
 
     def __init__(
@@ -156,9 +163,25 @@ class LeaderPoolService:
             core_candidates = [row for row in daily_snapshots if self._qualifies_core(row)]
             core_candidates.sort(key=lambda row: (-_to_float(row.get("leader_score")), row.get("code") or ""))
             core_codes = {row["code"] for row in core_candidates[: self.MAX_CORE_LEADERS]}
+            board_candidates = [
+                row for row in daily_snapshots
+                if row["code"] not in core_codes and self._qualifies_board_leader(row)
+            ]
+            board_candidates.sort(
+                key=lambda row: (
+                    -int(row.get("board_height") or 0),
+                    -_to_float(row.get("board_role_score")),
+                    row.get("code") or "",
+                )
+            )
+            board_codes = {
+                row["code"] for row in board_candidates[: self.MAX_BOARD_LEADERS]
+            }
             sector_candidates = [
                 row for row in daily_snapshots
-                if row["code"] not in core_codes and self._qualifies_sector_leader(row)
+                if row["code"] not in core_codes
+                and row["code"] not in board_codes
+                and self._qualifies_sector_leader(row)
             ]
             sector_candidates.sort(key=lambda row: (-_to_float(row.get("leader_score")), row.get("code") or ""))
             sector_codes = set()
@@ -174,6 +197,7 @@ class LeaderPoolService:
             emotion_candidates = [
                 row for row in daily_snapshots
                 if row["code"] not in core_codes
+                and row["code"] not in board_codes
                 and row["code"] not in sector_codes
                 and self._qualifies_emotion_leader(row)
             ]
@@ -183,14 +207,42 @@ class LeaderPoolService:
             emotion_codes = {
                 row["code"] for row in emotion_candidates[: self.MAX_EMOTION_LEADERS]
             }
+            trend_candidates = [
+                row for row in daily_snapshots
+                if row["code"] not in core_codes
+                and row["code"] not in board_codes
+                and row["code"] not in sector_codes
+                and row["code"] not in emotion_codes
+                and self._qualifies_trend_leader(row)
+            ]
+            trend_candidates.sort(
+                key=lambda row: (
+                    -_to_float(row.get("trend_role_score")),
+                    row.get("code") or "",
+                )
+            )
+            trend_codes = set()
+            trend_sectors = set()
+            for row in trend_candidates:
+                sector_key = str(row.get("primary_sector") or row.get("code") or "")
+                if sector_key in trend_sectors:
+                    continue
+                trend_sectors.add(sector_key)
+                trend_codes.add(row["code"])
+                if len(trend_codes) >= self.MAX_TREND_LEADERS:
+                    break
             for snapshot in daily_snapshots:
                 pool_type = ""
                 if snapshot["code"] in core_codes:
                     pool_type = "核心龙头"
+                elif snapshot["code"] in board_codes:
+                    pool_type = "连板龙头"
                 elif snapshot["code"] in sector_codes:
                     pool_type = "板块龙头"
                 elif snapshot["code"] in emotion_codes:
                     pool_type = "情绪龙头"
+                elif snapshot["code"] in trend_codes:
+                    pool_type = "趋势龙头"
                 if not pool_type:
                     continue
                 event = {
@@ -370,6 +422,20 @@ class LeaderPoolService:
             (board_score, 0.15),
             (behavior_acceleration, 0.15),
         ])
+        board_role_score = _weighted_score([
+            (min(board_height / 4.0 * 100.0, 100.0), 0.30),
+            (board_score, 0.20),
+            (seal_quality, 0.18),
+            (limit_quality, 0.17),
+            (behavior_acceleration, 0.15),
+        ])
+        trend_role_score = _weighted_score([
+            (relative_strength, 0.25),
+            (self._metric(item, "stk_new_high_20d", 50.0), 0.20),
+            (sector_persistence, 0.20),
+            (self._metric(item, "tech_score", 50.0), 0.20),
+            (continuity, 0.15),
+        ])
 
         source_rank_value = int(_to_float(item.get("rank"), 999))
         sector_names = str(item.get("resonance_sectors") or "")
@@ -383,6 +449,8 @@ class LeaderPoolService:
             "candidate_score": _to_float(item.get("score"), 0.0),
             "leader_score": round(leader_score, 4),
             "short_term_role_score": round(short_term_role_score, 4),
+            "board_role_score": round(board_role_score, 4),
+            "trend_role_score": round(trend_role_score, 4),
             "sector_role_score": round(sector_role_score, 4),
             "emotion_role_score": round(emotion_role_score, 4),
             "sector_status_score": round(sector_status, 4),
@@ -456,10 +524,34 @@ class LeaderPoolService:
             and _to_float(row.get("market_status_score")) >= 58.0
         )
 
+    def _qualifies_board_leader(self, row: Dict[str, Any]) -> bool:
+        return bool(
+            not row.get("severe_risk")
+            and row.get("identity_evidence")
+            and int(row.get("board_height") or 0) >= 2
+            and _to_float(row.get("board_role_score")) >= self.BOARD_SCORE
+        )
+
+    def _qualifies_trend_leader(self, row: Dict[str, Any]) -> bool:
+        return bool(
+            not row.get("severe_risk")
+            and row.get("identity_evidence")
+            and _to_float(row.get("trend_role_score")) >= self.TREND_SCORE
+            and _to_float(row.get("relative_strength_sector_score")) >= 58.0
+            and _to_float(row.get("sector_status_score")) >= 55.0
+        )
+
     @staticmethod
     def _role_labels(row: Dict[str, Any], pool_type: str = "") -> List[str]:
         """Roles are evidence tags, intentionally not mutually exclusive."""
         labels: List[str] = []
+        if (
+            int(row.get("board_height") or 0) >= 2
+            and _to_float(row.get("board_role_score")) >= 64.0
+        ):
+            labels.append("连板龙头")
+        if _to_float(row.get("trend_role_score")) >= 66.0:
+            labels.append("趋势龙头")
         if _to_float(row.get("short_term_role_score")) >= 67.0:
             labels.append("短线龙头")
         if _to_float(row.get("sector_role_score")) >= 67.0:
@@ -472,15 +564,21 @@ class LeaderPoolService:
             labels.append("板块龙头")
         if pool_type == "情绪龙头" and "情绪龙头" not in labels:
             labels.append("情绪龙头")
+        if pool_type == "连板龙头" and "连板龙头" not in labels:
+            labels.insert(0, "连板龙头")
+        if pool_type == "趋势龙头" and "趋势龙头" not in labels:
+            labels.insert(0, "趋势龙头")
         return labels
 
     @staticmethod
     def _primary_role(row: Dict[str, Any], pool_type: str = "") -> str:
         if pool_type == "核心龙头":
             return "短线龙头"
-        if pool_type in {"板块龙头", "情绪龙头"}:
+        if pool_type in {"连板龙头", "趋势龙头", "板块龙头", "情绪龙头"}:
             return pool_type
         scores = {
+            "连板龙头": _to_float(row.get("board_role_score")),
+            "趋势龙头": _to_float(row.get("trend_role_score")),
             "短线龙头": _to_float(row.get("short_term_role_score")),
             "板块龙头": _to_float(row.get("sector_role_score")),
             "情绪龙头": _to_float(row.get("emotion_role_score")),
@@ -512,11 +610,19 @@ class LeaderPoolService:
         leader_age_days = max(target_index - leader_index, 0)
         if current_event:
             pool_type = str(current_event.get("pool_type") or "板块龙头")
-            order = 0 if pool_type == "核心龙头" else 1 if pool_type == "板块龙头" else 2
+            order = {
+                "核心龙头": 0,
+                "连板龙头": 1,
+                "板块龙头": 2,
+                "情绪龙头": 3,
+                "趋势龙头": 4,
+            }.get(pool_type, 5)
             leader_time_label = {
                 "核心龙头": "当日核心龙头",
+                "连板龙头": "当日连板龙头",
                 "板块龙头": "当日板块龙头",
                 "情绪龙头": "当日情绪龙头",
+                "趋势龙头": "当日趋势龙头",
             }.get(pool_type, "当日龙头")
             prior_events = [event for event in events if str(event.get("date") or "") < target]
             divergence = _to_float(source.get("behavior_divergence_score"), 50.0)
@@ -530,7 +636,7 @@ class LeaderPoolService:
                 lifecycle_state = "确认龙头" if prior_events else "萌芽龙头"
         else:
             pool_type = "近期龙头"
-            order = 3
+            order = 6
             leader_time_label = "上一交易日龙头" if leader_age_days == 1 else f"{leader_age_days}个交易日前龙头"
             current_sector = _to_float((current or {}).get("sector_status_score"), 0.0)
             current_safety = _to_float((current or {}).get("safety_score"), 0.0)
@@ -581,6 +687,8 @@ class LeaderPoolService:
             "primary_role": primary_role,
             "leader_roles": leader_roles,
             "role_scores": {
+                "连板龙头": round(_to_float(source.get("board_role_score")), 2),
+                "趋势龙头": round(_to_float(source.get("trend_role_score")), 2),
                 "短线龙头": round(_to_float(source.get("short_term_role_score")), 2),
                 "板块龙头": round(_to_float(source.get("sector_role_score")), 2),
                 "情绪龙头": round(_to_float(source.get("emotion_role_score")), 2),
@@ -792,7 +900,9 @@ class LeaderPoolService:
 
 
 class IntradayStrengthService:
-    """Realtime strength confirmation over the factor-native leader pool."""
+    """Realtime strength confirmation over leaders or one strategy candidate set."""
+
+    LEADER_POOL_PROFILE = "leader_pool"
 
     def __init__(
         self,
@@ -800,10 +910,15 @@ class IntradayStrengthService:
         quote_service: Any = None,
         pool_service: Optional[LeaderPoolService] = None,
         entry_signal_service: Any = None,
+        screening_dir: Optional[Path] = None,
     ) -> None:
         self.quote_service = quote_service
         self.pool_service = pool_service or LeaderPoolService()
         self.entry_signal_service = entry_signal_service
+        inherited_dir = getattr(self.pool_service, "screening_dir", None)
+        self.screening_dir = (
+            Path(screening_dir or inherited_dir) if (screening_dir or inherited_dir) else None
+        )
 
     def build(
         self,
@@ -812,7 +927,17 @@ class IntradayStrengthService:
         market_date: Optional[str] = None,
         lookback: int = 10,
         limit: int = 30,
+        profile: str = LEADER_POOL_PROFILE,
     ) -> Dict[str, Any]:
+        resolved_profile = str(profile or self.LEADER_POOL_PROFILE)
+        if resolved_profile != self.LEADER_POOL_PROFILE:
+            return self._build_strategy_observation(
+                trade_date,
+                market_date=market_date,
+                profile=resolved_profile,
+                limit=limit,
+            )
+
         pool = self.pool_service.build_pool(trade_date, lookback=lookback, limit=limit)
         rows = pool.get("rows") or []
         quotes = self._quote_map(row.get("code") for row in rows)
@@ -841,6 +966,9 @@ class IntradayStrengthService:
             "candidate_date": candidate_date,
             "market_date": market_date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "profile": self.LEADER_POOL_PROFILE,
+            "strategy": {"id": self.LEADER_POOL_PROFILE, "name": "近期龙头池"},
+            "observation_source": self.LEADER_POOL_PROFILE,
             "thresholds": {
                 "weak_to_strong": "-3%至+1%",
                 "continuation": "+1%至+5%",
@@ -848,6 +976,89 @@ class IntradayStrengthService:
             },
             "counts": counts,
             "rows": enriched,
+        }
+
+    def _build_strategy_observation(
+        self,
+        trade_date: Optional[str],
+        *,
+        market_date: Optional[str],
+        profile: str,
+        limit: int,
+    ) -> Dict[str, Any]:
+        """Observe strategy candidates without changing or reusing leader identity rules."""
+        from core.realtime.overlay_service import RealtimeOverlayService
+
+        service = RealtimeOverlayService(
+            quote_service=self.quote_service,
+            screening_dir=self.screening_dir,
+            entry_signal_service=self.entry_signal_service,
+        )
+        payload = service.build_overlay(
+            trade_date,
+            market_date=market_date,
+            profile=profile,
+            limit=limit,
+        )
+        strategy = dict(payload.get("strategy") or {})
+        strategy_name = str(strategy.get("name") or profile)
+        rows: List[Dict[str, Any]] = []
+        for index, source in enumerate(payload.get("rows") or [], start=1):
+            row = dict(source)
+            status = str(row.get("confirm_status") or "observe")
+            screening_score = _to_float(row.get("screening_score"))
+            realtime_score = self._realtime_score(
+                row.get("open_gap_pct"),
+                row.get("pct_chg"),
+                None,
+            )
+            turn_score = screening_score * 0.45 + realtime_score * 0.55
+            if status == "cancelled":
+                turn_score = min(turn_score, 45.0)
+            row.update({
+                "status": status,
+                "status_text": {
+                    "confirmed": "转强确认",
+                    "unfilled": "信号确认·无法成交",
+                    "observe": "继续观察",
+                    "cancelled": "取消",
+                }.get(status, "继续观察"),
+                "turn_score": round(max(0.0, min(100.0, turn_score)), 2),
+                "leader_score": screening_score,
+                "pool_rank": index,
+                "source_rank": row.get("screening_rank"),
+                "pool_type": "策略候选",
+                "leader_time_label": f"{strategy_name}候选",
+                "last_leader_date": "",
+                "lifecycle_state": "",
+                "strategy_id": row.get("strategy_id") or profile,
+                "strategy_name": row.get("strategy_name") or strategy_name,
+                "observation_source": "strategy_profile",
+                "is_leader_observation": False,
+                "action": "仅按该策略的分钟入场条件确认，不改变龙头身份",
+            })
+            rows.append(row)
+        rows.sort(
+            key=lambda row: (
+                {"confirmed": 0, "unfilled": 1, "observe": 2, "cancelled": 3}.get(
+                    str(row.get("status") or "observe"), 2
+                ),
+                -_to_float(row.get("turn_score")),
+                int(_to_float(row.get("pool_rank"), 999)),
+            )
+        )
+        counts: Dict[str, int] = {}
+        for row in rows:
+            status = str(row.get("status") or "observe")
+            counts[status] = counts.get(status, 0) + 1
+        return {
+            **payload,
+            "ok": bool(rows),
+            "profile": profile,
+            "strategy": strategy,
+            "observation_source": "strategy_profile",
+            "counts": counts,
+            "rows": rows,
         }
 
     def _quote_map(self, codes: Iterable[Any]) -> Dict[str, Dict[str, Any]]:
@@ -894,6 +1105,7 @@ class IntradayStrengthService:
         status = str(signal.get("signal_status") or "observe")
         order = {"confirmed": 0, "unfilled": 1, "observe": 2, "cancelled": 3}.get(status, 2)
         reason = str(signal.get("reason") or "等待当日分钟入场条件")
+        mode = str(signal.get("entry_mode") or classify_entry_mode(open_price, pre_close))
         realtime_score = self._realtime_score(open_gap, change_pct, intraday_lift)
         turn_score = _to_float(pool_row.get("leader_score")) * 0.45 + realtime_score * 0.55
         if status == "cancelled":
@@ -910,8 +1122,8 @@ class IntradayStrengthService:
             }.get(status, "继续观察"),
             "turn_score": round(max(0.0, min(100.0, turn_score)), 2),
             "reason": reason,
-            "entry_mode": signal.get("entry_mode") or "",
-            "entry_mode_text": signal.get("entry_mode_text") or "等待分类",
+            "entry_mode": mode,
+            "entry_mode_text": signal.get("entry_mode_text") or entry_mode_text(mode),
             "confirm_time": signal.get("confirm_time") or "",
             "entry_time": signal.get("entry_time") or "",
             "entry_price": signal.get("entry_price"),

@@ -29,6 +29,9 @@ def summarize_entry_result(mode: str, result: Dict[str, Any]) -> Dict[str, Any]:
     filled_count = int(result.get("buy_trades") or 0)
     signal_count = sum(1 for row in attempts if row.get("status") in {"filled", "signal_unfilled"})
     unfilled_count = sum(1 for row in attempts if row.get("status") == "signal_unfilled")
+    pnl_values = [float(getattr(trade, "pnl", 0.0) or 0.0) for trade in closed]
+    gross_profit = sum(value for value in pnl_values if value > 0)
+    gross_loss = abs(sum(value for value in pnl_values if value < 0))
     # 旧固定区间没有独立的分钟信号层，可成交的竞价条件即视为信号。
     if mode == ENTRY_FIXED and not attempts:
         signal_count = filled_count
@@ -44,6 +47,11 @@ def summarize_entry_result(mode: str, result: Dict[str, Any]) -> Dict[str, Any]:
         "closed_trades": len(closed),
         "win_rate": float(result.get("win_rate") or 0.0),
         "average_return": float(pd.Series([getattr(t, "pnl_pct", 0.0) for t in closed], dtype=float).mean()) if closed else 0.0,
+        "profit_factor": (
+            gross_profit / gross_loss
+            if gross_loss > 1e-12
+            else (float("inf") if gross_profit > 0 else 0.0)
+        ),
         "total_return": float(result.get("total_return") or 0.0),
         "stop_rate": sum(bool(getattr(t, "stop_loss_triggered", False)) for t in closed) / len(closed) if closed else 0.0,
         "max_drawdown": float(result.get("max_drawdown") or 0.0),

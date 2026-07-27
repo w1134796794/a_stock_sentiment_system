@@ -1,10 +1,14 @@
 """Built-in trading-day scheduler; no cron or systemd timer is required."""
 from __future__ import annotations
 
-import gc
+import json
 import os
+import subprocess
+import sys
 import threading
+import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import schedule
@@ -34,6 +38,8 @@ class InternalScheduler:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.RLock()
+        self.daily_timeout = max(int(os.getenv("AUTOMATION_DAILY_TIMEOUT", "21600") or 21600), 600)
+        self.worker_memory_limit_mb = max(int(os.getenv("AUTOMATION_WORKER_MEMORY_MB", "2400") or 2400), 512)
 
     def start(self) -> None:
         with self._lock:
@@ -97,36 +103,54 @@ class InternalScheduler:
             return
         self.state.save({"status": "running", "job": "daily", "trade_date": trade_date, "started_at": datetime.now().isoformat(timespec="seconds")})
         try:
-            from main import SentimentSystem
             from core.notifications.notifier import NotificationService
-            from core.reports.daily_journal import DailyJournalService
 
-            system = SentimentSystem()
-            fetched = system.fetch_post_close_data(trade_date, skip_existing=True)
-            factors = system.run_factor_calculation(trade_date)
-            result = system.run_screening_strategy(trade_date)
-            journal = DailyJournalService().generate(trade_date, capital=self.capital)
-            backtest: Dict[str, Any] = {"ok": False, "reason": "自动回测已关闭"}
+            from config.settings import BASE_DIR, WEB_DATA_DIR
+
+            result_path = Path(WEB_DATA_DIR) / "automation" / f"daily_{trade_date}.json"
+            result_path.unlink(missing_ok=True)
+            command = [
+                sys.executable,
+                str(Path(BASE_DIR) / "scripts" / "automation_daily_worker.py"),
+                "--date", trade_date,
+                "--capital", str(self.capital),
+                "--result", str(result_path),
+            ]
             if self.auto_backtest:
-                gc.collect()
-                from core.reports.auto_backtest import AutoBacktestReportService
-
-                backtest = AutoBacktestReportService().run(trade_date, capital=self.capital)
-            payload = {
-                "status": "done",
+                command.append("--auto-backtest")
+            log_path = Path(BASE_DIR) / "logs" / f"automation_{trade_date}.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as stream:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(BASE_DIR),
+                    stdout=stream,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=(os.name != "nt"),
+                )
+                exit_code, guard_error = self._wait_worker(process, result_path)
+            payload = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else {
+                "status": "error",
                 "job": "daily",
                 "trade_date": trade_date,
-                "finished_at": datetime.now().isoformat(timespec="seconds"),
-                "pipeline_ok": bool(fetched.ok and factors.ok and result.ok),
-                "stages": {
-                    "fetch": bool(fetched.ok),
-                    "factors": bool(factors.ok),
-                    "screening": bool(result.ok),
-                },
-                "journal": journal,
-                "backtest": backtest,
+                "message": f"隔离任务退出码 {exit_code}，但未生成结果文件",
             }
+            if guard_error:
+                payload.update({"status": "error", "message": guard_error})
+            payload["worker_exit_code"] = exit_code
+            payload["worker_log"] = str(log_path)
             self.state.save(payload)
+            if payload.get("status") != "done" or not payload.get("pipeline_ok"):
+                message = str(payload.get("message") or f"隔离任务退出码 {exit_code}")
+                logger.error(f"[Automation] {trade_date} 隔离任务失败: {message}; 日志: {log_path}")
+                NotificationService().send(
+                    "每日数据生成失败",
+                    f"{trade_date}：{message}；日志：{log_path}",
+                    event_key=f"daily-error:{trade_date}",
+                )
+                return
+            journal = payload.get("journal") or {}
+            backtest = payload.get("backtest") or {}
             NotificationService().send(
                 "每日复盘数据已生成",
                 f"{trade_date} 五阶段流水线完成；候选{journal.get('candidate_count', 0)}只。"
@@ -147,7 +171,61 @@ class InternalScheduler:
                 pass
         finally:
             lease.release()
-            gc.collect()
+
+    def _wait_worker(self, process: subprocess.Popen, result_path: Path) -> tuple[int, str]:
+        """Monitor timeout, RSS and heartbeat without loading worker data in Web."""
+        started = time.monotonic()
+        while process.poll() is None:
+            if time.monotonic() - started > self.daily_timeout:
+                self._terminate_worker(process)
+                return -9, f"任务超过{self.daily_timeout}秒，已终止"
+            rss_mb = self._worker_rss_mb(process.pid)
+            if rss_mb > self.worker_memory_limit_mb:
+                self._terminate_worker(process)
+                return -9, f"任务内存{rss_mb:.0f}MB超过限制{self.worker_memory_limit_mb}MB，已终止并保留进度"
+            if result_path.exists():
+                try:
+                    payload = json.loads(result_path.read_text(encoding="utf-8"))
+                    self.state.save({**payload, "worker_rss_mb": round(rss_mb, 1)})
+                except (OSError, json.JSONDecodeError):
+                    pass
+            time.sleep(5.0)
+        return int(process.returncode or 0), ""
+
+    @staticmethod
+    def _worker_rss_mb(pid: int) -> float:
+        try:
+            import psutil  # type: ignore
+
+            parent = psutil.Process(pid)
+            rss = parent.memory_info().rss
+            rss += sum(child.memory_info().rss for child in parent.children(recursive=True) if child.is_running())
+            return rss / 1024.0 / 1024.0
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _terminate_worker(process: subprocess.Popen) -> None:
+        try:
+            import psutil  # type: ignore
+
+            parent = psutil.Process(process.pid)
+            children = parent.children(recursive=True)
+            processes = [*children, parent]
+            for item in processes:
+                try:
+                    item.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            _, alive = psutil.wait_procs(processes, timeout=5)
+            for item in alive:
+                try:
+                    item.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            if process.poll() is None:
+                process.kill()
 
     def _auction_job(self) -> None:
         market_date = datetime.now().strftime("%Y%m%d")

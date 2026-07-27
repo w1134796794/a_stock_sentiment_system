@@ -95,7 +95,7 @@ def test_confidence_exposes_four_trust_layers_and_abstains_on_drift():
     assert result["confidence_grade"] == "D"
 
 
-def test_missing_sector_or_auction_is_data_insufficient():
+def test_missing_sector_is_insufficient_but_missing_auction_can_use_minute_confirmation():
     weak = MinuteEntryEvaluator().evaluate(
         mode=ENTRY_WEAK, bars=_minute_bars(), open_gap=0, prev_close=10,
         plan_amount_ratio=1.2, sector_sync=lambda _: None,
@@ -107,8 +107,8 @@ def test_missing_sector_or_auction_is_data_insufficient():
     )
     assert weak.status == "data_insufficient"
     assert weak.data_status == "missing_sector"
-    assert continuation.status == "data_insufficient"
-    assert continuation.data_status == "missing_auction"
+    assert continuation.status != "data_insufficient"
+    assert continuation.signal == "开盘强势确认"
 
 
 def test_minute_amount_profile_is_learned_from_cache(tmp_path):

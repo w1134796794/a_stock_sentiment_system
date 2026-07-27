@@ -67,6 +67,58 @@
   </div>
 </section>
 
+{% if bt.candidate_count or bt.signal_count or bt.buy_count %}
+<section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">策略候选</div>
+    <div class="text-xl font-bold mono">{{ bt.candidate_count }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">进入分钟确认的交易计划</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">有效分钟信号</div>
+    <div class="text-xl font-bold mono text-amber-300">{{ bt.signal_count }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">可成交 {{ bt.fillable_signal_count }} · 无法成交 {{ bt.signal_unfilled_count }}</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">账户实际买入</div>
+    <div class="text-xl font-bold mono text-sky-300">{{ bt.buy_count }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">已通过现金与组合风控</div>
+  </div>
+  <div class="card border border-slate-800 rounded-xl p-4">
+    <div class="text-xs text-slate-400 mb-1">完成交易</div>
+    <div class="text-xl font-bold mono text-emerald-300">{{ bt.closed_count }}</div>
+    <div class="text-[11px] text-slate-500 mt-1">当前持仓 {{ bt.open_count|default(0, true) }}</div>
+  </div>
+</section>
+{% endif %}
+
+{% if bt.entry_funnel_rows %}
+<section class="card border border-slate-800 rounded-xl p-4 mb-6">
+  <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+    <h2 class="text-base font-bold">候选到成交漏斗</h2>
+    <span class="text-xs text-slate-500">用于区分选股、市场过滤、数据缺失、组合风控与成交失败</span>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead><tr class="text-slate-400">
+        {% for c in ['策略','入场模式','环节','结果','原因','数量'] %}
+        <th class="text-left font-medium px-3 py-2 whitespace-nowrap">{{ c }}</th>
+        {% endfor %}
+      </tr></thead>
+      <tbody>
+        {% for r in bt.entry_funnel_rows %}
+        <tr class="border-t border-slate-800">
+          {% for c in ['策略','入场模式','环节','结果','原因','数量'] %}
+          <td class="px-3 py-1.5 whitespace-nowrap">{{ r[c] }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
 {# ===== 入场模型对照 ===== #}
 {% if bt.entry_mode_rows %}
 <section class="card border border-slate-800 rounded-xl p-4 mb-6">
@@ -77,16 +129,44 @@
   <div class="overflow-x-auto">
     <table class="w-full text-sm border-collapse">
       <thead><tr class="text-slate-400">
-        {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','总收益','止损率','最大回撤','平均MFE','平均MAE'] %}
+        {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','盈亏比','总收益','止损率','最大回撤','平均MFE','平均MAE'] %}
         <th class="text-left font-medium px-3 py-2 whitespace-nowrap">{{ c }}</th>
         {% endfor %}
       </tr></thead>
       <tbody>
         {% for r in bt.entry_mode_rows %}
         <tr class="border-t border-slate-800">
-          {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','总收益','止损率','最大回撤','平均MFE','平均MAE'] %}
+          {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','盈亏比','总收益','止损率','最大回撤','平均MFE','平均MAE'] %}
           {% set v = r[c] %}
           <td class="px-3 py-1.5 whitespace-nowrap {% if c in ['平均收益','总收益'] and v.startswith('-') %}text-rose-400{% elif c in ['平均收益','总收益'] %}text-emerald-300{% endif %}">{{ v }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if bt.architecture_rows %}
+<section class="card border border-slate-800 rounded-xl p-4 mb-6">
+  <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+    <h2 class="text-base font-bold">精简链路历史对照</h2>
+    <span class="text-xs text-slate-500">同区间、同账户参数和同撮合规则，仅比较候选与决策链路</span>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead><tr class="text-slate-400">
+        {% for c in ['链路','候选数','成交数','成交覆盖率','已平仓','胜率','盈亏比','总收益','最大回撤'] %}
+        <th class="text-left font-medium px-3 py-2 whitespace-nowrap">{{ c }}</th>
+        {% endfor %}
+      </tr></thead>
+      <tbody>
+        {% for r in bt.architecture_rows %}
+        <tr class="border-t border-slate-800">
+          {% for c in ['链路','候选数','成交数','成交覆盖率','已平仓','胜率','盈亏比','总收益','最大回撤'] %}
+          {% set v = r[c] %}
+          <td class="px-3 py-1.5 whitespace-nowrap {% if c == '总收益' and v.startswith('-') %}text-rose-400{% elif c == '总收益' %}text-emerald-300{% endif %}">{{ v }}</td>
           {% endfor %}
         </tr>
         {% endfor %}
@@ -224,6 +304,7 @@
           <th class="text-left font-medium px-3 py-2">排名</th>
           <th class="text-right font-medium px-3 py-2">样本</th>
           <th class="text-right font-medium px-3 py-2">胜率</th>
+          <th class="text-right font-medium px-3 py-2">贝叶斯区间</th>
           <th class="text-right font-medium px-3 py-2">总盈亏</th>
           <th class="text-right font-medium px-3 py-2">止损率</th>
           <th class="text-right font-medium px-3 py-2">止盈率</th>
@@ -234,6 +315,7 @@
             <td class="px-3 py-1.5 mono">{{ r['排名'] }}</td>
             <td class="px-3 py-1.5 text-right mono">{{ r['样本'] }}</td>
             <td class="px-3 py-1.5 text-right mono">{{ r['胜率'] }}</td>
+            <td class="px-3 py-1.5 text-right mono text-slate-400">{{ r['胜率区间'] }}</td>
             <td class="px-3 py-1.5 text-right mono {% if r['总盈亏'].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}">{{ r['总盈亏'] }}</td>
             <td class="px-3 py-1.5 text-right mono">{{ r['止损率'] }}</td>
             <td class="px-3 py-1.5 text-right mono">{{ r['止盈率'] }}</td>
@@ -256,6 +338,7 @@
           <th class="text-right font-medium px-3 py-2">强项样本</th>
           <th class="text-right font-medium px-3 py-2">强项盈亏</th>
           <th class="text-right font-medium px-3 py-2">强项胜率</th>
+          <th class="text-right font-medium px-3 py-2">胜率区间</th>
           <th class="text-right font-medium px-3 py-2">弱项样本</th>
           <th class="text-right font-medium px-3 py-2">弱项盈亏</th>
           <th class="text-right font-medium px-3 py-2">弱项止损</th>
@@ -270,6 +353,7 @@
             <td class="px-3 py-1.5 text-right mono">{{ r['强项样本'] }}</td>
             <td class="px-3 py-1.5 text-right mono {% if r['强项盈亏'].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}">{{ r['强项盈亏'] }}</td>
             <td class="px-3 py-1.5 text-right mono">{{ r['强项胜率'] }}</td>
+            <td class="px-3 py-1.5 text-right mono text-slate-400">{{ r['强项胜率区间'] }}</td>
             <td class="px-3 py-1.5 text-right mono">{{ r['弱项样本'] }}</td>
             <td class="px-3 py-1.5 text-right mono {% if r['弱项盈亏'].startswith('-') %}text-rose-400{% else %}text-emerald-300{% endif %}">{{ r['弱项盈亏'] }}</td>
             <td class="px-3 py-1.5 text-right mono">{{ r['弱项止损率'] }}</td>

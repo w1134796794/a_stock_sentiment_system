@@ -65,7 +65,9 @@ class MarketRegimeDetector:
     @classmethod
     def predict_current(cls, metadata: Mapping[str, Any], market_score: float, market_return: float = 0.0) -> str:
         if metadata.get("status") != "trained":
-            return "strong" if market_score >= 70 else "weak" if market_score < 45 else "neutral"
+            from core.models.market_state import classify_market_score
+
+            return classify_market_score(market_score)
         mean = np.asarray(metadata.get("feature_mean"), dtype=float)
         std = np.asarray(metadata.get("feature_std"), dtype=float)
         value = (np.asarray([market_score, market_return], dtype=float) - mean) / np.where(std > 0, std, 1.0)

@@ -459,13 +459,6 @@
       </details>
       {% endif %}
     </div>
-    {% if section.training_diagnostic and section.training_diagnostic.triggered %}
-    <div class="dp-diagnostic">
-      <b>训练诊断已触发</b>
-      <span>{{ section.training_diagnostic.message }}</span>
-    </div>
-    {% endif %}
-
     {% for group in section.groups %}
       {% set collapsed = group.key == 'inactive' %}
       {% if collapsed %}<details class="dp-group dp-group--inactive"><summary class="dp-group-head">{% else %}<section class="dp-group"><div class="dp-group-head">{% endif %}
@@ -480,36 +473,26 @@
           <header class="dp-card-head">
             <span><b>{{ row.get('name') or row.get('股票名称') or row.get('code') }}</b><small class="mono">{{ row.get('code') }}</small></span>
             <span class="dp-head-badges">
-              <span class="dp-model">模型 {{ row.get('模型状态') }}</span>
-              <span class="dp-grade dp-grade--{{ row.get('股票等级')|lower }}">股票 {{ row.get('股票等级') }}</span>
+              <span class="dp-grade dp-grade--{{ row.get('规则等级')|lower }}">规则 {{ row.get('规则等级') }}</span>
               <span class="dp-action">{{ row.get('行动分组') }}</span>
             </span>
           </header>
           <div class="dp-conclusion">{{ row.get('一句话结论') }}</div>
           <dl class="dp-six">
             <div><dt>策略共识</dt><dd><b class="mono">{{ row.get('策略共识显示') }}</b><span>{{ row.get('命中策略')|join('、') }}</span></dd></div>
-            <div><dt>所属主线</dt><dd><b>{{ row.get('所属主线') }}</b><span>板块强度 {{ row.get('板块强度说明') }} {{ row.get('板块强度')|num2 }}</span></dd></div>
+            <div><dt>主线题材</dt><dd><b>{{ row.get('所属主线') }}</b>{% if row.get('主线确认') %}<span>题材强度 {{ row.get('板块强度说明') }} {{ row.get('板块强度')|num2 }}</span>{% else %}<span>未达到主线确认标准</span>{% endif %}</dd></div>
             <div><dt>次日确认条件</dt><dd>{{ row.get('明日入场模式') }}</dd></div>
             <div><dt>失效条件</dt><dd>{{ row.get('失效条件') }}</dd></div>
             <div><dt>建议仓位</dt><dd class="dp-position">{{ row.get('建议仓位') }}</dd></div>
+            <div><dt>增强证据</dt><dd>{{ row.get('增强证据')|join('、') if row.get('增强证据') else '等待盘中量价与板块确认' }}</dd></div>
           </dl>
           <details class="dp-evidence">
-            <summary>专业证据</summary>
-            <div class="dp-evidence-grid">
-              <div><span>候选概率</span><b>{{ row.get('candidate_probability')|num2 }}%</b></div>
-              <div><span>预计{{ row.get('forecast_horizon_days') or 3 }}日总收益</span><b>{{ row.get('expected_gross_return_pct')|num2 }}%</b></div>
-              <div><span>预计{{ row.get('forecast_horizon_days') or 3 }}日超额</span><b>{{ row.get('expected_return_pct')|num2 }}%</b></div>
-              <div><span>总收益80%区间</span><b>{{ row.get('gross_return_interval_low_pct')|num2 }}% ～ {{ row.get('gross_return_interval_high_pct')|num2 }}%</b></div>
-              <div><span>止损概率</span><b>{{ row.get('stop_probability')|num2 }}%</b></div>
-              <div><span>可信等级</span><b>{{ row.get('confidence_grade') or '--' }}</b></div>
-              <div><span>验证样本</span><b>{{ row.get('model_validation_sample_size')|num2 }}</b></div>
-              <div><span>数据完整度</span><b>{{ row.get('data_completeness')|num2 }}%</b></div>
-            </div>
+            <summary>查看规则依据</summary>
             {% if row.get('所属行业') %}<div class="dp-proof-row"><span>所属行业</span>{{ render_value(row.get('所属行业')) }}</div>{% endif %}
             {% if row.get('共振板块') %}<div class="dp-proof-row"><span>共振板块</span>{{ render_value(row.get('共振板块')) }}</div>{% endif %}
             {% if row.get('reasons') %}<div class="dp-proof-row"><span>筛选依据</span>{{ render_value(row.get('reasons')) }}</div>{% endif %}
             {% if row.get('命中指标') %}<div class="dp-proof-row"><span>命中指标</span>{{ render_value(row.get('命中指标')) }}</div>{% endif %}
-            {% if row.get('shap_explanation') %}<div class="dp-proof-row"><span>模型解释</span>{{ render_value(row.get('shap_explanation')) }}</div>{% endif %}
+            {% if row.get('否决条件') %}<div class="dp-proof-row"><span>否决条件</span>{{ render_value(row.get('否决条件')) }}</div>{% endif %}
           </details>
         </article>
         {% endfor %}

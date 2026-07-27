@@ -313,7 +313,7 @@ factors:
     name: "昨日涨停溢价"
     category: "emotion"
     sub_category: "core"
-    description: "T+1路径：前天涨停→昨日开盘买→今日开盘卖的平均溢价(%)"
+    description: "昨日涨停股今日开盘相对昨日收盘价的平均溢价(%)"
     data_source: "limit_up_pool"
     output_type: "float"
     value_range: [-10.0, 20.0]
@@ -1179,7 +1179,7 @@ factors:
   # ==========================================
 
   F1_cycle_duration:
-    id: "F1"
+    id: "F1_cycle_duration"
     name: "情绪周期持续性"
     category: "cross_cycle"
     sub_category: "cycle"
@@ -1192,7 +1192,7 @@ factors:
     params: {}
 
   F2_market_emotion_divergence:
-    id: "F2"
+    id: "F2_market_emotion_divergence"
     name: "大盘-情绪背离度"
     category: "cross_cycle"
     sub_category: "divergence"

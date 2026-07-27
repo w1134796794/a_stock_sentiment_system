@@ -1,5 +1,44 @@
 # A股短线复盘与因子筛选系统
 
+> 当前系统的端到端逻辑、模块优缺点、实测基线与收益优化路线见：
+> [当前系统详细逻辑与收益优化计划](docs/当前系统详细逻辑与收益优化计划.md)
+
+## 当前生产模式：精简规则交易体系
+
+生产链路已冻结模型训练，只运行三类核心规则策略：
+
+1. `mainline_leader`：主线龙头。
+2. `weak_to_strong`：弱转强。
+3. `first_board_launch`：首板启动。
+
+日常顺序为“盘后取数 -> 因子计算 -> 三策略选股 -> 次日分钟确认 -> 模拟交易”。
+资金流、龙虎榜和量价指标仅作为增强证据或否决项，不再直接主导股票排名。
+候选股、盘中确认与回测共享同一个策略 ID、`strategy_execution` 和分钟买点条件。
+涨停数据、龙虎榜和策略组合页面继续保留，其中策略组合与模型功能属于研究域，
+不会混入生产选股任务。
+
+具体使用与验收口径见：
+[精简规则交易体系使用说明](docs/精简规则交易体系使用说明.md)。
+
+### 研究域：模型训练与诊断
+
+以下流程仅用于策略研究和对照实验，不是日常生产任务。策略模型使用真实买点标签，
+训练器不会临时联网。首次训练或分钟缓存不完整时，先统计并补齐候选股 `T+1`
+分钟行情、竞价与板块同伴行情：
+
+```bash
+python3 scripts/prefetch_strategy_minutes.py --start 20250603 --end 20260714 --profiles all --dry-run
+python3 scripts/prefetch_strategy_minutes.py --start 20250603 --end 20260714 --profiles all
+```
+
+低内存服务器可按月拆分日期区间执行预取。数据会写入 `CACHE_DIR/stock/tick` 和 `CACHE_DIR/stock/auction`，已有完整缓存自动跳过。完成前置取数后，再按策略独立、串行训练：
+
+```bash
+python3 scripts/train_factor_library.py --start 20250603 --end 20260714 --all-strategies --walk-forward --train-months 12
+```
+
+若前置数据不足，命令会将对应策略标记为 `skipped`，并输出 `missing_minutes`、`missing_sector_minutes` 等审计原因，不会伪造标签或打印误导性的异常堆栈。训练完成后先在“策略实验室”检查数据覆盖、真实成交样本、OOS 月份和发布闸门，再运行回测。回测页面的“候选到成交漏斗”用于定位候选未成交的具体原因；每批结果同时保存运行清单和漏斗 CSV，保证不同批次可以按同一口径比较。
+
 > 面向 A 股短线复盘、候选股筛选、盘中确认和模拟交易验证的一体化系统。
 >
 > 当前 `main` 分支以“数据预取 -> 标准化仓库 -> 因子计算 -> 指标筛选 -> 实时确认 -> 模拟交易 -> 归因反馈”为唯一产品主线，不再依赖旧的四策略选股流程。
@@ -313,7 +352,32 @@ webdata/fetch_status/fetch_YYYYMMDD.json
 - 权重来源：人工、IC/IR、LightGBM、XGBoost挑战模型。
 - 龙虎榜与资金流共识增强。
 - 强市、震荡市、弱市适用范围。
+- 冰点、回暖、活跃、高潮、退潮五个情绪阶段适用范围。
 - 输出候选数量。
+
+市场状态由 `factor_market_wide` 统一生成，筛选、今日决策池、实时确认和回测共享同一份
+`MarketStateSnapshot`。三档市场强弱用于模型分层，五档情绪阶段用于策略启停和仓位约束：
+
+| 情绪阶段 | 默认启用策略 | 账户总仓位上限 | 主要约束 |
+| --- | --- | ---: | --- |
+| 冰点 | 弱市逆势试仓 | 16% | 最多两只，单票不超过 8% |
+| 回暖 | 首板启动、弱转强修复 | 45% | 等待低位扩散与分钟确认 |
+| 活跃 | 主线龙头、首板启动、弱转强修复 | 80% | 主线优先，允许集中于确认标的 |
+| 高潮 | 主线龙头、超短打板接力 | 55% | 周期超过 5 天后主动降仓 |
+| 退潮 | 弱转强修复 | 12% | 极低仓或空仓，只做分歧修复 |
+
+阶段判断显式消费以下市场因子：
+
+- `F1_cycle_duration`：当前强周期持续天数。
+- `F2_market_emotion_divergence`：大盘走势与短线情绪的背离程度。
+- `echelon_integrity`：1 至最高板之间的梯队覆盖和数量递减健康度。
+- `prev_limit_up_premium`：昨日涨停股在今日开盘的平均溢价。
+- `prev_limit_up_positive`：昨日涨停股今日收红比例。
+- `prev_first_board_gap_up`：昨日首板股今日高开比例。
+
+这些指标不是页面提示项，而是实际执行闸门。情绪背离会压缩首板和接力仓位；梯队断层会
+停用超短接力并回避高位股；昨日涨停平均溢价低于 -1% 会降低打板仓位；昨日首板高开
+比例低于 40% 会停用首板启动。所有策略继续统一排除高 `stk_behavior_decay` 的衰退标的。
 
 `/screening-run` 支持一次勾选多个组合，并指定一个主发布方案。主方案继续写入原有候选、龙头和页面快照，其他方案隔离保存用于对比：
 
@@ -1939,3 +2003,49 @@ DUCKDB_TEMP_DIR=/srv/a-stock/duckdb_tmp
 ```
 
 `DUCKDB_TEMP_DIR` 必须位于空间充足且systemd运行用户可写的目录。4GB内存机器建议额外配置4GB swap作为最后保护，但swap不能替代上述内存限制和任务解耦。批量补算时建议按月运行；发生失败后只重跑失败日期，无需从2025年重新开始。
+
+## 29. 收益优化改造的运维入口
+
+### 29.1 因子长表归档与瘦身
+
+所有维护命令默认只预演，不改数据库。先查看影响行数：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\maintain_factor_store.py --archive-before 20260101 --compact-live
+```
+
+确认清单后才执行归档、校验和裁剪：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\maintain_factor_store.py --archive-before 20260101 --compact-live --prune --apply
+```
+
+归档写入 `WEB_DATA_DIR/archive/factor_value_long/`，使用ZSTD Parquet。只有归档行数校验一致时才允许从在线长表删除；训练仍优先读取因子宽表。
+
+### 29.2 退出策略对照
+
+回测页面的“退出模型”可选择按策略参数、固定止损、ATR止损、结构止损、分段回撤或样本外优选。批量比较同一候选、成本和区间：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\compare_exit_policies.py `
+  --start 20260105 --end 20260706 `
+  --strategies mainline_leader,weak_to_strong
+```
+
+结果写入 `WEB_DATA_DIR/experiments/`。生产使用 `oos_selected` 时只读取交易日前已经生效且 `oos_passed=true` 的版本；没有合格版本自动回退策略参数。
+
+### 29.3 低内存自动任务保护
+
+```dotenv
+AUTOMATION_DAILY_TIMEOUT=21600
+AUTOMATION_WORKER_MEMORY_MB=2400
+OMP_NUM_THREADS=1
+OPENBLAS_NUM_THREADS=1
+MKL_NUM_THREADS=1
+```
+
+每日隔离进程会在取数、因子、选股和报告阶段更新心跳。超过时间或RSS限制时调度器终止工作进程，Web继续服务，已完成阶段和日志仍保留用于续跑。
+
+### 29.4 完成口径
+
+18个模块的工程验收矩阵见 `docs/当前系统详细逻辑与收益优化计划.md` 第4.1节。工程功能已经齐全并不代表模型必然有效；策略模型、退出模型和龙头角色概率仍必须由真实分钟数据通过滚动样本外闸门后才能发布。

@@ -275,7 +275,7 @@
           <div class="flex flex-wrap gap-1.5 mt-2"><span class="rt-pill ok">${esc(r.strategy_name || strategy.name || activeProfile)}</span><span class="rt-pill mono">v${esc(r.strategy_version || strategy.version || '--')}</span></div>
           ${renderStockSectorTags(r)}
           <div class="rt-metrics">
-            <div class="rt-metric"><span>入场模式</span><strong>${esc(r.entry_mode_text || '等待分类')}</strong></div>
+            <div class="rt-metric"><span>入场模式</span><strong>${esc(r.entry_mode_text || '待开盘确认')}</strong></div>
             <div class="rt-metric"><span>行为阶段</span><strong>${esc(r.behavior_state_label || '状态不明确')}</strong></div>
             <div class="rt-metric"><span>阶段置信度</span><strong class="mono">${r.behavior_state_probability == null ? '--' : Number(r.behavior_state_probability).toFixed(1) + '%'}</strong></div>
             <div class="rt-metric"><span>开盘</span><strong class="${clsPct(r.open_gap_pct)}">${gap(r.open_gap_pct)}</strong></div>

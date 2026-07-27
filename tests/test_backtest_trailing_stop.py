@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pandas as pd
+
 from backtest.backtest_engine import BacktestConfig, BacktestEngine
 from risk.risk_config import RiskConfig
 
@@ -10,6 +12,15 @@ class DailyRows:
 
     def get_stock_daily_data(self, ts_code, trade_date):
         return self.rows.get((ts_code, trade_date), {})
+
+
+class MinuteRows(DailyRows):
+    def __init__(self, rows, minutes):
+        super().__init__(rows)
+        self.minutes = minutes
+
+    def get_stock_tick(self, ts_code, trade_date):
+        return self.minutes.get((ts_code, trade_date), pd.DataFrame())
 
 
 def _position():
@@ -41,6 +52,7 @@ def test_rising_stock_has_no_fixed_or_partial_take_profit():
     config = BacktestConfig(
         trailing_stop_pct=0.08,
         trailing_activation_pct=0.05,
+        daily_ohlc_path_policy="optimistic_high_first",
         time_stop_days=999,
         commission_rate=0,
         stamp_duty_rate=0,
@@ -65,6 +77,7 @@ def test_pullback_from_session_high_exits_full_position_as_take_profit():
     config = BacktestConfig(
         trailing_stop_pct=0.08,
         trailing_activation_pct=0.05,
+        daily_ohlc_path_policy="optimistic_high_first",
         time_stop_days=999,
         commission_rate=0,
         stamp_duty_rate=0,
@@ -82,6 +95,60 @@ def test_pullback_from_session_high_exits_full_position_as_take_profit():
     assert trade.exit_reason == "trailing_stop"
     assert trade.take_profit_triggered is True
     assert trade.stop_loss_triggered is False
+
+
+def test_conservative_daily_path_does_not_assume_new_high_precedes_low():
+    dm = DailyRows({
+        ("000001.SZ", "20260623"): {
+            "open": 11.5, "high": 12.0, "low": 10.8, "close": 10.95, "pre_close": 11.0,
+        },
+    })
+    engine = BacktestEngine(dm, BacktestConfig(
+        trailing_stop_pct=0.08,
+        trailing_activation_pct=0.05,
+        daily_ohlc_path_policy="conservative_stop_first",
+        time_stop_days=999,
+        commission_rate=0,
+        stamp_duty_rate=0,
+        slippage=0,
+    ))
+    engine.current_positions["000001"] = _position()
+
+    engine._check_stop_loss_take_profit("20260623")
+
+    assert "000001" in engine.current_positions
+    assert engine._exit_execution_audit["ambiguous_daily_bars"] == 1
+
+
+def test_minute_exit_uses_chronological_trailing_threshold():
+    date = "20260623"
+    dm = MinuteRows({
+        ("000001.SZ", date): {"open": 10.2, "high": 11.5, "low": 10.1, "close": 10.6, "pre_close": 10.0},
+    }, {
+        ("000001.SZ", date): pd.DataFrame([
+            {"time": "09:30", "open": 10.2, "high": 10.8, "low": 10.2, "close": 10.7},
+            {"time": "09:31", "open": 10.7, "high": 11.5, "low": 10.7, "close": 11.4},
+            {"time": "09:32", "open": 11.4, "high": 11.4, "low": 10.7, "close": 10.8},
+        ]),
+    })
+    engine = BacktestEngine(dm, BacktestConfig(
+        trailing_activation_pct=0.05,
+        trailing_early_stop_pct=0.04,
+        trailing_mid_profit_pct=0.10,
+        trailing_mid_stop_pct=0.06,
+        exit_minute_data_policy="cache_or_fetch",
+        time_stop_days=999,
+        commission_rate=0,
+        stamp_duty_rate=0,
+        slippage=0,
+    ))
+    engine.current_positions["000001"] = _position()
+
+    engine._check_stop_loss_take_profit(date)
+
+    assert "000001" not in engine.current_positions
+    assert engine.trade_history[-1].exit_reason == "trailing_stop_minute"
+    assert engine._exit_execution_audit["minute_exit_triggers"] == 1
 
 
 def test_hard_stop_loss_behavior_is_preserved():
@@ -119,7 +186,7 @@ def test_trailing_pullback_uses_profit_stages():
     assert engine._trailing_stop_distance(0.30) == 0.10
 
 
-def test_risk_projection_keeps_simulation_specific_strategy_thresholds():
+def test_risk_projection_uses_single_risk_configuration_source():
     config = BacktestConfig.from_risk_config(RiskConfig(
         market_entry_threshold=50,
         market_strong_threshold=70,
@@ -127,10 +194,11 @@ def test_risk_projection_keeps_simulation_specific_strategy_thresholds():
         trailing_stop=0.08,
     ))
 
-    assert config.market_entry_threshold == 60
+    assert config.market_entry_threshold == 50
     assert config.market_strong_threshold == 65
-    assert config.stop_loss_pct == 0.04
-    assert config.trailing_stop_pct == 0.10
+    assert config.market_hot_threshold == 70
+    assert config.stop_loss_pct == 0.05
+    assert config.trailing_stop_pct == 0.08
 
 
 def test_entry_day_stop_is_recorded_but_not_sold_due_to_t_plus_one():

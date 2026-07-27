@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -54,6 +55,18 @@ def _normalize_code(value: Any) -> str:
 class ScreeningEngine:
     """Apply hard filters, priority filters and ranking from YAML profiles."""
 
+    RAW_VALUE_FACTORS = {
+        "stk_lhb_crowding_risk",
+        "mkt_limit_up_count",
+        "mkt_limit_down_count",
+        "mkt_broken_rate",
+        "F1_cycle_duration",
+        "F2_market_emotion_divergence",
+        "prev_limit_up_premium",
+        "prev_limit_up_positive",
+        "prev_first_board_gap_up",
+    }
+
     def __init__(
         self,
         *,
@@ -77,6 +90,7 @@ class ScreeningEngine:
         self._confidence_model_type = "manual_prior"
         self._confidence_as_of_date = ""
         self._active_regime = "neutral"
+        self._market_state_snapshot = None
         self._model_drift: Dict[str, Any] = {"status": "unknown"}
         self._confidence_drift: Dict[str, Any] = {"status": "unknown"}
         self._candidate_model_metadata: Dict[str, Any] = {}
@@ -130,7 +144,8 @@ class ScreeningEngine:
             )
         source_config = deepcopy(profile_config) if profile_config is not None else (profiles[profile_name] or {})
         cfg, weight_metadata = self._runtime_profile(source_config, trade_date, profile_name)
-        self._weight_metadata = dict(weight_metadata)
+        cfg, source_gate = self._disable_missing_source_enhancements(cfg, source_config, trade_date)
+        weight_metadata["source_gate"] = source_gate
 
         result = ScreeningResult(trade_date=trade_date, profile=profile_name)
         result.weight_metadata = weight_metadata
@@ -155,29 +170,71 @@ class ScreeningEngine:
         if market_values.empty or market_values.dropna().empty:
             market_values = pd.to_numeric(candidates.get("market_score"), errors="coerce") if "market_score" in candidates else pd.Series([50.0])
         market_score_value = float(market_values.dropna().median()) if not market_values.dropna().empty else 50.0
+        from core.models.market_state import MarketStateSnapshot
+
         regime_model = weight_metadata.get("market_regime_model") or {}
-        if regime_model:
-            from core.models.market_regime import MarketRegimeDetector
-
-            self._active_regime = MarketRegimeDetector.predict_current(regime_model, market_score_value)
+        market_context: Dict[str, Any] = {}
+        market_row = candidates.iloc[0] if not candidates.empty else {}
+        for key in (
+            "market_score_change",
+            "cycle_duration",
+            "market_emotion_divergence",
+            "limit_up_count",
+            "limit_down_count",
+            "echelon_integrity",
+            "prev_limit_up_premium",
+            "prev_limit_up_positive",
+            "prev_first_board_gap_up",
+            "broken_rate",
+        ):
+            value = market_row.get(key) if hasattr(market_row, "get") else None
+            if value is not None and not pd.isna(value):
+                market_context[key] = value
+        market_state = MarketStateSnapshot.resolve(
+            market_score_value,
+            trade_date=trade_date,
+            regime_model=regime_model,
+            context=market_context,
+        )
+        self._market_state_snapshot = market_state
+        self._active_regime = market_state.regime
+        weight_metadata["market_state_snapshot"] = market_state.to_dict()
+        rules_only = str(cfg.get("strategy_scope") or "") == "production"
+        if rules_only:
+            self._model_drift = {
+                "status": "not_used",
+                "reason": "生产链已冻结模型，仅运行规则策略",
+            }
+            self._confidence_drift = dict(self._model_drift)
+            weight_metadata["feature_drift"] = self._model_drift
+            weight_metadata["candidate_model"] = {}
+            weight_metadata["candidate_model_runtime"] = "rules_only"
+            weight_metadata["production_engine"] = "rules_only"
+            regime_weights = None
         else:
-            self._active_regime = market_regime(market_score_value)
-        from core.signals.trust_algorithms import evaluate_feature_drift
+            from core.signals.trust_algorithms import evaluate_feature_drift
 
-        drift_references, drift_reference_meta = self._select_drift_references(
-            weight_metadata, self._active_regime,
-        )
-        self._model_drift = evaluate_feature_drift(
-            candidates, drift_references,
-        )
-        self._model_drift.update(drift_reference_meta)
-        weight_metadata["feature_drift"] = self._model_drift
-        self._confidence_drift = dict(self._model_drift)
-        regime_weights = (weight_metadata.get("regime_weights") or {}).get(self._active_regime)
+            drift_references, drift_reference_meta = self._select_drift_references(
+                weight_metadata, self._active_regime,
+            )
+            self._model_drift = evaluate_feature_drift(
+                candidates, drift_references,
+            )
+            self._model_drift.update(drift_reference_meta)
+            weight_metadata["feature_drift"] = self._model_drift
+            self._confidence_drift = dict(self._model_drift)
+            regime_weights = (weight_metadata.get("regime_weights") or {}).get(self._active_regime)
         if regime_weights:
             cfg.setdefault("ranking", {})["weights"] = dict(regime_weights)
             weight_metadata["weights"] = dict(regime_weights)
             weight_metadata["source"] = "dynamic_regime_ic_ir"
+        # Regime-specific weights are loaded after the initial source gate.
+        # Apply the gate again so an unavailable optional feed cannot be
+        # reintroduced by a model artifact.
+        cfg, source_gate = self._disable_missing_source_enhancements(cfg, source_config, trade_date)
+        weight_metadata["source_gate"] = source_gate
+        weight_metadata["weights"] = dict((cfg.get("ranking") or {}).get("weights") or {})
+        self._weight_metadata = dict(weight_metadata)
         profiles = weight_metadata.get("confidence_profiles") or {}
         self._confidence_profile = dict(profiles.get(self._active_regime) or profiles.get("all") or {})
         self._confidence_model_type = str(weight_metadata.get("model_type") or "manual_prior")
@@ -186,7 +243,9 @@ class ScreeningEngine:
         weight_metadata["confidence_profile_available"] = bool(self._confidence_profile)
 
         allowed_regimes = list(cfg.get("allowed_market_regimes") or [])
-        if allowed_regimes and self._active_regime not in allowed_regimes:
+        regime_applicable = not allowed_regimes or self._active_regime in allowed_regimes
+        weight_metadata["strategy_regime_applicable"] = regime_applicable
+        if not rules_only and not regime_applicable:
             result.after_hard_filter = 0
             result.after_priority_filter = 0
             result.message = (
@@ -197,6 +256,69 @@ class ScreeningEngine:
             if persist:
                 result.output_path = str(self.persist_result(result))
             return result
+
+        allowed_phases = list(cfg.get("allowed_emotion_phases") or [])
+        phase_applicable = not allowed_phases or market_state.phase in allowed_phases
+        weight_metadata["strategy_phase_applicable"] = phase_applicable
+        if not rules_only and not phase_applicable:
+            result.after_hard_filter = 0
+            result.after_priority_filter = 0
+            result.message = (
+                f"当前{market_state.phase_label}不在策略适用阶段"
+                f"{','.join(allowed_phases)}，本次不输出候选"
+            )
+            result.weight_metadata = weight_metadata
+            if persist:
+                result.output_path = str(self.persist_result(result))
+            return result
+
+        strategy_id = str(cfg.get("strategy_id") or profile_name)
+        managed_strategies = {
+            "mainline_leader", "first_board_launch", "weak_to_strong",
+        }
+        strategy_position_multiplier = (
+            market_state.strategy_position_multiplier(strategy_id)
+            if strategy_id in managed_strategies else 1.0
+        )
+        weight_metadata["emotion_phase"] = market_state.phase
+        weight_metadata["emotion_phase_label"] = market_state.phase_label
+        weight_metadata["market_risk_flags"] = list(market_state.risk_flags)
+        weight_metadata["strategy_position_multiplier"] = strategy_position_multiplier
+        self._weight_metadata = dict(weight_metadata)
+        if (
+            not rules_only
+            and strategy_id in managed_strategies
+            and strategy_position_multiplier <= 0
+        ):
+            result.after_hard_filter = 0
+            result.after_priority_filter = 0
+            result.message = (
+                f"{market_state.phase_label}触发策略风险否决："
+                f"{','.join(market_state.risk_flags) or '阶段不适用'}"
+            )
+            result.weight_metadata = weight_metadata
+            if persist:
+                result.output_path = str(self.persist_result(result))
+            return result
+        base_position_cap = _to_float(cfg.get("position_cap_pct"), 0.0)
+        if base_position_cap > 0:
+            cfg["position_cap_pct"] = round(
+                base_position_cap * strategy_position_multiplier, 4,
+            )
+        if (
+            "echelon_broken" in market_state.risk_flags
+            and strategy_id == "mainline_leader"
+        ):
+            cfg.setdefault("exclusion_filters", []).append({
+                "name": "梯队断层回避高位",
+                "factor": "stk_board_height",
+                "op": ">=",
+                "value": 3,
+                "reason": "连板梯队断层，仅有高位没有低位承接",
+            })
+        if "market_emotion_divergence" in market_state.risk_flags:
+            ranking = cfg.setdefault("ranking", {})
+            ranking["top_n"] = max(1, int(ranking.get("top_n") or 1) // 2)
 
         neutral_score = _to_float((cfg.get("missing") or {}).get("neutral_score"), 50.0)
         working = candidates.copy()
@@ -291,6 +413,40 @@ class ScreeningEngine:
         if persist:
             result.output_path = str(self.persist_result(result))
         return result
+
+    @staticmethod
+    def _disable_missing_source_enhancements(
+        runtime: Dict[str, Any], profile: Dict[str, Any], trade_date: str,
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """Remove unavailable optional evidence instead of treating it as score 50."""
+        from core.models.strategy_diagnostics import StrategyDiagnosticsService
+
+        gate = StrategyDiagnosticsService.unavailable_factor_tokens(profile, trade_date)
+        tokens = tuple(gate.get("tokens") or ())
+        if not tokens:
+            return runtime, gate
+
+        def unavailable(factor: Any) -> bool:
+            text = str(factor or "")
+            return any(token in text for token in tokens)
+
+        cfg = deepcopy(runtime)
+        ranking = cfg.setdefault("ranking", {})
+        original = dict(ranking.get("weights") or ranking.get("prior_weights") or {})
+        kept = {factor: weight for factor, weight in original.items() if not unavailable(factor)}
+        total = sum(abs(_to_float(value)) for value in kept.values())
+        if total > 0:
+            kept = {factor: _to_float(value) / total for factor, value in kept.items()}
+            ranking["weights"] = kept
+        disabled_filters = []
+        for key in ("hard_filters", "priority_filters", "exclusion_filters"):
+            rows = list(cfg.get(key) or [])
+            disabled_filters.extend(str(row.get("factor") or "") for row in rows if unavailable(row.get("factor")))
+            cfg[key] = [row for row in rows if not unavailable(row.get("factor"))]
+        gate["disabled_factors"] = sorted(factor for factor in original if unavailable(factor))
+        gate["disabled_filters"] = sorted(set(disabled_filters))
+        gate["remaining_weight_count"] = len(kept)
+        return cfg, gate
 
     def load_profiles(self) -> Dict[str, Dict[str, Any]]:
         if not self.profile_path.exists():
@@ -393,17 +549,54 @@ class ScreeningEngine:
 
         import duckdb  # type: ignore
 
-        con = duckdb.connect(str(self.duckdb_path))
-        try:
-            stock_wide = self._read_table(con, "factor_stock_wide", trade_date)
-            value_long = self._read_table(con, "factor_value_long", trade_date)
-        finally:
-            con.close()
+        stock_wide = pd.DataFrame()
+        market_wide = pd.DataFrame()
+        value_long = pd.DataFrame()
+        last_error: Optional[Exception] = None
+        for attempt in range(4):
+            con = None
+            try:
+                con = duckdb.connect(str(self.duckdb_path))
+                stock_wide = self._read_table(con, "factor_stock_wide", trade_date)
+                market_wide = self._read_table(con, "factor_market_wide", trade_date)
+                value_long = self._read_table(con, "factor_value_long", trade_date)
+                last_error = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                message = str(exc).lower()
+                retryable = any(
+                    marker in message
+                    for marker in (
+                        "another program is using this file",
+                        "\u53e6\u4e00\u4e2a\u7a0b\u5e8f\u6b63\u5728\u4f7f\u7528\u6b64\u6587\u4ef6",
+                        "cannot open file",
+                        "could not set lock",
+                    )
+                )
+                if not retryable or attempt >= 3:
+                    raise
+                delay = 0.25 * (attempt + 1)
+                logger.warning(
+                    f"[ScreeningEngine] \u56e0\u5b50\u5e93\u6682\u65f6\u88ab\u5360\u7528\uff0c{delay:.2f}s \u540e\u91cd\u8bd5 "
+                    f"({attempt + 1}/3): {exc}"
+                )
+                time.sleep(delay)
+            finally:
+                if con is not None:
+                    con.close()
+        if last_error is not None:
+            raise last_error
         if stock_wide.empty:
             return pd.DataFrame()
 
         stock_wide["code"] = stock_wide["code"].map(_normalize_code)
         base = stock_wide.drop_duplicates("code").set_index("code", drop=False).copy()
+        if not market_wide.empty:
+            market_row = market_wide.iloc[-1]
+            for column, value in market_row.items():
+                if str(column) not in {"trade_date", "computed_at"}:
+                    base[str(column)] = value
 
         if not value_long.empty:
             stock_scores = value_long[value_long["entity_type"] == "stock"].copy()
@@ -416,12 +609,28 @@ class ScreeningEngine:
                     aggfunc="last",
                 )
                 base = base.join(pivot, how="left")
+                raw_scores = stock_scores[
+                    stock_scores["factor_id"].isin(self.RAW_VALUE_FACTORS)
+                ].pivot_table(
+                    index="entity_id",
+                    columns="factor_id",
+                    values="raw_value",
+                    aggfunc="last",
+                )
+                for factor in raw_scores.columns:
+                    base[factor] = raw_scores[factor]
 
             market_scores = value_long[value_long["entity_type"] == "market"].copy()
             for _, row in market_scores.iterrows():
                 factor_id = str(row.get("factor_id") or "")
                 if factor_id:
-                    base[factor_id] = _to_float(row.get("score"), 50.0)
+                    # Keep raw market fields (ratios, percentages and counts)
+                    # intact. Their normalized scores belong to separate
+                    # factor ids and must not overwrite the market snapshot.
+                    if factor_id in self.RAW_VALUE_FACTORS:
+                        base[factor_id] = _to_float(row.get("raw_value"), math.nan)
+                    elif factor_id not in base.columns:
+                        base[factor_id] = _to_float(row.get("score"), 50.0)
 
         alias_map = {
             "stk_total_score": "total_score",
@@ -691,6 +900,10 @@ class ScreeningEngine:
         if strategy_position_cap > 0 and position_budget_pct > strategy_position_cap:
             position_budget_pct = strategy_position_cap
             position_constraints.append(f"策略单票上限{strategy_position_cap:g}%")
+        if self._market_state_snapshot is not None:
+            position_constraints.append(
+                f"{self._market_state_snapshot.phase_label}仓位约束"
+            )
         final: List[Dict[str, Any]] = []
         metric_cols = list(dict.fromkeys(list((ranking_cfg.get("weights") or {}).keys()) + [
             "stk_lhb_net_buy_score",
@@ -941,6 +1154,37 @@ class ScreeningEngine:
                 "decision_label": confidence["decision_label"],
                 "position_budget_pct": round(position_budget_pct, 2),
                 "position_budget_reason": "；".join(position_constraints) or "按账户风险预算计算",
+                "market_regime": self._active_regime,
+                "emotion_phase": (
+                    self._market_state_snapshot.phase
+                    if self._market_state_snapshot is not None else ""
+                ),
+                "emotion_phase_label": (
+                    self._market_state_snapshot.phase_label
+                    if self._market_state_snapshot is not None else ""
+                ),
+                "market_position_scale": (
+                    self._market_state_snapshot.position_scale
+                    if self._market_state_snapshot is not None else 1.0
+                ),
+                "market_total_position_cap_pct": round(
+                    (
+                        self._market_state_snapshot.position_scale
+                        if self._market_state_snapshot is not None else 1.0
+                    ) * 100.0,
+                    2,
+                ),
+                "strategy_position_multiplier": _to_float(
+                    self._weight_metadata.get("strategy_position_multiplier"), 1.0,
+                ),
+                "market_risk_flags": list(
+                    self._market_state_snapshot.risk_flags
+                    if self._market_state_snapshot is not None else ()
+                ),
+                "emotion_phase_reasons": list(
+                    self._market_state_snapshot.phase_reasons
+                    if self._market_state_snapshot is not None else ()
+                ),
                 "worst_expected_loss_pct": round(
                     min(
                         account_risk_pct,

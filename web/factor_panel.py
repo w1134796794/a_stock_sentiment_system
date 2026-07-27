@@ -24,6 +24,100 @@ CATEGORY_LABELS: Dict[str, str] = {
     "cross_cycle": "跨周期",
 }
 
+CORE_FACTOR_GROUPS: Dict[str, Dict[str, Any]] = {
+    "market": {
+        "label": "市场与情绪",
+        "factor_ids": [
+            "mkt_market_score",
+            "mkt_limit_up_count",
+            "mkt_limit_down_count",
+            "mkt_broken_rate",
+            "F1_cycle_duration",
+            "F2_market_emotion_divergence",
+            "prev_limit_up_premium",
+        ],
+    },
+    "first_board_launch": {
+        "label": "首板启动",
+        "factor_ids": [
+            "limit_progress",
+            "stk_behavior_attention",
+            "stk_liquidity_percentile",
+            "stk_behavior_decay",
+            "stk_lhb_crowding_risk",
+            "stk_behavior_repair",
+            "stk_intraday_seal_quality",
+            "stk_crowding_decay_5d",
+            "stk_sector_resonance_score",
+            "stk_sector_rotation_momentum",
+            "stk_amount_ratio_5d",
+            "stk_board_height",
+        ],
+    },
+    "weak_to_strong": {
+        "label": "弱转强修复",
+        "factor_ids": [
+            "stk_behavior_repair",
+            "stk_sector_resonance_score",
+            "stk_liquidity_percentile",
+            "stk_behavior_decay",
+            "stk_sector_mainline_score",
+            "stk_intraday_seal_quality",
+            "tech_score",
+            "stk_relative_strength_sector",
+            "stk_amount_ratio_5d",
+            "stk_capital_flow_consensus",
+            "stk_sector_rotation_momentum",
+        ],
+    },
+    "mainline_leader": {
+        "label": "主线龙头",
+        "factor_ids": [
+            "stk_sector_mainline_score",
+            "stk_sector_resonance_score",
+            "stk_relative_strength_sector",
+            "stk_behavior_decay",
+            "stk_lhb_crowding_risk",
+            "stk_kpl_leader_quality",
+            "stk_sector_persistence_score",
+            "stk_board_position",
+            "stk_intraday_seal_quality",
+            "stk_behavior_acceleration",
+            "stk_lhb_sector_resonance",
+        ],
+    },
+}
+
+CORE_FACTOR_IDS = {
+    factor_id
+    for group in CORE_FACTOR_GROUPS.values()
+    for factor_id in group["factor_ids"]
+}
+
+STRATEGY_FACTOR_ROLES: List[Dict[str, Any]] = [
+    {
+        "strategy_id": "first_board_launch",
+        "label": "首板启动",
+        "required": ["涨停进度", "首次关注度", "流动性", "市场温度", "涨停家数"],
+        "excluded": ["行为衰退", "龙虎榜拥挤"],
+        "ranked": ["分歧修复", "封板质量", "拥挤衰减", "板块共振", "成交额与流动性"],
+    },
+    {
+        "strategy_id": "weak_to_strong",
+        "label": "弱转强修复",
+        "required": ["分歧修复", "板块共振", "流动性", "市场温度"],
+        "excluded": ["行为衰退"],
+        "ranked": ["分歧修复", "主线地位", "封板质量", "相对强度", "资金共识"],
+    },
+    {
+        "strategy_id": "mainline_leader",
+        "label": "主线龙头",
+        "required": ["主线地位", "板块共振", "相对强度", "市场温度", "跌停与炸板率"],
+        "excluded": ["行为衰退", "龙虎榜拥挤"],
+        "ranked": ["主线地位", "KPL龙头质量", "板块持续性", "相对强度", "身位与封板质量"],
+    },
+]
+
 def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
     """构建指标因子页面完整状态。active_profile 为最新快照实际生效的方案（仅展示用）。"""
     from config import overrides as ov
@@ -47,7 +141,12 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
     # ---- 因子开关（按大类分组）----
     cat_order = list(CATEGORY_LABELS.keys())
     groups: Dict[str, Dict[str, Any]] = {}
-    for f in reg._factors.values():  # noqa: SLF001 - 面板只读访问
+    definitions = {
+        f.factor_id: f
+        for f in reg._factors.values()  # noqa: SLF001 - 面板只读访问
+        if f.factor_id in CORE_FACTOR_IDS
+    }
+    for f in definitions.values():
         # 龙虎榜属于资金行为，但在操作层面需要独立开关和观察，避免藏在资金流分组里。
         cat = "lhb" if f.sub_category == "lhb" else f.category.value
         path = f"factor_registry.factors.{f.factor_id}.enabled"
@@ -85,37 +184,36 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
         if x["enabled"]
     ]
 
-    # ---- 情绪周期 profile ----
-    profiles_raw = reg.get_profiles() or {}
-    profiles: List[Dict[str, Any]] = []
-    for name, prof in profiles_raw.items():
-        prof = prof or {}
-        profiles.append({
-            "name": name,
-            "disabled_factors": list(prof.get("disabled_factors") or []),
-            "enabled_factors": list(prof.get("enabled_factors") or []),
-            "description": prof.get("description", ""),
+    latest_factor_data = _latest_factor_data(factor_ids=CORE_FACTOR_IDS)
+    core_catalog = []
+    for group_id, group in CORE_FACTOR_GROUPS.items():
+        rows = []
+        for factor_id in group["factor_ids"]:
+            definition = definitions.get(factor_id)
+            rows.append({
+                "factor_id": factor_id,
+                "name": definition.name if definition else factor_id,
+                "description": definition.description if definition else "由计算层生成的核心指标",
+                "available": definition is not None,
+            })
+        core_catalog.append({
+            "group_id": group_id,
+            "label": group["label"],
+            "factors": rows,
         })
-    profiles.sort(key=lambda p: p["name"])
-
-    latest_factor_data = _latest_factor_data()
-    dynamic_weight_state = _dynamic_weight_state(
-        latest_factor_data.get("trade_date", ""), active_profile or "default"
-    )
 
     return {
         "factor_groups": factor_groups,
         "factor_total": total,
         "factor_enabled": enabled,
         "enabled_factor_list": enabled_factor_list,
-        "profiles": profiles,
-        "profile_names": [p["name"] for p in profiles],
         "active_profile": active_profile or "",
         "snapshot_enabled_factors": latest_factor_data.get("snapshot_enabled_factors", []),
         "latest_factor_trade_date": latest_factor_data.get("trade_date", ""),
         "latest_factor_summary": latest_factor_data.get("rows", []),
         "override_count": _count(yaml_store),
-        "dynamic_weights": dynamic_weight_state,
+        "core_catalog": core_catalog,
+        "strategy_factor_roles": STRATEGY_FACTOR_ROLES,
     }
 
 
@@ -123,7 +221,10 @@ def _count(d: Any) -> int:
     return len(d) if isinstance(d, dict) else 0
 
 
-def _latest_factor_data(limit: int = 120) -> Dict[str, Any]:
+def _latest_factor_data(
+    limit: int = 120,
+    factor_ids: Optional[set[str]] = None,
+) -> Dict[str, Any]:
     try:
         import duckdb  # type: ignore
 
@@ -155,6 +256,13 @@ def _latest_factor_data(limit: int = 120) -> Dict[str, Any]:
                 trade_date = str(con.execute("SELECT MAX(trade_date) FROM factor_value_long").fetchone()[0] or "")
             if not trade_date:
                 return {"trade_date": "", "snapshot_enabled_factors": enabled, "rows": []}
+            where_factor = ""
+            params: List[Any] = [trade_date]
+            if factor_ids:
+                ordered_ids = sorted(factor_ids)
+                where_factor = f" AND factor_id IN ({','.join('?' for _ in ordered_ids)})"
+                params.extend(ordered_ids)
+            params.append(int(limit))
             df = con.execute(
                 """
                 SELECT
@@ -167,6 +275,7 @@ def _latest_factor_data(limit: int = 120) -> Dict[str, Any]:
                     ROUND(MAX(score), 2) AS max_score
                 FROM factor_value_long
                 WHERE trade_date = ?
+                {where_factor}
                 GROUP BY entity_type, factor_id
                 ORDER BY
                     CASE entity_type
@@ -177,8 +286,8 @@ def _latest_factor_data(limit: int = 120) -> Dict[str, Any]:
                     END,
                     factor_id
                 LIMIT ?
-                """,
-                [trade_date, int(limit)],
+                """.format(where_factor=where_factor),
+                params,
             ).fetchdf()
         raw_rows = df.to_dict(orient="records") if df is not None and not df.empty else []
         rows = [{k: _json_scalar(v) for k, v in row.items()} for row in raw_rows]

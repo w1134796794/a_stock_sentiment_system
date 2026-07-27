@@ -1,4 +1,5 @@
 """回测运行脚本。"""
+import json
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -210,6 +211,22 @@ def save_backtest_results(
         pd.DataFrame(attempts).to_csv(attempts_file, index=False, encoding="utf-8-sig")
         logger.info(f"入场信号明细已保存: {attempts_file}")
 
+    from backtest.run_audit import build_entry_funnel, build_run_manifest
+
+    funnel_rows = build_entry_funnel(
+        attempts, candidate_count=int(result.get('entry_candidate_count') or 0),
+    )
+    funnel_file = output_path / f"backtest_entry_funnel_{timestamp}.csv"
+    pd.DataFrame(funnel_rows).to_csv(funnel_file, index=False, encoding="utf-8-sig")
+    logger.info(f"成交漏斗已保存: {funnel_file}")
+
+    manifest = build_run_manifest(result, metadata)
+    manifest_file = output_path / f"backtest_manifest_{timestamp}.json"
+    manifest_file.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8",
+    )
+    logger.info(f"运行审计清单已保存: {manifest_file}")
+
     # 保存净值曲线
     if result.get('daily_nav'):
         nav_df = pd.DataFrame(result['daily_nav'])
@@ -239,6 +256,13 @@ def save_backtest_results(
         'entry_candidate_count': result.get('entry_candidate_count', 0),
         'entry_signal_count': sum(1 for row in attempts if row.get('status') in {'filled', 'signal_unfilled'}),
         'entry_unfilled_count': sum(1 for row in attempts if row.get('status') == 'signal_unfilled'),
+        'code_revision': manifest.get('code_revision', ''),
+        'configuration_hash': manifest.get('configuration_hash', ''),
+        'data_cutoff': manifest.get('data_cutoff', ''),
+    })
+    summary.update({
+        f"entry_{key}": value
+        for key, value in (result.get('entry_opportunity_summary') or {}).items()
     })
     if metadata:
         summary.update(metadata)

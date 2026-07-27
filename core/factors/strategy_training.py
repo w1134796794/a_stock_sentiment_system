@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
@@ -15,6 +15,7 @@ from backtest.minute_entry import (
     ENTRY_WEAK,
     MinuteEntryEvaluator,
     normalize_minute_bars,
+    normalize_strategy_entry_modes,
 )
 from core.signals.minute_amount_profile import MinuteAmountProfileRepository
 
@@ -34,13 +35,6 @@ STRATEGY_TRAINING_SPECS: Dict[str, StrategyTrainingSpec] = {
     "weak_to_strong": StrategyTrainingSpec(3, 3),
     "trend_follow": StrategyTrainingSpec(5, 10),
 }
-MODE_MAP = {
-    "weak_to_strong": ENTRY_WEAK,
-    "continuation": ENTRY_CONTINUATION,
-    "acceleration": ENTRY_ACCELERATION,
-}
-
-
 def strategy_training_spec(strategy_id: str, default_horizon: int = 3) -> StrategyTrainingSpec:
     return STRATEGY_TRAINING_SPECS.get(
         str(strategy_id), StrategyTrainingSpec(max(int(default_horizon), 1), max(int(default_horizon), 1)),
@@ -66,6 +60,11 @@ class StrategyMinuteTrainingBuilder:
         self.auction_dir = Path(auction_dir or Path(CACHE_DIR) / "stock" / "auction")
         self.amount_profiles = MinuteAmountProfileRepository()
         self.audit: Dict[str, Any] = {}
+        self._connection: Any = None
+        self._tick_cache: OrderedDict[tuple[str, str], pd.DataFrame] = OrderedDict()
+        self._auction_cache: OrderedDict[tuple[str, str], Dict[str, Any]] = OrderedDict()
+        self._daily_cache: OrderedDict[tuple[str, str, int], pd.DataFrame] = OrderedDict()
+        self._cache_limit = 128
 
     def apply(
         self,
@@ -79,22 +78,31 @@ class StrategyMinuteTrainingBuilder:
         if frame.empty or not candidates:
             self.audit = {"candidate_rows": len(candidates), "filled_rows": 0, "excluded": {"missing_candidates": len(frame)}}
             return frame.iloc[0:0].copy()
-        selected = frame[
-            frame.apply(lambda row: (str(row["trade_date"]), str(row["code"]).zfill(6)) in candidates, axis=1)
-        ].copy()
+        keys = list(zip(frame["trade_date"].astype(str), frame["code"].astype(str).str.zfill(6)))
+        selected = frame[[key in candidates for key in keys]].copy()
         exclusions: Counter[str] = Counter()
         output = []
-        for _, row in selected.iterrows():
-            key = (str(row["trade_date"]), str(row["code"]).zfill(6))
-            candidate = candidates[key]
-            labelled, reason = self._label_row(
-                row, candidate, strategy_id=strategy_id, horizon_days=max(int(horizon_days), 1),
-                allowed_entry_modes=list(allowed_entry_modes),
-            )
-            if labelled is None:
-                exclusions[reason or "not_filled"] += 1
-            else:
-                output.append(labelled)
+        import duckdb  # type: ignore
+
+        self._connection = duckdb.connect(str(self.duckdb_path), read_only=True)
+        try:
+            for _, row in selected.iterrows():
+                key = (str(row["trade_date"]), str(row["code"]).zfill(6))
+                candidate = candidates[key]
+                labelled, reason = self._label_row(
+                    row, candidate, strategy_id=strategy_id, horizon_days=max(int(horizon_days), 1),
+                    allowed_entry_modes=list(allowed_entry_modes),
+                )
+                if labelled is None:
+                    exclusions[reason or "not_filled"] += 1
+                else:
+                    output.append(labelled)
+        finally:
+            self._connection.close()
+            self._connection = None
+            self._tick_cache.clear()
+            self._auction_cache.clear()
+            self._daily_cache.clear()
         self.audit = {
             "strategy_id": strategy_id,
             "candidate_rows": len(selected),
@@ -121,6 +129,25 @@ class StrategyMinuteTrainingBuilder:
                 if code:
                     rows[(date, code)] = dict(row)
         return rows
+
+    def candidate_map(
+        self,
+        strategy_id: str,
+        *,
+        start_date: str = "",
+        end_date: str = "",
+    ) -> Dict[tuple[str, str], Dict[str, Any]]:
+        """Return normalized strategy candidates, optionally bounded by trade date."""
+        rows = self._candidate_map(strategy_id)
+        if not start_date and not end_date:
+            return rows
+        lower = str(start_date or "00000000")
+        upper = str(end_date or "99999999")
+        return {
+            key: value
+            for key, value in rows.items()
+            if lower <= str(key[0]) <= upper
+        }
 
     def _label_row(
         self,
@@ -162,8 +189,6 @@ class StrategyMinuteTrainingBuilder:
         if sector_sync is None:
             return None, "missing_sector_minutes"
         auction = self._load_auction(ts_code, entry_date)
-        if mode == ENTRY_CONTINUATION and not auction:
-            return None, "missing_auction"
         context = candidate.get("context") or {}
         limit_pct = float(context.get("limit_pct") or row.get("limit_pct") or 10.0)
         evaluator = MinuteEntryEvaluator()
@@ -174,8 +199,12 @@ class StrategyMinuteTrainingBuilder:
             prev_close=prev_close,
             previous_amount=float(prev.get("amount_yuan") or 0.0),
             previous_volume=float(prev.get("vol_hand") or 0.0),
-            auction_amount=float(auction.get("amount") or auction.get("成交额") or 0.0),
-            auction_volume=float(auction.get("volume") or auction.get("成交量") or 0.0),
+            auction_amount=float(
+                auction.get("amount") or auction.get("成交额") or auction.get("竞价成交额") or 0.0
+            ),
+            auction_volume=float(
+                auction.get("volume") or auction.get("成交量") or auction.get("竞价成交量") or 0.0
+            ),
             plan_amount_ratio=float(context.get("amount_ratio") or 0.0),
             limit_price=prev_close * (1.0 + limit_pct / 100.0),
             is_leader=strategy_id_is_leader(candidate, allowed_entry_modes),
@@ -220,40 +249,37 @@ class StrategyMinuteTrainingBuilder:
 
     @staticmethod
     def _entry_mode(open_gap: float, allowed: Iterable[str]) -> str:
-        allowed_set = set(allowed)
-        wanted = "weak_to_strong" if -0.03 <= open_gap <= 0.01 else "continuation" if open_gap <= 0.05 else "acceleration"
-        return MODE_MAP.get(wanted, "") if wanted in allowed_set else ""
+        allowed_set = normalize_strategy_entry_modes(allowed)
+        wanted = ENTRY_WEAK if -0.03 <= open_gap <= 0.01 else ENTRY_CONTINUATION if open_gap <= 0.05 else ENTRY_ACCELERATION
+        return wanted if wanted in allowed_set else ""
 
     def _daily_window(self, code: str, plan_date: str, entry_date: str, horizon: int) -> pd.DataFrame:
-        import duckdb  # type: ignore
-
-        con = duckdb.connect(str(self.duckdb_path), read_only=True)
-        try:
-            rows = con.execute(
-                "SELECT trade_date, open, high, low, close, vol_hand, amount_yuan "
-                "FROM stock_daily_silver WHERE code=? AND trade_date>=? ORDER BY trade_date LIMIT ?",
-                [code, plan_date, horizon + 1],
-            ).fetchdf()
-        finally:
-            con.close()
+        key = (str(code), str(plan_date), int(horizon))
+        cached = self._cache_get(self._daily_cache, key)
+        if cached is not None:
+            return cached
+        if self._connection is None:
+            raise RuntimeError("strategy training DuckDB connection is not open")
+        rows = self._connection.execute(
+            "SELECT trade_date, open, high, low, close, vol_hand, amount_yuan "
+            "FROM stock_daily_silver WHERE code=? AND trade_date>=? ORDER BY trade_date LIMIT ?",
+            [code, plan_date, horizon + 1],
+        ).fetchdf()
         rows["trade_date"] = rows.get("trade_date", pd.Series(dtype=str)).astype(str)
+        self._cache_put(self._daily_cache, key, rows)
         return rows
 
     def _sector_sync_callback(self, plan_date: str, entry_date: str, code: str, sectors: str):
         sector = str(sectors).replace("，", ",").split(",", 1)[0].strip()
         if not sector:
             return None
-        import duckdb  # type: ignore
-
-        con = duckdb.connect(str(self.duckdb_path), read_only=True)
-        try:
-            peers = con.execute(
-                "SELECT code, ts_code FROM factor_stock_wide WHERE trade_date=? AND code<>? "
-                "AND resonance_sectors LIKE ? ORDER BY total_score DESC LIMIT 8",
-                [plan_date, code, f"%{sector}%"],
-            ).fetchall()
-        finally:
-            con.close()
+        if self._connection is None:
+            raise RuntimeError("strategy training DuckDB connection is not open")
+        peers = self._connection.execute(
+            "SELECT code, ts_code FROM factor_stock_wide WHERE trade_date=? AND code<>? "
+            "AND resonance_sectors LIKE ? ORDER BY total_score DESC LIMIT 8",
+            [plan_date, code, f"%{sector}%"],
+        ).fetchall()
         frames = [self._load_tick(str(ts_code or self._ts_code(str(peer))), entry_date) for peer, ts_code in peers]
         frames = [normalize_minute_bars(frame) for frame in frames if frame is not None and not frame.empty]
         if len(frames) < 3:
@@ -271,18 +297,44 @@ class StrategyMinuteTrainingBuilder:
         return synced
 
     def _load_tick(self, ts_code: str, trade_date: str) -> pd.DataFrame:
+        key = (str(ts_code), str(trade_date))
+        cached = self._cache_get(self._tick_cache, key)
+        if cached is not None:
+            return cached
         path = self.tick_dir / f"{ts_code}_{trade_date}.csv"
         try:
-            return pd.read_csv(path) if path.exists() else pd.DataFrame()
+            frame = pd.read_csv(path) if path.exists() else pd.DataFrame()
         except Exception:
-            return pd.DataFrame()
+            frame = pd.DataFrame()
+        self._cache_put(self._tick_cache, key, frame)
+        return frame
 
     def _load_auction(self, ts_code: str, trade_date: str) -> Dict[str, Any]:
+        key = (str(ts_code), str(trade_date))
+        cached = self._cache_get(self._auction_cache, key)
+        if cached is not None:
+            return cached
         path = self.auction_dir / f"{ts_code}_{trade_date}.json"
         try:
-            return dict(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else {}
+            payload = dict(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else {}
         except Exception:
-            return {}
+            payload = {}
+        self._cache_put(self._auction_cache, key, payload)
+        return payload
+
+    def _cache_get(self, cache: OrderedDict, key: Any) -> Any:
+        if key not in cache:
+            return None
+        value = cache.pop(key)
+        cache[key] = value
+        return value
+
+    def _cache_put(self, cache: OrderedDict, key: Any, value: Any) -> None:
+        if key in cache:
+            cache.pop(key)
+        cache[key] = value
+        while len(cache) > self._cache_limit:
+            cache.popitem(last=False)
 
     @staticmethod
     def _ts_code(code: str) -> str:

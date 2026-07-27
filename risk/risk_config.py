@@ -51,8 +51,29 @@ class RiskConfig:
     min_open_gap: float = 0.0                 # 仅原固定区间对照模式使用
     max_open_gap: float = 0.03                # 仅原固定区间对照模式使用
     market_entry_threshold: float = 50.0      # 弱市停止开仓
-    market_strong_threshold: float = 70.0     # 强市才扩展到前 N 名
+    market_active_threshold: float = 65.0     # 中性可交易阈值
+    market_strong_threshold: float = 70.0     # 强市阈值
     neutral_market_max_rank: int = 1          # 中性市场只执行第 1 名
+    direct_entry_min_score: float = 74.0
+    neutral_market_min_score: float = 80.0
+    active_market_min_score: float = 76.0
+    reduced_position_gap: float = 0.02
+    high_gap_position_multiplier: float = 0.75
+
+    # ---- 分钟入场（实时与回测统一）----
+    entry_confirm_deadline: str = "10:00:00"
+    weak_entry_min_gap: float = -0.03
+    weak_entry_max_gap: float = 0.01
+    continuation_max_gap: float = 0.05
+    entry_min_amount_pace: float = 0.80
+    entry_max_amount_pace: float = 3.00
+    continuation_min_auction_volume_ratio: float = 0.008
+    continuation_min_auction_amount: float = 5_000_000.0
+    intraday_strength_trigger_pct: float = 0.01
+    intraday_min_tech_score: float = 80.0
+    intraday_min_sector_resonance: float = 60.0
+    intraday_min_amount_ratio: float = 0.80
+    intraday_max_amount_ratio: float = 1.50
 
     # ---- 组合层：板块集中度 ----
     max_sector_concentration: float = 0.40    # 单一板块最大仓位
@@ -62,6 +83,10 @@ class RiskConfig:
     hard_stop_loss: float = 0.05              # 硬止损
     trailing_stop: float = 0.08               # 移动止损（从最高点回撤）
     trailing_activation: float = 0.05         # 盈利多少后启动移动止损
+    trailing_mid_profit: float = 0.10
+    trailing_high_profit: float = 0.20
+    trailing_early_stop: float = 0.04
+    trailing_mid_stop: float = 0.06
     time_stop_days: int = 5                   # 时间止损天数
     time_stop_profit_threshold: float = 0.02  # 时间止损时的盈利下限
 
@@ -82,6 +107,9 @@ class RiskConfig:
     stamp_duty_rate: float = 0.001
     slippage: float = 0.002
     min_holding_days: int = 1                 # T+1
+    exit_minute_data_policy: str = "cache_or_fetch"  # cache_only / cache_or_fetch / daily_only
+    daily_ohlc_path_policy: str = "conservative_stop_first"
+    exit_policy_mode: str = "strategy"
 
     # ---- 固定风险 / 保守凯利 ----
     position_sizing_mode: str = "fixed_risk"  # fixed_risk / conservative_kelly
@@ -102,7 +130,11 @@ class RiskConfig:
             return cls()
         known = {f.name for f in fields(cls)}
         kwargs = {k: v for k, v in data.items() if k in known}
-        unknown = set(data) - known
+        # Fixed take-profit was removed in favour of trailing exits. Old web
+        # overrides can still contain this key, so treat it as a silent legacy
+        # migration instead of logging the same warning on every config load.
+        deprecated = {"take_profit"}
+        unknown = set(data) - known - deprecated
         if unknown:
             logger.debug(f"[RiskConfig] 忽略未知配置键: {sorted(unknown)}")
         return cls(**kwargs)

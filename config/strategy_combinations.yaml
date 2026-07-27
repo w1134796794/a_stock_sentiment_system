@@ -3,8 +3,8 @@ strategies:
   default:
     name: 默认短线综合
     description: 使用全量个股因子，在候选池内综合量能、板块主线、流动性与技术强度。
-    enabled: true
-    primary: true
+    enabled: false
+    primary: false
     protected: true
     base_profile: default
     stock_pool: all
@@ -19,13 +19,15 @@ strategies:
     - weak
     top_n: 10
     execution:
-      allowed_entry_modes: [weak_to_strong, continuation]
+      allowed_entry_modes:
+      - weak_to_strong
+      - continuation
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
   short_term_alpha:
     name: 精选接力
     description: 只在接近涨停且流动性合格的同类样本中训练，盘后精选不超过5只，次日必须由弱转强或强势延续的分钟信号确认。
-    enabled: true
+    enabled: false
     primary: false
     protected: false
     base_profile: default
@@ -53,7 +55,7 @@ strategies:
     - factor: stk_sector_rotation_momentum
       weight: 0.12
     - factor: stk_attention_consensus
-      weight: 0.10
+      weight: 0.1
     - factor: tech_score
       weight: 0.08
     - factor: stk_new_high_20d
@@ -78,14 +80,16 @@ strategies:
     top_n: 5
     position_cap_pct: 8
     execution:
-      allowed_entry_modes: [weak_to_strong, continuation]
+      allowed_entry_modes:
+      - weak_to_strong
+      - continuation
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
       max_positions: 3
   momentum_repair:
     name: 量价修复
     description: 强调市场可进攻、量价修复和阶段新高位置。
-    enabled: true
+    enabled: false
     primary: false
     protected: true
     base_profile: momentum_repair
@@ -100,13 +104,15 @@ strategies:
     - neutral
     top_n: 8
     execution:
-      allowed_entry_modes: [weak_to_strong, continuation]
+      allowed_entry_modes:
+      - weak_to_strong
+      - continuation
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
   trend_follow:
     name: 趋势主升
     description: 偏趋势持有，寻找技术结构、阶段位置和板块持续性同时占优的股票，不追求必须涨停。
-    enabled: true
+    enabled: false
     primary: false
     protected: false
     base_profile: default
@@ -165,16 +171,19 @@ strategies:
     - neutral
     top_n: 8
     execution:
-      allowed_entry_modes: [continuation]
+      allowed_entry_modes:
+      - continuation
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
   first_board_launch:
     name: 首板启动
     description: 捕捉板块首次异动和个股注意形成，偏低身位首板，不参与明显拥挤的高位接力。
     enabled: true
+    scope: production
     primary: false
     base_profile: default
     stock_pool: near_limit
+    training_scope: near_limit
     required_filters:
     - name: 涨停确认
       factor: limit_progress
@@ -191,33 +200,64 @@ strategies:
       op: '>='
       value: 35
       reason: ''
-    exclusion_filters:
+    - name: 市场情绪合格
+      factor: mkt_market_score
+      op: '>='
+      value: 35
+      reason: 极端冰点不做首板
+    - name: 涨停家数基础
+      factor: mkt_limit_up_count
+      op: '>='
+      value: 20
+      reason: 市场需要具备低位扩散基础
+    exclusion_filters: []
+    veto_rules:
     - name: 已进入拥挤衰退
       factor: stk_behavior_decay
       op: '>='
       value: 70
       reason: ''
-    - name: 龙虎榜拥挤
+    - name: 龙虎榜过度拥挤
       factor: stk_lhb_crowding_risk
-      op: '<='
+      op: '>='
       value: 75
-      reason: ''
+      reason: 席位过度一致增加兑现风险
+    evidence_rules:
+    - name: 量价健康
+      factor: stk_amount_ratio_5d
+      op: '>='
+      value: 55
+      reason: 成交额处于可持续区间
+    - name: 资金共识
+      factor: stk_capital_flow_consensus
+      op: '>='
+      value: 55
+      reason: 多源资金方向一致
+    - name: 龙虎榜净买认可
+      factor: stk_lhb_net_buy_score
+      op: '>='
+      value: 55
+      reason: 龙虎榜作为资金证据
     ranking_factors:
-    - factor: stk_behavior_attention
-      weight: 0.24
-    - factor: stk_amount_ratio_5d
-      weight: 0.1
-    - factor: stk_sector_resonance_score
+    - factor: stk_behavior_repair
       weight: 0.15
-    - factor: stk_liquidity_percentile
-      weight: 0.1
     - factor: stk_intraday_seal_quality
       weight: 0.15
+    - factor: stk_crowding_decay_5d
+      weight: 0.13
+    - factor: stk_behavior_attention
+      weight: 0.13
+    - factor: stk_sector_resonance_score
+      weight: 0.12
     - factor: stk_sector_rotation_momentum
-      weight: 0.16
+      weight: 0.10
+    - factor: stk_amount_ratio_5d
+      weight: 0.09
+    - factor: stk_liquidity_percentile
+      weight: 0.08
     - factor: stk_board_height
-      weight: -0.1
-    weight_source: lightgbm
+      weight: -0.05
+    weight_source: manual
     weight_profile: first_board_launch
     enhancements:
       lhb: true
@@ -226,17 +266,34 @@ strategies:
     - strong
     - neutral
     - weak
-    top_n: 12
-    position_cap_pct: 0.0
+    emotion_phases:
+    - warm
+    - active
+    top_n: 6
+    position_cap_pct: 20.0
     execution:
-      allowed_entry_modes: [weak_to_strong, continuation]
+      allowed_entry_modes:
+      - weak_to_strong
+      - continuation
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
-    protected: false
+      max_positions: 1
+      exit:
+        hard_stop_loss: 0.05
+        trailing_activation: 0.05
+        trailing_early_stop: 0.04
+        trailing_mid_profit: 0.1
+        trailing_mid_stop: 0.06
+        trailing_high_profit: 0.2
+        trailing_stop: 0.08
+        time_stop_days: 5
+        time_stop_profit_threshold: 0.02
+    protected: true
   ultra_short_board:
     name: 超短打板接力
     description: 偏强势接力，重点观察封板质量、板块共振、身位和一致加速，仅适合风险偏好较高的市场。
-    enabled: true
+    enabled: false
+    scope: research
     primary: false
     protected: false
     base_profile: default
@@ -295,17 +352,24 @@ strategies:
     market_regimes:
     - strong
     - neutral
+    - weak
+    emotion_phases:
+    - boom
     top_n: 6
+    position_cap_pct: 18
     execution:
-      allowed_entry_modes: [continuation, acceleration]
+      allowed_entry_modes:
+      - continuation
+      - acceleration
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
   weak_to_strong:
     name: 弱转强修复
     description: 选择盘后具备修复基础的候选，次日必须再由分时弱转强条件确认，不把盘后评分直接当买点。
     enabled: true
+    scope: production
     primary: false
-    protected: false
+    protected: true
     base_profile: default
     stock_pool: liquid
     required_filters:
@@ -324,30 +388,56 @@ strategies:
       op: '>='
       value: 40
       reason: 保证分时确认后可成交
-    exclusion_filters:
+    - name: 市场不在极端冰点
+      factor: mkt_market_score
+      op: '>='
+      value: 25
+      reason: 弱市可以修复，但极端冰点停止主动试错
+    exclusion_filters: []
+    veto_rules:
     - name: 拥挤衰退
       factor: stk_behavior_decay
       op: '>='
       value: 70
       reason: 衰退阶段不按弱转强处理
+    evidence_rules:
+    - name: 量价健康
+      factor: stk_amount_ratio_5d
+      op: '>='
+      value: 55
+      reason: 修复过程有合理成交支持
+    - name: 资金共识
+      factor: stk_capital_flow_consensus
+      op: '>='
+      value: 55
+      reason: 多源资金方向一致
+    - name: 龙虎榜资金认可
+      factor: stk_lhb_net_buy_score
+      op: '>='
+      value: 55
+      reason: 龙虎榜仅作增强证据
     ranking_factors:
     - factor: stk_behavior_repair
-      weight: 0.25
-    - factor: stk_relative_strength_sector
-      weight: 0.15
+      weight: 0.16
     - factor: stk_sector_resonance_score
       weight: 0.15
-    - factor: stk_capital_flow_consensus
-      weight: 0.11
-    - factor: stk_amount_ratio_5d
-      weight: 0.1
+    - factor: stk_sector_mainline_score
+      weight: 0.13
+    - factor: stk_intraday_seal_quality
+      weight: 0.12
     - factor: tech_score
-      weight: 0.1
-    - factor: stk_sector_rotation_momentum
+      weight: 0.10
+    - factor: stk_relative_strength_sector
+      weight: 0.10
+    - factor: stk_amount_ratio_5d
       weight: 0.08
+    - factor: stk_capital_flow_consensus
+      weight: 0.07
+    - factor: stk_sector_rotation_momentum
+      weight: 0.05
     - factor: stk_liquidity_percentile
-      weight: 0.06
-    weight_source: lightgbm
+      weight: 0.04
+    weight_source: manual
     weight_profile: weak_to_strong
     enhancements:
       lhb: true
@@ -355,66 +445,102 @@ strategies:
     market_regimes:
     - strong
     - neutral
+    - weak
+    emotion_phases:
+    - warm
+    - active
+    - decline
     top_n: 8
+    position_cap_pct: 15
     execution:
-      allowed_entry_modes: [weak_to_strong]
+      allowed_entry_modes:
+      - weak_to_strong
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
+      max_positions: 1
   mainline_leader:
     name: 主线龙头
     description: 不按候选排名直接认定龙头，强调主线地位、板块持续性、相对强度、封板质量和资金认可。
     enabled: true
-    primary: false
-    protected: false
+    scope: production
+    primary: true
     base_profile: default
     stock_pool: all
+    training_scope: all
     required_filters:
     - name: 主线地位合格
       factor: stk_sector_mainline_score
       op: '>='
       value: 55
-      reason: 所属板块具备主线属性
+      reason: ''
     - name: 板块共振合格
       factor: stk_sector_resonance_score
       op: '>='
       value: 55
-      reason: 个股与板块同步增强
+      reason: ''
     - name: 相对板块不弱
       factor: stk_relative_strength_sector
       op: '>='
       value: 50
-      reason: 龙头不能弱于所属板块
-    exclusion_filters:
+      reason: ''
+    - name: 市场情绪合格
+      factor: mkt_market_score
+      op: '>='
+      value: 40
+      reason: 主线龙头需要基本市场容错率
+    - name: 跌停家数可控
+      factor: mkt_limit_down_count
+      op: <=
+      value: 30
+      reason: 跌停过多时停止主动接力
+    - name: 炸板率可控
+      factor: mkt_broken_rate
+      op: <=
+      value: 35
+      reason: 炸板率过高时主线承接不可靠
+    exclusion_filters: []
+    veto_rules:
     - name: 龙头衰退
       factor: stk_behavior_decay
       op: '>='
       value: 70
       reason: 龙头生命周期进入衰退
-    - name: 龙虎榜拥挤
+    - name: 龙虎榜过度拥挤
       factor: stk_lhb_crowding_risk
-      op: <=
+      op: '>='
       value: 80
-      reason: 资金过度拥挤降低接力安全度
+      reason: 席位过度一致增加兑现风险
+    evidence_rules:
+    - name: 龙虎榜板块共振
+      factor: stk_lhb_sector_resonance
+      op: '>='
+      value: 55
+      reason: 龙虎榜资金与主线同向
+    - name: 量价健康
+      factor: stk_amount_ratio_5d
+      op: '>='
+      value: 55
+      reason: 成交额处于可持续区间
     ranking_factors:
     - factor: stk_sector_mainline_score
-      weight: 0.18
+      weight: 0.15
     - factor: stk_sector_resonance_score
-      weight: 0.16
-    - factor: stk_sector_persistence_score
       weight: 0.14
+    - factor: stk_kpl_leader_quality
+      weight: 0.14
+    - factor: stk_sector_persistence_score
+      weight: 0.12
     - factor: stk_relative_strength_sector
-      weight: 0.13
+      weight: 0.12
     - factor: stk_board_position
       weight: 0.11
     - factor: stk_intraday_seal_quality
       weight: 0.1
     - factor: stk_behavior_acceleration
-      weight: 0.08
+      weight: 0.07
     - factor: stk_lhb_sector_resonance
-      weight: 0.06
-    - factor: stk_capital_flow_consensus
-      weight: 0.04
-    weight_source: lightgbm
+      weight: 0.05
+    weight_source: manual
     weight_profile: mainline_leader
     enhancements:
       lhb: true
@@ -422,15 +548,34 @@ strategies:
     market_regimes:
     - strong
     - neutral
+    - weak
+    emotion_phases:
+    - active
+    - boom
     top_n: 6
+    position_cap_pct: 25.0
     execution:
-      allowed_entry_modes: [weak_to_strong, continuation, acceleration]
+      allowed_entry_modes:
+      - weak_to_strong
+      - continuation
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
+      max_positions: 1
+      exit:
+        hard_stop_loss: 0.05
+        trailing_activation: 0.05
+        trailing_early_stop: 0.04
+        trailing_mid_profit: 0.1
+        trailing_mid_stop: 0.06
+        trailing_high_profit: 0.2
+        trailing_stop: 0.08
+        time_stop_days: 5
+        time_stop_profit_threshold: 0.02
+    protected: true
   capital_resonance:
     name: 资金共振
     description: 偏资金确认，综合多源资金流、龙虎榜净买入、机构席位和板块共振，适合同分候选的资金排序。
-    enabled: true
+    enabled: false
     primary: false
     protected: false
     base_profile: default
@@ -484,13 +629,15 @@ strategies:
     - neutral
     top_n: 10
     execution:
-      allowed_entry_modes: [weak_to_strong, continuation]
+      allowed_entry_modes:
+      - weak_to_strong
+      - continuation
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
   defensive_quality:
     name: 震荡防守
     description: 用于震荡或弱市，只保留高流动性、相对板块强和资金持续性较好的少量观察标的。
-    enabled: true
+    enabled: false
     primary: false
     protected: false
     base_profile: default
@@ -547,13 +694,15 @@ strategies:
     - weak
     top_n: 3
     execution:
-      allowed_entry_modes: [weak_to_strong]
+      allowed_entry_modes:
+      - weak_to_strong
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
   weak_market_probe:
     name: 弱市逆势试仓
     description: 仅在弱市寻找显著跑赢板块和市场、流动性充足且未进入衰退的强势股；最多2只，单票不超过8%，次日仍须分钟行情确认。
-    enabled: true
+    enabled: false
+    scope: research
     primary: false
     protected: false
     base_profile: default
@@ -613,11 +762,16 @@ strategies:
       lhb: true
       capital_flow: true
     market_regimes:
+    - strong
+    - neutral
     - weak
+    emotion_phases:
+    - freeze
     top_n: 2
     position_cap_pct: 8
     execution:
-      allowed_entry_modes: [weak_to_strong]
+      allowed_entry_modes:
+      - weak_to_strong
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
       max_positions: 2

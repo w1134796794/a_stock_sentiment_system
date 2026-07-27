@@ -27,12 +27,9 @@ def _ratio(value: Any, default: float = 1.0) -> float:
 
 def market_regime(score: Any) -> str:
     """Use the same market layers as the daily dashboard and execution rules."""
-    value = _float(score, 50.0)
-    if value >= 70.0:
-        return "strong"
-    if value >= 45.0:
-        return "neutral"
-    return "weak"
+    from core.models.market_state import classify_market_score
+
+    return classify_market_score(score)
 
 
 class ConfidenceService:
@@ -111,7 +108,7 @@ class ConfidenceService:
             decision_label = "数据不足"
         elif drift_status == "degraded":
             decision = "model_degraded"
-            decision_label = "模型失效，暂停采用"
+            decision_label = "当前模型不可用，请使用规则回退"
             grade = "D"
         elif probability <= baseline and expected <= 0:
             decision = "no_edge"
@@ -152,6 +149,12 @@ class ConfidenceService:
             "brier_score": None if (calibration or {}).get("brier_score") is None else round(_float((calibration or {}).get("brier_score")), 4),
             "ece": None if (calibration or {}).get("ece") is None else round(_float((calibration or {}).get("ece")) * 100.0, 2),
             "model_drift_status": drift_status,
+            "model_status": (
+                "已回退" if drift_status == "fallback_active"
+                else "规则模式" if drift_status == "rules_active"
+                else "不可用" if drift_status == "degraded"
+                else "正常"
+            ),
             "drift_psi": round(_float(drift.get("max_psi")), 4),
             "drift_ks": round(_float(drift.get("max_ks")), 4),
             "decision_status": decision,

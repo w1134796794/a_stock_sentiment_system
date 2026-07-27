@@ -1,6 +1,7 @@
 """Minute-based realtime entry confirmation shared by intraday views."""
 from __future__ import annotations
 
+import json
 from threading import RLock
 from time import monotonic
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -14,6 +15,7 @@ from backtest.minute_entry import (
     EntryDecision,
     MinuteEntryEvaluator,
     normalize_minute_bars,
+    normalize_strategy_entry_modes,
 )
 from backtest.trade_calendar import TradeCalendar
 from core.realtime.models import normalize_stock_code
@@ -38,6 +40,24 @@ def _float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def classify_entry_mode(open_price: Any, pre_close: Any) -> str:
+    """Classify the opening layer independently from minute confirmation."""
+    open_value = _float(open_price)
+    previous_value = _float(pre_close)
+    if open_value <= 0 or previous_value <= 0:
+        return ""
+    gap = open_value / previous_value - 1.0
+    if gap <= 0.0100001:
+        return ENTRY_WEAK
+    if gap <= 0.0500001:
+        return ENTRY_CONTINUATION
+    return ENTRY_ACCELERATION
+
+
+def entry_mode_text(mode: str) -> str:
+    return MODE_LABELS.get(str(mode or ""), "待开盘确认")
 
 
 class RealtimeEntrySignalService:
@@ -120,31 +140,33 @@ class RealtimeEntrySignalService:
         code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
         name = str(quote.get("name") or row.get("name") or "")
         quote_date = str(quote.get("date") or "").replace("-", "")[:8]
-        if quote_date and quote_date != market_date:
-            return self._payload(
-                EntryDecision("observing", reason=f"行情日期{quote_date}与当日{market_date}不一致"),
-                "", market_date,
-            )
-
         pre_close = _float(quote.get("pre_close"), _float(previous.get("close")))
         open_price = _float(quote.get("open_price"))
         if not frame.empty:
             first = frame.iloc[0]
             open_price = open_price or _float(first.get("open"), _float(first.get("close")))
             pre_close = pre_close or _float(first.get("pre_close"))
+        preliminary_mode = classify_entry_mode(open_price, pre_close)
+        if quote_date and quote_date != market_date:
+            return self._payload(
+                EntryDecision("observing", reason=f"行情日期{quote_date}与当日{market_date}不一致"),
+                preliminary_mode, market_date,
+            )
+
         if open_price <= 0 or pre_close <= 0:
             return self._payload(
                 EntryDecision("observing", reason="当日开盘价或昨收价尚未取得"),
                 "", market_date,
             )
 
+        row_execution = self._row_execution(row)
+        if row_execution:
+            execution = {**execution, **row_execution}
         gap = open_price / pre_close - 1.0
-        mode = self._mode_for_gap(gap)
-        allowed_modes = {
-            str(item).strip()
-            for item in (execution.get("allowed_entry_modes") or [])
-            if str(item).strip()
-        }
+        mode = preliminary_mode
+        allowed_modes = normalize_strategy_entry_modes(
+            execution.get("allowed_entry_modes") or []
+        )
         if allowed_modes and mode not in allowed_modes:
             allowed_text = "、".join(MODE_LABELS.get(item, item) for item in sorted(allowed_modes))
             return self._payload(
@@ -187,6 +209,24 @@ class RealtimeEntrySignalService:
             live=True,
         )
         return self._payload(decision, mode, market_date, sector_detail=sector_detail)
+
+    @staticmethod
+    def _row_execution(row: Dict[str, Any]) -> Dict[str, Any]:
+        value = row.get("strategy_execution") or row.get("策略执行") or {}
+        if isinstance(value, dict):
+            execution = dict(value)
+        elif isinstance(value, str) and value.strip():
+            try:
+                parsed = json.loads(value)
+                execution = dict(parsed) if isinstance(parsed, dict) else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                execution = {}
+        else:
+            execution = {}
+        row_modes = row.get("allowed_entry_modes") or []
+        if row_modes:
+            execution["allowed_entry_modes"] = list(row_modes)
+        return execution
 
     @staticmethod
     def _mode_for_gap(gap: float) -> str:
@@ -242,7 +282,7 @@ class RealtimeEntrySignalService:
         return {
             "market_date": market_date,
             "entry_mode": mode,
-            "entry_mode_text": MODE_LABELS.get(mode, "等待分类"),
+            "entry_mode_text": entry_mode_text(mode),
             "signal_status": status,
             "signal_status_text": status_text,
             "signal": signal_name,
@@ -423,4 +463,9 @@ class RealtimeEntrySignalService:
         return self.dm
 
 
-__all__ = ["MODE_LABELS", "RealtimeEntrySignalService"]
+__all__ = [
+    "MODE_LABELS",
+    "RealtimeEntrySignalService",
+    "classify_entry_mode",
+    "entry_mode_text",
+]

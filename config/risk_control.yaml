@@ -18,8 +18,29 @@ max_positions: 8                 # 最多同时持仓只数
 min_open_gap: 0.0                # 仅“原固定开盘区间”对照模式使用
 max_open_gap: 0.03               # 仅“原固定开盘区间”对照模式使用
 market_entry_threshold: 50.0     # 弱市停止开仓
-market_strong_threshold: 70.0    # 强市才扩展至候选前 N 名
+market_active_threshold: 65.0    # 中性可交易阈值
+market_strong_threshold: 70.0    # 强市阈值
 neutral_market_max_rank: 1       # 中性市场只执行第 1 名
+direct_entry_min_score: 74.0
+neutral_market_min_score: 80.0
+active_market_min_score: 76.0
+reduced_position_gap: 0.02
+high_gap_position_multiplier: 0.75
+
+# ---- 分钟入场（实时与回测统一）----
+entry_confirm_deadline: '10:00:00'
+weak_entry_min_gap: -0.03
+weak_entry_max_gap: 0.01
+continuation_max_gap: 0.05
+entry_min_amount_pace: 0.80
+entry_max_amount_pace: 3.00
+continuation_min_auction_volume_ratio: 0.008
+continuation_min_auction_amount: 5000000.0
+intraday_strength_trigger_pct: 0.01
+intraday_min_tech_score: 80.0
+intraday_min_sector_resonance: 60.0
+intraday_min_amount_ratio: 0.80
+intraday_max_amount_ratio: 1.50
 
 # ---- 组合层：板块集中度 ----
 max_sector_concentration: 0.40   # 单一板块最大仓位
@@ -29,6 +50,10 @@ max_correlated_positions: 3      # 相关板块最多持仓数
 hard_stop_loss: 0.05             # 硬止损（亏损达此比例强制卖出）
 trailing_stop: 0.08              # 移动止损（从持仓最高点回撤比例）
 trailing_activation: 0.05        # 盈利达此比例后才启动移动止损
+trailing_mid_profit: 0.10        # 盈利10%进入中段
+trailing_high_profit: 0.20       # 盈利20%进入趋势段
+trailing_early_stop: 0.04        # 早段从高点回撤4%退出
+trailing_mid_stop: 0.06          # 中段从高点回撤6%退出
 time_stop_days: 5                # 时间止损：持仓超过 N 天
 time_stop_profit_threshold: 0.02 # 时间止损触发时的盈利下限
 
@@ -51,6 +76,9 @@ commission_rate: 0.0003          # 佣金率
 stamp_duty_rate: 0.001           # 印花税（卖出）
 slippage: 0.002                  # 滑点
 min_holding_days: 1              # 最小持仓天数（T+1）
+exit_minute_data_policy: cache_or_fetch  # 优先按分钟顺序撮合；缺失时允许补取并缓存
+daily_ohlc_path_policy: conservative_stop_first  # 日线降级时同日止损优先
+exit_policy_mode: strategy          # strategy/fixed_stop/atr_stop/structure_stop/staged_trailing/oos_selected
 
 # ---- 固定风险 / 保守凯利 ----
 position_sizing_mode: fixed_risk  # fixed_risk / conservative_kelly

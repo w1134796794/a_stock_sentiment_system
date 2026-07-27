@@ -27,6 +27,7 @@ from backtest.minute_entry import (
     EntryDecision,
     MinuteEntryEvaluator,
     normalize_minute_bars,
+    normalize_strategy_entry_modes,
 )
 from backtest.trade_calendar import TradeCalendar
 from core.signals.minute_amount_profile import MinuteAmountProfileRepository
@@ -109,6 +110,9 @@ class BacktestConfig:
 
     # 数据缺失时是否用随机价格兜底（B-1：默认关闭，缺数据则跳过该票，避免回测失真）
     use_simulated_prices: bool = False
+    exit_minute_data_policy: str = "cache_or_fetch"
+    daily_ohlc_path_policy: str = "conservative_stop_first"
+    exit_policy_mode: str = "strategy"
 
     @classmethod
     def from_risk_config(
@@ -116,8 +120,7 @@ class BacktestConfig:
         risk_control: Optional[bool] = None,
     ) -> "BacktestConfig":
         """Project the unified RiskConfig into the active backtest engine."""
-        defaults = cls()
-        trailing_pct = max(float(risk_config.trailing_stop), defaults.trailing_stop_pct, 0.0)
+        trailing_pct = max(float(risk_config.trailing_stop), 0.0)
         return cls(
             initial_capital=float(initial_capital or risk_config.initial_capital),
             max_position_per_stock=float(risk_config.max_position_per_stock),
@@ -133,21 +136,46 @@ class BacktestConfig:
             kelly_payoff_haircut=float(getattr(risk_config, "kelly_payoff_haircut", 0.80)),
             min_open_gap=float(risk_config.min_open_gap),
             max_open_gap=float(risk_config.max_open_gap),
-            # 入场和退出阈值是本轮历史样本验证后的模拟交易策略，不反向修改全局风控。
-            market_entry_threshold=defaults.market_entry_threshold,
-            market_strong_threshold=defaults.market_strong_threshold,
+            reduced_position_gap=float(risk_config.reduced_position_gap),
+            high_gap_position_multiplier=float(risk_config.high_gap_position_multiplier),
+            entry_confirm_deadline=str(risk_config.entry_confirm_deadline),
+            weak_entry_min_gap=float(risk_config.weak_entry_min_gap),
+            weak_entry_max_gap=float(risk_config.weak_entry_max_gap),
+            continuation_max_gap=float(risk_config.continuation_max_gap),
+            entry_min_amount_pace=float(risk_config.entry_min_amount_pace),
+            entry_max_amount_pace=float(risk_config.entry_max_amount_pace),
+            continuation_min_auction_volume_ratio=float(risk_config.continuation_min_auction_volume_ratio),
+            continuation_min_auction_amount=float(risk_config.continuation_min_auction_amount),
+            market_entry_threshold=float(risk_config.market_entry_threshold),
+            market_strong_threshold=float(risk_config.market_active_threshold),
+            market_hot_threshold=float(risk_config.market_strong_threshold),
             neutral_market_max_rank=int(risk_config.neutral_market_max_rank),
+            direct_entry_min_score=float(risk_config.direct_entry_min_score),
+            neutral_market_min_score=float(risk_config.neutral_market_min_score),
+            active_market_min_score=float(risk_config.active_market_min_score),
+            intraday_strength_trigger_pct=float(risk_config.intraday_strength_trigger_pct),
+            intraday_min_tech_score=float(risk_config.intraday_min_tech_score),
+            intraday_min_sector_resonance=float(risk_config.intraday_min_sector_resonance),
+            intraday_min_amount_ratio=float(risk_config.intraday_min_amount_ratio),
+            intraday_max_amount_ratio=float(risk_config.intraday_max_amount_ratio),
             risk_control=bool(risk_config.enabled if risk_control is None else risk_control),
-            stop_loss_pct=min(float(risk_config.hard_stop_loss), defaults.stop_loss_pct),
+            stop_loss_pct=float(risk_config.hard_stop_loss),
             trailing_stop=trailing_pct > 0,
             trailing_stop_pct=trailing_pct,
-            trailing_activation_pct=max(float(risk_config.trailing_activation), defaults.trailing_activation_pct, 0.0),
+            trailing_activation_pct=max(float(risk_config.trailing_activation), 0.0),
+            trailing_mid_profit_pct=float(risk_config.trailing_mid_profit),
+            trailing_high_profit_pct=float(risk_config.trailing_high_profit),
+            trailing_early_stop_pct=float(risk_config.trailing_early_stop),
+            trailing_mid_stop_pct=float(risk_config.trailing_mid_stop),
             time_stop_days=int(risk_config.time_stop_days),
             time_stop_profit_threshold=float(risk_config.time_stop_profit_threshold),
             commission_rate=float(risk_config.commission_rate),
             stamp_duty_rate=float(risk_config.stamp_duty_rate),
             slippage=float(risk_config.slippage),
             min_holding_days=int(risk_config.min_holding_days),
+            exit_minute_data_policy=str(getattr(risk_config, "exit_minute_data_policy", "cache_or_fetch")),
+            daily_ohlc_path_policy=str(getattr(risk_config, "daily_ohlc_path_policy", "conservative_stop_first")),
+            exit_policy_mode=str(getattr(risk_config, "exit_policy_mode", "strategy")),
         )
 
 
@@ -213,6 +241,14 @@ class BacktestEngine:
         self._last_entry_meta: Dict[str, Dict[str, Any]] = {}
         self._last_sizing_meta: Dict[str, Any] = {}
         self._minute_frames: Dict[Tuple[str, str], pd.DataFrame] = {}
+        self._exit_minute_frames: Dict[Tuple[str, str], pd.DataFrame] = {}
+        self._exit_execution_audit: Dict[str, int] = {
+            "minute_days": 0,
+            "daily_fallback_days": 0,
+            "minute_exit_triggers": 0,
+            "daily_exit_triggers": 0,
+            "ambiguous_daily_bars": 0,
+        }
         self._auction_rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
         self._sector_peers: Dict[str, List[str]] = {}
         self._day_plans = pd.DataFrame()
@@ -387,26 +423,44 @@ class BacktestEngine:
             # 只保留买入计划
             if '动作' in df.columns:
                 df = df[df['动作'] == '买入']
+            self.entry_candidate_count += int(len(df))
             market_score = 0.0
             if '原始_mkt_market_score' in df.columns:
                 values = pd.to_numeric(df['原始_mkt_market_score'], errors='coerce').dropna()
                 market_score = float(values.iloc[0]) if not values.empty else 0.0
             if market_score > 0 and market_score < self.config.market_entry_threshold:
                 logger.info(f"[{date}] 市场评分{market_score:.1f}，弱市停止开仓")
+                for _, row in df.iterrows():
+                    self._record_gate_attempt(
+                        row, self.calendar.next(date), "market_gate", "market_too_weak",
+                        f"市场评分{market_score:.1f}低于开仓阈值{self.config.market_entry_threshold:.1f}",
+                    )
                 return pd.DataFrame()
             if market_score > 0:
                 score_col = df['综合评分'] if '综合评分' in df.columns else pd.Series(0.0, index=df.index)
                 score_values = pd.to_numeric(score_col, errors='coerce').fillna(0)
                 if market_score < self.config.market_strong_threshold:
                     before = len(df)
-                    df = df[score_values >= self.config.neutral_market_min_score]
+                    keep = score_values >= self.config.neutral_market_min_score
+                    for _, row in df[~keep].iterrows():
+                        self._record_gate_attempt(
+                            row, self.calendar.next(date), "market_gate", "score_below_neutral_threshold",
+                            f"中性偏弱市场评分不足{self.config.neutral_market_min_score:.0f}",
+                        )
+                    df = df[keep]
                     logger.info(
                         f"[{date}] 市场评分{market_score:.1f}，中性偏弱仅保留评分"
                         f"{self.config.neutral_market_min_score:.0f}以上候选: {before}->{len(df)}"
                     )
                 elif market_score < self.config.market_hot_threshold:
                     before = len(df)
-                    df = df[score_values >= self.config.active_market_min_score]
+                    keep = score_values >= self.config.active_market_min_score
+                    for _, row in df[~keep].iterrows():
+                        self._record_gate_attempt(
+                            row, self.calendar.next(date), "market_gate", "score_below_active_threshold",
+                            f"中性市场评分不足{self.config.active_market_min_score:.0f}",
+                        )
+                    df = df[keep]
                     logger.info(
                         f"[{date}] 市场评分{market_score:.1f}，中性市场保留评分"
                         f"{self.config.active_market_min_score:.0f}以上候选: {before}->{len(df)}"
@@ -431,6 +485,15 @@ class BacktestEngine:
         # 检查是否已有持仓
         if stock_code in self.current_positions:
             logger.debug(f"{stock_name} 已有持仓，跳过")
+            self._record_gate_attempt(plan, date, "portfolio_gate", "already_held", "已有持仓")
+            return
+
+        # 先识别客观分钟信号，再由仓位、现金和集中度决定账户是否接纳。
+        # 这样回测能区分“市场没有买点”和“有买点但账户已满”，避免把组合约束
+        # 错误解释为策略没有交易机会。
+        can_buy, entry_price = self._check_buy_conditions(plan, date, stock_code, stock_name)
+        if not can_buy:
+            self._clear_entry_state(stock_code)
             return
 
         position_size = self._calculate_position_size(plan)
@@ -439,6 +502,11 @@ class BacktestEngine:
             logger.info(
                 f"{stock_name} 仓位模型拒绝开仓: {sizing_meta.get('rationale') or '无正期望'}"
             )
+            self._record_gate_attempt(
+                plan, date, "sizing_gate", "position_sizing_rejected",
+                str(sizing_meta.get('rationale') or '仓位模型无正期望'),
+            )
+            self._clear_entry_state(stock_code)
             return
         current_position_value = sum(pos['market_value'] for pos in self.current_positions.values())
         strategy_id = str(plan.get('策略ID') or 'default')
@@ -446,6 +514,7 @@ class BacktestEngine:
         strategy_version = str(plan.get('策略版本') or '')
         strategy_sources = str(plan.get('策略来源') or strategy_id)
         execution = self._plan_execution(plan)
+        exit_config = self._execution_exit_config(execution)
         strategy_position_cap = self._float(plan.get('策略单票仓位上限%')) / 100.0
         if strategy_position_cap > 0:
             position_size = min(position_size, self.total_capital * strategy_position_cap)
@@ -460,6 +529,11 @@ class BacktestEngine:
             )
             if strategy_open_count >= strategy_max_positions:
                 logger.info(f"{strategy_name} 已达策略持仓上限{strategy_max_positions}只，跳过 {stock_name}")
+                self._record_gate_attempt(
+                    plan, date, "portfolio_gate", "strategy_position_limit",
+                    f"策略持仓已达{strategy_max_positions}只",
+                )
+                self._clear_entry_state(stock_code)
                 return
 
         # 组合层风控闸门（仅风控开启时施加：持仓数 / 单票 / 总仓 / 板块集中度）
@@ -467,6 +541,8 @@ class BacktestEngine:
             # a) 持仓数上限
             if len(self.current_positions) >= self.config.max_positions:
                 logger.warning(f"持仓数已达上限{self.config.max_positions}只，跳过买入 {stock_name}")
+                self._record_gate_attempt(plan, date, "portfolio_gate", "account_position_limit", "账户持仓数已达上限")
+                self._clear_entry_state(stock_code)
                 return
 
             # b) 单票上限
@@ -475,9 +551,23 @@ class BacktestEngine:
                 position_size = max_position_value
 
             # c) 总仓位上限
-            max_total = self.total_capital * self.config.max_total_position
+            market_total_position_cap = self._float(
+                plan.get('市场总仓位上限%'), 100.0
+            ) / 100.0
+            effective_total_position_cap = min(
+                self.config.max_total_position,
+                max(market_total_position_cap, 0.0),
+            )
+            max_total = self.total_capital * effective_total_position_cap
             if current_position_value + position_size > max_total:
-                logger.warning(f"总仓位超限，跳过买入 {stock_name}")
+                logger.warning(
+                    f"总仓位超限({effective_total_position_cap:.0%})，跳过买入 {stock_name}"
+                )
+                self._record_gate_attempt(
+                    plan, date, "portfolio_gate", "total_position_limit",
+                    f"当前情绪阶段总仓位上限{effective_total_position_cap:.0%}",
+                )
+                self._clear_entry_state(stock_code)
                 return
 
             # d) 板块集中度
@@ -492,16 +582,13 @@ class BacktestEngine:
                     allowed = max(max_sector - sector_value, 0.0)
                     if allowed < self.total_capital * 0.005:
                         logger.warning(f"板块[{sector}]集中度超限，跳过买入 {stock_name}")
+                        self._record_gate_attempt(
+                            plan, date, "portfolio_gate", "sector_concentration_limit",
+                            f"板块[{sector}]集中度超限",
+                        )
+                        self._clear_entry_state(stock_code)
                         return
                     position_size = allowed
-
-        # 检查开盘情况是否满足买入条件
-        can_buy, entry_price = self._check_buy_conditions(plan, date, stock_code, stock_name)
-        if not can_buy:
-            self._last_entry_gap.pop(stock_code, None)
-            self._last_entry_signal.pop(stock_code, None)
-            self._last_entry_meta.pop(stock_code, None)
-            return
 
         entry_gap = self._last_entry_gap.get(stock_code, 0.0)
         gap_multiplier = self._entry_gap_position_multiplier(entry_gap)
@@ -514,16 +601,14 @@ class BacktestEngine:
         # 入场确认和追高降仓后再检查现金。
         if position_size > self.cash:
             logger.warning(f"现金不足，跳过买入 {stock_name}")
-            self._last_entry_gap.pop(stock_code, None)
-            self._last_entry_signal.pop(stock_code, None)
-            self._last_entry_meta.pop(stock_code, None)
+            self._record_gate_attempt(plan, date, "portfolio_gate", "insufficient_cash", "可用现金不足")
+            self._clear_entry_state(stock_code)
             return
         
         if entry_price <= 0:
             logger.warning(f"{stock_name} 买入价格无效，跳过")
-            self._last_entry_gap.pop(stock_code, None)
-            self._last_entry_signal.pop(stock_code, None)
-            self._last_entry_meta.pop(stock_code, None)
+            self._record_gate_attempt(plan, date, "matching_gate", "invalid_entry_price", "买入价格无效")
+            self._clear_entry_state(stock_code)
             return
 
         # 确保买入价格不超过对应板块涨停价。
@@ -540,11 +625,14 @@ class BacktestEngine:
 
         if entry_price <= 0:
             logger.warning(f"{stock_name} 买入价格无效，跳过")
+            self._clear_entry_state(stock_code)
             return
         shares = int(position_size / entry_price / 100) * 100  # 整手
 
         if shares < 100:
             logger.warning(f"{stock_name} 计算股数不足1手，跳过")
+            self._record_gate_attempt(plan, date, "sizing_gate", "below_one_lot", "目标仓位不足一手")
+            self._clear_entry_state(stock_code)
             return
 
         actual_cost = shares * entry_price
@@ -559,6 +647,13 @@ class BacktestEngine:
         factor_metrics_json = self._factor_metrics_json(plan)
         factor_context_json = self._factor_context_json(plan)
         factor_context = json.loads(factor_context_json or '{}')
+        from backtest.exit_policy import ExitPolicyRepository, resolve_exit_config
+
+        exit_policy = str(self.config.exit_policy_mode or "strategy").lower()
+        if exit_policy == "oos_selected":
+            selected_policy = ExitPolicyRepository().resolve(strategy_id, date)
+            exit_policy = str(selected_policy.get("policy") or "strategy")
+        exit_config = resolve_exit_config(exit_config, policy=exit_policy, factor_context=factor_context)
         open_gap = self._last_entry_gap.pop(stock_code, 0.0)
         entry_signal = self._last_entry_signal.pop(stock_code, "竞价买点")
         entry_meta = self._last_entry_meta.pop(stock_code, {})
@@ -589,7 +684,7 @@ class BacktestEngine:
             'entry_signal': entry_signal,
             'entry_time': str(entry_meta.get('entry_time') or '09:30:00'),
             'confirm_time': str(entry_meta.get('confirm_time') or ''),
-            'stop_loss_price': entry_price * (1 - self.config.stop_loss_pct),
+            'stop_loss_price': entry_price * (1 - exit_config['hard_stop_loss']),
             'highest_price': entry_price,  # 用于跟踪回撤
             'max_favorable_price': entry_price,
             'min_adverse_price': entry_price,
@@ -601,6 +696,8 @@ class BacktestEngine:
             'strategy_name': strategy_name,
             'strategy_version': strategy_version,
             'strategy_sources': strategy_sources,
+            'strategy_execution': execution,
+            'exit_config': exit_config,
         }
 
         logger.info(f"[{date}] 买入 {stock_name}({stock_code}): {shares}股 @ {entry_price:.2f}, 成本:{actual_cost+commission:.2f}")
@@ -844,11 +941,9 @@ class BacktestEngine:
                 return None
         else:
             resolved = configured
-        allowed = {
-            str(item).strip()
-            for item in self._plan_execution(plan).get('allowed_entry_modes') or []
-            if str(item).strip()
-        }
+        allowed = normalize_strategy_entry_modes(
+            self._plan_execution(plan).get('allowed_entry_modes') or []
+        )
         if allowed and resolved not in allowed:
             return None
         return resolved
@@ -857,6 +952,32 @@ class BacktestEngine:
         self, plan: pd.Series, date: str, stock_code: str, stock_name: str,
         decision: EntryDecision, *, entry_mode: str,
     ) -> None:
+        reason_code = str(decision.status or 'entry_signal')
+        reason_text = str(decision.reason or '')
+        detailed_reasons = {
+            '等待当日一分钟行情': 'missing_minutes',
+            '等待开盘前5分钟完成': 'incomplete_opening_window',
+            '开盘不在弱转强区间': 'weak_gap_out_of_range',
+            '开盘不在强势延续区间': 'continuation_gap_out_of_range',
+            '高开超过5%，仅高开加速模式参与': 'acceleration_mode_required',
+            '低开超过3%，取消': 'gap_below_entry_floor',
+            '跌破开盘前5分钟低点': 'broke_opening_low',
+            '缺少真实板块指数或成分股宽度，保持观察': 'missing_sector_confirmation',
+            '缺少历史同分钟成交进度模型，保持观察': 'missing_amount_profile',
+            '弱转强条件尚未全部满足': 'weak_signal_pending',
+            '10:00前未完成弱转强确认': 'weak_confirmation_timeout',
+            '缺少真实竞价成交额、竞价量或昨日日量': 'missing_auction_evidence',
+            '竞价成交额或竞价量比不足': 'auction_volume_insufficient',
+            '强势延续条件尚未全部满足': 'continuation_signal_pending',
+            '10:00前未出现有效承接或突破': 'continuation_confirmation_timeout',
+            '缺少竞价明细且10:00前未完成开盘强势确认': 'opening_strength_confirmation_timeout',
+            '非龙头或主线核心，不参与高开加速': 'acceleration_not_leader',
+            '接近涨停开盘，暂无可成交证据': 'locked_limit_unfilled',
+            '高开加速条件尚未全部满足': 'acceleration_signal_pending',
+            '10:00前未出现龙头加速确认': 'acceleration_confirmation_timeout',
+        }
+        if reason_code in {'rejected', 'cancelled', 'observing', 'data_insufficient', 'signal_unfilled'}:
+            reason_code = detailed_reasons.get(reason_text, reason_code)
         self.entry_attempts.append({
             'date': str(date),
             'stock_code': stock_code,
@@ -867,6 +988,8 @@ class BacktestEngine:
             'strategy_id': str(plan.get('策略ID') or 'default'),
             'strategy_name': str(plan.get('策略名称') or ''),
             'strategy_version': str(plan.get('策略版本') or ''),
+            'stage': 'entry_signal',
+            'reason_code': reason_code,
             'signal': decision.signal,
             'status': decision.status,
             'reason': decision.reason,
@@ -885,6 +1008,47 @@ class BacktestEngine:
             'active_buy_ratio': decision.active_buy_ratio,
         })
 
+    def _clear_entry_state(self, stock_code: str) -> None:
+        """Discard transient signal metadata when a later account gate rejects the order."""
+        self._last_entry_gap.pop(stock_code, None)
+        self._last_entry_signal.pop(stock_code, None)
+        self._last_entry_meta.pop(stock_code, None)
+
+    def _record_gate_attempt(
+        self, plan: pd.Series, date: str, stage: str, reason_code: str, reason: str,
+        *, status: str = "rejected",
+    ) -> None:
+        """Record a deterministic non-signal rejection in the transaction funnel."""
+        self.entry_attempts.append({
+            'date': str(date or ''),
+            'stock_code': str(plan.get('代码') or '').split('.', 1)[0].zfill(6),
+            'stock_name': str(plan.get('名称') or ''),
+            'plan_rank': self._int(plan.get('优先级')),
+            'plan_score': self._float(plan.get('综合评分')),
+            'entry_mode': '',
+            'strategy_id': str(plan.get('策略ID') or 'default'),
+            'strategy_name': str(plan.get('策略名称') or ''),
+            'strategy_version': str(plan.get('策略版本') or ''),
+            'stage': str(stage),
+            'reason_code': str(reason_code),
+            'signal': '',
+            'status': str(status),
+            'reason': str(reason),
+            'confirm_time': '',
+            'entry_time': '',
+            'entry_price': 0.0,
+            'open_gap_pct': 0.0,
+            'amount_pace': 0.0,
+            'sector_confirmed': False,
+            'data_status': 'complete',
+            'data_completeness': 1.0,
+            'profile_samples': 0,
+            'hold_minutes': 0,
+            'false_break_count': 0,
+            'pullback_quality': 0.0,
+            'active_buy_ratio': 0.0,
+        })
+
     def _check_buy_conditions(self, plan: pd.Series, date: str, stock_code: str, stock_name: str) -> Tuple[bool, float]:
         """
         检查买入条件
@@ -894,7 +1058,16 @@ class BacktestEngine:
         """
         target_price = plan['目标价']
         entry_timing = plan.get('介入时机', '09:31-10:00')
-        self.entry_candidate_count += 1
+        def reject(reason_code: str, reason: str, *, data_status: str = 'complete') -> Tuple[bool, float]:
+            decision = EntryDecision(
+                status=reason_code,
+                reason=reason,
+                open_gap_pct=self._last_entry_gap.get(stock_code, 0.0),
+                data_status=data_status,
+                data_completeness=0.0 if data_status != 'complete' else 1.0,
+            )
+            self._record_entry_attempt(plan, date, stock_code, stock_name, decision, entry_mode='')
+            return False, 0.0
         
         # 获取当日开盘数据
         try:
@@ -903,7 +1076,7 @@ class BacktestEngine:
             
             if not daily_data:
                 logger.info(f"{stock_name} 无法获取当日开盘数据，不能确认高开，放弃买入")
-                return False, 0
+                return reject('missing_daily_open', '缺少当日开盘数据', data_status='missing_daily')
             
             open_price = daily_data.get('open', 0)
             high_price = daily_data.get('high', 0)
@@ -911,11 +1084,11 @@ class BacktestEngine:
             
             if open_price <= 0:
                 logger.info(f"{stock_name} 开盘价无效，不能确认高开，放弃买入")
-                return False, 0
+                return reject('invalid_daily_open', '当日开盘价无效', data_status='invalid_daily')
                 
         except Exception as e:
             logger.debug(f"{stock_name} 获取开盘数据失败: {e}，不能确认高开，放弃买入")
-            return False, 0
+            return reject('daily_open_error', f'获取开盘数据失败: {e}', data_status='daily_error')
         
         prev_close = float(daily_data.get('pre_close') or 0)
         if prev_close <= 0:
@@ -923,7 +1096,7 @@ class BacktestEngine:
         gap = open_gap_pct({"open": open_price, "pre_close": prev_close}, prev_close)
         if gap is None:
             logger.info(f"{stock_name} 昨收价缺失，无法计算开盘状态，放弃买入")
-            return False, 0
+            return reject('missing_previous_close', '缺少昨收，无法计算开盘状态', data_status='missing_previous_close')
         self._last_entry_gap[stock_code] = gap
 
         lu_price = None
@@ -936,7 +1109,7 @@ class BacktestEngine:
             logger.info(
                 f"{stock_name} 当前开盘分层不在策略允许入场模式内: {','.join(str(item) for item in allowed)}"
             )
-            return False, 0
+            return reject('entry_mode_not_allowed', '开盘分层不在策略允许入场模式内')
         if entry_mode != ENTRY_FIXED:
             previous_date = self.calendar.prev(date)
             previous_bar = self._get_stock_daily_bar(stock_code, previous_date) or {}
@@ -989,25 +1162,25 @@ class BacktestEngine:
         if gap <= self.config.min_open_gap:
             label = "低开" if gap < 0 else "平开"
             logger.info(f"{stock_name} {label}{gap:.2%}，未高开，放弃竞价买点")
-            return False, 0
+            return reject('fixed_gap_not_high_open', f'{label}不符合固定开盘区间')
         if gap > self.config.max_open_gap:
             logger.info(f"{stock_name} 高开{gap:.2%}超过{self.config.max_open_gap:.2%}，不追高")
-            return False, 0
+            return reject('fixed_gap_too_high', '高开超过固定区间上限')
         if lu_price is not None and open_price >= lu_price * 0.998:
             logger.info(f"{stock_name} 涨停开盘，无法买入")
-            return False, 0
+            return reject('locked_limit_unfilled', '涨停开盘无法成交')
 
         plan_score = self._float(plan.get('综合评分'))
         if plan_score < self.config.direct_entry_min_score:
             if not self._intraday_strength_ready(plan):
                 logger.info(f"{stock_name} 评分{plan_score:.1f}未达到竞价买点，盘中转强条件不足")
-                return False, 0
+                return reject('score_and_strength_insufficient', '评分不足且盘中转强前置条件未满足')
             trigger_price = open_price * (1 + self.config.intraday_strength_trigger_pct)
             if high_price < trigger_price:
                 logger.info(
                     f"{stock_name} 盘中最高价未触及转强价{trigger_price:.2f}，继续观察"
                 )
-                return False, 0
+                return reject('intraday_trigger_not_reached', '盘中最高价未触及转强触发价')
             self._last_entry_signal[stock_code] = "盘中转强"
             entry_price = trigger_price * (1 + self.config.slippage)
             logger.info(f"{stock_name} 盘中触及转强价{trigger_price:.2f}，确认买入")
@@ -1039,7 +1212,7 @@ class BacktestEngine:
             else:
                 # 目标价高于最高价，无法成交
                 logger.info(f"{stock_name} 目标价{target_price:.2f}高于最高价{high_price:.2f}，无法买入")
-                return False, 0
+                return reject('target_price_not_reached', '目标价高于当日最高价')
         else:
             # 目标价为0，使用开盘价
             entry_price = open_price * (1 + self.config.slippage)
@@ -1068,6 +1241,9 @@ class BacktestEngine:
 
         position_str = plan.get('仓位', 'medium')
         position_pct = position_map.get(position_str, 0.1)
+        explicit_position_pct = self._float(plan.get('计划基础仓位%')) / 100.0
+        if explicit_position_pct > 0:
+            position_pct = explicit_position_pct
 
         # 热点共振增加仓位
         if plan.get('热点共振', False):
@@ -1153,9 +1329,26 @@ class BacktestEngine:
             session_open = self._float(daily_bar.get('open'), current_price)
             session_low = self._float(daily_bar.get('low'), current_price)
 
+            minute_result = self._minute_exit_decision(stock_code, position, date, daily_bar)
+            if minute_result is not None:
+                self._exit_execution_audit["minute_days"] += 1
+                if minute_result.get("sell"):
+                    self._exit_execution_audit["minute_exit_triggers"] += 1
+                    stocks_to_sell.append((
+                        stock_code,
+                        self._float(minute_result.get("price"), current_price),
+                        str(minute_result.get("reason") or "minute_exit"),
+                    ))
+                continue
+            self._exit_execution_audit["daily_fallback_days"] += 1
+
             # 最高价采用当日 high，而不是只看收盘价；触发仍按收盘确认，避免
             # 仅有 OHLC 时假设无法得知的日内高低点先后顺序。
             session_high = self._float(daily_bar.get('high'), current_price)
+            prior_peak = max(
+                self._float(position.get('highest_price'), position['entry_price']),
+                position['entry_price'],
+            )
             self._update_excursion(position, session_high, session_low)
             position['highest_price'] = max(
                 self._float(position.get('highest_price'), position['entry_price']),
@@ -1174,24 +1367,44 @@ class BacktestEngine:
             stop_price = self._float(position.get('stop_loss_price'))
             if session_open <= stop_price:
                 stocks_to_sell.append((stock_code, session_open, 'stop_loss_gap'))
+                self._exit_execution_audit["daily_exit_triggers"] += 1
                 logger.info(f"[{date}] {position['stock_name']} 跳空跌破止损线，按开盘价止损: {session_open:.2f}")
                 continue
             if session_low <= stop_price:
                 stocks_to_sell.append((stock_code, stop_price, 'stop_loss'))
+                self._exit_execution_audit["daily_exit_triggers"] += 1
                 logger.info(f"[{date}] {position['stock_name']} 盘中触发硬止损: {stop_price:.2f}")
                 continue
 
             # ========== 2. 跟踪止损（移动止盈）==========
-            if self.config.trailing_stop and position['highest_price'] > position['entry_price']:
+            exit_config = self._position_exit_config(position)
+            peak_profit_today = (session_high - position['entry_price']) / position['entry_price']
+            possible_distance = self._trailing_stop_distance(peak_profit_today, exit_config)
+            if (
+                peak_profit_today >= exit_config['trailing_activation']
+                and session_low <= session_high * (1.0 - possible_distance)
+                and session_high > prior_peak
+            ):
+                self._exit_execution_audit["ambiguous_daily_bars"] += 1
+            # Daily OHLC cannot establish whether today's new high occurred
+            # before the low. Only a peak known before this session may trigger
+            # a daily fallback trailing exit; today's high becomes tomorrow's peak.
+            trailing_peak = (
+                session_high
+                if str(self.config.daily_ohlc_path_policy).lower() == "optimistic_high_first"
+                else prior_peak
+            )
+            if exit_config['trailing_stop'] > 0 and trailing_peak > position['entry_price']:
                 # 计算从最高点的回撤
-                drawdown_from_high = (position['highest_price'] - current_price) / position['highest_price']
+                drawdown_from_high = (trailing_peak - current_price) / trailing_peak
 
                 # 只有当盈利超过激活阈值后才启动跟踪止损
-                profit_pct = (position['highest_price'] - position['entry_price']) / position['entry_price']
+                profit_pct = (trailing_peak - position['entry_price']) / position['entry_price']
 
-                trailing_distance = self._trailing_stop_distance(profit_pct)
-                if profit_pct >= self.config.trailing_activation_pct and drawdown_from_high >= trailing_distance:
+                trailing_distance = self._trailing_stop_distance(profit_pct, exit_config)
+                if profit_pct >= exit_config['trailing_activation'] and drawdown_from_high >= trailing_distance:
                     stocks_to_sell.append((stock_code, current_price, 'trailing_stop'))
+                    self._exit_execution_audit["daily_exit_triggers"] += 1
                     logger.info(f"[{date}] {position['stock_name']} 触发跟踪止损: {current_price:.2f} "
                                f"(最高点{position['highest_price']:.2f}, 回撤{drawdown_from_high:.2%}, "
                                f"阶段线{trailing_distance:.2%})")
@@ -1199,10 +1412,11 @@ class BacktestEngine:
 
             # ========== 3. 时间止损 ==========
             holding_days = self._calculate_holding_days(position['entry_date'], date)
-            if holding_days >= self.config.time_stop_days:
+            if holding_days >= int(exit_config['time_stop_days']):
                 # 持仓时间过长且盈利未达到预期，强制卖出
-                if current_pnl_pct < self.config.time_stop_profit_threshold:
+                if current_pnl_pct < exit_config['time_stop_profit_threshold']:
                     stocks_to_sell.append((stock_code, current_price, 'time_stop'))
+                    self._exit_execution_audit["daily_exit_triggers"] += 1
                     logger.info(f"[{date}] {position['stock_name']} 触发时间止损: {current_price:.2f} "
                                f"(持仓{holding_days}天, 盈利{current_pnl_pct:.2%})")
                     continue
@@ -1210,6 +1424,118 @@ class BacktestEngine:
         # 执行全部卖出
         for stock_code, sell_price, reason in stocks_to_sell:
             self._execute_sell(stock_code, sell_price, date, reason)
+
+    def _minute_exit_decision(
+        self, stock_code: str, position: Dict[str, Any], date: str, daily_bar: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Chronologically evaluate exits when one-minute bars are available.
+
+        ``None`` requests the explicitly audited daily-OHLC fallback. A dict
+        means the minute session was handled, even when no exit was triggered.
+        """
+        if str(self.config.exit_minute_data_policy or "").lower() == "daily_only":
+            return None
+        bars = self._load_exit_minute_bars(stock_code, date)
+        if bars.empty:
+            return None
+        entry_price = self._float(position.get("entry_price"))
+        stop_price = self._float(position.get("stop_loss_price"))
+        exit_config = self._position_exit_config(position)
+        peak = max(self._float(position.get("highest_price"), entry_price), entry_price)
+        session_low = entry_price
+        session_high = peak
+        first = True
+        for row in bars.itertuples(index=False):
+            minute_open = self._float(getattr(row, "open", 0.0))
+            minute_high = self._float(getattr(row, "high", minute_open), minute_open)
+            minute_low = self._float(getattr(row, "low", minute_open), minute_open)
+            minute_close = self._float(getattr(row, "close", minute_open), minute_open)
+            if first and stop_price > 0 and minute_open <= stop_price:
+                return {"sell": True, "price": minute_open, "reason": "stop_loss_gap_minute"}
+            first = False
+            session_low = min(session_low, minute_low)
+            session_high = max(session_high, minute_high)
+
+            # One-minute OHLC still hides tick order. Use the conservative
+            # adverse-first path inside a minute before accepting a new peak.
+            if stop_price > 0 and minute_low <= stop_price:
+                self._update_excursion(position, session_high, session_low)
+                price = min(minute_open, stop_price) if minute_open > 0 else stop_price
+                return {"sell": True, "price": price, "reason": "stop_loss_minute"}
+
+            peak = max(peak, minute_high)
+            position["highest_price"] = peak
+            profit_pct = (peak - entry_price) / entry_price if entry_price > 0 else 0.0
+            trailing_distance = self._trailing_stop_distance(profit_pct, exit_config)
+            trailing_price = peak * (1.0 - trailing_distance)
+            if (
+                exit_config["trailing_stop"] > 0
+                and profit_pct >= exit_config["trailing_activation"]
+                and minute_low <= trailing_price
+            ):
+                self._update_excursion(position, session_high, session_low)
+                price = min(minute_open, trailing_price) if 0 < minute_open < trailing_price else trailing_price
+                return {"sell": True, "price": price, "reason": "trailing_stop_minute"}
+            position["last_close"] = minute_close
+
+        self._update_excursion(position, session_high, session_low)
+        close_price = self._float(bars.iloc[-1].get("close"), self._float(daily_bar.get("close")))
+        position["market_value"] = position["shares"] * close_price
+        position["last_close"] = close_price
+        holding_days = self._calculate_holding_days(position["entry_date"], date)
+        current_pnl_pct = (close_price - entry_price) / entry_price if entry_price > 0 else 0.0
+        if (
+            holding_days >= int(exit_config["time_stop_days"])
+            and current_pnl_pct < exit_config["time_stop_profit_threshold"]
+        ):
+            return {"sell": True, "price": close_price, "reason": "time_stop_minute_close"}
+        return {"sell": False}
+
+    def _load_exit_minute_bars(self, stock_code: str, date: str) -> pd.DataFrame:
+        key = (str(date), str(stock_code).zfill(6))
+        if key in self._exit_minute_frames:
+            return self._exit_minute_frames[key]
+        frame = pd.DataFrame()
+        policy = str(self.config.exit_minute_data_policy or "cache_or_fetch").lower()
+        ts_code = self._standardize_stock_code(stock_code)
+        stock_dir_value = getattr(self.dm, "stock_dir", None)
+        cache_file = Path(stock_dir_value) / "tick" / f"{ts_code}_{date}.csv" if stock_dir_value else None
+        try:
+            if cache_file is not None and cache_file.exists():
+                frame = pd.read_csv(cache_file)
+            elif policy == "cache_or_fetch":
+                frame = self.dm.get_stock_tick(ts_code, str(date))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[{date}] {stock_code} 退出分钟行情不可用: {exc}")
+        normalized = self._normalize_full_minute_bars(frame)
+        self._exit_minute_frames[key] = normalized
+        return normalized
+
+    @staticmethod
+    def _normalize_full_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
+        if frame is None or frame.empty:
+            return pd.DataFrame()
+        data = frame.copy()
+        if "time" not in data.columns and "datetime" in data.columns:
+            data["time"] = pd.to_datetime(data["datetime"], errors="coerce").dt.strftime("%H:%M:%S")
+        if "time" not in data.columns:
+            return pd.DataFrame()
+
+        def normalize_time(value: Any) -> str:
+            text = str(value or "").strip().split(" ")[-1]
+            if len(text) == 5 and text[2] == ":":
+                return text + ":00"
+            parsed = pd.to_datetime(text, errors="coerce")
+            return parsed.strftime("%H:%M:%S") if pd.notna(parsed) else text[-8:]
+
+        data["time"] = data["time"].map(normalize_time)
+        for column in ("open", "high", "low", "close"):
+            if column not in data.columns:
+                data[column] = data.get("price", 0.0)
+            data[column] = pd.to_numeric(data[column], errors="coerce")
+        return data[
+            data["time"].between("09:30:00", "15:00:59") & (data["close"] > 0)
+        ].sort_values("time").drop_duplicates("time", keep="last").reset_index(drop=True)
 
     def _apply_corporate_action_adjustment(
         self, stock_code: str, position: Dict, daily_bar: Dict, date: str,
@@ -1252,14 +1578,40 @@ class BacktestEngine:
             return amount_yuan
         return cls._float(daily_bar.get('amount')) * 1000.0
 
-    def _trailing_stop_distance(self, peak_profit_pct: float) -> float:
+    def _trailing_stop_distance(
+        self, peak_profit_pct: float, exit_config: Optional[Dict[str, Any]] = None,
+    ) -> float:
         """Return the pullback distance for the current profit stage."""
+        cfg = exit_config or self._execution_exit_config({})
         profit = max(self._float(peak_profit_pct), 0.0)
-        if profit >= self.config.trailing_high_profit_pct:
-            return max(self.config.trailing_stop_pct, 0.0)
-        if profit >= self.config.trailing_mid_profit_pct:
-            return max(self.config.trailing_mid_stop_pct, 0.0)
-        return max(self.config.trailing_early_stop_pct, 0.0)
+        if profit >= cfg['trailing_high_profit']:
+            return max(cfg['trailing_stop'], 0.0)
+        if profit >= cfg['trailing_mid_profit']:
+            return max(cfg['trailing_mid_stop'], 0.0)
+        return max(cfg['trailing_early_stop'], 0.0)
+
+    def _execution_exit_config(self, execution: Dict[str, Any]) -> Dict[str, Any]:
+        raw = execution.get('exit') if isinstance(execution.get('exit'), dict) else {}
+        return {
+            'hard_stop_loss': self._float(raw.get('hard_stop_loss'), self.config.stop_loss_pct),
+            'trailing_activation': self._float(raw.get('trailing_activation'), self.config.trailing_activation_pct),
+            'trailing_early_stop': self._float(raw.get('trailing_early_stop'), self.config.trailing_early_stop_pct),
+            'trailing_mid_profit': self._float(raw.get('trailing_mid_profit'), self.config.trailing_mid_profit_pct),
+            'trailing_mid_stop': self._float(raw.get('trailing_mid_stop'), self.config.trailing_mid_stop_pct),
+            'trailing_high_profit': self._float(raw.get('trailing_high_profit'), self.config.trailing_high_profit_pct),
+            'trailing_stop': self._float(raw.get('trailing_stop'), self.config.trailing_stop_pct),
+            'time_stop_days': max(1, self._int(raw.get('time_stop_days'), self.config.time_stop_days)),
+            'time_stop_profit_threshold': self._float(
+                raw.get('time_stop_profit_threshold'), self.config.time_stop_profit_threshold,
+            ),
+        }
+
+    def _position_exit_config(self, position: Dict[str, Any]) -> Dict[str, Any]:
+        saved = position.get('exit_config')
+        if isinstance(saved, dict) and saved:
+            return self._execution_exit_config({'exit': saved})
+        execution = position.get('strategy_execution')
+        return self._execution_exit_config(execution if isinstance(execution, dict) else {})
 
     def _execute_sell(self, stock_code: str, sell_price: float, date: str, reason: str):
         """执行卖出"""
@@ -1501,7 +1853,16 @@ class BacktestEngine:
 
     def _generate_backtest_report(self) -> Dict:
         """生成回测报告"""
+        from backtest.run_audit import build_entry_funnel, build_entry_opportunity_summary
+
+        entry_funnel = build_entry_funnel(
+            self.entry_attempts,
+            candidate_count=self.entry_candidate_count,
+        )
         if not self.trade_history:
+            entry_opportunities = build_entry_opportunity_summary(
+                self.entry_attempts, candidate_count=self.entry_candidate_count,
+            )
             nav_series = pd.DataFrame(self.daily_nav)
             max_drawdown = 0
             if not nav_series.empty and 'total_value' in nav_series.columns:
@@ -1528,6 +1889,10 @@ class BacktestEngine:
                 'entry_attempts': self.entry_attempts,
                 'entry_mode': self.config.entry_mode,
                 'entry_candidate_count': self.entry_candidate_count,
+                'entry_funnel': entry_funnel,
+                'entry_opportunity_summary': entry_opportunities,
+                'backtest_config': asdict(self.config),
+                'exit_execution_audit': dict(self._exit_execution_audit),
                 'as_of_date': str(self.daily_nav[-1].get('date') if self.daily_nav else ''),
             }
 
@@ -1553,6 +1918,13 @@ class BacktestEngine:
             'hot_resonance': t.hot_resonance
         } for t in self.trade_history])
         closed_df = trades_df[trades_df['action'].astype(str).str.upper().str.startswith('SELL')].copy()
+        buy_count = int((trades_df['action'].astype(str).str.upper() == 'BUY').sum())
+        entry_opportunities = build_entry_opportunity_summary(
+            self.entry_attempts,
+            candidate_count=self.entry_candidate_count,
+            executed_buys=buy_count,
+            closed_trades=len(closed_df),
+        )
 
         if closed_df.empty:
             win_rate = 0
@@ -1594,7 +1966,7 @@ class BacktestEngine:
             'win_rate': win_rate,
             'profit_loss_ratio': profit_loss_ratio,
             'total_trades': len(closed_df),
-            'buy_trades': int((trades_df['action'].astype(str).str.upper() == 'BUY').sum()),
+            'buy_trades': buy_count,
             'closed_trades': len(closed_df),
             'initial_capital': self.config.initial_capital,
             'final_capital': self.total_capital,
@@ -1606,6 +1978,10 @@ class BacktestEngine:
             'entry_attempts': self.entry_attempts,
             'entry_mode': self.config.entry_mode,
             'entry_candidate_count': self.entry_candidate_count,
+            'entry_funnel': entry_funnel,
+            'entry_opportunity_summary': entry_opportunities,
+            'backtest_config': asdict(self.config),
+            'exit_execution_audit': dict(self._exit_execution_audit),
             'as_of_date': str(self.daily_nav[-1].get('date') if self.daily_nav else ''),
         }
 

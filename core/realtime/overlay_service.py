@@ -6,7 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from core.realtime.entry_signal_service import classify_entry_mode, entry_mode_text
 from core.realtime.models import normalize_stock_code
+
+DECISION_POOL_PROFILE = "decision_pool"
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -51,9 +54,18 @@ class RealtimeOverlayService:
     ) -> Dict[str, Any]:
         candidate_date = str(trade_date or self._latest_date() or "")
         market_date = str(market_date or candidate_date)
-        rows = list(candidates) if candidates is not None else self._load_candidates(candidate_date, profile=profile)
+        resolved_profile = str(profile or "")
+        if (
+            candidates is None
+            and not resolved_profile
+            and self._decision_pool_path(candidate_date).exists()
+        ):
+            resolved_profile = DECISION_POOL_PROFILE
+        rows = list(candidates) if candidates is not None else self._load_candidates(
+            candidate_date, profile=resolved_profile,
+        )
         rows = self._dedupe_candidates(rows)[: max(int(limit or 20), 1)]
-        strategy = self._strategy_metadata(profile, rows)
+        strategy = self._strategy_metadata(resolved_profile, rows)
         codes = [r["code"] for r in rows if r.get("code")]
 
         quotes = self._quote_map(codes)
@@ -73,11 +85,16 @@ class RealtimeOverlayService:
             signal = signals.get(cand.get("code") or "", {})
             row = self._build_row(candidate_date, market_date, cand, quote, signal)
             row.update({
-                "strategy_id": strategy["id"],
-                "strategy_name": strategy["name"],
-                "strategy_version": strategy["version"],
-                "strategy_execution": dict(strategy["execution"]),
-                "position_cap_pct": strategy["position_cap_pct"],
+                "strategy_id": cand.get("strategy_id") or strategy["id"],
+                "strategy_name": cand.get("strategy_name") or strategy["name"],
+                "strategy_version": cand.get("strategy_version") or strategy["version"],
+                "strategy_execution": dict(cand.get("strategy_execution") or strategy["execution"]),
+                "position_cap_pct": _to_float(
+                    cand.get("position_cap_pct"), strategy["position_cap_pct"],
+                ),
+                "strategy_sources": cand.get("strategy_sources") or "",
+                "action_group": cand.get("action_group") or "",
+                "suggested_position": cand.get("suggested_position") or "",
             })
             overlay_rows.append(row)
 
@@ -125,6 +142,8 @@ class RealtimeOverlayService:
             return ""
 
     def _load_candidates(self, trade_date: str, *, profile: str = "") -> List[Dict[str, Any]]:
+        if profile == DECISION_POOL_PROFILE:
+            return self._load_decision_pool(trade_date)
         path = self._screening_path(trade_date, profile)
         if path.exists():
             try:
@@ -150,7 +169,50 @@ class RealtimeOverlayService:
                 pass
         return []
 
+    def _load_decision_pool(self, trade_date: str) -> List[Dict[str, Any]]:
+        path = self._decision_pool_path(trade_date)
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        rows: List[Dict[str, Any]] = []
+        for source in payload.get("rows") or []:
+            if not isinstance(source, dict) or not source.get("execution_eligible"):
+                continue
+            item = dict(source)
+            modes = list(item.get("allowed_entry_modes") or [])
+            execution = dict(item.get("strategy_execution") or {})
+            execution["allowed_entry_modes"] = modes
+            sectors = item.get("共振板块") or item.get("resonance_sectors") or ""
+            if isinstance(sectors, list):
+                sectors = ",".join(str(value) for value in sectors if value)
+            item.update({
+                "code": item.get("code") or item.get("代码") or item.get("股票代码") or "",
+                "name": item.get("name") or item.get("名称") or item.get("股票名称") or "",
+                "strategy_id": (
+                    item.get("策略ID") or item.get("strategy_id") or DECISION_POOL_PROFILE
+                ),
+                "strategy_name": (
+                    item.get("策略名称") or item.get("strategy_name") or "今日决策池"
+                ),
+                "strategy_execution": execution,
+                "position_cap_pct": _to_float(item.get("执行仓位上限%")),
+                "strategy_sources": item.get("策略来源") or "",
+                "action_group": item.get("行动分组") or "",
+                "suggested_position": item.get("建议仓位") or "",
+                "resonance_sectors": sectors,
+            })
+            rows.append(item)
+        return rows
+
+    def _decision_pool_path(self, trade_date: str) -> Path:
+        return self.screening_dir / "decision_pool" / f"decision_pool_{trade_date}.json"
+
     def _screening_path(self, trade_date: str, profile: str = "") -> Path:
+        if profile == DECISION_POOL_PROFILE:
+            return self._decision_pool_path(trade_date)
         if profile:
             combination = self.screening_dir / "combinations" / str(profile) / f"screening_{trade_date}.json"
             if combination.exists():
@@ -171,6 +233,22 @@ class RealtimeOverlayService:
         except Exception:
             profiles = []
         summaries: List[Dict[str, Any]] = []
+        decision_payload: Dict[str, Any] = {}
+        decision_path = self._decision_pool_path(trade_date)
+        if decision_path.exists():
+            try:
+                decision_payload = json.loads(decision_path.read_text(encoding="utf-8"))
+            except Exception:
+                decision_payload = {}
+            summaries.append({
+                "id": DECISION_POOL_PROFILE,
+                "name": "今日决策池",
+                "version": str(decision_payload.get("schema_version") or 1),
+                "execution": {},
+                "candidate_count": int(decision_payload.get("decision_count") or 0),
+                "available": bool(decision_payload),
+                "primary": True,
+            })
         for profile in profiles:
             path = self._screening_path(trade_date, str(profile.get("id") or ""))
             payload: Dict[str, Any] = {}
@@ -186,7 +264,7 @@ class RealtimeOverlayService:
                 "execution": profile.get("execution") or {},
                 "candidate_count": len(payload.get("final") or []),
                 "available": bool(payload),
-                "primary": bool(profile.get("primary")),
+                "primary": False if decision_payload else bool(profile.get("primary")),
             })
         return summaries
 
@@ -194,6 +272,14 @@ class RealtimeOverlayService:
     def _strategy_metadata(profile: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         first = dict(rows[0] or {}) if rows else {}
         profile_id = str(profile or first.get("strategy_id") or first.get("profile") or "default")
+        if profile_id == DECISION_POOL_PROFILE:
+            return {
+                "id": DECISION_POOL_PROFILE,
+                "name": "今日决策池",
+                "version": "1",
+                "execution": {},
+                "position_cap_pct": 0.0,
+            }
         try:
             from core.screening.strategy_profiles import StrategyProfileRepository
 
@@ -249,6 +335,7 @@ class RealtimeOverlayService:
         gap_pct = (open_price / pre_close - 1.0) * 100.0 if open_price > 0 and pre_close > 0 else None
         status = str(signal.get("signal_status") or "observe")
         reason = str(signal.get("reason") or "等待当日分钟入场条件")
+        mode = str(signal.get("entry_mode") or classify_entry_mode(open_price, pre_close))
         return {
             "trade_date": candidate_date,
             "candidate_date": candidate_date,
@@ -268,8 +355,8 @@ class RealtimeOverlayService:
             "is_stale": bool(quote.get("is_stale")),
             "confirm_status": status,
             "reason": reason,
-            "entry_mode": signal.get("entry_mode") or "",
-            "entry_mode_text": signal.get("entry_mode_text") or "等待分类",
+            "entry_mode": mode,
+            "entry_mode_text": signal.get("entry_mode_text") or entry_mode_text(mode),
             "signal_status_text": signal.get("signal_status_text") or "观察",
             "confirm_time": signal.get("confirm_time") or "",
             "entry_time": signal.get("entry_time") or "",
@@ -284,6 +371,9 @@ class RealtimeOverlayService:
             "confidence": signal.get("confidence") or {},
             "sector_detail": signal.get("sector_detail") or {},
             "candidate_reasons": candidate.get("reasons") or [],
+            "strategy_sources": candidate.get("strategy_sources") or "",
+            "action_group": candidate.get("action_group") or "",
+            "suggested_position": candidate.get("suggested_position") or "",
         }
 
     @staticmethod

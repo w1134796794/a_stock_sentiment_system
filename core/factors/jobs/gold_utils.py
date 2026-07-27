@@ -195,9 +195,28 @@ class FactorJobResult:
     ok: bool = True
     rows: Dict[str, int] = field(default_factory=dict)
     messages: List[str] = field(default_factory=list)
+    source_coverage: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    disabled_enhancements: List[str] = field(default_factory=list)
 
     def add_message(self, message: str) -> None:
         self.messages.append(str(message))
+
+    def record_source(
+        self, source: str, *, available: bool, rows: int = 0,
+        freshness_date: str = "", required: bool = False,
+    ) -> None:
+        """Record source evidence without converting absence into a neutral score."""
+        self.source_coverage[str(source)] = {
+            "available": bool(available),
+            "rows": max(int(rows or 0), 0),
+            "freshness_date": str(freshness_date or ""),
+            "required": bool(required),
+        }
+
+    def disable_enhancement(self, name: str) -> None:
+        value = str(name or "").strip()
+        if value and value not in self.disabled_enhancements:
+            self.disabled_enhancements.append(value)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -206,6 +225,8 @@ class FactorJobResult:
             "ok": self.ok,
             "rows": self.rows,
             "messages": self.messages,
+            "source_coverage": self.source_coverage,
+            "disabled_enhancements": self.disabled_enhancements,
         }
 
 
@@ -221,17 +242,26 @@ def make_long_record(
     percentile: Any = None,
     direction: str = "higher_better",
 ) -> Dict[str, Any]:
+    missing = raw_value is None
+    if not missing:
+        try:
+            marker = pd.isna(raw_value)
+            missing = bool(marker)
+        except (TypeError, ValueError):
+            missing = False
     return {
         "trade_date": str(trade_date),
         "entity_type": entity_type,
         "entity_id": str(entity_id),
         "factor_id": factor_id,
-        "raw_value": to_float(raw_value),
-        "score": to_float(score),
+        "raw_value": None if missing else to_float(raw_value),
+        "score": None if missing else to_float(score),
         "rank_value": None if rank_value is None else to_float(rank_value),
         "percentile": None if percentile is None else to_float(percentile),
         "direction": direction,
         "source_version": GOLD_SCHEMA_VERSION,
+        "is_missing": int(missing),
+        "freshness_date": str(trade_date),
         "computed_at": now_iso(),
     }
 
@@ -247,6 +277,8 @@ FACTOR_VALUE_LONG_COLUMNS = [
     "percentile",
     "direction",
     "source_version",
+    "is_missing",
+    "freshness_date",
     "computed_at",
 ]
 

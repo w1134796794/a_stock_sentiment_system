@@ -99,6 +99,26 @@ class SectorFactorJob:
         today["amount_ratio_score"] = ratio_scores
         today["persistence_score"] = persistence_scores
         today["positive_streak"] = positive_streaks
+        constituent = self._constituent_metrics(con, today, str(trade_date))
+        for column in (
+            "constituent_count", "constituent_observed", "constituent_breadth",
+            "constituent_average_pct", "limit_up_count", "breadth_score",
+            "limit_up_diffusion_score", "breadth_acceleration_score",
+            "membership_available",
+        ):
+            today[column] = [row.get(column) for row in constituent]
+        result.record_source(
+            "sector_constituent_breadth",
+            available=bool(pd.to_numeric(today["membership_available"], errors="coerce").fillna(0).max()),
+            rows=int(pd.to_numeric(today["constituent_observed"], errors="coerce").fillna(0).sum()),
+            freshness_date=str(trade_date), required=True,
+        )
+        result.record_source(
+            "limit_up_pool_silver",
+            available=bool(pd.to_numeric(today["limit_up_count"], errors="coerce").fillna(0).sum()),
+            rows=int(pd.to_numeric(today["limit_up_count"], errors="coerce").fillna(0).sum()),
+            freshness_date=str(trade_date), required=False,
+        )
         signal = read_table(
             con, "factor_signal_sector_wide",
             where="CAST(trade_date AS VARCHAR) = ?", params=[str(trade_date)],
@@ -142,15 +162,7 @@ class SectorFactorJob:
                 today[col] = pd.to_numeric(today[col], errors="coerce").fillna(default)
             else:
                 today[col] = today[col].fillna(default)
-        today["mainline_score"] = [
-            safe_weighted_score([
-                (row.momentum_score, 0.45),
-                (row.amount_score, 0.25),
-                (row.amount_ratio_score, 0.15),
-                (row.persistence_score, 0.15),
-            ])
-            for row in today.itertuples()
-        ]
+        today["mainline_score"] = [self._mainline_score(row) for row in today.itertuples()]
         previous_by_code = (
             hist.drop_duplicates("sector_code", keep="last")
             .set_index("sector_code").to_dict("index")
@@ -168,6 +180,10 @@ class SectorFactorJob:
                 persistence_score=row.get("persistence_score"),
                 flow_score=row.get("sector_flow_score"),
                 positive_streak=row.get("positive_streak"),
+                breadth_acceleration_score=(
+                    row.get("breadth_acceleration_score")
+                    if bool(row.get("membership_available")) else None
+                ),
             ))
         for state in BEHAVIOR_STATES:
             today[f"behavior_{state}_score"] = [item["scores"][state] for item in behavior_rows]
@@ -208,6 +224,15 @@ class SectorFactorJob:
             "mainline_score",
             "amount_ratio",
             "positive_streak",
+            "constituent_count",
+            "constituent_observed",
+            "constituent_breadth",
+            "constituent_average_pct",
+            "limit_up_count",
+            "breadth_score",
+            "limit_up_diffusion_score",
+            "breadth_acceleration_score",
+            "membership_available",
             "behavior_attention_score",
             "behavior_acceleration_score",
             "behavior_divergence_score",
@@ -279,6 +304,20 @@ class SectorFactorJob:
                     factor_id="sec_mainline_score", raw_value=row["mainline_score"],
                     score=row["mainline_score"], rank_value=row["rank"], direction="higher_better",
                 ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="sector", entity_id=entity_id,
+                    factor_id="sec_constituent_breadth", raw_value=(
+                        row["constituent_breadth"] if row["membership_available"] else None
+                    ),
+                    score=row["breadth_score"], direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="sector", entity_id=entity_id,
+                    factor_id="sec_limit_up_diffusion", raw_value=(
+                        row["limit_up_count"] if row["membership_available"] else None
+                    ),
+                    score=row["limit_up_diffusion_score"], direction="higher_better",
+                ),
             ])
             for state in BEHAVIOR_STATES:
                 records.append(make_long_record(
@@ -301,3 +340,101 @@ class SectorFactorJob:
             params=[str(trade_date), "sector"],
         )
         return result
+
+    @staticmethod
+    def _mainline_score(row) -> float:
+        values = [
+            (row.momentum_score, 0.35),
+            (row.amount_score, 0.20),
+            (row.amount_ratio_score, 0.10),
+            (row.persistence_score, 0.10),
+        ]
+        if bool(row.membership_available):
+            values.extend([
+                (row.breadth_score, 0.15),
+                (row.limit_up_diffusion_score, 0.10),
+            ])
+        else:
+            values = [
+                (row.momentum_score, 0.45), (row.amount_score, 0.25),
+                (row.amount_ratio_score, 0.15), (row.persistence_score, 0.15),
+            ]
+        return safe_weighted_score(values)
+
+    @staticmethod
+    def _constituent_metrics(con, sectors: pd.DataFrame, trade_date: str) -> list[dict]:
+        """Use prior known memberships with today's stock tape and official limit pool."""
+        try:
+            previous_date = con.execute(
+                "SELECT MAX(CAST(trade_date AS VARCHAR)) FROM factor_stock_wide "
+                "WHERE CAST(trade_date AS VARCHAR) < ?", [trade_date],
+            ).fetchone()[0]
+        except Exception:
+            previous_date = None
+        if not previous_date:
+            return [{"membership_available": 0} for _ in range(len(sectors))]
+        try:
+            members = con.execute(
+                "SELECT code, primary_sector_code, primary_sector_name, resonance_sectors "
+                "FROM factor_stock_wide WHERE CAST(trade_date AS VARCHAR)=?",
+                [str(previous_date)],
+            ).fetchdf()
+            daily = con.execute(
+                "SELECT code, pct_chg FROM stock_daily_silver "
+                "WHERE CAST(trade_date AS VARCHAR)=?", [trade_date],
+            ).fetchdf()
+            limit_rows = con.execute(
+                "SELECT code FROM limit_up_pool_silver "
+                "WHERE CAST(trade_date AS VARCHAR)=?", [trade_date],
+            ).fetchdf()
+        except Exception:
+            return [{"membership_available": 0} for _ in range(len(sectors))]
+        try:
+            previous_sector = con.execute(
+                "SELECT sector_code, constituent_breadth FROM factor_sector_wide "
+                "WHERE CAST(trade_date AS VARCHAR)=?", [str(previous_date)],
+            ).fetchdf()
+        except Exception:
+            previous_sector = pd.DataFrame()
+        if members.empty or daily.empty:
+            return [{"membership_available": 0} for _ in range(len(sectors))]
+        for frame in (members, daily, limit_rows):
+            if "code" in frame:
+                frame["code"] = frame["code"].astype(str).str.split(".").str[0].str.zfill(6)
+        daily["pct_chg"] = pd.to_numeric(daily.get("pct_chg"), errors="coerce")
+        tape = daily.dropna(subset=["pct_chg"]).drop_duplicates("code").set_index("code")
+        limit_codes = set(limit_rows.get("code", pd.Series(dtype=str)).astype(str))
+        previous_breadth = {
+            str(row.get("sector_code") or "").split(".")[0]: to_float(row.get("constituent_breadth"), 0.5)
+            for row in previous_sector.to_dict("records")
+        } if not previous_sector.empty else {}
+        rows: list[dict] = []
+        resonance = members.get("resonance_sectors", pd.Series("", index=members.index)).fillna("").astype(str)
+        primary_code = members.get("primary_sector_code", pd.Series("", index=members.index)).fillna("").astype(str).str.split(".").str[0]
+        primary_name = members.get("primary_sector_name", pd.Series("", index=members.index)).fillna("").astype(str)
+        for sector in sectors.to_dict("records"):
+            code = str(sector.get("sector_code") or "").split(".")[0]
+            name = str(sector.get("sector_name") or "").strip()
+            mask = primary_code.eq(code) | primary_name.eq(name)
+            if name:
+                mask = mask | resonance.str.contains(name, regex=False)
+            codes = set(members.loc[mask, "code"].astype(str))
+            observed_codes = sorted(codes.intersection(set(tape.index)))
+            observed = tape.loc[observed_codes, "pct_chg"] if observed_codes else pd.Series(dtype=float)
+            breadth = float((observed > 0).mean()) if len(observed) else None
+            average = float(observed.mean()) if len(observed) else None
+            limit_count = len(codes.intersection(limit_codes))
+            old = previous_breadth.get(code)
+            acceleration = (breadth - old) if breadth is not None and old is not None else None
+            rows.append({
+                "constituent_count": len(codes),
+                "constituent_observed": len(observed),
+                "constituent_breadth": breadth,
+                "constituent_average_pct": average,
+                "limit_up_count": limit_count,
+                "breadth_score": breadth * 100.0 if breadth is not None else None,
+                "limit_up_diffusion_score": score_between(limit_count, 0.0, 8.0) if codes else None,
+                "breadth_acceleration_score": score_between(acceleration, -0.20, 0.20) if acceleration is not None else None,
+                "membership_available": int(len(observed) >= 3),
+            })
+        return rows

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from core.portfolio.strategy_allocator import StrategyPortfolioAllocator
+from core.models.strategy_diagnostics import StrategyDiagnosticsService
 from core.screening.strategy_profiles import StrategyProfileRepository
 
 
@@ -21,17 +22,26 @@ class StrategyLabService:
     def build(
         self, trade_date: str, strategy_ids: Iterable[str] | None = None,
     ) -> Dict[str, Any]:
-        profiles = self.repository.list_profiles(enabled_only=True)
-        enabled_ids = [str(profile.get("id") or "") for profile in profiles]
-        selected = self.repository.validate_selection(strategy_ids or enabled_ids)
+        profiles = self.repository.list_profiles()
+        enabled_ids = [
+            str(profile.get("id") or "")
+            for profile in profiles
+            if profile.get("enabled")
+        ]
+        selected = self.repository.validate_selection(
+            strategy_ids or enabled_ids,
+            allow_disabled=bool(strategy_ids),
+        )
         profile_by_id = {str(profile.get("id") or ""): profile for profile in profiles}
         strategy_rows: List[Dict[str, Any]] = []
         candidates: List[Dict[str, Any]] = []
+        diagnostics_service = StrategyDiagnosticsService()
 
         for strategy_id in selected:
             profile = self.repository.get_profile(strategy_id) or profile_by_id.get(strategy_id) or {}
             payload = self._load(strategy_id, trade_date)
             final = list(payload.get("final") or [])
+            diagnostics = diagnostics_service.build(profile, trade_date, final)
             strategy_rows.append({
                 "id": strategy_id,
                 "name": profile.get("name") or strategy_id,
@@ -41,6 +51,7 @@ class StrategyLabService:
                 "market_regimes": list(profile.get("market_regimes") or []),
                 "entry_modes": list((profile.get("execution") or {}).get("allowed_entry_modes") or []),
                 "top_n": int(profile.get("top_n") or 0),
+                "diagnostics": diagnostics,
             })
             for item in final:
                 row = dict(item or {})
@@ -53,7 +64,8 @@ class StrategyLabService:
                 })
                 candidates.append(row)
 
-        allocation = StrategyPortfolioAllocator().allocate(candidates)
+        allocator = StrategyPortfolioAllocator()
+        allocation = allocator.allocate(candidates)
         consensus_count = sum(1 for row in allocation if int(row.get("策略共识数") or 0) >= 2)
         total_weight = sum(float(row.get("组合建议仓位%") or 0.0) for row in allocation)
         return {
@@ -62,6 +74,7 @@ class StrategyLabService:
             "strategies": strategy_rows,
             "selected_strategy_ids": selected,
             "allocation": allocation,
+            "portfolio_risk": allocator.last_risk_report,
             "summary": {
                 "input_candidates": len(candidates),
                 "unique_candidates": len({str(row.get("代码") or row.get("code") or "") for row in candidates}),

@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import pandas as pd
 
 from core.screening.explanations import FACTOR_LABELS
+from core.signals.trust_algorithms import beta_binomial_interval
 
 
 def _attr(obj: Any, name: str, default: Any = None) -> Any:
@@ -157,6 +158,10 @@ def build_attribution_frames(result: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
                 "weak_win_rate": _rate(weak["win"]),
                 "weak_stop_loss_rate": _rate(weak["stop_loss"]),
                 "weak_stop_loss_count": int(weak["stop_loss"].sum()) if not weak.empty else 0,
+                "win_rate_interval_low": beta_binomial_interval(int(g["win"].sum()), len(g))["lower"],
+                "win_rate_interval_high": beta_binomial_interval(int(g["win"].sum()), len(g))["upper"],
+                "strong_win_interval_low": beta_binomial_interval(int(strong["win"].sum()), len(strong))["lower"] if len(strong) else 0.0,
+                "strong_win_interval_high": beta_binomial_interval(int(strong["win"].sum()), len(strong))["upper"] if len(strong) else 1.0,
             })
         factor_feedback = pd.DataFrame(rows)
         factor_feedback["strong_minus_weak_pnl"] = (
@@ -186,6 +191,8 @@ def build_attribution_frames(result: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
                 "stop_loss_rate": float(g["stop_loss_triggered"].mean()),
                 "take_profit_rate": float(g["take_profit_triggered"].mean()),
                 "avg_score": float(g["plan_score"].mean()),
+                "win_rate_interval_low": beta_binomial_interval(int((g["pnl"] > 0).sum()), len(g))["lower"],
+                "win_rate_interval_high": beta_binomial_interval(int((g["pnl"] > 0).sum()), len(g))["upper"],
             })
         rank_feedback = pd.DataFrame(rows).sort_values("plan_rank").reset_index(drop=True)
 

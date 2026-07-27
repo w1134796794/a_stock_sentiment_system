@@ -2,23 +2,61 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
+import json
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from core.models.market_state import (
+    EMOTION_PHASE_LABELS,
+    EMOTION_PHASES,
+    PHASE_ALLOWED_STRATEGIES,
+    MarketStateSnapshot,
+)
+from core.factors.sector_taxonomy import partition_sector_names
 from core.portfolio.strategy_allocator import StrategyPortfolioAllocator
+from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
 
 
+PRODUCTION_STRATEGIES = PRODUCTION_STRATEGY_IDS
 REGIME_STRATEGIES = {
-    "strong": ("mainline_leader", "ultra_short_board", "first_board_launch"),
-    "neutral": ("capital_resonance", "momentum_repair", "weak_to_strong"),
-    "weak": ("defensive_quality", "weak_market_probe"),
+    "strong": PRODUCTION_STRATEGIES,
+    "neutral": ("mainline_leader", "first_board_launch", "weak_to_strong"),
+    "weak": ("mainline_leader", "weak_to_strong"),
 }
 REGIME_LABELS = {"strong": "强市", "neutral": "震荡市", "weak": "弱市"}
+RISK_FLAG_LABELS = {
+    "cycle_overheated": "强周期持续过久，接近退潮窗口",
+    "market_emotion_divergence": "大盘与短线情绪明显背离",
+    "echelon_broken": "连板梯队断层",
+    "prev_limit_premium_weak": "昨日涨停今日溢价偏弱",
+    "prev_limit_positive_weak": "昨日涨停今日收红率偏低",
+    "first_board_no_premium": "昨日首板今日高开率不足",
+}
 ENTRY_MODE_LABELS = {
     "weak_to_strong": "弱转强确认",
     "continuation": "强势延续确认",
     "acceleration": "高开加速确认",
 }
-BLOCKED_STATUSES = {"model_degraded", "data_insufficient", "no_edge"}
+GRADE_ORDER = {"A": 0, "B": 1, "C": 2, "D": 3}
+MAINLINE_CONFIRM_THRESHOLD = 55.0
+EVIDENCE_FACTORS = (
+    ("stk_sector_mainline_score", "主线地位", 55.0),
+    ("stk_sector_resonance_score", "板块共振", 55.0),
+    ("stk_sector_persistence_score", "主线持续", 55.0),
+    ("stk_capital_flow_consensus", "资金共振", 55.0),
+    ("stk_lhb_sector_resonance", "龙虎榜板块共振", 55.0),
+    ("stk_lhb_net_buy_score", "龙虎榜净买认可", 55.0),
+    ("stk_lhb_institution_score", "机构席位认可", 55.0),
+    ("stk_behavior_repair", "量价修复", 55.0),
+    ("stk_intraday_seal_quality", "封板质量", 55.0),
+    ("stk_relative_strength_sector", "强于所属板块", 55.0),
+)
+FACTOR_ALIASES = {
+    "stk_sector_mainline_score": ("sector_mainline_score",),
+    "stk_sector_resonance_score": ("sector_resonance_score",),
+    "stk_sector_persistence_score": ("sector_persistence_score",),
+}
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -37,6 +75,18 @@ def _unique(values: Iterable[str]) -> List[str]:
     return list(dict.fromkeys(value for value in values if value))
 
 
+def _metric(row: Mapping[str, Any], factor: str) -> float:
+    keys = (factor, *FACTOR_ALIASES.get(factor, ()))
+    containers = (row, row.get("metrics") or {}, row.get("context") or {})
+    for container in containers:
+        if not isinstance(container, Mapping):
+            continue
+        for key in keys:
+            if key in container and container.get(key) not in (None, ""):
+                return _number(container.get(key))
+    return 0.0
+
+
 class DecisionPoolService:
     """Select applicable strategies, merge overlap, and assign an action group."""
 
@@ -45,7 +95,9 @@ class DecisionPoolService:
 
     @staticmethod
     def market_regime(market_score: float) -> str:
-        return "strong" if market_score >= 70 else "weak" if market_score < 45 else "neutral"
+        from core.models.market_state import classify_market_score
+
+        return classify_market_score(market_score)
 
     def build(
         self,
@@ -54,10 +106,40 @@ class DecisionPoolService:
         *,
         market_score: float = 50.0,
         market_regime: str = "",
+        market_state: Mapping[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        regime = str(market_regime) if str(market_regime) in REGIME_STRATEGIES else self.market_regime(market_score)
-        applicable = [strategy_id for strategy_id in REGIME_STRATEGIES[regime] if strategy_id in payloads]
-        hidden = [strategy_id for strategy_id in payloads if strategy_id not in applicable]
+        state_payload = dict(market_state or {})
+        state_context = dict(state_payload.get("context") or {})
+        state_context.update(state_payload)
+        snapshot = MarketStateSnapshot.resolve(
+            market_score,
+            trade_date=str(state_payload.get("trade_date") or ""),
+            context=state_context,
+        )
+        supplied_regime = str(market_regime or state_payload.get("regime") or "")
+        regime = snapshot.regime
+        phase = str(state_payload.get("phase") or snapshot.phase)
+        if phase not in EMOTION_PHASES:
+            phase = snapshot.phase
+        phase_label = EMOTION_PHASE_LABELS[phase]
+        position_scale = _number(
+            state_payload.get("position_scale"),
+            snapshot.position_scale,
+        )
+        risk_flags = list(state_payload.get("risk_flags") or snapshot.risk_flags)
+        phase_reasons = list(state_payload.get("phase_reasons") or snapshot.phase_reasons)
+        allowed_strategies = set(PHASE_ALLOWED_STRATEGIES[phase]).intersection(
+            REGIME_STRATEGIES[regime]
+        )
+        available = [
+            strategy_id for strategy_id in PRODUCTION_STRATEGIES
+            if strategy_id in payloads and strategy_id in profiles
+        ]
+        applicable = [
+            strategy_id for strategy_id in available
+            if strategy_id in allowed_strategies
+        ]
+        hidden = [strategy_id for strategy_id in available if strategy_id not in applicable]
 
         raw_rows: List[Dict[str, Any]] = []
         members_by_code: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -66,8 +148,6 @@ class DecisionPoolService:
             profile = profiles.get(strategy_id) or {}
             strategy_name = str(payload.get("strategy_name") or profile.get("name") or strategy_id)
             execution = dict(profile.get("execution") or {})
-            runtime = str((payload.get("weight_metadata") or {}).get("candidate_model_runtime") or "")
-            model_status = "正常" if runtime == "active" else "已回退" if runtime.startswith("fallback") else "不可用"
             for source in payload.get("final") or []:
                 if not isinstance(source, Mapping) or not _code(source):
                     continue
@@ -77,44 +157,68 @@ class DecisionPoolService:
                     "策略名称": strategy_name,
                     "策略单票仓位上限%": _number(profile.get("position_cap_pct")),
                     "_entry_modes": list(execution.get("allowed_entry_modes") or []),
-                    "_model_status": model_status,
+                    "_evidence_rules": list(profile.get("evidence_rules") or []),
+                    "_veto_rules": list(profile.get("veto_rules") or []),
                 })
                 raw_rows.append(row)
                 members_by_code[_code(row)].append(row)
 
         merged = self.allocator.merge(raw_rows)
-        total = max(len(applicable), 1)
+        total = len(PRODUCTION_STRATEGIES)
         for row in merged:
             members = members_by_code.get(_code(row), [])
-            self._decorate(row, members, total, regime)
+            self._decorate(
+                row,
+                members,
+                total,
+                regime,
+                phase=phase,
+                phase_label=phase_label,
+                position_scale=position_scale,
+                risk_flags=risk_flags,
+            )
 
         actionable = [row for row in merged if not row["_blocked"]]
         inactive = [row for row in merged if row["_blocked"]]
         focus: List[Dict[str, Any]] = []
         watch: List[Dict[str, Any]] = []
         for row in actionable:
-            grade = str(row.get("股票等级") or "D")
-            expected = _number(row.get("预期超额收益%"))
-            if len(focus) < 3 and grade in {"A", "B"} and expected >= 0.30:
-                self._set_group(row, "focus", regime)
+            grade = str(row.get("规则等级") or "D")
+            if len(focus) < 3 and grade in {"A", "B"}:
+                self._set_group(row, "focus", regime, phase)
                 focus.append(row)
             elif len(watch) < 5 and len(focus) + len(watch) < 8 and grade in {"A", "B", "C"}:
-                self._set_group(row, "watch", regime)
+                self._set_group(row, "watch", regime, phase)
                 watch.append(row)
             else:
-                self._set_group(row, "inactive", regime)
+                self._set_group(row, "inactive", regime, phase)
                 inactive.append(row)
 
         for row in inactive:
             if row.get("行动分组") != "暂不参与":
-                self._set_group(row, "inactive", regime)
+                self._set_group(row, "inactive", regime, phase)
 
         active_names = [str((profiles.get(key) or {}).get("name") or key) for key in applicable]
         hidden_names = [str((profiles.get(key) or {}).get("name") or key) for key in hidden]
         return {
+            "schema_version": 1,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
             "regime": regime,
             "regime_label": REGIME_LABELS[regime],
+            "supplied_regime": supplied_regime,
+            "regime_corrected": bool(
+                supplied_regime in REGIME_STRATEGIES and supplied_regime != regime
+            ),
             "market_score": round(market_score, 1),
+            "emotion_phase": phase,
+            "emotion_phase_label": phase_label,
+            "emotion_phase_reasons": phase_reasons,
+            "market_position_scale": round(position_scale, 4),
+            "market_total_position_cap_pct": round(position_scale * 100.0, 2),
+            "market_risk_flags": risk_flags,
+            "market_risk_labels": [
+                RISK_FLAG_LABELS.get(flag, flag) for flag in risk_flags
+            ],
             "active_strategy_ids": applicable,
             "active_strategy_names": active_names,
             "hidden_strategy_names": hidden_names,
@@ -122,10 +226,23 @@ class DecisionPoolService:
             "groups": [
                 {"key": "focus", "name": "重点确认", "meaning": "多策略共识，盘中满足条件可交易", "rows": focus},
                 {"key": "watch", "name": "盘中观察", "meaning": "具备优势，等待弱转强或板块确认", "rows": watch},
-                {"key": "inactive", "name": "暂不参与", "meaning": "模型失效、样本不足或风险过高", "rows": inactive},
+                {"key": "inactive", "name": "暂不参与", "meaning": "规则不适用、数据不足或风险否决", "rows": inactive},
             ],
             "decision_count": len(focus) + len(watch),
         }
+
+    @staticmethod
+    def persist(payload: Mapping[str, Any], output_dir: Path, trade_date: str) -> Path:
+        """Persist the sole production decision artifact consumed by live and backtest."""
+        path = Path(output_dir) / "decision_pool" / f"decision_pool_{trade_date}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        body = dict(payload or {})
+        body["trade_date"] = str(trade_date)
+        path.write_text(
+            json.dumps(body, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        return path
 
     def _decorate(
         self,
@@ -133,80 +250,196 @@ class DecisionPoolService:
         members: Sequence[Mapping[str, Any]],
         strategy_total: int,
         regime: str,
+        *,
+        phase: str,
+        phase_label: str,
+        position_scale: float,
+        risk_flags: Sequence[str],
     ) -> None:
         names = _unique(str(item.get("策略名称") or item.get("策略ID") or "") for item in members)
-        sectors = _unique(
+        sector_labels = _unique(
             str(sector).strip()
             for item in members
             for sector in str(item.get("resonance_sectors") or "").replace("，", ",").split(",")
         )
+        sectors, attribute_labels = partition_sector_names(sector_labels)
         contexts = [item.get("context") or {} for item in members]
         sector_scores = [
             max(_number(ctx.get("sector_mainline_score")), _number(ctx.get("sector_resonance_score")))
             for ctx in contexts
         ]
-        sector_strength = max(sector_scores or [0.0])
-        modes = _unique(
-            ENTRY_MODE_LABELS.get(mode, mode)
-            for item in members for mode in (item.get("_entry_modes") or [])
+        sector_strength = max(sector_scores or [0.0]) if sectors else 0.0
+        mainline_confirmed = bool(
+            sectors and sector_strength >= MAINLINE_CONFIRM_THRESHOLD
         )
-        grade_order = {"A": 0, "B": 1, "C": 2, "D": 3}
-        grades = [str(item.get("confidence_grade") or "D") for item in members]
-        stock_grade = min(grades or ["D"], key=lambda value: grade_order.get(value, 3))
-        expected_return = max((_number(item.get("expected_return_pct")) for item in members), default=0.0)
-        model_statuses = [str(item.get("_model_status") or "不可用") for item in members]
-        model_status = "正常" if "正常" in model_statuses else "已回退" if "已回退" in model_statuses else "不可用"
+        mainline_name = sectors[0] if mainline_confirmed else "主线待确认"
+        raw_modes = _unique(
+            str(mode) for item in members for mode in (item.get("_entry_modes") or [])
+        )
+        modes = [ENTRY_MODE_LABELS.get(mode, mode) for mode in raw_modes]
+        strategy_ids = _unique(str(item.get("策略ID") or "") for item in members)
+        evidence = self._evidence(members)
+        rule_grade = self._rule_grade(
+            members, evidence, sector_strength, _number(row.get("策略组合评分")),
+        )
         blocked_reasons: List[str] = []
-        statuses = {str(item.get("decision_status") or "") for item in members}
-        if members and statuses and statuses.issubset({"data_insufficient", "no_edge"}):
-            blocked_reasons.append("模型或样本暂不可用")
-        if stock_grade == "D":
-            blocked_reasons.append("可信等级不足")
-        stop_probability = max((_number(item.get("stop_probability")) for item in members), default=0.0)
-        if stop_probability >= 65:
-            blocked_reasons.append(f"先触发止损概率{stop_probability:.0f}%")
+        data_completeness = min(
+            (_number(item.get("data_completeness")) for item in members),
+            default=100.0,
+        )
+        if members and 0 < data_completeness < 80.0:
+            blocked_reasons.append("关键数据不足")
+        if rule_grade == "D":
+            blocked_reasons.append("规则优势或增强证据不足")
+        veto_conditions = self._veto_conditions(members)
 
         row.update({
             "命中策略": names,
             "策略总数": strategy_total,
             "策略共识显示": f"{len(names)}/{strategy_total}",
-            "所属主线": sectors[0] if sectors else "主线待确认",
+            "所属主线": mainline_name,
+            "主线确认": mainline_confirmed,
             "共振板块": sectors[:4],
+            "相关题材": sectors[:4],
+            "证券属性标签": attribute_labels[:4],
             "板块强度": round(sector_strength, 1),
-            "板块强度说明": "强" if sector_strength >= 70 else "中" if sector_strength >= 50 else "弱",
+            "板块强度说明": (
+                "强" if sector_strength >= 70
+                else "中" if mainline_confirmed
+                else "待确认"
+            ),
             "明日入场模式": " / ".join(modes) if modes else "等待分钟行情分类",
-            "模型状态": model_status,
-            "股票等级": stock_grade,
-            "预期超额收益%": round(expected_return, 2),
+            "allowed_entry_modes": raw_modes,
+            "strategy_execution": {
+                "allowed_entry_modes": raw_modes,
+                "confirmation_deadline": "10:00:00",
+                "candidate_max_age_days": 1,
+                "source_strategies": strategy_ids,
+            },
+            "策略来源": ",".join(strategy_ids),
+            "策略模式": "规则策略",
+            "规则等级": rule_grade,
+            "增强证据": evidence[:5],
+            "否决条件": veto_conditions[:4],
+            "数据完整度%": round(data_completeness, 1),
+            "情绪阶段": phase_label,
+            "情绪阶段代码": phase,
+            "市场总仓位上限%": round(position_scale * 100.0, 2),
+            "市场风控": [RISK_FLAG_LABELS.get(flag, flag) for flag in risk_flags],
             "_blocked": bool(blocked_reasons),
             "_blocked_reasons": blocked_reasons,
         })
+        mainline_summary = (
+            f"主线题材为{row['所属主线']}"
+            if mainline_confirmed
+            else "主线题材待确认"
+        )
         row["一句话结论"] = (
             f"{row.get('name') or row.get('股票名称') or row.get('代码')}命中{len(names)}个当前适用策略，"
-            f"主线{row['所属主线']}，板块强度{row['板块强度说明']}；"
+            f"{mainline_summary}，"
+            f"{'、'.join(evidence[:2]) if evidence else '资金与量价证据待确认'}；"
             + ("当前证据不足，先不参与。" if blocked_reasons else "次日只在分钟条件确认后参与。")
         )
         row["失效条件"] = (
             "；".join(blocked_reasons)
             if blocked_reasons
-            else "板块转弱、跌破开盘低点或10:00前未确认"
+            else "；".join(veto_conditions[:2] or ["板块转弱", "跌破开盘低点或10:00前未确认"])
         )
 
     @staticmethod
-    def _set_group(row: Dict[str, Any], group: str, regime: str) -> None:
+    def _evidence(members: Sequence[Mapping[str, Any]]) -> List[str]:
+        evidence: List[str] = []
+        for factor, label, threshold in EVIDENCE_FACTORS:
+            value = max((_metric(item, factor) for item in members), default=0.0)
+            if value >= threshold:
+                evidence.append(label)
+        for item in members:
+            for rule in item.get("_evidence_rules") or []:
+                if DecisionPoolService._rule_matches(item, rule):
+                    evidence.append(str(rule.get("name") or rule.get("factor") or "增强证据"))
+        return _unique(evidence)
+
+    @staticmethod
+    def _veto_conditions(members: Sequence[Mapping[str, Any]]) -> List[str]:
+        labels = []
+        for item in members:
+            for rule in item.get("_veto_rules") or []:
+                labels.append(str(rule.get("reason") or rule.get("name") or rule.get("factor") or "风险否决"))
+        return _unique(labels)
+
+    @staticmethod
+    def _rule_matches(item: Mapping[str, Any], rule: Mapping[str, Any]) -> bool:
+        actual = _metric(item, str(rule.get("factor") or ""))
+        expected = rule.get("value")
+        op = str(rule.get("op") or ">=")
+        try:
+            if op == ">=":
+                return actual >= float(expected)
+            if op == ">":
+                return actual > float(expected)
+            if op == "<=":
+                return actual <= float(expected)
+            if op == "<":
+                return actual < float(expected)
+            if op == "between":
+                low, high = list(expected or [])[:2]
+                return float(low) <= actual <= float(high)
+            if op == "==":
+                return actual == float(expected)
+            if op == "!=":
+                return actual != float(expected)
+        except (TypeError, ValueError):
+            return False
+        return False
+
+    @staticmethod
+    def _rule_grade(
+        members: Sequence[Mapping[str, Any]], evidence: Sequence[str], sector_strength: float,
+        combination_score: float,
+    ) -> str:
+        score = max(
+            (_number(item.get("score"), _number(item.get("综合评分"))) for item in members),
+            default=0.0,
+        )
+        consensus = len(_unique(str(item.get("策略ID") or "") for item in members))
+        if score >= 84 and len(evidence) >= 3 and sector_strength >= 65:
+            return "A"
+        if (
+            score >= 72 and len(evidence) >= 2 and sector_strength >= 50
+        ) or (
+            consensus >= 2 and len(evidence) >= 1 and combination_score >= 55
+        ):
+            return "B"
+        if (score >= 60 and len(evidence) >= 1) or combination_score >= 50:
+            return "C"
+        return "D"
+
+    @staticmethod
+    def _set_group(
+        row: Dict[str, Any],
+        group: str,
+        regime: str,
+        phase: str,
+    ) -> None:
         if group == "inactive":
             row["行动分组"] = "暂不参与"
+            row["execution_eligible"] = False
+            row["执行仓位上限%"] = 0.0
             row["建议仓位"] = "0%"
+            if not row.get("_blocked_reasons"):
+                row["失效条件"] = "优先级未进入今日8只决策池"
             return
         cap = _number(row.get("position_budget_pct"), _number(row.get("策略单票仓位上限%"), 10.0))
         if cap <= 0:
             cap = 10.0
-        if regime == "weak":
+        if phase in {"freeze", "decline"} or regime == "weak":
             cap = min(cap, 8.0)
         elif group == "watch":
             cap = min(cap, 10.0)
         row["行动分组"] = "重点确认" if group == "focus" else "盘中观察"
+        row["execution_eligible"] = True
+        row["执行仓位上限%"] = round(cap, 2)
         row["建议仓位"] = f"确认后参考 {cap:.0f}%"
 
 
-__all__ = ["DecisionPoolService", "REGIME_STRATEGIES"]
+__all__ = ["DecisionPoolService", "PRODUCTION_STRATEGIES", "REGIME_STRATEGIES"]

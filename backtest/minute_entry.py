@@ -23,6 +23,30 @@ ENTRY_MODES = {
     ENTRY_COMPARE,
 }
 
+STRATEGY_ENTRY_MODE_ALIASES = {
+    "weak_to_strong": ENTRY_WEAK,
+    ENTRY_WEAK: ENTRY_WEAK,
+    "continuation": ENTRY_CONTINUATION,
+    ENTRY_CONTINUATION: ENTRY_CONTINUATION,
+    "acceleration": ENTRY_ACCELERATION,
+    ENTRY_ACCELERATION: ENTRY_ACCELERATION,
+    "fixed": ENTRY_FIXED,
+    "fixed_open": ENTRY_FIXED,
+    ENTRY_FIXED: ENTRY_FIXED,
+    ENTRY_HYBRID: ENTRY_HYBRID,
+}
+
+
+def normalize_strategy_entry_modes(values: Any) -> set[str]:
+    """Translate strategy-facing entry names to the backtest/runtime constants."""
+    if isinstance(values, str):
+        values = [values]
+    return {
+        STRATEGY_ENTRY_MODE_ALIASES.get(str(value).strip(), str(value).strip())
+        for value in (values or [])
+        if str(value).strip()
+    }
+
 
 @dataclass(frozen=True)
 class EntryDecision:
@@ -260,19 +284,16 @@ class MinuteEntryEvaluator:
         auction_amount, auction_volume, plan_amount_ratio, limit_price, sector_sync,
         expected_amount_fraction, amount_profile_samples, live,
     ) -> EntryDecision:
-        if auction_amount <= 0 or auction_volume <= 0 or previous_volume <= 0:
-            return EntryDecision(
-                "data_insufficient", "强势延续", "缺少真实竞价成交额、竞价量或昨日日量",
-                open_gap_pct=gap, data_status="missing_auction", data_completeness=0.55,
+        auction_available = auction_amount > 0 and auction_volume > 0 and previous_volume > 0
+        if auction_available:
+            auction_ratio = auction_volume / previous_volume
+            auction_ok = (
+                auction_amount >= self.min_auction_amount
+                and auction_ratio >= self.min_auction_volume_ratio
             )
-        auction_ratio = auction_volume / previous_volume if previous_volume > 0 else 0.0
-        auction_ok = (
-            auction_amount >= self.min_auction_amount
-            and auction_ratio >= self.min_auction_volume_ratio
-        )
-        if not auction_ok:
-            status = "observing" if live else "cancelled"
-            return EntryDecision(status, "强势延续", "竞价成交额或竞价量比不足", open_gap_pct=gap)
+            if not auction_ok:
+                status = "observing" if live else "cancelled"
+                return EntryDecision(status, "强势延续", "竞价成交额或竞价量比不足", open_gap_pct=gap)
         opening_high = float(first_five["high"].max())
         touched_vwap = False
         sector_observed = False
@@ -286,16 +307,33 @@ class MinuteEntryEvaluator:
             trigger = (touched_vwap and float(row["close"]) >= vwap) or float(row["high"]) > opening_high
             if trigger and sector_ok and self.min_amount_pace <= pace <= self.max_amount_pace:
                 history = scan.loc[:index]
-                false_breaks = int(((history["high"] > opening_high) & (history["close"] < opening_high)).sum())
                 hold_minutes = int((history["close"] >= history["vwap"]).sum())
+                false_breaks = int(((history["high"] > opening_high) & (history["close"] < opening_high)).sum())
                 pullback_quality = float((history["close"] / history["vwap"]).clip(upper=1.02).mean())
-                return self._next_minute_fill(
-                    data, index, "强势延续", "竞价放量后回踩VWAP承接或突破前5分钟高点",
-                    gap, pace, sector_ok, limit_price, live=live,
-                    profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
-                    false_break_count=false_breaks, pullback_quality=pullback_quality,
-                    active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
-                )
+                if auction_available:
+                    confirmed = trigger
+                    signal = "强势延续"
+                    reason = "竞价放量后回踩VWAP承接或突破前5分钟高点"
+                else:
+                    # 历史竞价明细缺失时只依据可验证的分钟证据，不把它误称为竞价放量。
+                    # 无竞价锚点的路径更严格：必须收在VWAP之上、有效突破且至少连续
+                    # 两分钟维持在分时均价之上，量能进度也不能弱于历史同期。
+                    confirmed = (
+                        float(row["close"]) >= vwap
+                        and float(row["high"]) > opening_high
+                        and hold_minutes >= 2
+                        and pace >= max(self.min_amount_pace, 1.0)
+                    )
+                    signal = "开盘强势确认"
+                    reason = "竞价明细缺失，按突破前5分钟高点、站稳VWAP和分钟量能确认"
+                if confirmed:
+                    return self._next_minute_fill(
+                        data, index, signal, reason,
+                        gap, pace, sector_ok, limit_price, live=live,
+                        profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
+                        false_break_count=false_breaks, pullback_quality=pullback_quality,
+                        active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
+                    )
         if not sector_observed:
             return EntryDecision(
                 "data_insufficient", "强势延续", "缺少真实板块指数或成分股宽度，保持观察",
@@ -308,7 +346,9 @@ class MinuteEntryEvaluator:
             )
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "强势延续", "强势延续条件尚未全部满足", open_gap_pct=gap)
-        return EntryDecision("cancelled", "强势延续", "10:00前未出现有效承接或突破", open_gap_pct=gap)
+        signal = "强势延续" if auction_available else "开盘强势确认"
+        reason = "10:00前未出现有效承接或突破" if auction_available else "缺少竞价明细且10:00前未完成开盘强势确认"
+        return EntryDecision("cancelled", signal, reason, open_gap_pct=gap)
 
     def _acceleration(
         self, data, first_five, scan, gap, limit_price, is_leader, sector_sync, live,

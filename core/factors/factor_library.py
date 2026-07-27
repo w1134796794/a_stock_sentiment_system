@@ -27,6 +27,34 @@ from core.signals.trust_algorithms import (
 
 _SAFE_FACTOR = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
+# Training reads the materialized stock-wide table first.  The long table is an
+# audit/export shape and grows by every factor on every stock-day; scanning it
+# for each rolling fold is prohibitively expensive on the 4GB production host.
+_FACTOR_WIDE_COLUMNS: Dict[str, str] = {
+    "stk_liquidity_percentile": "fw.liquidity_score",
+    "stk_sector_mainline_score": "fw.sector_mainline_score",
+    "stk_sector_resonance_score": "fw.sector_resonance_score",
+    "stk_sector_persistence_score": "fw.sector_persistence_score",
+    "stk_sector_rotation_momentum": "fw.sector_rotation_momentum_score",
+    "stk_attention_consensus": "fw.attention_score",
+    "stk_new_high_20d": "CASE WHEN fw.new_high_ratio <= 0 THEN 0 WHEN fw.new_high_ratio < 0.85 THEN GREATEST(0, fw.new_high_ratio / 0.85 * 20) WHEN fw.new_high_ratio < 0.95 THEN 20 + (fw.new_high_ratio - 0.85) / 0.10 * 50 WHEN fw.new_high_ratio < 1.02 THEN 70 + (fw.new_high_ratio - 0.95) / 0.07 * 30 WHEN fw.new_high_ratio <= 1.10 THEN 100 - (fw.new_high_ratio - 1.02) / 0.08 * 20 WHEN fw.new_high_ratio <= 1.20 THEN 80 - (fw.new_high_ratio - 1.10) / 0.10 * 25 ELSE GREATEST(20, 55 - (fw.new_high_ratio - 1.20) * 100) END",
+    "stk_relative_strength_sector": "fw.relative_strength_sector_score",
+    "stk_amount_ratio_5d": "CASE WHEN fw.amount_ratio <= 0 THEN 0 WHEN fw.amount_ratio < 0.4 THEN GREATEST(0, fw.amount_ratio / 0.4 * 15) WHEN fw.amount_ratio < 0.8 THEN 15 + (fw.amount_ratio - 0.4) / 0.4 * 60 WHEN fw.amount_ratio < 1.15 THEN 75 + (fw.amount_ratio - 0.8) / 0.35 * 25 WHEN fw.amount_ratio <= 1.5 THEN 100 - (fw.amount_ratio - 1.15) / 0.35 * 15 WHEN fw.amount_ratio <= 2.2 THEN 85 - (fw.amount_ratio - 1.5) / 0.7 * 40 WHEN fw.amount_ratio <= 3.0 THEN 45 - (fw.amount_ratio - 2.2) / 0.8 * 30 ELSE GREATEST(0, 15 - (fw.amount_ratio - 3.0) * 5) END",
+    "stk_vol_ratio_5d": "CASE WHEN fw.vol_ratio <= 0 THEN 0 WHEN fw.vol_ratio < 0.6 THEN GREATEST(20, 20 + fw.vol_ratio / 0.6 * 20) WHEN fw.vol_ratio < 1.0 THEN 40 + (fw.vol_ratio - 0.6) / 0.4 * 30 WHEN fw.vol_ratio < 2.2 THEN 70 + (fw.vol_ratio - 1.0) / 1.2 * 30 WHEN fw.vol_ratio < 3.0 THEN 100 - (fw.vol_ratio - 2.2) / 0.8 * 25 WHEN fw.vol_ratio < 5.0 THEN 75 - (fw.vol_ratio - 3.0) / 2.0 * 45 ELSE 20 END",
+    "stk_pct_chg_1d": "CASE WHEN COALESCE(fw.limit_pct, 0) > 0 THEN (LEAST(fw.limit_pct, GREATEST(-fw.limit_pct, fw.pct_chg)) + fw.limit_pct) / (2 * fw.limit_pct) * 100 ELSE 50 END",
+    "stk_board_position": "fw.board_score",
+    "stk_board_height": "fw.board_height_score",
+    "stk_intraday_seal_quality": "fw.intraday_seal_quality_score",
+    "stk_crowding_decay_5d": "fw.crowding_decay_5d_score",
+    "stk_capital_flow_consensus": "fw.capital_flow_consensus_score",
+    "stk_lhb_net_buy_score": "fw.lhb_net_buy_score",
+    "stk_lhb_institution_score": "fw.institution_net_buy_score",
+    "stk_lhb_sector_resonance": "fw.sector_lhb_resonance_score",
+    "stk_behavior_attention": "fw.behavior_attention_score",
+    "stk_behavior_acceleration": "fw.behavior_acceleration_score",
+    "stk_behavior_repair": "fw.behavior_repair_score",
+}
+
 
 def _normalize_weights(weights: Mapping[str, float]) -> Dict[str, float]:
     """Normalize by absolute exposure while preserving inverse factors."""
@@ -73,6 +101,23 @@ class WeightArtifact:
     weights: Dict[str, float]
     payload: Dict[str, Any]
     path: Path
+
+
+class TrainingPrerequisiteError(RuntimeError):
+    """Expected training skip caused by incomplete historical prerequisites."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str,
+        audit: Optional[Mapping[str, Any]] = None,
+        hint: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = str(reason_code)
+        self.audit = dict(audit or {})
+        self.hint = str(hint)
 
 
 class DynamicWeightRepository:
@@ -147,7 +192,13 @@ class FactorLibraryTrainer:
         self.profile_path = Path(profile_path or BASE_DIR / "config" / "screening_profiles.yaml")
         self.repository = repository or DynamicWeightRepository()
         self.horizon_days = max(int(horizon_days), 1)
-        self.min_daily_samples = max(int(min_daily_samples), 10)
+        # Strategy-specific candidate pools are intentionally small (normally
+        # 5-10 names before executable-entry filtering).  Keeping the old hard
+        # floor of 10 made every real T+1 validation day ineligible after the
+        # minute-entry filter, so walk-forward metrics silently collapsed to
+        # zero.  Three is the minimum useful cross-section for ranking; broad
+        # universe callers still retain the default of 20.
+        self.min_daily_samples = max(int(min_daily_samples), 3)
 
     def prior_weights(self, profile: str = "default") -> Dict[str, float]:
         data = yaml.safe_load(self.profile_path.read_text(encoding="utf-8")) or {}
@@ -200,47 +251,135 @@ class FactorLibraryTrainer:
         if not self.duckdb_path.exists():
             return pd.DataFrame()
         import duckdb  # type: ignore
+        from config.settings import DUCKDB_MEMORY_LIMIT, DUCKDB_TEMP_DIR, DUCKDB_THREADS
+        from core.factors.strategy_training import STRATEGY_TRAINING_SPECS, StrategyMinuteTrainingBuilder
 
         horizon = max(int(horizon_days or self.horizon_days), 1)
+        price_start = (datetime.strptime(str(start_date), "%Y%m%d") - timedelta(days=10)).strftime("%Y%m%d")
+        price_end = (datetime.strptime(str(end_date), "%Y%m%d") + timedelta(days=max(30, horizon * 7))).strftime("%Y%m%d")
+        strategy_builder: Optional[StrategyMinuteTrainingBuilder] = None
+        strategy_candidates = pd.DataFrame(columns=["trade_date", "code"])
+        if profile in STRATEGY_TRAINING_SPECS:
+            strategy_builder = StrategyMinuteTrainingBuilder(duckdb_path=self.duckdb_path)
+            candidate_map = strategy_builder.candidate_map(
+                profile,
+                start_date=str(start_date),
+                end_date=str(end_date),
+            )
+            if not candidate_map:
+                self._last_strategy_training_audit = {
+                    "strategy_id": profile,
+                    "candidate_rows": 0,
+                    "filled_rows": 0,
+                    "excluded": {"missing_candidates": 0},
+                }
+                return pd.DataFrame()
+            strategy_candidates = pd.DataFrame(
+                [{"trade_date": date, "code": code} for date, code in candidate_map],
+            ).drop_duplicates()
         factor_ids = [factor for factor in factors if factor != "tech_score"]
         for factor in factor_ids:
             if not _SAFE_FACTOR.match(factor):
                 raise ValueError(f"unsafe factor identifier: {factor}")
+        use_wide_factors = all(factor in _FACTOR_WIDE_COLUMNS for factor in factor_ids)
         pivot_columns = ",\n".join(
             f"MAX(CASE WHEN factor_id = '{factor}' THEN score END) AS \"{factor}\""
             for factor in factor_ids
         )
         tech_column = ", w.tech_score AS tech_score" if "tech_score" in factors else ""
+        candidate_price_join = ""
+        candidate_factor_join = ""
+        candidate_wide_join = ""
+        if strategy_builder is not None:
+            candidate_price_join = "JOIN (SELECT DISTINCT code FROM _strategy_candidates) sc ON sc.code = s.code"
+            candidate_factor_join = (
+                "JOIN _strategy_candidates c "
+                "ON c.trade_date = l.trade_date AND c.code = l.entity_id"
+            )
+            candidate_wide_join = (
+                "JOIN _strategy_candidates c "
+                "ON c.trade_date = fw.trade_date AND c.code = fw.code"
+            )
+        if use_wide_factors:
+            wide_columns = "".join(
+                f', ({_FACTOR_WIDE_COLUMNS[factor]}) AS "{factor}"'
+                for factor in factor_ids
+            )
+            factor_pivot_sql = f"""
+            factor_pivot AS (
+              SELECT fw.trade_date, fw.code{wide_columns}
+              FROM factor_stock_wide fw
+              {candidate_wide_join}
+              WHERE fw.trade_date BETWEEN ? AND ?
+              QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY fw.trade_date, fw.code
+                ORDER BY COALESCE(fw.computed_at, '') DESC
+              ) = 1
+            )
+            """
+            factor_params: List[Any] = []
+        else:
+            factor_pivot_sql = f"""
+            factor_pivot AS (
+              SELECT l.trade_date, l.entity_id AS code,
+                     {pivot_columns}
+              FROM factor_value_long l
+              {candidate_factor_join}
+              WHERE l.entity_type = 'stock'
+                AND l.trade_date BETWEEN ? AND ?
+                AND l.factor_id IN ({','.join('?' for _ in factor_ids)})
+              GROUP BY l.trade_date, l.entity_id
+            )
+            """
+            factor_params = list(factor_ids)
         sql = f"""
         WITH prices AS (
-          SELECT trade_date, code, close,
-                 LEAD(trade_date, 1) OVER stock_window AS entry_date,
-                 LEAD(open, 1) OVER stock_window AS entry_open,
-                 LEAD(pre_close, 1) OVER stock_window AS entry_pre_close,
-                 LEAD(vol_hand, 1) OVER stock_window AS entry_volume,
-                 LEAD(low, 1) OVER stock_window AS low_1,
-                 LEAD(high, 1) OVER stock_window AS high_1,
-                 LEAD(low, 2) OVER stock_window AS low_2,
-                 LEAD(high, 2) OVER stock_window AS high_2,
-                 LEAD(low, 3) OVER stock_window AS low_3,
-                 LEAD(high, 3) OVER stock_window AS high_3,
-                 LEAD(close, {horizon}) OVER stock_window AS future_close,
-                 LEAD(trade_date, {horizon}) OVER stock_window AS future_date
-          FROM stock_daily_silver
-          WINDOW stock_window AS (PARTITION BY code ORDER BY trade_date)
-        ), factor_pivot AS (
-          SELECT l.trade_date, l.entity_id AS code,
-                 {pivot_columns}
-          FROM factor_value_long l
-          WHERE l.entity_type = 'stock'
-            AND l.trade_date BETWEEN ? AND ?
-            AND l.factor_id IN ({','.join('?' for _ in factor_ids)})
-          GROUP BY l.trade_date, l.entity_id
-        )
+          SELECT s.trade_date, s.code, s.close,
+                 LEAD(s.trade_date, 1) OVER stock_window AS entry_date,
+                 LEAD(s.open, 1) OVER stock_window AS entry_open,
+                 LEAD(s.pre_close, 1) OVER stock_window AS entry_pre_close,
+                 LEAD(s.vol_hand, 1) OVER stock_window AS entry_volume,
+                 LEAD(s.low, 1) OVER stock_window AS low_1,
+                 LEAD(s.high, 1) OVER stock_window AS high_1,
+                 LEAD(s.low, 2) OVER stock_window AS low_2,
+                 LEAD(s.high, 2) OVER stock_window AS high_2,
+                 LEAD(s.low, 3) OVER stock_window AS low_3,
+                 LEAD(s.high, 3) OVER stock_window AS high_3,
+                 LEAD(s.close, {horizon}) OVER stock_window AS future_close,
+                 LEAD(s.trade_date, {horizon}) OVER stock_window AS future_date
+          FROM stock_daily_silver s
+          {candidate_price_join}
+          WHERE s.trade_date BETWEEN ? AND ?
+          WINDOW stock_window AS (PARTITION BY s.code ORDER BY s.trade_date)
+        ), market_prices AS (
+          SELECT trade_date,
+                 LEAD(open, 1) OVER market_window AS entry_open,
+                 LEAD(close, {horizon}) OVER market_window AS future_close
+          FROM index_daily_silver
+          WHERE index_code = '000001.SH' AND trade_date BETWEEN ? AND ?
+          WINDOW market_window AS (ORDER BY trade_date)
+        ), sector_base AS (
+          SELECT trade_date, sector_name, open, close
+          FROM sector_daily_silver
+          WHERE trade_date BETWEEN ? AND ?
+            AND COALESCE(sector_name, '') <> ''
+          QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY trade_date, sector_name
+            ORDER BY COALESCE(ingested_at, '') DESC
+          ) = 1
+        ), sector_prices AS (
+          SELECT trade_date, sector_name,
+                 LEAD(open, 1) OVER sector_window AS entry_open,
+                 LEAD(close, {horizon}) OVER sector_window AS future_close
+          FROM sector_base
+          WINDOW sector_window AS (PARTITION BY sector_name ORDER BY trade_date)
+        ), {factor_pivot_sql}
         SELECT f.*{tech_column}, w.resonance_sectors, w.limit_pct, w.limit_progress, w.liquidity_score,
                m.market_score,
                p.entry_date, p.future_date, p.entry_open,
                (p.future_close / NULLIF(p.entry_open, 0) - 1.0) AS raw_forward_return,
+               (mp.future_close / NULLIF(mp.entry_open, 0) - 1.0) AS market_forward_return,
+               (sp.future_close / NULLIF(sp.entry_open, 0) - 1.0) AS sector_forward_return,
                (GREATEST(p.high_1, p.high_2, p.high_3) / NULLIF(p.entry_open, 0) - 1.0) AS mfe_3d,
                (LEAST(p.low_1, p.low_2, p.low_3) / NULLIF(p.entry_open, 0) - 1.0) AS mae_3d,
                CASE
@@ -262,31 +401,62 @@ class FactorLibraryTrainer:
         LEFT JOIN factor_stock_wide w
           ON w.trade_date = f.trade_date AND w.code = f.code
         LEFT JOIN factor_market_wide m ON m.trade_date = f.trade_date
+        LEFT JOIN market_prices mp ON mp.trade_date = f.trade_date
+        LEFT JOIN sector_prices sp
+          ON sp.trade_date = f.trade_date AND sp.sector_name = w.primary_sector_name
         WHERE p.future_date <= ? AND p.future_close > 0 AND p.close > 0
         ORDER BY f.trade_date, f.code
         """
-        params: List[Any] = [str(start_date), str(end_date), *factor_ids, str(end_date)]
+        params: List[Any] = [
+            price_start, price_end,
+            price_start, price_end,
+            price_start, price_end,
+            str(start_date), str(end_date), *factor_params, str(end_date),
+        ]
+        Path(DUCKDB_TEMP_DIR).mkdir(parents=True, exist_ok=True)
         con = duckdb.connect(str(self.duckdb_path), read_only=True)
         try:
+            con.execute("SET memory_limit = ?", [str(DUCKDB_MEMORY_LIMIT)])
+            con.execute("SET threads = ?", [max(1, int(DUCKDB_THREADS))])
+            con.execute("SET temp_directory = ?", [str(DUCKDB_TEMP_DIR)])
+            con.execute("SET preserve_insertion_order = false")
+            if strategy_builder is not None:
+                con.register("_strategy_candidates", strategy_candidates)
             frame = con.execute(sql, params).fetchdf()
         finally:
+            if strategy_builder is not None:
+                try:
+                    con.unregister("_strategy_candidates")
+                except Exception:
+                    pass
             con.close()
         if frame.empty:
+            if strategy_builder is not None:
+                self._last_strategy_training_audit = {
+                    "strategy_id": profile,
+                    "candidate_rows": int(len(strategy_candidates)),
+                    "filled_rows": 0,
+                    "excluded": {
+                        "missing_factor_or_forward_daily": int(len(strategy_candidates)),
+                    },
+                }
             return frame
         frame["primary_sector"] = (
             frame.get("resonance_sectors", pd.Series("", index=frame.index))
             .fillna("").astype(str).str.split(",").str[0].str.strip()
         )
         raw = pd.to_numeric(frame["raw_forward_return"], errors="coerce")
-        market_return = raw.groupby(frame["trade_date"]).transform("mean")
-        sector_return = raw.groupby([frame["trade_date"], frame["primary_sector"]]).transform("mean")
-        sector_return = sector_return.where(frame["primary_sector"].ne(""), market_return)
+        market_return = pd.to_numeric(frame.get("market_forward_return"), errors="coerce")
+        market_return = market_return.fillna(raw.groupby(frame["trade_date"]).transform("mean"))
+        sector_return = pd.to_numeric(frame.get("sector_forward_return"), errors="coerce")
+        fallback_sector = raw.groupby([frame["trade_date"], frame["primary_sector"]]).transform("mean")
+        sector_return = sector_return.fillna(fallback_sector).where(frame["primary_sector"].ne(""), market_return)
         frame["next_3d_excess_return"] = raw - (market_return + sector_return) / 2.0
         frame["target_return"] = frame["next_3d_excess_return"]
+        from core.models.market_state import classify_market_score
+
         score = pd.to_numeric(frame.get("market_score"), errors="coerce").fillna(50.0)
-        frame["market_regime"] = np.select(
-            [score >= 70.0, score < 45.0], ["strong", "weak"], default="neutral",
-        )
+        frame["market_regime"] = score.map(classify_market_score)
         strong = (
             (pd.to_numeric(frame["tradable_next_day"], errors="coerce").fillna(0) > 0)
             & (pd.to_numeric(frame["mfe_3d"], errors="coerce").fillna(0) >= 0.08)
@@ -303,8 +473,6 @@ class FactorLibraryTrainer:
         frame["label_avoid"] = (frame["label_class"] == 0).astype(int)
         frame["label_success"] = frame["label_strong_buy"]
         frame = self._apply_training_scope(frame, training_scope)
-        from core.factors.strategy_training import STRATEGY_TRAINING_SPECS, StrategyMinuteTrainingBuilder
-
         if profile in STRATEGY_TRAINING_SPECS:
             try:
                 from core.screening.strategy_profiles import StrategyProfileRepository
@@ -314,7 +482,7 @@ class FactorLibraryTrainer:
                 modes = execution.get("allowed_entry_modes") or execution.get("entry_modes") or []
             except Exception:
                 modes = []
-            builder = StrategyMinuteTrainingBuilder(duckdb_path=self.duckdb_path)
+            builder = strategy_builder or StrategyMinuteTrainingBuilder(duckdb_path=self.duckdb_path)
             frame = builder.apply(
                 frame,
                 strategy_id=profile,
@@ -884,11 +1052,28 @@ class FactorLibraryTrainer:
         )
         if frame.empty or frame["trade_date"].nunique() < 20:
             audit = getattr(self, "_last_strategy_training_audit", {})
-            raise RuntimeError(f"动态权重训练样本不足，至少需要20个有效交易日；真实买点审计={audit}")
+            raise TrainingPrerequisiteError(
+                f"动态权重训练样本不足，至少需要20个有效交易日；真实买点审计={audit}",
+                reason_code="insufficient_executable_samples",
+                audit=audit,
+                hint=(
+                    "请先批量预取策略候选在T+1的1分钟行情、集合竞价和板块同伴分钟行情，"
+                    "再重新训练。"
+                ),
+            )
         weights, report = self.fit_frame(frame, prior)
         oos_frame = self._rolling_oos_scored_frame(frame, prior)
         if oos_frame.empty or oos_frame["trade_date"].astype(str).nunique() < 5:
-            raise RuntimeError("滚动样本外校准不足：至少需要5个有预测的验证交易日，禁止使用训练集内校准")
+            raise TrainingPrerequisiteError(
+                "滚动样本外校准不足：至少需要5个有预测的验证交易日，禁止使用训练集内校准",
+                reason_code="insufficient_oos_calibration",
+                audit={
+                    "training_rows": int(len(frame)),
+                    "training_days": int(frame["trade_date"].astype(str).nunique()),
+                    "oos_days": int(oos_frame["trade_date"].astype(str).nunique()) if not oos_frame.empty else 0,
+                },
+                hint="扩大训练区间或补齐各月份可成交样本后重试。",
+            )
         report["confidence_profiles"] = {
             "all": self._confidence_profile(oos_frame, weights),
         }
@@ -900,9 +1085,23 @@ class FactorLibraryTrainer:
         report["oos_calibration_rows"] = int(len(oos_frame))
         report["oos_calibration_months"] = int(oos_frame["trade_date"].astype(str).str[:6].nunique())
         monthly_gate = self._rolling_month_gate(frame, prior)
+        all_profile = (report.get("confidence_profiles") or {}).get("all", {})
+        calibration = all_profile.get("calibration") or {}
+        success_probability = float(all_profile.get("success_probability") or 0.0)
+        baseline_brier = success_probability * (1.0 - success_probability)
+        model_brier = float(calibration.get("brier_score") or 1.0)
+        tuning = report.get("tuning_evaluation") or {}
+        readiness_checks = {
+            "minimum_training_days": int(frame["trade_date"].astype(str).nunique()) >= 60,
+            "minimum_filled_samples": int(len(frame)) >= 200,
+            "minimum_oos_months": int(report["oos_calibration_months"]) >= 3,
+            "profit_factor_above_1_2": float(tuning.get("profit_factor") or 0.0) >= 1.2,
+            "brier_not_worse_than_base_rate": model_brier <= baseline_brier + 1e-12,
+            "top_groups_monotonic": bool(all_profile.get("monotonic_top3")),
+            "recent_month_gate": bool(monthly_gate.get("passed")),
+        }
         gate_passed = bool(
-            (report.get("confidence_profiles") or {}).get("all", {}).get("monotonic_top3")
-            and monthly_gate.get("passed")
+            all(readiness_checks.values())
         )
         if not gate_passed:
             weights = prior
@@ -912,9 +1111,17 @@ class FactorLibraryTrainer:
         report["publication_gate"] = {
             "passed": gate_passed,
             "reason": (
-                "收益分组单调，且最近3个样本外月份至少2个月Rank IC为正"
-                if gate_passed else "动态模型未通过收益单调性或连续月样本外闸门，生产权重回退冷启动先验"
+                "训练样本、样本外月份、收益单调性、Profit Factor与校准全部达标"
+                if gate_passed else "动态模型未通过完整发布清单，生产权重回退规则先验"
             ),
+            "checks": readiness_checks,
+            "thresholds": {
+                "training_days": 60,
+                "filled_samples": 200,
+                "oos_months": 3,
+                "profit_factor": 1.2,
+                "baseline_brier": baseline_brier,
+            },
             "monthly_oos": monthly_gate,
         }
         if not effective_date:
@@ -933,6 +1140,11 @@ class FactorLibraryTrainer:
             profile=profile,
             effective_date=str(effective_date),
         )
+        if not gate_passed and candidate_model.get("active"):
+            candidate_model["challenger_status"] = candidate_model.get("status")
+            candidate_model["status"] = "rejected_publication_gate"
+            candidate_model["active"] = False
+            candidate_model["reason"] = "未通过完整样本外发布清单，仅保留Challenger产物"
         candidate_model["training_scope"] = training_scope
         report["candidate_model"] = candidate_model
         report["lightgbm"] = {
@@ -1044,16 +1256,36 @@ class FactorLibraryTrainer:
         profile: str = "default",
         train_months: int = 12,
     ) -> Dict[str, Any]:
+        from core.factors.strategy_training import strategy_training_spec
+
+        spec = strategy_training_spec(profile, self.horizon_days)
         prior = self.prior_weights(profile)
         training_scope = self.training_scope(profile)
         frame = self.load_training_frame(
             start_date, end_date, list(prior), training_scope=training_scope,
+            profile=profile, horizon_days=spec.horizon_days,
         )
-        if frame.empty:
-            return {"folds": [], "summary": {"folds": 0}}
+        if frame.empty or frame["trade_date"].astype(str).nunique() < 20:
+            audit = getattr(self, "_last_strategy_training_audit", {})
+            raise TrainingPrerequisiteError(
+                f"滚动验证样本不足，至少需要20个有效交易日；真实买点审计={audit}",
+                reason_code="insufficient_executable_samples",
+                audit=audit,
+                hint=(
+                    "请先批量预取策略候选在T+1的1分钟行情、集合竞价和板块同伴分钟行情，"
+                    "再重新训练。"
+                ),
+            )
         frame = frame.copy()
         frame["month"] = frame["trade_date"].astype(str).str.slice(0, 6)
         months = sorted(frame["month"].unique())
+        if len(months) <= max(int(train_months), 1):
+            raise TrainingPrerequisiteError(
+                f"滚动验证月份不足：现有{len(months)}个月，训练窗口需要{int(train_months)}个月并至少保留1个月验证",
+                reason_code="insufficient_walk_forward_months",
+                audit={"available_months": list(months), "train_months": int(train_months)},
+                hint="缩短训练窗口或扩大训练日期范围。",
+            )
         folds: List[Dict[str, Any]] = []
         for index in range(max(int(train_months), 1), len(months)):
             train_keys = months[index - train_months:index]
@@ -1066,7 +1298,7 @@ class FactorLibraryTrainer:
                 candidate,
                 validation_start=validation_start,
                 validation_end=validation_end,
-                embargo_days=self.horizon_days,
+                embargo_days=spec.horizon_days,
             )
             train = train[train["month"].isin(train_keys)]
             if train["trade_date"].nunique() < 20 or validation.empty:
@@ -1092,7 +1324,7 @@ class FactorLibraryTrainer:
                 "trained_at": datetime.now().isoformat(timespec="seconds"),
                 "train_start": str(train["trade_date"].min()),
                 "train_end": str(train["trade_date"].max()),
-                "horizon_days": self.horizon_days,
+                "horizon_days": spec.horizon_days,
                 "training_rows": int(len(train)),
                 "training_days": int(train["trade_date"].nunique()),
                 "prior_weights": prior,
@@ -1111,6 +1343,17 @@ class FactorLibraryTrainer:
                 "embargo_dates": split_audit["embargo_dates"],
                 **evaluation,
             })
+        if not folds:
+            raise TrainingPrerequisiteError(
+                "滚动验证未形成有效折：每折训练期至少需要20个有效交易日，验证期也必须存在可成交样本",
+                reason_code="insufficient_walk_forward_folds",
+                audit={
+                    "available_months": list(months),
+                    "training_rows": int(len(frame)),
+                    "training_days": int(frame["trade_date"].astype(str).nunique()),
+                },
+                hint="补齐各月份T+1分钟行情，或在保持样本外验证的前提下扩大日期范围。",
+            )
         summary = {
             "folds": len(folds),
             "mean_oos_rank_ic": float(np.mean([row["rank_ic"] for row in folds])) if folds else 0.0,
@@ -1173,4 +1416,9 @@ class FactorLibraryTrainer:
         }
 
 
-__all__ = ["DynamicWeightRepository", "FactorLibraryTrainer", "WeightArtifact"]
+__all__ = [
+    "DynamicWeightRepository",
+    "FactorLibraryTrainer",
+    "TrainingPrerequisiteError",
+    "WeightArtifact",
+]

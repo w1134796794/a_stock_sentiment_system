@@ -27,6 +27,25 @@ def test_fixed_risk_sizes_by_account_risk_and_stop_distance():
     assert engine._last_sizing_meta["method"] == "fixed_risk"
 
 
+def test_explicit_plan_base_position_can_raise_size_within_risk_caps():
+    config = BacktestConfig(
+        initial_capital=100_000,
+        position_sizing_mode="fixed_risk",
+        fixed_risk_per_trade=0.04,
+        stop_loss_pct=0.05,
+        max_position_per_stock=0.70,
+        kelly_max_position=0.70,
+    )
+    engine = BacktestEngine(None, config)
+    value = engine._calculate_position_size(pd.Series({
+        "模式": "指标筛选/default",
+        "仓位": "heavy",
+        "计划基础仓位%": 50,
+    }))
+    assert value == 50_000
+    assert engine._last_sizing_meta["position_pct"] == 0.5
+
+
 def test_kelly_uses_only_prior_closed_trades_and_rejects_negative_edge():
     config = BacktestConfig(
         initial_capital=1_000_000,

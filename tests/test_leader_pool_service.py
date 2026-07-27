@@ -65,11 +65,54 @@ def test_leader_pool_from_screening_json(tmp_path: Path):
     assert result["rows"][0]["resonance_sectors"] == "光通信"
     assert result["rows"][0]["lifecycle_state"] == "萌芽龙头"
     assert result["rows"][0]["primary_role"] == "短线龙头"
-    assert {"短线龙头", "板块龙头", "情绪龙头"}.issubset(
+    assert {"连板龙头", "趋势龙头", "短线龙头", "板块龙头", "情绪龙头"}.issubset(
         result["rows"][0]["leader_roles"]
     )
+    assert result["role_counts"]["连板龙头"] >= 1
+    assert result["role_counts"]["趋势龙头"] >= 1
     assert result["role_counts"]["短线龙头"] >= 1
     assert all(row["code"] != "000001" for row in result["rows"])
+
+
+def test_leader_pool_payload_is_strict_json_when_source_contains_nan(tmp_path: Path):
+    screening_dir = tmp_path / "screening"
+    screening_dir.mkdir()
+    item = _leader_item()
+    item["metrics"]["stk_kpl_leader_quality"] = float("nan")
+    (screening_dir / "screening_20260618.json").write_text(
+        json.dumps({"trade_date": "20260618", "final": [item]}),
+        encoding="utf-8",
+    )
+
+    result = LeaderPoolService(screening_dir=screening_dir).build_pool("20260618")
+
+    json.dumps(result, ensure_ascii=False, allow_nan=False)
+    assert result["rows"][0]["kpl_leader_score"] == 50.0
+
+
+def test_leader_pool_ignores_strategy_combination_candidates(tmp_path: Path):
+    screening_dir = tmp_path / "screening"
+    screening_dir.mkdir()
+    (screening_dir / "screening_20260618.json").write_text(
+        json.dumps({
+            "trade_date": "20260618",
+            "final": [_leader_item(code="002281", name="原龙头")],
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    combination = screening_dir / "combinations" / "first_board_launch"
+    combination.mkdir(parents=True)
+    (combination / "screening_20260618.json").write_text(
+        json.dumps({
+            "trade_date": "20260618",
+            "final": [_leader_item(code="600000", name="策略候选", rank=1)],
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    rows = LeaderPoolService(screening_dir=screening_dir).build_pool("20260618")["rows"]
+
+    assert [row["code"] for row in rows] == ["002281"]
 
 
 def test_intraday_strength_uses_weak_to_strong_for_low_open():
@@ -144,6 +187,61 @@ def test_intraday_strength_uses_weak_to_strong_for_low_open():
     assert result["market_date"] == "20260619"
     assert result["rows"][0]["status"] == "confirmed"
     assert result["rows"][0]["entry_mode_text"] == "弱转强"
+
+
+def test_intraday_strength_observes_strategy_candidates_without_leader_identity(tmp_path: Path):
+    screening_dir = tmp_path / "screening"
+    combination = screening_dir / "combinations" / "first_board_launch"
+    combination.mkdir(parents=True)
+    (combination / "screening_20260618.json").write_text(
+        json.dumps({
+            "trade_date": "20260618",
+            "strategy_id": "first_board_launch",
+            "strategy_name": "首板启动",
+            "final": [{
+                "code": "600000",
+                "name": "浦发银行",
+                "score": 76,
+                "rank": 2,
+            }],
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    class FakePool:
+        def build_pool(self, trade_date, *, lookback=5, limit=30):
+            raise AssertionError("策略候选观察不应调用龙头池判定")
+
+    fake_pool = FakePool()
+    fake_pool.screening_dir = screening_dir
+    result = IntradayStrengthService(
+        quote_service=type("Quotes", (), {
+            "get_quotes": lambda self, codes: {
+                "quotes": [{
+                    "code": "600000",
+                    "name": "浦发银行",
+                    "pre_close": 7.8,
+                    "open_price": 7.9,
+                    "last_price": 8.0,
+                    "change_pct": 2.56,
+                }],
+            },
+        })(),
+        pool_service=fake_pool,
+        screening_dir=screening_dir,
+    ).build(
+        "20260618",
+        market_date="20260619",
+        profile="first_board_launch",
+    )
+
+    assert result["observation_source"] == "strategy_profile"
+    assert result["strategy"]["id"] == "first_board_launch"
+    assert [row["code"] for row in result["rows"]] == ["600000"]
+    row = result["rows"][0]
+    assert row["pool_type"] == "策略候选"
+    assert row["is_leader_observation"] is False
+    assert row["leader_time_label"] == "首板启动候选"
 
 
 def test_leader_pool_uses_20cm_limit_progress_for_chinext(tmp_path: Path):

@@ -122,8 +122,28 @@ def load_positions(run: str) -> List[Dict[str, Any]]:
 
 
 _TRADE_TEXT_MAP = {
+    "mainline_leader": "主线龙头",
+    "weak_to_strong": "弱转强修复",
+    "first_board_launch": "首板启动",
+    "default": "默认策略",
+    "weak_only": "只做弱转强",
+    "continuation_only": "只做强势延续",
+    "acceleration_only": "只做高开加速",
+    "fixed_gap": "固定开盘区间",
+    "hybrid": "弱转强与强势延续",
+    "continuation": "强势延续",
+    "acceleration": "高开加速",
     "buy": "买入成交",
     "holding": "持仓中",
+    "loaded": "已加载",
+    "rejected": "已拒绝",
+    "observing": "观察中",
+    "confirmed": "已确认",
+    "cancelled": "已取消",
+    "signal_unfilled": "信号正确但无法成交",
+    "fixed_gap_not_high_open": "未满足固定高开条件",
+    "fixed_gap_too_high": "高开幅度过高",
+    "score_and_strength_insufficient": "评分与强度不足",
     "stop_loss": "硬止损",
     "stop_loss_gap": "跳空止损",
     "trailing_stop": "回撤止盈",
@@ -411,6 +431,10 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "强项样本": r.get("strong_count", 0),
             "强项盈亏": _fmt_money(r.get("strong_total_pnl")),
             "强项胜率": _fmt_pct(r.get("strong_win_rate")),
+            "强项胜率区间": (
+                f"{_fmt_pct(r.get('strong_win_interval_low'))}~"
+                f"{_fmt_pct(r.get('strong_win_interval_high'))}"
+            ),
             "弱项样本": r.get("weak_count", 0),
             "弱项盈亏": _fmt_money(r.get("weak_total_pnl")),
             "弱项止损率": _fmt_pct(r.get("weak_stop_loss_rate")),
@@ -486,6 +510,10 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "成交覆盖率": _fmt_pct(r.get("coverage_rate")),
             "已平仓": int(float(r.get("closed_trades") or 0)),
             "胜率": _fmt_pct(r.get("win_rate")),
+            "胜率区间": (
+                f"{_fmt_pct(r.get('win_rate_interval_low'))}~"
+                f"{_fmt_pct(r.get('win_rate_interval_high'))}"
+            ),
             "平均收益": _fmt_pct(r.get("avg_return"), signed=True),
             "总收益": _fmt_pct(r.get("total_return"), signed=True),
             "止损率": _fmt_pct(r.get("stop_loss_rate")),
@@ -505,11 +533,79 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "已平仓": int(float(r.get("closed_trades") or 0)),
             "胜率": _fmt_pct(r.get("win_rate")),
             "平均收益": _fmt_pct(r.get("average_return"), signed=True),
+            "盈亏比": (
+                "∞" if str(r.get("profit_factor") or "").lower() == "inf"
+                else f"{float(r.get('profit_factor') or 0):.2f}"
+            ),
             "总收益": _fmt_pct(r.get("total_return"), signed=True),
             "止损率": _fmt_pct(r.get("stop_rate")),
             "最大回撤": _fmt_pct(r.get("max_drawdown"), signed=True),
             "平均MFE": _fmt_pct(r.get("average_mfe"), signed=True),
             "平均MAE": _fmt_pct(r.get("average_mae"), signed=True),
+        })
+
+    architecture_rows = []
+    for r in load_table("architecture", run):
+        profit_factor = str(r.get("profit_factor") or "")
+        architecture_rows.append({
+            "链路": r.get("architecture") or "",
+            "候选数": int(float(r.get("candidate_count") or 0)),
+            "成交数": int(float(r.get("buy_count") or 0)),
+            "成交覆盖率": _fmt_pct(r.get("coverage_rate")),
+            "已平仓": int(float(r.get("closed_trades") or 0)),
+            "胜率": _fmt_pct(r.get("win_rate")),
+            "盈亏比": "∞" if profit_factor.lower() == "inf" else f"{float(profit_factor or 0):.2f}",
+            "总收益": _fmt_pct(r.get("total_return"), signed=True),
+            "最大回撤": _fmt_pct(r.get("max_drawdown"), signed=True),
+        })
+
+    funnel_stage_labels = {
+        "candidate": "加载候选",
+        "market_gate": "市场闸门",
+        "sizing_gate": "仓位闸门",
+        "portfolio_gate": "组合风控",
+        "entry_signal": "入场信号",
+        "matching_gate": "成交撮合",
+    }
+    funnel_reason_labels = {
+        "candidate_loaded": "候选已加载",
+        "market_too_weak": "市场过弱",
+        "score_below_neutral_threshold": "中性偏弱市场评分不足",
+        "score_below_active_threshold": "中性市场评分不足",
+        "position_sizing_rejected": "仓位模型拒绝",
+        "already_held": "已有持仓",
+        "strategy_position_limit": "策略持仓上限",
+        "account_position_limit": "账户持仓上限",
+        "total_position_limit": "总仓位上限",
+        "sector_concentration_limit": "板块集中度上限",
+        "insufficient_cash": "现金不足",
+        "invalid_entry_price": "成交价格无效",
+        "filled": "已成交",
+        "missing_minutes": "缺少分钟行情",
+        "missing_auction": "缺少竞价数据",
+        "opening_strength_confirmation_timeout": "缺竞价时开盘强势未确认",
+        "signal_unfilled": "信号正确但无法成交",
+        "not_confirmed": "入场条件未确认",
+    }
+    entry_funnel_rows = []
+    fillable_signal_count = 0
+    unfilled_signal_count = 0
+    for r in load_table("entry_funnel", run):
+        stage = str(r.get("stage") or "")
+        reason = str(r.get("reason_code") or "")
+        status = str(r.get("status") or "")
+        count = int(float(r.get("count") or 0))
+        if stage == "entry_signal" and status == "filled":
+            fillable_signal_count += count
+        elif stage == "entry_signal" and status == "signal_unfilled":
+            unfilled_signal_count += count
+        entry_funnel_rows.append({
+            "策略": _trade_text(r.get("strategy_id"), "默认策略"),
+            "入场模式": _trade_text(r.get("entry_mode"), "--"),
+            "环节": funnel_stage_labels.get(stage, stage or "--"),
+            "结果": _trade_text(r.get("status"), "--"),
+            "原因": funnel_reason_labels.get(reason, _trade_text(reason, reason or "--")),
+            "数量": count,
         })
 
     # 逐笔展示原始 BUY/SELL；FIFO 仅用于识别哪些 BUY 仍处于持仓中。
@@ -613,6 +709,10 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "total_trades": summary.get("total_trades") if summary.get("total_trades") is not None else len(closed),
         "closed_count": len(closed),
         "buy_count": sum(1 for t in trades if str(t.get("action", "")).upper() == "BUY"),
+        "candidate_count": int(float(summary.get("entry_candidate_count") or 0)),
+        "signal_count": int(float(summary.get("entry_signal_count") or (fillable_signal_count + unfilled_signal_count))),
+        "fillable_signal_count": int(float(summary.get("entry_fillable_signal_count") or fillable_signal_count)),
+        "signal_unfilled_count": int(float(summary.get("entry_signal_unfilled_count") or unfilled_signal_count)),
         "execution_count": len(trades),
         "open_count": open_count,
         "win_count": len(wins),
@@ -630,6 +730,8 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "walk_forward_summary": walk_forward_summary,
         "lhb_comparison_rows": lhb_comparison_rows,
         "entry_mode_rows": entry_mode_rows,
+        "architecture_rows": architecture_rows,
+        "entry_funnel_rows": entry_funnel_rows,
         "transaction_view": True,
         "trade_rows": trade_rows,
         "trade_columns": ["日期", "动作", "名称", "代码", "策略", "模式", "买入价", "卖出价", "现价",
