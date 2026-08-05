@@ -37,6 +37,7 @@ ignore = [
     "B007",   # 未使用的循环变量
     "UP006",  # PEP 585 类型升级（保留 Dict/List 风格更易读）
     "UP007",  # Optional[X] -> X | None
+    "UP045",  # Ruff 新版对 Optional[X] 的对应规则
     "UP035",  # 类型导入升级
 ]
 

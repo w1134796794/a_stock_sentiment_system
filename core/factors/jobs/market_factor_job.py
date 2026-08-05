@@ -6,15 +6,17 @@ from pathlib import Path
 import pandas as pd
 
 from config.settings import CACHE_DIR
+from core.factors.jobs.first_board_factors import first_board_market_metrics
 from core.factors.jobs.gold_utils import (
     FactorJobResult,
     long_records_to_frame,
     make_long_record,
+    now_iso,
     read_recent_trade_dates,
     safe_weighted_score,
     score_between,
+    to_float,
     write_replace_partition,
-    now_iso,
 )
 from core.models.market_state import MarketStateSnapshot, classify_emotion_phase
 
@@ -342,6 +344,9 @@ class MarketFactorJob:
         prev_premium, prev_positive, prev_first_board_gap = _previous_limit_feedback(
             con, trade_date,
         )
+        first_board_market = first_board_market_metrics(
+            con, str(trade_date), limit_pool,
+        )
         previous_market_score = _previous_market_score(con, trade_date)
         market_score_change = (
             market_score - previous_market_score
@@ -356,6 +361,13 @@ class MarketFactorJob:
             "prev_limit_up_premium": prev_premium,
             "prev_limit_up_positive": prev_positive,
             "prev_first_board_gap_up": prev_first_board_gap,
+            "first_board_sector_resonance_ratio": first_board_market[
+                "first_board_sector_resonance_ratio"
+            ],
+            "first_board_cluster_count": first_board_market["first_board_cluster_count"],
+            "first_board_follow_through_ratio": first_board_market[
+                "first_board_follow_through_ratio"
+            ],
             "market_emotion_divergence": abs(trend_score - emotion_score),
         }
         provisional_phase, _ = classify_emotion_phase(market_score, market_context)
@@ -388,6 +400,13 @@ class MarketFactorJob:
             "prev_limit_up_premium": prev_premium,
             "prev_limit_up_positive": prev_positive,
             "prev_first_board_gap_up": prev_first_board_gap,
+            "first_board_sector_resonance_ratio": first_board_market[
+                "first_board_sector_resonance_ratio"
+            ],
+            "first_board_cluster_count": first_board_market["first_board_cluster_count"],
+            "first_board_follow_through_ratio": first_board_market[
+                "first_board_follow_through_ratio"
+            ],
             "emotion_phase": market_state.phase,
             "emotion_phase_label": market_state.phase_label,
             "emotion_phase_reason": "；".join(market_state.phase_reasons),
@@ -416,6 +435,9 @@ class MarketFactorJob:
             "prev_limit_up_premium",
             "prev_limit_up_positive",
             "prev_first_board_gap_up",
+            "first_board_sector_resonance_ratio",
+            "first_board_cluster_count",
+            "first_board_follow_through_ratio",
             "market_position_scale",
         ):
             wide[column] = pd.to_numeric(wide[column], errors="coerce")
@@ -500,6 +522,36 @@ class MarketFactorJob:
                 factor_id="prev_first_board_gap_up",
                 raw_value=prev_first_board_gap,
                 score=None if prev_first_board_gap is None else prev_first_board_gap * 100.0,
+                direction="higher_better",
+            ),
+            make_long_record(
+                trade_date=trade_date, entity_type="market", entity_id="market",
+                factor_id="first_board_sector_resonance_ratio",
+                raw_value=first_board_market["first_board_sector_resonance_ratio"],
+                score=(
+                    None if first_board_market["first_board_sector_resonance_ratio"] is None
+                    else to_float(first_board_market["first_board_sector_resonance_ratio"]) * 100.0
+                ),
+                direction="higher_better",
+            ),
+            make_long_record(
+                trade_date=trade_date, entity_type="market", entity_id="market",
+                factor_id="first_board_cluster_count",
+                raw_value=first_board_market["first_board_cluster_count"],
+                score=(
+                    None if first_board_market["first_board_cluster_count"] is None
+                    else score_between(first_board_market["first_board_cluster_count"], 0, 8)
+                ),
+                direction="higher_better",
+            ),
+            make_long_record(
+                trade_date=trade_date, entity_type="market", entity_id="market",
+                factor_id="first_board_follow_through_ratio",
+                raw_value=first_board_market["first_board_follow_through_ratio"],
+                score=(
+                    None if first_board_market["first_board_follow_through_ratio"] is None
+                    else to_float(first_board_market["first_board_follow_through_ratio"]) * 100.0
+                ),
                 direction="higher_better",
             ),
         ])

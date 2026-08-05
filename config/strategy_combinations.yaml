@@ -190,6 +190,11 @@ strategies:
       op: '>='
       value: 0.95
       reason: ''
+    - name: 官方首板身份
+      factor: board_height
+      op: '=='
+      value: 1
+      reason: 仅使用涨停池确认的首板，不以涨幅阈值推断
     - name: 注意形成
       factor: stk_behavior_attention
       op: '>='
@@ -200,6 +205,11 @@ strategies:
       op: '>='
       value: 35
       reason: ''
+    - name: 最低封板质量
+      factor: stk_intraday_seal_quality
+      op: '>='
+      value: 50
+      reason: 首板身份成立但封板结构偏弱
     - name: 市场情绪合格
       factor: mkt_market_score
       op: '>='
@@ -239,24 +249,24 @@ strategies:
       value: 55
       reason: 龙虎榜作为资金证据
     ranking_factors:
+    - factor: stk_first_board_resonance_score
+      weight: 0.30
     - factor: stk_behavior_repair
-      weight: 0.15
-    - factor: stk_intraday_seal_quality
-      weight: 0.15
-    - factor: stk_crowding_decay_5d
-      weight: 0.13
-    - factor: stk_behavior_attention
-      weight: 0.13
-    - factor: stk_sector_resonance_score
-      weight: 0.12
-    - factor: stk_sector_rotation_momentum
       weight: 0.10
-    - factor: stk_amount_ratio_5d
-      weight: 0.09
-    - factor: stk_liquidity_percentile
+    - factor: stk_intraday_seal_quality
+      weight: 0.12
+    - factor: stk_crowding_decay_5d
+      weight: 0.10
+    - factor: stk_behavior_attention
+      weight: 0.10
+    - factor: stk_sector_resonance_score
+      weight: 0.10
+    - factor: stk_sector_rotation_momentum
       weight: 0.08
-    - factor: stk_board_height
-      weight: -0.05
+    - factor: stk_amount_ratio_5d
+      weight: 0.06
+    - factor: stk_liquidity_percentile
+      weight: 0.04
     weight_source: manual
     weight_profile: first_board_launch
     enhancements:
@@ -279,14 +289,14 @@ strategies:
       candidate_max_age_days: 1
       max_positions: 1
       exit:
-        hard_stop_loss: 0.05
-        trailing_activation: 0.05
-        trailing_early_stop: 0.04
-        trailing_mid_profit: 0.1
-        trailing_mid_stop: 0.06
-        trailing_high_profit: 0.2
-        trailing_stop: 0.08
-        time_stop_days: 5
+        hard_stop_loss: 0.04
+        trailing_activation: 0.03
+        trailing_early_stop: 0.02
+        trailing_mid_profit: 0.08
+        trailing_mid_stop: 0.04
+        trailing_high_profit: 0.15
+        trailing_stop: 0.06
+        time_stop_days: 3
         time_stop_profit_threshold: 0.02
     protected: true
   ultra_short_board:
@@ -458,6 +468,16 @@ strategies:
       confirmation_deadline: '10:00:00'
       candidate_max_age_days: 1
       max_positions: 1
+      exit:
+        hard_stop_loss: 0.04
+        trailing_activation: 0.03
+        trailing_early_stop: 0.02
+        trailing_mid_profit: 0.08
+        trailing_mid_stop: 0.04
+        trailing_high_profit: 0.15
+        trailing_stop: 0.06
+        time_stop_days: 4
+        time_stop_profit_threshold: 0.02
   mainline_leader:
     name: 主线龙头
     description: 不按候选排名直接认定龙头，强调主线地位、板块持续性、相对强度、封板质量和资金认可。

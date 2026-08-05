@@ -33,7 +33,16 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "prefix": "/",
                 "exact": True,
                 "roles": ALL_ROLES,
+                "default_menu_visible": False,
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'),
+            },
+            {
+                "key": "workbench",
+                "label": "交易工作台",
+                "href": "/workspace",
+                "prefix": "/workspace",
+                "roles": ALL_ROLES,
+                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M4 10h16M10 10v9"/><path d="M7 7h.01M10 7h.01"/></svg>'),
             },
         ],
     },
@@ -46,6 +55,7 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "href": "/data/strategy",
                 "prefix": "/data/strategy",
                 "roles": ALL_ROLES,
+                "default_menu_visible": False,
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>'),
             },
             {
@@ -54,6 +64,7 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "href": "/data/sector",
                 "prefix": "/data/sector",
                 "roles": ALL_ROLES,
+                "default_menu_visible": False,
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>'),
             },
             {
@@ -86,6 +97,7 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "href": "/intraday",
                 "prefix": "/intraday",
                 "roles": ALL_ROLES,
+                "default_menu_visible": False,
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>'),
             },
             {
@@ -94,6 +106,7 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "href": "/realtime",
                 "prefix": "/realtime",
                 "roles": ALL_ROLES,
+                "default_menu_visible": False,
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-6 4 12 2-6h6"/><circle cx="5" cy="19" r="1"/><circle cx="12" cy="19" r="1"/><circle cx="19" cy="19" r="1"/></svg>'),
             },
         ],
@@ -144,6 +157,7 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "href": "/drawdown",
                 "prefix": "/drawdown",
                 "roles": ALL_ROLES,
+                "default_menu_visible": False,
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4v16h18"/><path d="M7 8l4 6 3-3 4 5"/></svg>'),
             },
         ],
@@ -219,7 +233,15 @@ MENU_GROUPS: List[Dict[str, Any]] = [
     },
 ]
 
-PUBLIC_PATHS = {"/login", "/logout", "/expired", "/favicon.ico"}
+PUBLIC_PATHS = {
+    "/login",
+    "/logout",
+    "/expired",
+    "/favicon.ico",
+    "/api/v1/mobile/auth/wechat",
+    "/api/v1/mobile/auth/bind",
+    "/api/v1/mobile/auth/refresh",
+}
 PUBLIC_PREFIXES = ("/static/",)
 
 # Page-like paths and docs that must be admin only even for GET.
@@ -256,18 +278,19 @@ FORCED_ADMIN_KEYS = frozenset({
 })
 
 PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
-    "overview": ("/", "/api/overview"),
+    "overview": ("/", "/api/overview", "/api/v1/mobile/bootstrap", "/api/v1/mobile/dashboard"),
+    "workbench": ("/workspace", "/api/v1/workbench"),
     "strategy": (
         "/data/strategy", "/report", "/assistant",
         "/api/etl/screening", "/api/etl/analysis", "/api/agent", "/api/assistant",
-        "/api/automation/status",
+        "/api/automation/status", "/api/v1/mobile/candidates", "/api/v1/mobile/stocks",
     ),
     "sector": ("/data/sector",),
-    "limitup": ("/data/limitup",),
-    "lhb": ("/data/lhb",),
-    "dragon": ("/dragon", "/api/leader-pool"),
+    "limitup": ("/data/limitup", "/api/v1/mobile/limitup"),
+    "lhb": ("/data/lhb", "/api/v1/mobile/lhb"),
+    "dragon": ("/dragon", "/api/leader-pool", "/api/v1/mobile/leaders"),
     "intraday": ("/intraday", "/api/intraday-strength"),
-    "realtime": ("/realtime", "/api/realtime"),
+    "realtime": ("/realtime", "/api/realtime", "/api/v1/mobile/realtime"),
     "backtest": ("/backtest", "/api/backtest"),
     "drawdown": ("/drawdown",),
     "users": ("/admin/users", "/api/admin/users"),
@@ -332,10 +355,11 @@ def _effective_permission(
         return {"menu_visible": allowed, "can_access": allowed, "locked": True}
 
     default_allowed = role in tuple(item.get("roles") or ())
+    default_menu_visible = default_allowed and bool(item.get("default_menu_visible", True))
     source = overrides if overrides is not None else get_role_permission_overrides()
     saved = source.get(role, {}).get(key, {})
     can_access = bool(saved.get("can_access", default_allowed))
-    menu_visible = bool(saved.get("menu_visible", default_allowed)) and can_access
+    menu_visible = bool(saved.get("menu_visible", default_menu_visible)) and can_access
     return {"menu_visible": menu_visible, "can_access": can_access, "locked": False}
 
 

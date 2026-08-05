@@ -1557,6 +1557,10 @@ class BacktestEngine:
         position['entry_price'] = self._float(position.get('entry_price')) * ratio
         position['highest_price'] = self._float(position.get('highest_price')) * ratio
         position['stop_loss_price'] = self._float(position.get('stop_loss_price')) * ratio
+        for key in ('max_favorable_price', 'min_adverse_price', 'last_close'):
+            value = self._float(position.get(key))
+            if value > 0:
+                position[key] = value * ratio
         position['shares'] = old_shares / ratio if ratio > 0 else old_shares
         position['last_adjustment_date'] = str(date)
         logger.info(

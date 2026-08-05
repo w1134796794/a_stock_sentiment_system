@@ -16,7 +16,7 @@ from __future__ import annotations
 import csv
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from config.settings import OUTPUT_DIR
 from core.screening.explanations import FACTOR_LABELS
@@ -55,7 +55,7 @@ def _read_csv(path: Path) -> List[Dict[str, Any]]:
     if not path.exists():
         return []
     try:
-        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        with open(path, encoding="utf-8-sig", newline="") as f:
             return [dict(row) for row in csv.DictReader(f)]
     except Exception:  # noqa: BLE001
         return []
@@ -122,6 +122,7 @@ def load_positions(run: str) -> List[Dict[str, Any]]:
 
 
 _TRADE_TEXT_MAP = {
+    "all": "全部候选",
     "mainline_leader": "主线龙头",
     "weak_to_strong": "弱转强修复",
     "first_board_launch": "首板启动",
@@ -154,6 +155,31 @@ _TRADE_TEXT_MAP = {
     "end_of_backtest": "回测结束平仓",
     "auction_entry": "竞价买点",
     "intraday_strength": "盘中转强",
+    "filled": "已成交",
+    "data_insufficient": "数据不足",
+    "entry_mode_not_allowed": "策略不支持该开盘入场模式",
+    "continuation_confirmation_timeout": "10:00前未确认强势延续",
+    "weak_confirmation_timeout": "10:00前未确认弱转强",
+    "acceleration_confirmation_timeout": "10:00前未确认高开加速",
+    "broke_opening_low": "跌破开盘前5分钟低点",
+    "below_one_lot": "目标仓位不足一手",
+    "weak_gap_out_of_range": "开盘不在弱转强区间",
+    "continuation_gap_out_of_range": "开盘不在强势延续区间",
+    "acceleration_mode_required": "高开幅度较大，仅高开加速可参与",
+    "gap_below_entry_floor": "低开超过允许范围",
+    "missing_sector_confirmation": "缺少板块同步确认",
+    "missing_amount_profile": "缺少历史同分钟量能模型",
+    "weak_signal_pending": "弱转强条件尚未全部满足",
+    "continuation_signal_pending": "强势延续条件尚未全部满足",
+    "acceleration_signal_pending": "高开加速条件尚未全部满足",
+    "missing_auction_evidence": "缺少竞价成交证据",
+    "auction_volume_insufficient": "竞价量能不足",
+    "acceleration_not_leader": "非龙头或主线核心",
+    "locked_limit_unfilled": "涨停封单无可成交证据",
+    "stop_loss_minute": "分钟硬止损",
+    "stop_loss_gap_minute": "次日跳空止损",
+    "trailing_stop_minute": "分钟回撤止盈",
+    "time_stop_minute_close": "持有到期按收盘价退出",
 }
 
 
@@ -165,6 +191,11 @@ def _trade_text(value: Any, default: str = "") -> str:
 def _pattern_text(value: Any) -> str:
     text = str(value or "").strip()
     return text.replace("/default", "/默认").replace("default", "默认")
+
+
+def _strategy_version_text(value: Any) -> str:
+    # 配置哈希用于产物追溯，不属于交易页面需要理解的信息。
+    return "规则版"
 
 
 def load_table(kind: str, run: str) -> List[Dict[str, Any]]:
@@ -391,7 +422,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         strategy_id = str(trade.get("strategy_id") or "default")
         item = strategy_stats.setdefault(strategy_id, {
             "策略": str(trade.get("strategy_name") or strategy_id),
-            "版本": str(trade.get("strategy_version") or "--"),
+            "版本": _strategy_version_text(trade.get("strategy_version")),
             "笔数": 0,
             "盈利": 0,
             "总盈亏": 0.0,
@@ -425,7 +456,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
     for r in load_table("factor_feedback", run):
         factor_id = str(r.get("factor_id") or "")
         factor_feedback_rows.append({
-            "因子": FACTOR_LABELS.get(factor_id) or r.get("factor_name") or factor_id,
+            "因子": FACTOR_LABELS.get(factor_id) or r.get("factor_name") or "未命名因子",
             "样本": r.get("sample_count", 0),
             "总体胜率": _fmt_pct(r.get("win_rate")),
             "强项样本": r.get("strong_count", 0),
@@ -540,8 +571,8 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
             "总收益": _fmt_pct(r.get("total_return"), signed=True),
             "止损率": _fmt_pct(r.get("stop_rate")),
             "最大回撤": _fmt_pct(r.get("max_drawdown"), signed=True),
-            "平均MFE": _fmt_pct(r.get("average_mfe"), signed=True),
-            "平均MAE": _fmt_pct(r.get("average_mae"), signed=True),
+            "平均最大浮盈": _fmt_pct(r.get("average_mfe"), signed=True),
+            "平均最大浮亏": _fmt_pct(r.get("average_mae"), signed=True),
         })
 
     architecture_rows = []
@@ -586,6 +617,21 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "opening_strength_confirmation_timeout": "缺竞价时开盘强势未确认",
         "signal_unfilled": "信号正确但无法成交",
         "not_confirmed": "入场条件未确认",
+        "entry_mode_not_allowed": "策略不支持该开盘入场模式",
+        "continuation_confirmation_timeout": "10:00前未确认强势延续",
+        "weak_confirmation_timeout": "10:00前未确认弱转强",
+        "acceleration_confirmation_timeout": "10:00前未确认高开加速",
+        "broke_opening_low": "跌破开盘前5分钟低点",
+        "below_one_lot": "目标仓位不足一手",
+        "weak_gap_out_of_range": "开盘不在弱转强区间",
+        "continuation_gap_out_of_range": "开盘不在强势延续区间",
+        "acceleration_mode_required": "高开幅度较大，仅高开加速可参与",
+        "gap_below_entry_floor": "低开超过允许范围",
+        "missing_sector_confirmation": "缺少板块同步确认",
+        "missing_amount_profile": "缺少历史同分钟量能模型",
+        "auction_volume_insufficient": "竞价量能不足",
+        "acceleration_not_leader": "非龙头或主线核心",
+        "locked_limit_unfilled": "涨停封单无可成交证据",
     }
     entry_funnel_rows = []
     fillable_signal_count = 0
@@ -682,8 +728,14 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
                 position.get("entry_signal") if is_open and position else record.get("entry_signal", ""),
             ),
             "入场时间": position.get("entry_time") if is_open and position else record.get("entry_time", ""),
-            "MFE": _fmt_pct(position.get("mfe_pct") if is_open and position else record.get("mfe_pct"), signed=True),
-            "MAE": _fmt_pct(position.get("mae_pct") if is_open and position else record.get("mae_pct"), signed=True),
+            "最大浮盈": _fmt_pct(
+                position.get("mfe_pct") if is_open and position else record.get("mfe_pct"),
+                signed=True,
+            ),
+            "最大浮亏": _fmt_pct(
+                position.get("mae_pct") if is_open and position else record.get("mae_pct"),
+                signed=True,
+            ),
             "状态/退出": status,
             "_sort_date": str(record.get("date") or ""),
             "_sort_index": index,
@@ -724,6 +776,10 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "pattern_rows": pattern_rows,
         "strategy_rows": strategy_rows,
         "factor_feedback_rows": factor_feedback_rows,
+        "factor_feedback_warning": (
+            f"当前仅{len(closed)}笔平仓，因子结论波动较大，仅作诊断参考。"
+            if len(closed) < 30 else ""
+        ),
         "rank_feedback_rows": rank_feedback_rows,
         "rank_suggestion": rank_suggestion,
         "walk_forward_rows": walk_forward_rows,
@@ -736,7 +792,7 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
         "trade_rows": trade_rows,
         "trade_columns": ["日期", "动作", "名称", "代码", "策略", "模式", "买入价", "卖出价", "现价",
                           "股数", "盈亏", "盈亏%", "持仓天数", "止损", "止盈", "排名", "评分",
-                          "买入信号", "入场时间", "MFE", "MAE", "状态/退出"],
+                          "买入信号", "入场时间", "最大浮盈", "最大浮亏", "状态/退出"],
     })
     return base
 

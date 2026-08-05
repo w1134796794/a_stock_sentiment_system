@@ -24,7 +24,6 @@ from core.signals.trust_algorithms import (
     purged_month_split,
 )
 
-
 _SAFE_FACTOR = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 # Training reads the materialized stock-wide table first.  The long table is an
@@ -45,6 +44,13 @@ _FACTOR_WIDE_COLUMNS: Dict[str, str] = {
     "stk_board_position": "fw.board_score",
     "stk_board_height": "fw.board_height_score",
     "stk_intraday_seal_quality": "fw.intraday_seal_quality_score",
+    "stk_first_board_sector_sync_score": "fw.first_board_sector_sync_score",
+    "stk_first_board_leadership_score": "fw.first_board_leadership_score",
+    "stk_first_board_sector_pioneer_score": "fw.first_board_sector_pioneer_score",
+    "stk_first_board_breadth_score": "fw.first_board_breadth_score",
+    "stk_first_board_amount_surge_score": "fw.first_board_amount_surge_score",
+    "stk_first_board_new_theme_score": "fw.first_board_new_theme_score",
+    "stk_first_board_resonance_score": "fw.first_board_resonance_score",
     "stk_crowding_decay_5d": "fw.crowding_decay_5d_score",
     "stk_capital_flow_consensus": "fw.capital_flow_consensus_score",
     "stk_lhb_net_buy_score": "fw.lhb_net_buy_score",
@@ -251,6 +257,7 @@ class FactorLibraryTrainer:
         if not self.duckdb_path.exists():
             return pd.DataFrame()
         import duckdb  # type: ignore
+
         from config.settings import DUCKDB_MEMORY_LIMIT, DUCKDB_TEMP_DIR, DUCKDB_THREADS
         from core.factors.strategy_training import STRATEGY_TRAINING_SPECS, StrategyMinuteTrainingBuilder
 

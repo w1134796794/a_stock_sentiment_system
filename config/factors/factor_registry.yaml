@@ -770,6 +770,45 @@ factors:
     enabled: true
     params: {}
 
+  first_board_sector_resonance_ratio:
+    id: "FBM1"
+    name: "首板板块共振占比"
+    category: "emotion"
+    sub_category: "first_board"
+    description: "当日官方首板中，所属题材位于板块涨幅前20%的股票占比"
+    data_source: "limit_up_pool+sector_daily+sector_membership"
+    output_type: "float"
+    value_range: [0.0, 1.0]
+    default_weight: 0.0
+    enabled: true
+    params: {top_percentile: 0.20}
+
+  first_board_cluster_count:
+    id: "FBM2"
+    name: "首板集群板块数"
+    category: "emotion"
+    sub_category: "first_board"
+    description: "当日板块内至少出现3只官方首板的题材数量"
+    data_source: "limit_up_pool+sector_membership"
+    output_type: "int"
+    value_range: [0.0, 30.0]
+    default_weight: 0.0
+    enabled: true
+    params: {minimum_first_boards: 3}
+
+  first_board_follow_through_ratio:
+    id: "FBM3"
+    name: "首板题材延续率"
+    category: "emotion"
+    sub_category: "first_board"
+    description: "昨日出现官方首板的题材中，今日板块指数继续收红的比例"
+    data_source: "limit_up_pool+sector_daily+sector_membership"
+    output_type: "float"
+    value_range: [0.0, 1.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
   stk_capital_flow_consensus:
     id: "SIG1"
     name: "多源资金流共识"
@@ -793,6 +832,97 @@ factors:
     output_type: "float"
     value_range: [0.0, 100.0]
     default_weight: 0.08
+    enabled: true
+    params: {}
+
+  stk_first_board_sector_sync_score:
+    id: "FB1"
+    name: "首板板块同步爆发"
+    category: "stock_tech"
+    sub_category: "first_board"
+    description: "官方首板当天板块涨幅、涨停扩散、板块与个股成交额同步放大的综合评分"
+    data_source: "limit_up_pool+factor_sector_wide+stock_daily"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_first_board_leadership_score:
+    id: "FB2"
+    name: "首板先锋领先性"
+    category: "stock_tech"
+    sub_category: "first_board"
+    description: "按同题材官方首板的首封时间排序，越早封板越接近板块先锋"
+    data_source: "limit_up_pool+sector_membership"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_first_board_sector_pioneer_score:
+    id: "FB3"
+    name: "首板题材集群强度"
+    category: "stock_tech"
+    sub_category: "first_board"
+    description: "所属题材首板数量及其占成分股比例，衡量低位启动集群强度"
+    data_source: "limit_up_pool+sector_membership"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_first_board_breadth_score:
+    id: "FB4"
+    name: "首板题材跟涨宽度"
+    category: "stock_tech"
+    sub_category: "first_board"
+    description: "所属题材当日涨幅超过5%的成分股占比评分"
+    data_source: "stock_daily+sector_membership"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {member_pct_threshold: 5.0}
+
+  stk_first_board_amount_surge_score:
+    id: "FB5"
+    name: "首板量价共振"
+    category: "stock_tech"
+    sub_category: "first_board"
+    description: "板块成交额环比与个股五日成交额比的同步放大质量"
+    data_source: "factor_sector_wide+stock_daily"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {}
+
+  stk_first_board_new_theme_score:
+    id: "FB6"
+    name: "首板新题材启动"
+    category: "stock_tech"
+    sub_category: "first_board"
+    description: "所属题材近5个交易日首板稀少时得分更高，识别首次启动而非反复炒作"
+    data_source: "factor_stock_wide+limit_up_pool"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params: {lookback_days: 5}
+
+  stk_first_board_resonance_score:
+    id: "FB7"
+    name: "首板板块共振综合分"
+    category: "stock_tech"
+    sub_category: "first_board"
+    description: "汇总同步爆发、先锋领先、题材集群、跟涨宽度、量价共振和新题材启动"
+    data_source: "factor_stock_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
     enabled: true
     params: {}
 

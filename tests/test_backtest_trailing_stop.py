@@ -219,6 +219,32 @@ def test_entry_day_stop_is_recorded_but_not_sold_due_to_t_plus_one():
     assert engine.trade_history == []
 
 
+def test_corporate_action_adjusts_excursion_price_anchors():
+    engine = BacktestEngine(None, BacktestConfig())
+    position = _position()
+    position.update({
+        "entry_price": 100.0,
+        "highest_price": 120.0,
+        "stop_loss_price": 95.0,
+        "max_favorable_price": 125.0,
+        "min_adverse_price": 90.0,
+        "last_close": 110.0,
+        "shares": 1000,
+    })
+
+    engine._apply_corporate_action_adjustment(
+        "000001", position, {"pre_close": 88.0}, "20260623",
+    )
+
+    assert position["entry_price"] == 80.0
+    assert position["highest_price"] == 96.0
+    assert position["stop_loss_price"] == 76.0
+    assert position["max_favorable_price"] == 100.0
+    assert position["min_adverse_price"] == 72.0
+    assert position["last_close"] == 88.0
+    assert position["shares"] == 1250
+
+
 def test_corporate_action_price_break_keeps_position_value_continuous():
     dm = DailyRows({
         ("000001.SZ", "20260623"): {

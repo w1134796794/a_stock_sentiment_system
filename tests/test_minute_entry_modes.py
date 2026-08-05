@@ -75,6 +75,31 @@ def test_weak_to_strong_cancels_after_breaking_opening_low():
     assert "跌破" in decision.reason
 
 
+def test_weak_to_strong_without_sector_data_stays_unconfirmed():
+    frame = _bars([
+        (9.80, 9.90, 9.75, 9.88),
+        (9.88, 9.92, 9.82, 9.90),
+        (9.90, 9.95, 9.86, 9.93),
+        (9.93, 9.97, 9.90, 9.95),
+        (9.95, 9.99, 9.93, 9.98),
+        (9.98, 10.05, 9.96, 10.03),
+        (10.04, 10.08, 10.02, 10.06),
+    ])
+
+    decision = MinuteEntryEvaluator().evaluate(
+        mode=ENTRY_WEAK,
+        bars=frame,
+        open_gap=-0.02,
+        prev_close=10.0,
+        plan_amount_ratio=1.2,
+        sector_sync=lambda _: None,
+    )
+
+    assert decision.status == "data_insufficient"
+    assert decision.filled is False
+    assert "板块" in decision.reason
+
+
 def test_continuation_requires_auction_volume_and_fills_next_minute():
     frame = _bars([
         (10.20, 10.25, 10.18, 10.22),

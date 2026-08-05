@@ -7,11 +7,16 @@ import pandas as pd
 
 from config.settings import CACHE_DIR
 from core.factors.behavior_cycle import BEHAVIOR_STATES, stock_behavior_cycle
-
+from core.factors.jobs.first_board_factors import (
+    FIRST_BOARD_FACTOR_COLUMNS,
+    build_first_board_stock_metrics,
+    load_membership_map,
+)
 from core.factors.jobs.gold_utils import (
     FactorJobResult,
     long_records_to_frame,
     make_long_record,
+    now_iso,
     percentile_score,
     read_recent_trade_dates,
     read_table,
@@ -19,9 +24,7 @@ from core.factors.jobs.gold_utils import (
     score_between,
     to_float,
     write_replace_partition,
-    now_iso,
 )
-from core.utils.price_limit import get_price_limit_pct_points, limit_progress
 from core.factors.jobs.stock_advanced import (
     crowding_metrics,
     late_seal_safety,
@@ -31,7 +34,7 @@ from core.factors.jobs.stock_advanced import (
     sector_rotation_metrics,
 )
 from core.factors.sector_taxonomy import is_trade_theme_sector
-
+from core.utils.price_limit import get_price_limit_pct_points, limit_progress
 
 # ---------------------------------------------------------------------------
 # 打板身位（board）子类评分 —— 连板高度 / 封板时间 / 流通市值适配
@@ -151,7 +154,12 @@ def _new_high_position_score(value: float) -> float:
     return max(20.0, 55.0 - (v - 1.20) * 100.0)
 
 
-def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE_DIR) -> dict:
+def _stock_sector_scores(
+    code: str,
+    sector_scores: dict,
+    cache_dir: Path = CACHE_DIR,
+    memberships: list[dict[str, str]] | None = None,
+) -> dict:
     """Map cached stock memberships to point-in-time sector factor scores."""
     neutral = {
         "sector_heat_score": 50.0,
@@ -164,27 +172,32 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
         "primary_sector_name": "",
         "sector_behavior_dominant_state": "",
         "sector_behavior_dominant_label": "",
+        "matched_sector_codes": "",
+        "matched_sector_names": "",
     }
     for state in BEHAVIOR_STATES:
         neutral[f"sector_behavior_{state}_score"] = 50.0
     if not sector_scores:
         return neutral
-    code6 = str(code or "").split(".")[0].zfill(6)
-    membership_dir = Path(cache_dir) / "sector" / "stock_sectors"
-    files = list(membership_dir.glob(f"{code6}.*.csv"))
-    if not files:
-        return neutral
-    try:
-        memberships = pd.read_csv(files[0])
-    except Exception:
-        return neutral
+    if memberships is None:
+        code6 = str(code or "").split(".")[0].zfill(6)
+        membership_dir = Path(cache_dir) / "sector" / "stock_sectors"
+        files = list(membership_dir.glob(f"{code6}.*.csv"))
+        if not files:
+            return neutral
+        try:
+            membership_rows = pd.read_csv(files[0]).to_dict("records")
+        except Exception:
+            return neutral
+    else:
+        membership_rows = memberships
 
     matched = []
-    for row in memberships.to_dict("records"):
+    for row in membership_rows:
         sector_type = str(row.get("type") or "").strip().upper()
         if sector_type not in {"N", "I", "概念", "行业"}:
             continue
-        sector_code = str(row.get("ts_code") or "").split(".")[0]
+        sector_code = str(row.get("code") or row.get("ts_code") or "").split(".")[0]
         values = sector_scores.get(sector_code)
         if not values:
             continue
@@ -235,6 +248,8 @@ def _stock_sector_scores(code: str, sector_scores: dict, cache_dir: Path = CACHE
         "primary_sector_name": str(leaders[0].get("name") or ""),
         "sector_behavior_dominant_state": str(leaders[0].get("behavior_state") or ""),
         "sector_behavior_dominant_label": str(leaders[0].get("behavior_label") or ""),
+        "matched_sector_codes": ",".join(item["code"] for item in matched),
+        "matched_sector_names": ",".join(item["name"] for item in matched),
     }
     for state in BEHAVIOR_STATES:
         result[f"sector_behavior_{state}_score"] = round(
@@ -351,16 +366,15 @@ class StockFactorJob:
             str(row.get("sector_code") or "").split(".")[0]: row
             for row in sector_frame.to_dict("records")
         } if not sector_frame.empty else {}
-        membership_dir = Path(CACHE_DIR) / "sector" / "stock_sectors"
-        cached_sector_codes = {
-            path.name.split(".")[0]
-            for path in membership_dir.glob("*.csv")
-        } if membership_dir.exists() else set()
+        membership_map = load_membership_map(list(today["code"].astype(str)))
         sector_values = []
         for _, row in today.iterrows():
             code = str(row.get("code") or "")
-            if code in cached_sector_codes:
-                sector_values.append(_stock_sector_scores(code, sector_scores))
+            memberships = membership_map.get(code.zfill(6), [])
+            if memberships:
+                sector_values.append(
+                    _stock_sector_scores(code, sector_scores, memberships=memberships)
+                )
             else:
                 sector_values.append(_stock_sector_scores("", {}))
         for key in (
@@ -368,6 +382,7 @@ class StockFactorJob:
             "sector_resonance_score", "resonance_sectors",
             "sector_flow_score", "primary_sector_code", "primary_sector_name",
             "sector_behavior_dominant_state", "sector_behavior_dominant_label",
+            "matched_sector_codes", "matched_sector_names",
             *[f"sector_behavior_{state}_score" for state in BEHAVIOR_STATES],
         ):
             today[key] = [item[key] for item in sector_values]
@@ -541,6 +556,41 @@ class StockFactorJob:
             ]) if row.board_height > 0 else 50.0
             for row in today.itertuples()
         ]
+        first_board_metrics = build_first_board_stock_metrics(
+            con,
+            str(trade_date),
+            today,
+            pool_by_code,
+            sector_scores,
+            membership_map,
+        )
+        first_board_columns = (
+            *FIRST_BOARD_FACTOR_COLUMNS,
+            "first_board_factor_available",
+            "first_board_primary_sector_code",
+            "first_board_primary_sector_name",
+            "first_board_sector_top20",
+        )
+        for column in first_board_columns:
+            today[column] = [
+                first_board_metrics.get(str(code).zfill(6), {}).get(column, 0.0)
+                for code in today["code"].astype(str)
+            ]
+        # A genuine first board can outrank a plain second-board position only
+        # when sector launch evidence is strong. Other board heights retain the
+        # existing board score unchanged.
+        first_board_mask = (
+            pd.to_numeric(today["board_height"], errors="coerce").eq(1)
+            & pd.to_numeric(
+                today["first_board_factor_available"], errors="coerce",
+            ).eq(1)
+        )
+        today.loc[first_board_mask, "board_score"] = (
+            pd.to_numeric(today.loc[first_board_mask, "board_score"], errors="coerce").fillna(50.0) * 0.35
+            + pd.to_numeric(
+                today.loc[first_board_mask, "first_board_resonance_score"], errors="coerce",
+            ).fillna(0.0) * 0.65
+        ).clip(0.0, 100.0)
         seal_values = [
             seal_quality(pool_by_code.get(str(row.get("code") or "")) or {}, row.get("amount_yuan"))
             for _, row in today.iterrows()
@@ -604,7 +654,7 @@ class StockFactorJob:
         today["behavior_dominant_probability"] = [item["dominant_probability"] for item in behavior_rows]
         today["behavior_data_completeness"] = [item["data_completeness"] for item in behavior_rows]
 
-        today["total_score"] = [
+        total_score = pd.Series([
             safe_weighted_score([
                 (row.tech_score, 0.25),
                 (row.volume_score, 0.12),
@@ -613,13 +663,18 @@ class StockFactorJob:
                 (row.board_score, 0.20),
             ])
             for row in today.itertuples()
-        ]
-        today["signal_total_adjustment"] = today[[
+        ], index=today.index, dtype=float)
+        signal_total_adjustment = today[[
             "capital_flow_adjustment", "attention_adjustment", "leader_adjustment",
             "margin_adjustment", "risk_adjustment",
         ]].sum(axis=1).clip(-10.0, 10.0)
-        today["enhanced_total_score"] = (today["total_score"] + today["signal_total_adjustment"]).clip(0, 100)
-        today["rank"] = today["total_score"].rank(method="dense", ascending=False).astype(int)
+        score_columns = pd.DataFrame({
+            "total_score": total_score,
+            "signal_total_adjustment": signal_total_adjustment,
+            "enhanced_total_score": (total_score + signal_total_adjustment).clip(0, 100),
+            "rank": total_score.rank(method="dense", ascending=False).astype(int),
+        }, index=today.index)
+        today = pd.concat([today, score_columns], axis=1).copy()
 
         # Keep neutral defaults during internal calculations, then persist
         # unavailable optional evidence as NULL so downstream code can
@@ -702,6 +757,17 @@ class StockFactorJob:
             "behavior_data_completeness",
             "float_mv",
             "float_mv_fit_score",
+            "first_board_sector_sync_score",
+            "first_board_leadership_score",
+            "first_board_sector_pioneer_score",
+            "first_board_breadth_score",
+            "first_board_amount_surge_score",
+            "first_board_new_theme_score",
+            "first_board_resonance_score",
+            "first_board_factor_available",
+            "first_board_primary_sector_code",
+            "first_board_primary_sector_name",
+            "first_board_sector_top20",
             "lhb_present",
             "lhb_source_available",
             "lhb_net_buy_score",
@@ -842,6 +908,18 @@ class StockFactorJob:
                     factor_id="stk_intraday_seal_quality", raw_value=row["sealed_order_amount_ratio"],
                     score=row["intraday_seal_quality_score"], direction="higher_better",
                 ),
+                *[
+                    make_long_record(
+                        trade_date=trade_date,
+                        entity_type="stock",
+                        entity_id=entity_id,
+                        factor_id=f"stk_{column}",
+                        raw_value=(row[column] if row["first_board_factor_available"] else None),
+                        score=row[column],
+                        direction="higher_better",
+                    )
+                    for column in FIRST_BOARD_FACTOR_COLUMNS
+                ],
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_sector_rotation_momentum", raw_value=row["sector_rotation_age"],

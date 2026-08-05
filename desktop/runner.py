@@ -10,18 +10,25 @@
 """
 from __future__ import annotations
 
-import sys
 import json
 import os
+import re
 import subprocess
-import time
+import sys
 import threading
+import time
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.infrastructure.shared_state import TaskLease, TaskStateStore
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _clean_log_text(value: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", str(value or ""))
 
 
 class LogBuffer:
@@ -41,7 +48,7 @@ class LogBuffer:
             self._store.clear_logs()
 
     def append_line(self, line: str) -> None:
-        clean = line.rstrip("\n")
+        clean = _clean_log_text(line).rstrip("\n")
         with self._lock:
             self._lines.append(clean)
         if self._store and self._store.shared:
@@ -49,6 +56,7 @@ class LogBuffer:
 
     def append_text(self, text: str) -> None:
         """写入任意文本（可能不含/含多个换行），按换行切分成行。"""
+        text = _clean_log_text(text)
         if not text:
             return
         with self._lock:
@@ -300,6 +308,8 @@ class RunController:
             command.extend(["--date", str(date)])
         env = dict(os.environ)
         env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["NO_COLOR"] = "1"
         process = subprocess.Popen(
             command,
             cwd=str(BASE_DIR),
@@ -534,8 +544,8 @@ class BacktestController:
               position_sizing_mode: object = "fixed_risk",
               exit_policy_mode: object = "strategy",
               strategy_ids: object = None) -> Tuple[bool, str]:
-        from core.screening.enhancements import enhancement_label, normalize_enhancements
         from backtest.minute_entry import ENTRY_COMPARE, ENTRY_HYBRID, ENTRY_MODES
+        from core.screening.enhancements import enhancement_label, normalize_enhancements
 
         selected_enhancements = normalize_enhancements(enhancements)
         combination_label = enhancement_label(selected_enhancements)
@@ -712,11 +722,11 @@ class BacktestController:
                 f"=== 开始回测 · {start} ~ {end} · 策略 {', '.join(selected_strategy_ids)} · "
                 f"{combination_label} · 初始资金 {capital:,.0f} · {mode_txt} ===")
 
-            from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
-            from backtest.plan_source import build_backtest_plan_dir
-            from core.data.data_manager_main import DataManager
             from backtest.backtest_engine import BacktestConfig, BacktestEngine
             from backtest.performance_analyzer import PerformanceAnalyzer
+            from backtest.plan_source import build_backtest_plan_dir
+            from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
+            from core.data.data_manager_main import DataManager
             from risk.risk_config import RiskConfig
 
             if not (TUSHARE_TOKEN or "").strip():
@@ -934,12 +944,12 @@ class BacktestController:
                 f"=== 开始单日接力回测 · {trade_date} · 策略 {', '.join(selected_strategy_ids)} · "
                 f"{combination_label} · 初始资金 {capital:,.0f} · {mode_txt} ===")
 
-            from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
-            from backtest.plan_source import build_backtest_plan_dir
-            from backtest.trade_calendar import TradeCalendar
-            from core.data.data_manager_main import DataManager
             from backtest.backtest_engine import BacktestConfig, BacktestEngine
             from backtest.performance_analyzer import PerformanceAnalyzer
+            from backtest.plan_source import build_backtest_plan_dir
+            from backtest.trade_calendar import TradeCalendar
+            from config.settings import CACHE_DIR, OUTPUT_DIR, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR
+            from core.data.data_manager_main import DataManager
             from risk.risk_config import RiskConfig
 
             calendar = TradeCalendar()

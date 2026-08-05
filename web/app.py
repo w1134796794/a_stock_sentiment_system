@@ -13,8 +13,8 @@ import json
 import logging
 import os
 import time
-from contextlib import asynccontextmanager
 from collections import Counter, deque
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from threading import Event, Lock, Thread
@@ -22,16 +22,30 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, quote
 
 from fastapi import Body, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+from config.settings import (
+    CACHE_DIR,
+    FACTOR_DB_PATH,
+    SNAPSHOT_DIR,
+    TUSHARE_TOKEN,
+    WEB_DATA_DIR,
+    WINRATE_PATH,
+)
+from core.realtime.overlay_service import RealtimeOverlayService
+from core.realtime.quote_service import RealtimeQuoteService
+from core.realtime.sector_service import RealtimeSectorService
+from snapshot.reader import SnapshotReader
 from web.auth_store import (
     SESSION_COOKIE_NAME,
     create_user,
     ensure_auth_db,
     extend_user,
     list_users,
-    login as auth_login,
     recent_login_logs,
     reset_password,
     revoke_session,
@@ -39,6 +53,9 @@ from web.auth_store import (
     update_user_limits,
     update_user_status,
     validate_session,
+)
+from web.auth_store import (
+    login as auth_login,
 )
 from web.permissions import (
     can_access_path,
@@ -55,20 +72,6 @@ from web.stock_profile import (
     enrich_stock_sector_labels,
     load_stock_profiles,
 )
-
-from config.settings import (
-    SNAPSHOT_DIR,
-    APP_DB_PATH,
-    WINRATE_PATH,
-    TUSHARE_TOKEN,
-    CACHE_DIR,
-    WEB_DATA_DIR,
-    FACTOR_DB_PATH,
-)
-from core.realtime.overlay_service import RealtimeOverlayService
-from core.realtime.quote_service import RealtimeQuoteService
-from core.realtime.sector_service import RealtimeSectorService
-from snapshot.reader import SnapshotReader
 
 logger = logging.getLogger(__name__)
 BASE = Path(__file__).parent
@@ -1754,6 +1757,7 @@ async def _app_lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="A股情绪系统 · 指标看板", docs_url="/api/docs", lifespan=_app_lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
 @app.exception_handler(Exception)
@@ -1764,12 +1768,34 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         request.url.path,
         exc_info=(type(exc), exc, exc.__traceback__),
     )
+    if request.url.path.startswith("/api/v1/mobile"):
+        from web.api.mobile.responses import mobile_error_response
+
+        return mobile_error_response(
+            "SERVER_ERROR",
+            "服务器内部错误，请查看服务日志",
+            status_code=500,
+        )
     if is_api_path(request.url.path):
         return JSONResponse(
             {"ok": False, "error": "server_error", "message": "服务器内部错误，请查看服务日志"},
             status_code=500,
         )
     return HTMLResponse("Internal Server Error", status_code=500)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/v1/mobile"):
+        from web.api.mobile.responses import mobile_error_response
+
+        return mobile_error_response(
+            "VALIDATION_ERROR",
+            "请求参数不正确",
+            status_code=422,
+            details={"errors": exc.errors()},
+        )
+    return JSONResponse({"detail": exc.errors()}, status_code=422)
 
 _static_dir = BASE / "static"
 _static_dir.mkdir(parents=True, exist_ok=True)
@@ -1814,6 +1840,12 @@ def _rate_limit_exceeded(request: Request, user: Optional[Dict[str, Any]]) -> bo
         base_limit = max(base_limit, 600)
     if not user and request.url.path == "/login":
         base_limit = min(base_limit, 40)
+    if not user and request.url.path in {
+        "/api/v1/mobile/auth/wechat",
+        "/api/v1/mobile/auth/bind",
+        "/api/v1/mobile/auth/refresh",
+    }:
+        base_limit = min(base_limit, 30)
     key = f"user:{user.get('id')}" if user else f"ip:{_client_ip(request)}"
     now = time.time()
     window = 60.0
@@ -1828,6 +1860,12 @@ def _rate_limit_exceeded(request: Request, user: Optional[Dict[str, Any]]) -> bo
 
 def _rate_limited_response(request: Request) -> HTMLResponse | JSONResponse:
     if is_api_path(request.url.path):
+        if request.url.path.startswith("/api/v1/mobile"):
+            from web.api.mobile.responses import mobile_error_response
+
+            return mobile_error_response(
+                "RATE_LIMITED", "请求过于频繁，请稍后再试", status_code=429
+            )
         return JSONResponse({"error": "rate_limited", "message": "请求过于频繁，请稍后再试"}, status_code=429)
     return HTMLResponse(
         '<!doctype html><meta charset="utf-8"><body style="background:#020617;color:#e2e8f0;font-family:sans-serif;padding:40px">请求过于频繁，请稍后再试。</body>',
@@ -1839,10 +1877,30 @@ def _rate_limited_response(request: Request) -> HTMLResponse | JSONResponse:
 async def auth_middleware(request: Request, call_next):
     ensure_auth_db()
     path = request.url.path
-    user, auth_error = validate_session(request.cookies.get(SESSION_COOKIE_NAME))
+    is_mobile_api = path.startswith("/api/v1/mobile")
+    mobile_context = None
+    access_token = ""
+    authorization = str(request.headers.get("authorization") or "").strip()
+    scheme, _, token = authorization.partition(" ")
+    if is_mobile_api and scheme.lower() == "bearer":
+        from web.mobile_auth_store import validate_access_token
+
+        access_token = token.strip()
+        user, auth_error, mobile_context = validate_access_token(access_token)
+    else:
+        user, auth_error = validate_session(
+            request.cookies.get(SESSION_COOKIE_NAME)
+        )
     request.state.user = user
     request.state.is_admin = bool(user and user.get("role") == "admin")
     request.state.is_viewer = bool(user and user.get("role") == "viewer")
+    request.state.mobile_access_token = access_token
+    request.state.mobile_token_id = (
+        mobile_context.get("mobile_token_id") if mobile_context else None
+    )
+    request.state.mobile_device_session_id = (
+        mobile_context.get("mobile_device_session_id") if mobile_context else None
+    )
 
     if _rate_limit_exceeded(request, user):
         return _rate_limited_response(request)
@@ -1851,25 +1909,70 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     if not user:
-        if auth_error in {"session_revoked", "session_expired", "user_disabled"}:
-            response = (
-                JSONResponse({"error": auth_error, "message": "登录状态已失效"}, status_code=401)
-                if is_api_path(path)
-                else _login_redirect(request)
-            )
-            response.delete_cookie(SESSION_COOKIE_NAME)
+        if auth_error in {
+            "session_revoked",
+            "session_expired",
+            "user_disabled",
+            "mobile_session_revoked",
+            "mobile_device_disabled",
+            "mobile_token_expired",
+        }:
+            if path.startswith("/api/v1/mobile"):
+                from web.api.mobile.responses import mobile_error_response
+
+                error_codes = {
+                    "mobile_token_expired": "ACCESS_TOKEN_EXPIRED",
+                    "mobile_session_revoked": "MOBILE_SESSION_REVOKED",
+                    "mobile_device_disabled": "MOBILE_DEVICE_DISABLED",
+                    "session_revoked": "SESSION_REVOKED",
+                    "session_expired": "SESSION_EXPIRED",
+                    "user_disabled": "USER_DISABLED",
+                }
+                response = mobile_error_response(
+                    error_codes.get(auth_error, "NOT_AUTHENTICATED"),
+                    "登录状态已失效",
+                    status_code=401,
+                )
+            else:
+                response = (
+                    JSONResponse({"error": auth_error, "message": "登录状态已失效"}, status_code=401)
+                    if is_api_path(path)
+                    else _login_redirect(request)
+                )
+            if not access_token:
+                response.delete_cookie(SESSION_COOKIE_NAME)
             return response
         if is_api_path(path):
+            if path.startswith("/api/v1/mobile"):
+                from web.api.mobile.responses import mobile_error_response
+
+                return mobile_error_response(
+                    "NOT_AUTHENTICATED", "请先登录", status_code=401
+                )
             return JSONResponse({"error": "not_authenticated", "message": "请先登录"}, status_code=401)
         return _login_redirect(request)
 
     if auth_error == "subscription_expired":
         if is_api_path(path):
+            if path.startswith("/api/v1/mobile"):
+                from web.api.mobile.responses import mobile_error_response
+
+                return mobile_error_response(
+                    "SUBSCRIPTION_EXPIRED", "服务已到期", status_code=403
+                )
             return JSONResponse({"error": "subscription_expired", "message": "服务已到期"}, status_code=403)
         return RedirectResponse(url="/expired", status_code=303)
 
     if not can_access_path(user, path, request.method):
         if is_api_path(path):
+            if path.startswith("/api/v1/mobile"):
+                from web.api.mobile.responses import mobile_error_response
+
+                return mobile_error_response(
+                    "PERMISSION_DENIED",
+                    "当前账号没有该功能的访问权限",
+                    status_code=403,
+                )
             return JSONResponse(
                 {"error": "permission_denied", "message": "当前账号没有该功能的访问权限"},
                 status_code=403,
@@ -1952,6 +2055,12 @@ def index(request: Request) -> Any:
     from desktop.status import overview
 
     return templates.TemplateResponse(request, "overview.html", {"ov": overview()})
+
+
+@app.get("/workspace", response_class=HTMLResponse)
+def workspace_page(request: Request, date: str = "") -> Any:
+    """Action-first trading workbench backed by local decision artifacts."""
+    return templates.TemplateResponse(request, "workspace.html", {"date": date})
 
 
 @app.get("/report", response_class=HTMLResponse)
@@ -2395,8 +2504,8 @@ def api_fetch_status(since: int = 0) -> Any:
 
 @app.post("/api/screening-run")
 def api_screening_run(payload: dict = Body(default={})) -> Any:
-    from desktop.runner import SCREENING_CONTROLLER
     from core.screening.strategy_profiles import StrategyProfileRepository
+    from desktop.runner import SCREENING_CONTROLLER
 
     _clear_data_caches()
     data = dict(payload or {})
@@ -3526,8 +3635,8 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
 @app.get("/backtest", response_class=HTMLResponse)
 def backtest_page(request: Request, run: Optional[str] = None) -> Any:
     """模拟交易结果：汇总指标 + 净值曲线 + 逐笔交易 + 模式表现。"""
-    from desktop.backtest import backtest_overview
     from core.screening.strategy_profiles import StrategyProfileRepository
+    from desktop.backtest import backtest_overview
 
     strategy_profiles = StrategyProfileRepository().list_profiles(
         enabled_only=True, scope="production",
@@ -3544,8 +3653,8 @@ def backtest_page(request: Request, run: Optional[str] = None) -> Any:
 @app.get("/drawdown", response_class=HTMLResponse)
 def drawdown_page(request: Request, run: Optional[str] = None) -> Any:
     """回撤分析：水下回撤曲线 + 最大回撤 + 回撤区间 + 最差交易。"""
-    from desktop.backtest import drawdown_overview
     from core.screening.strategy_profiles import StrategyProfileRepository
+    from desktop.backtest import drawdown_overview
 
     return templates.TemplateResponse(
         request, "drawdown.html", {
@@ -3640,3 +3749,57 @@ def api_snapshot(date: str) -> Any:
     if snapshot is None:
         return JSONResponse({"error": "not found", "date": date}, status_code=404)
     return JSONResponse(snapshot)
+
+
+def _mobile_realtime_cache(
+    candidate_date: str,
+    market_date: str,
+    limit: int,
+) -> Optional[Dict[str, Any]]:
+    """Read the server-owned realtime snapshot without fetching an upstream quote."""
+    quote_date = market_date or _realtime_market_date()
+    trade_date = candidate_date or _realtime_candidate_date(quote_date)
+    key = _overlay_cache_key(trade_date, quote_date, "", limit, 90)
+    payload = _REALTIME_PAYLOAD_CACHE.get(key)
+    if not isinstance(payload, dict):
+        return None
+    result = dict(payload)
+    cache_stats = _REALTIME_PAYLOAD_CACHE.stats()
+    result.setdefault("trade_date", trade_date)
+    result.setdefault("market_date", quote_date)
+    result["generated_at"] = str(cache_stats.get("latest_updated_at") or "")
+    result["cache_age_seconds"] = cache_stats.get("oldest_age_seconds")
+    return result
+
+
+def _mobile_leader_pool(date: str, lookback: int, limit: int) -> Dict[str, Any]:
+    from core.realtime.leader_pool_service import LeaderPoolService
+
+    payload = LeaderPoolService().build_pool(date, lookback=lookback, limit=limit)
+    snapshot = _load_snapshot(date) if date else None
+    _enrich_stock_names(payload.get("rows") or [], snapshot, date)
+    return payload
+
+
+def _mobile_lhb_view(date: str) -> Dict[str, Any]:
+    from web.lhb_view import build_lhb_view
+
+    return build_lhb_view(date)
+
+
+from core.application.mobile_services import MobileReadService
+from core.application.workbench_service import WorkbenchService
+from web.api.mobile import create_mobile_router
+from web.api.workbench import create_workbench_router
+
+_mobile_read_service = MobileReadService(
+    leader_loader=_mobile_leader_pool,
+    lhb_loader=_mobile_lhb_view,
+    realtime_loader=_mobile_realtime_cache,
+)
+app.include_router(create_mobile_router(_mobile_read_service))
+app.include_router(
+    create_workbench_router(
+        WorkbenchService(_mobile_read_service)
+    )
+)

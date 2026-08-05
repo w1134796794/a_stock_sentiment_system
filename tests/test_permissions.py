@@ -42,7 +42,12 @@ def test_role_permission_matrix_controls_menu_and_route(isolated_auth_db):
     assert can_access_path(viewer, "/screening-run") is False
     assert can_access_path(viewer, "/strategies") is False
     assert can_access_path(admin, "/strategies") is True
-    assert "realtime" in _visible_keys(viewer)
+    assert "workbench" in _visible_keys(viewer)
+    assert "realtime" not in _visible_keys(viewer)
+    assert "strategy" not in _visible_keys(viewer)
+    assert "sector" not in _visible_keys(viewer)
+    assert "intraday" not in _visible_keys(viewer)
+    assert "drawdown" not in _visible_keys(viewer)
     assert "assistant" not in _visible_keys(viewer)
     assert "report" not in _visible_keys(viewer)
     assert "lhb" in _visible_keys(viewer)
@@ -77,6 +82,25 @@ def test_role_permission_matrix_controls_menu_and_route(isolated_auth_db):
     assert can_access_path(viewer, "/realtime") is True
     assert "realtime" not in _visible_keys(viewer)
     assert can_access_path(admin, "/admin/permissions") is True
+
+
+def test_compact_menu_can_be_explicitly_expanded(isolated_auth_db):
+    viewer = {"role": "viewer"}
+    assert can_access_path(viewer, "/realtime") is True
+    assert "realtime" not in _visible_keys(viewer)
+
+    update_permission_matrix(
+        [
+            {
+                "role": "viewer",
+                "permission_key": "realtime",
+                "menu_visible": True,
+                "can_access": True,
+            }
+        ]
+    )
+
+    assert "realtime" in _visible_keys(viewer)
 
 
 def test_forced_admin_permissions_cannot_be_relaxed(isolated_auth_db):

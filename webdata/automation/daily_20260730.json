@@ -1,0 +1,9 @@
+{
+  "status": "error",
+  "job": "daily",
+  "trade_date": "20260730",
+  "started_at": "2026-07-30T18:30:01",
+  "finished_at": "2026-07-30T18:33:05",
+  "message": "盘后数据不完整，请先运行盘后取数；缺失：未知产物",
+  "traceback": "Traceback (most recent call last):\n  File \"G:\\a_stock_sentiment_system\\scripts\\automation_daily_worker.py\", line 56, in main\n    factors = system.run_factor_calculation(trade_date)\n  File \"G:\\a_stock_sentiment_system\\main.py\", line 68, in run_factor_calculation\n    result = self.pipeline.compute_factors(target, self.yesterday)\n  File \"G:\\a_stock_sentiment_system\\core\\etl\\daily_pipeline.py\", line 198, in compute_factors\n    require_stage(status)\n    ~~~~~~~~~~~~~^^^^^^^^\n  File \"G:\\a_stock_sentiment_system\\core\\etl\\stage_status.py\", line 207, in require_stage\n    raise RuntimeError(f\"{status.get('message')}；缺失：{missing}\")\nRuntimeError: 盘后数据不完整，请先运行盘后取数；缺失：未知产物\n"
+}

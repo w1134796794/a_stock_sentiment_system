@@ -7,7 +7,6 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
-
 ENTRY_FIXED = "fixed_gap"
 ENTRY_WEAK = "weak_only"
 ENTRY_CONTINUATION = "continuation_only"
@@ -263,6 +262,7 @@ class MinuteEntryEvaluator:
                     profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
                     false_break_count=false_breaks, pullback_quality=pullback_quality,
                     active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
+                    data_completeness=1.0,
                 )
         if not sector_observed:
             return EntryDecision(
@@ -305,7 +305,8 @@ class MinuteEntryEvaluator:
             sector_ok = bool(sector_state)
             pace = self._amount_pace(row, previous_amount, plan_amount_ratio, expected_amount_fraction)
             trigger = (touched_vwap and float(row["close"]) >= vwap) or float(row["high"]) > opening_high
-            if trigger and sector_ok and self.min_amount_pace <= pace <= self.max_amount_pace:
+            sector_check_passed = sector_ok if sector_observed else False
+            if trigger and sector_check_passed and self.min_amount_pace <= pace <= self.max_amount_pace:
                 history = scan.loc[:index]
                 hold_minutes = int((history["close"] >= history["vwap"]).sum())
                 false_breaks = int(((history["high"] > opening_high) & (history["close"] < opening_high)).sum())
@@ -315,9 +316,6 @@ class MinuteEntryEvaluator:
                     signal = "强势延续"
                     reason = "竞价放量后回踩VWAP承接或突破前5分钟高点"
                 else:
-                    # 历史竞价明细缺失时只依据可验证的分钟证据，不把它误称为竞价放量。
-                    # 无竞价锚点的路径更严格：必须收在VWAP之上、有效突破且至少连续
-                    # 两分钟维持在分时均价之上，量能进度也不能弱于历史同期。
                     confirmed = (
                         float(row["close"]) >= vwap
                         and float(row["high"]) > opening_high
@@ -327,17 +325,21 @@ class MinuteEntryEvaluator:
                     signal = "开盘强势确认"
                     reason = "竞价明细缺失，按突破前5分钟高点、站稳VWAP和分钟量能确认"
                 if confirmed:
+                    if not sector_observed:
+                        reason += "（缺少板块确认）"
                     return self._next_minute_fill(
                         data, index, signal, reason,
                         gap, pace, sector_ok, limit_price, live=live,
                         profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
                         false_break_count=false_breaks, pullback_quality=pullback_quality,
                         active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
+                        data_completeness=0.75 if not sector_observed else 1.0,
                     )
         if not sector_observed:
             return EntryDecision(
                 "data_insufficient", "强势延续", "缺少真实板块指数或成分股宽度，保持观察",
                 open_gap_pct=gap, data_status="missing_sector", data_completeness=0.55,
+                profile_samples=amount_profile_samples,
             )
         if previous_amount > 0 and expected_amount_fraction is None:
             return EntryDecision(
@@ -366,13 +368,18 @@ class MinuteEntryEvaluator:
             sector_state = sector_sync(str(row["time"])) if sector_sync else None
             sector_observed = sector_observed or sector_state is not None
             sector_ok = bool(sector_state)
-            if sector_ok and (
+            sector_check_passed = sector_ok if sector_observed else False
+            if sector_check_passed and (
                 float(row["high"]) > opening_high
                 or (limit_price > 0 and float(row["high"]) >= limit_price * 0.998)
             ):
+                reason = "龙头高开后继续突破"
+                if not sector_observed:
+                    reason += "（缺少板块确认）"
                 return self._next_minute_fill(
-                    data, index, "高开加速", "龙头高开后继续突破", gap, 0.0,
+                    data, index, "高开加速", reason, gap, 0.0,
                     sector_ok, limit_price, unfilled_when_locked=True, live=live,
+                    data_completeness=0.75 if not sector_observed else 1.0,
                 )
         if not sector_observed:
             return EntryDecision(
@@ -392,6 +399,7 @@ class MinuteEntryEvaluator:
         false_break_count: int = 0,
         pullback_quality: float = 0.0,
         active_buy_ratio: float = 0.0,
+        data_completeness: float = 1.0,
     ) -> EntryDecision:
         following = data[data.index > index]
         if following.empty:
@@ -417,7 +425,7 @@ class MinuteEntryEvaluator:
             str(next_row.get("time") or ""), price, gap, pace, sector_ok,
             profile_samples=profile_samples, hold_minutes=hold_minutes,
             false_break_count=false_break_count, pullback_quality=pullback_quality,
-            active_buy_ratio=active_buy_ratio,
+            active_buy_ratio=active_buy_ratio, data_completeness=data_completeness,
         )
 
     @staticmethod

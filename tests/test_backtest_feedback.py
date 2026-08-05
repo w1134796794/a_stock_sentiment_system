@@ -3,15 +3,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from backtest.backtest_engine import BacktestConfig, BacktestEngine, TradeRecord
 from backtest.attribution import build_attribution_frames
+from backtest.backtest_engine import BacktestConfig, BacktestEngine, TradeRecord
 from backtest.plan_source import _position, build_backtest_plan_dir
 
 
 def test_weak_market_trial_position_maps_to_probe_size():
     assert _position("试仓 0%-8%") == "probe"
-from desktop import backtest as backtest_view
 from core.screening.explanations import FACTOR_LABELS
+from desktop import backtest as backtest_view
 
 
 def test_internal_factor_ids_have_chinese_labels():
@@ -19,6 +19,17 @@ def test_internal_factor_ids_have_chinese_labels():
     assert FACTOR_LABELS["stk_board_position"] == "打板身位"
     assert FACTOR_LABELS["stk_sector_persistence_score"] == "板块持续性"
     assert FACTOR_LABELS["stk_sector_resonance_score"] == "板块共振"
+    assert FACTOR_LABELS["stk_behavior_decay"] == "个股拥挤衰退"
+    assert FACTOR_LABELS["stk_behavior_repair"] == "个股弱转强修复"
+    assert FACTOR_LABELS["stk_behavior_divergence"] == "个股分歧释放"
+
+
+def test_backtest_internal_codes_are_translated_for_display():
+    assert backtest_view._trade_text("time_stop_minute_close") == "持有到期按收盘价退出"
+    assert backtest_view._trade_text("stop_loss_gap_minute") == "次日跳空止损"
+    assert backtest_view._trade_text("entry_mode_not_allowed") == "策略不支持该开盘入场模式"
+    assert backtest_view._strategy_version_text("f021b0b8db43") == "规则版"
+    assert backtest_view._trade_text("all") == "全部候选"
 
 
 def test_plan_source_keeps_all_candidates_by_default(tmp_path):

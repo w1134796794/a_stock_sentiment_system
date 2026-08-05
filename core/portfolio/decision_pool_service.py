@@ -1,22 +1,21 @@
 """Turn multi-strategy screening output into a compact daily decision pool."""
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import datetime
-import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from core.factors.sector_taxonomy import partition_sector_names
 from core.models.market_state import (
     EMOTION_PHASE_LABELS,
     EMOTION_PHASES,
     PHASE_ALLOWED_STRATEGIES,
     MarketStateSnapshot,
 )
-from core.factors.sector_taxonomy import partition_sector_names
 from core.portfolio.strategy_allocator import StrategyPortfolioAllocator
 from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
-
 
 PRODUCTION_STRATEGIES = PRODUCTION_STRATEGY_IDS
 REGIME_STRATEGIES = {
@@ -157,6 +156,7 @@ class DecisionPoolService:
                     "策略名称": strategy_name,
                     "策略单票仓位上限%": _number(profile.get("position_cap_pct")),
                     "_entry_modes": list(execution.get("allowed_entry_modes") or []),
+                    "_strategy_execution": execution,
                     "_evidence_rules": list(profile.get("evidence_rules") or []),
                     "_veto_rules": list(profile.get("veto_rules") or []),
                 })
@@ -278,6 +278,24 @@ class DecisionPoolService:
         )
         modes = [ENTRY_MODE_LABELS.get(mode, mode) for mode in raw_modes]
         strategy_ids = _unique(str(item.get("策略ID") or "") for item in members)
+        primary_strategy_id = str(
+            row.get("策略ID") or (strategy_ids[0] if strategy_ids else "")
+        )
+        primary_member = next(
+            (item for item in members if str(item.get("策略ID") or "") == primary_strategy_id),
+            members[0] if members else {},
+        )
+        primary_execution = dict(primary_member.get("_strategy_execution") or {})
+        combined_execution = dict(row.get("strategy_execution") or {})
+        combined_execution.update({
+            "allowed_entry_modes": raw_modes,
+            "source_strategies": strategy_ids,
+            "primary_strategy": primary_strategy_id,
+        })
+        if isinstance(primary_execution.get("exit"), Mapping):
+            combined_execution["exit"] = dict(primary_execution["exit"])
+        # 合并决策池由组合层统一限制持仓数量，不能沿用某个主策略的单策略上限。
+        combined_execution.pop("max_positions", None)
         evidence = self._evidence(members)
         rule_grade = self._rule_grade(
             members, evidence, sector_strength, _number(row.get("策略组合评分")),
@@ -310,12 +328,7 @@ class DecisionPoolService:
             ),
             "明日入场模式": " / ".join(modes) if modes else "等待分钟行情分类",
             "allowed_entry_modes": raw_modes,
-            "strategy_execution": {
-                "allowed_entry_modes": raw_modes,
-                "confirmation_deadline": "10:00:00",
-                "candidate_max_age_days": 1,
-                "source_strategies": strategy_ids,
-            },
+            "strategy_execution": combined_execution,
             "策略来源": ",".join(strategy_ids),
             "策略模式": "规则策略",
             "规则等级": rule_grade,

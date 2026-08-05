@@ -52,7 +52,7 @@
     <a href="/drawdown?run={{ bt.run }}" class="text-[11px] text-slate-500 hover:text-emerald-300">回撤分析 →</a>
   </div>
   <div class="card border border-slate-800 rounded-xl p-4">
-    <div class="text-xs text-slate-400 mb-1">Sharpe</div>
+    <div class="text-xs text-slate-400 mb-1">夏普比率</div>
     <div class="text-xl font-bold mono">{{ '%.2f'|format(bt.sharpe or 0) }}</div>
   </div>
   <div class="card border border-slate-800 rounded-xl p-4">
@@ -129,14 +129,14 @@
   <div class="overflow-x-auto">
     <table class="w-full text-sm border-collapse">
       <thead><tr class="text-slate-400">
-        {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','盈亏比','总收益','止损率','最大回撤','平均MFE','平均MAE'] %}
+        {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','盈亏比','总收益','止损率','最大回撤','平均最大浮盈','平均最大浮亏'] %}
         <th class="text-left font-medium px-3 py-2 whitespace-nowrap">{{ c }}</th>
         {% endfor %}
       </tr></thead>
       <tbody>
         {% for r in bt.entry_mode_rows %}
         <tr class="border-t border-slate-800">
-          {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','盈亏比','总收益','止损率','最大回撤','平均MFE','平均MAE'] %}
+          {% for c in ['模式','候选数','信号数','成交数','未成交信号','成交覆盖率','信号成交率','已平仓','胜率','平均收益','盈亏比','总收益','止损率','最大回撤','平均最大浮盈','平均最大浮亏'] %}
           {% set v = r[c] %}
           <td class="px-3 py-1.5 whitespace-nowrap {% if c in ['平均收益','总收益'] and v.startswith('-') %}text-rose-400{% elif c in ['平均收益','总收益'] %}text-emerald-300{% endif %}">{{ v }}</td>
           {% endfor %}
@@ -329,7 +329,10 @@
 
   {% if bt.factor_feedback_rows %}
   <div class="card border border-slate-800 rounded-xl p-4">
-    <h2 class="text-base font-bold mb-3">因子反哺</h2>
+    <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+      <h2 class="text-base font-bold">因子反哺</h2>
+      {% if bt.factor_feedback_warning %}<span class="text-xs text-amber-300">{{ bt.factor_feedback_warning }}</span>{% endif %}
+    </div>
     <div class="overflow-x-auto max-h-80">
       <table class="w-full text-sm border-collapse">
         <thead class="sticky top-0 bg-slate-900"><tr class="text-slate-400">

@@ -12,6 +12,8 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional
 
+from core.screening.explanations import FACTOR_LABELS
+
 # 因子大类中文标签（与 FactorCategory.value 对应）
 CATEGORY_LABELS: Dict[str, str] = {
     "market_env": "大盘环境",
@@ -156,7 +158,7 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
             "factors": [],
         })["factors"].append({
             "factor_id": f.factor_id,
-            "name": f.name,
+            "name": FACTOR_LABELS.get(f.factor_id, f.name),
             "sub_category": f.sub_category,
             "description": f.description,
             "enabled": bool(f.enabled),
@@ -185,6 +187,19 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
     ]
 
     latest_factor_data = _latest_factor_data(factor_ids=CORE_FACTOR_IDS)
+    latest_factor_rows = []
+    for row in latest_factor_data.get("rows", []):
+        factor_id = str(row.get("factor_id") or "")
+        definition = definitions.get(factor_id)
+        latest_factor_rows.append({
+            **row,
+            "factor_name": (
+                FACTOR_LABELS.get(
+                    factor_id,
+                    definition.name if definition else "未命名因子",
+                )
+            ),
+        })
     core_catalog = []
     for group_id, group in CORE_FACTOR_GROUPS.items():
         rows = []
@@ -192,7 +207,10 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
             definition = definitions.get(factor_id)
             rows.append({
                 "factor_id": factor_id,
-                "name": definition.name if definition else factor_id,
+                "name": FACTOR_LABELS.get(
+                    factor_id,
+                    definition.name if definition else "未命名因子",
+                ),
                 "description": definition.description if definition else "由计算层生成的核心指标",
                 "available": definition is not None,
             })
@@ -210,7 +228,7 @@ def build_factor_state(active_profile: Optional[str] = None) -> Dict[str, Any]:
         "active_profile": active_profile or "",
         "snapshot_enabled_factors": latest_factor_data.get("snapshot_enabled_factors", []),
         "latest_factor_trade_date": latest_factor_data.get("trade_date", ""),
-        "latest_factor_summary": latest_factor_data.get("rows", []),
+        "latest_factor_summary": latest_factor_rows,
         "override_count": _count(yaml_store),
         "core_catalog": core_catalog,
         "strategy_factor_roles": STRATEGY_FACTOR_ROLES,
@@ -226,9 +244,9 @@ def _latest_factor_data(
     factor_ids: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     try:
-        import duckdb  # type: ignore
-
         from pathlib import Path
+
+        import duckdb  # type: ignore
 
         from config.settings import FACTOR_DB_PATH, SNAPSHOT_DIR
         from snapshot.reader import SnapshotReader
@@ -264,7 +282,7 @@ def _latest_factor_data(
                 params.extend(ordered_ids)
             params.append(int(limit))
             df = con.execute(
-                """
+                f"""
                 SELECT
                     entity_type,
                     factor_id,
@@ -286,7 +304,7 @@ def _latest_factor_data(
                     END,
                     factor_id
                 LIMIT ?
-                """.format(where_factor=where_factor),
+                """,
                 params,
             ).fetchdf()
         raw_rows = df.to_dict(orient="records") if df is not None and not df.empty else []
@@ -375,8 +393,14 @@ def _dynamic_weight_state(trade_date: str, profile: str) -> Dict[str, Any]:
                 total_weight = sum(weights)
                 deciles.append({
                     "decile": index,
-                    "expected_return": sum(float(row.get("expected_return") or 0.0) * weight for row, weight in zip(group, weights)) / total_weight,
-                    "success_probability": sum(float(row.get("success_probability") or 0.0) * weight for row, weight in zip(group, weights)) / total_weight,
+                    "expected_return": sum(
+                        float(row.get("expected_return") or 0.0) * weight
+                        for row, weight in zip(group, weights, strict=True)
+                    ) / total_weight,
+                    "success_probability": sum(
+                        float(row.get("success_probability") or 0.0) * weight
+                        for row, weight in zip(group, weights, strict=True)
+                    ) / total_weight,
                 })
         drift = _latest_screening_drift(trade_date)
         return {

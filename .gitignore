@@ -11,6 +11,9 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Frontend dependency caches
+/frontend/node_modules/
+
 # Logs and local caches
 /logs/
 *.log

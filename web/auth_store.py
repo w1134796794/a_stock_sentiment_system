@@ -131,6 +131,68 @@ def ensure_auth_db() -> None:
               updated_at TEXT NOT NULL,
               PRIMARY KEY(role, permission_key)
             );
+            CREATE TABLE IF NOT EXISTS wechat_bindings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              appid TEXT NOT NULL,
+              openid TEXT NOT NULL,
+              unionid TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              last_login_at TEXT,
+              UNIQUE(appid, openid),
+              UNIQUE(user_id, appid)
+            );
+            CREATE TABLE IF NOT EXISTS wechat_login_tickets (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              token_hash TEXT NOT NULL UNIQUE,
+              appid TEXT NOT NULL,
+              openid TEXT NOT NULL,
+              unionid TEXT,
+              expires_at TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              used_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS mobile_devices (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              wechat_binding_id INTEGER REFERENCES wechat_bindings(id) ON DELETE SET NULL,
+              device_id TEXT NOT NULL,
+              device_name TEXT NOT NULL DEFAULT '',
+              platform TEXT NOT NULL DEFAULT '',
+              ip TEXT NOT NULL DEFAULT '',
+              user_agent TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL,
+              last_seen_at TEXT,
+              disabled_at TEXT,
+              UNIQUE(user_id, device_id)
+            );
+            CREATE TABLE IF NOT EXISTS mobile_tokens (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              device_session_id INTEGER NOT NULL REFERENCES mobile_devices(id) ON DELETE CASCADE,
+              access_token_hash TEXT NOT NULL UNIQUE,
+              refresh_token_hash TEXT NOT NULL UNIQUE,
+              created_at TEXT NOT NULL,
+              access_expires_at TEXT NOT NULL,
+              refresh_expires_at TEXT NOT NULL,
+              last_seen_at TEXT,
+              revoked_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_mobile_tokens_user_active
+              ON mobile_tokens(user_id, revoked_at, refresh_expires_at);
+            CREATE TABLE IF NOT EXISTS mobile_audit_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER,
+              device_session_id INTEGER,
+              action TEXT NOT NULL,
+              path TEXT NOT NULL DEFAULT '',
+              ip TEXT NOT NULL DEFAULT '',
+              user_agent TEXT NOT NULL DEFAULT '',
+              success INTEGER NOT NULL DEFAULT 0,
+              reason TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL
+            );
             """
         )
         count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
@@ -205,15 +267,53 @@ def record_login(
 
 
 def _active_session_count(conn: sqlite3.Connection, user_id: int) -> int:
-    return int(
+    now = _now()
+    web_count = int(
         conn.execute(
             """
             SELECT COUNT(*) FROM sessions
             WHERE user_id=? AND revoked_at IS NULL AND expires_at > ?
             """,
-            (user_id, _now()),
+            (user_id, now),
         ).fetchone()[0]
     )
+    mobile_count = int(
+        conn.execute(
+            """
+            SELECT COUNT(*) FROM mobile_tokens
+            WHERE user_id=? AND revoked_at IS NULL AND refresh_expires_at > ?
+            """,
+            (user_id, now),
+        ).fetchone()[0]
+    )
+    return web_count + mobile_count
+
+
+def _active_session_rows(
+    conn: sqlite3.Connection,
+    user_id: int,
+) -> List[Tuple[str, int, str]]:
+    now = _now()
+    rows = conn.execute(
+        """
+        SELECT source, id, touched_at
+        FROM (
+          SELECT 'web' AS source, id, COALESCE(last_seen_at, created_at) AS touched_at
+          FROM sessions
+          WHERE user_id=? AND revoked_at IS NULL AND expires_at > ?
+          UNION ALL
+          SELECT 'mobile' AS source, id, COALESCE(last_seen_at, created_at) AS touched_at
+          FROM mobile_tokens
+          WHERE user_id=? AND revoked_at IS NULL AND refresh_expires_at > ?
+        )
+        ORDER BY touched_at
+        """,
+        (user_id, now, user_id, now),
+    ).fetchall()
+    return [
+        (str(row["source"]), int(row["id"]), str(row["touched_at"]))
+        for row in rows
+    ]
 
 
 def login(
@@ -264,16 +364,15 @@ def login(
                     (user["id"], username, ip, user_agent[:500], "在线设备数已达上限", _now()),
                 )
                 return False, "在线设备数已达上限，请先退出其他设备", None, user, 0
-            rows = conn.execute(
-                """
-                SELECT id FROM sessions
-                WHERE user_id=? AND revoked_at IS NULL AND expires_at > ?
-                ORDER BY COALESCE(last_seen_at, created_at), created_at
-                """,
-                (user["id"], _now()),
-            ).fetchall()
-            for row in rows[: max(0, len(rows) - max_sessions + 1)]:
-                conn.execute("UPDATE sessions SET revoked_at=? WHERE id=?", (_now(), row["id"]))
+            rows = _active_session_rows(conn, int(user["id"]))
+            for source, row_id, _ in rows[
+                : max(0, len(rows) - max_sessions + 1)
+            ]:
+                table = "sessions" if source == "web" else "mobile_tokens"
+                conn.execute(
+                    f"UPDATE {table} SET revoked_at=? WHERE id=?",
+                    (_now(), row_id),
+                )
 
         conn.execute(
             """
@@ -333,7 +432,15 @@ def revoke_session(token: Optional[str]) -> None:
 def revoke_user_sessions(user_id: int) -> None:
     ensure_auth_db()
     with _connect() as conn:
-        conn.execute("UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL", (_now(), int(user_id)))
+        now = _now()
+        conn.execute(
+            "UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+            (now, int(user_id)),
+        )
+        conn.execute(
+            "UPDATE mobile_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+            (now, int(user_id)),
+        )
 
 
 def list_users() -> List[Dict[str, Any]]:
@@ -342,12 +449,17 @@ def list_users() -> List[Dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT u.*,
-              (SELECT COUNT(*) FROM sessions s
-               WHERE s.user_id=u.id AND s.revoked_at IS NULL AND s.expires_at > ?) AS active_sessions
+              (
+                (SELECT COUNT(*) FROM sessions s
+                 WHERE s.user_id=u.id AND s.revoked_at IS NULL AND s.expires_at > ?)
+                +
+                (SELECT COUNT(*) FROM mobile_tokens mt
+                 WHERE mt.user_id=u.id AND mt.revoked_at IS NULL AND mt.refresh_expires_at > ?)
+              ) AS active_sessions
             FROM users u
             ORDER BY CASE u.role WHEN 'admin' THEN 0 ELSE 1 END, u.id
             """,
-            (_now(),),
+            (_now(), _now()),
         ).fetchall()
     return [_row_to_user(row) | {"active_sessions": row["active_sessions"]} for row in rows]
 
@@ -395,7 +507,15 @@ def update_user_status(user_id: int, status: str) -> Dict[str, Any]:
     with _connect() as conn:
         conn.execute("UPDATE users SET status=?, updated_at=? WHERE id=?", (status, _now(), int(user_id)))
         if status == "disabled":
-            conn.execute("UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL", (_now(), int(user_id)))
+            now = _now()
+            conn.execute(
+                "UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+                (now, int(user_id)),
+            )
+            conn.execute(
+                "UPDATE mobile_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+                (now, int(user_id)),
+            )
     return get_user_by_id(user_id) or {}
 
 
@@ -427,7 +547,15 @@ def reset_password(user_id: int, password: str) -> Dict[str, Any]:
             "UPDATE users SET password_hash=?, updated_at=? WHERE id=?",
             (hash_password(password), _now(), int(user_id)),
         )
-        conn.execute("UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL", (_now(), int(user_id)))
+        now = _now()
+        conn.execute(
+            "UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+            (now, int(user_id)),
+        )
+        conn.execute(
+            "UPDATE mobile_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+            (now, int(user_id)),
+        )
     return get_user_by_id(user_id) or {}
 
 

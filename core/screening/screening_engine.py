@@ -12,10 +12,10 @@ import pandas as pd
 import yaml
 from loguru import logger
 
+from core.screening.enhancements import ENHANCEMENT_DEFINITIONS
 from core.screening.explanations import build_screening_reasons
 from core.screening.screening_models import FilterTrace, ScreeningResult
-from core.screening.enhancements import ENHANCEMENT_DEFINITIONS
-from core.signals.confidence_service import ConfidenceService, market_regime
+from core.signals.confidence_service import ConfidenceService
 from core.utils.price_limit import get_price_limit_pct_points, limit_progress
 
 
@@ -65,6 +65,9 @@ class ScreeningEngine:
         "prev_limit_up_premium",
         "prev_limit_up_positive",
         "prev_first_board_gap_up",
+        "first_board_sector_resonance_ratio",
+        "first_board_cluster_count",
+        "first_board_follow_through_ratio",
     }
 
     def __init__(

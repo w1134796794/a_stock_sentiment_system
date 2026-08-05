@@ -24,12 +24,24 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--capital", type=float, default=1_000_000.0)
     parser.add_argument("--no-risk", action="store_true")
     parser.add_argument("--enhancements", default="")
+    parser.add_argument(
+        "--strategies",
+        default="",
+        help="逗号分隔的策略ID；传 production 使用全部生产策略",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = _args()
     selected = normalize_enhancements(args.enhancements)
+    selected_strategies = [
+        item.strip() for item in str(args.strategies or "").split(",") if item.strip()
+    ]
+    if selected_strategies == ["production"]:
+        from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
+
+        selected_strategies = list(PRODUCTION_STRATEGY_IDS)
     plan_dir, file_count, row_count = build_backtest_plan_dir(
         snapshot_dir=Path(SNAPSHOT_DIR),
         output_dir=Path(WEB_DATA_DIR),
@@ -38,6 +50,7 @@ def main() -> int:
         end_date=str(args.end),
         max_rank=0,
         enhancements=selected,
+        strategy_ids=selected_strategies,
     )
     if file_count <= 0:
         raise SystemExit("No generated plans are available in the requested range")
@@ -62,6 +75,7 @@ def main() -> int:
         "max_plan_rank": 0,
         "enhancements": selected,
         "enhancement_label": enhancement_label(selected),
+        "strategy_ids": selected_strategies,
         "validation_window": "3个月训练 + 1个月样本外验证",
     })
     print(

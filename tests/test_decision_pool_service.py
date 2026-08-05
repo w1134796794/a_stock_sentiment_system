@@ -3,12 +3,22 @@ import json
 from core.portfolio.decision_pool_service import DecisionPoolService
 
 
-def _profile(strategy_id: str, name: str):
+def _profile(
+    strategy_id: str,
+    name: str,
+    *,
+    hard_stop_loss: float = 0.05,
+    max_positions: int = 1,
+):
     return {
         "id": strategy_id,
         "name": name,
         "position_cap_pct": 12,
-        "execution": {"allowed_entry_modes": ["weak_to_strong", "continuation"]},
+        "execution": {
+            "allowed_entry_modes": ["weak_to_strong", "continuation"],
+            "max_positions": max_positions,
+            "exit": {"hard_stop_loss": hard_stop_loss},
+        },
     }
 
 
@@ -55,6 +65,9 @@ def test_strong_market_deduplicates_three_production_strategies():
     assert first["strategy_execution"]["source_strategies"] == [
         "mainline_leader", "weak_to_strong", "first_board_launch",
     ]
+    assert first["strategy_execution"]["primary_strategy"] == first["策略ID"]
+    assert first["strategy_execution"]["exit"]["hard_stop_loss"] == 0.05
+    assert "max_positions" not in first["strategy_execution"]
 
 
 def test_security_attributes_cannot_be_promoted_to_the_mainline():
