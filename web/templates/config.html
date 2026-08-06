@@ -49,6 +49,38 @@
   </a>
 </div>
 
+<section class="border-y border-slate-800 bg-slate-900/35 -mx-6 px-6 py-4 mb-5">
+  <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <h2 class="text-base font-bold text-slate-100">微信买点提醒</h2>
+        {% if notification_status.enabled %}
+        <span class="text-xs rounded border border-emerald-700/70 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">已启用</span>
+        {% else %}
+        <span class="text-xs rounded border border-amber-700/70 bg-amber-950/40 px-2 py-0.5 text-amber-300">待配置</span>
+        {% endif %}
+      </div>
+      <p class="text-sm text-slate-400 mt-1">交易日09:30–15:00后台监控；只有分钟买点变为“确认”才推送，同一股票同一模式每日只发送一次。</p>
+      <div class="flex flex-wrap gap-2 mt-2">
+        {% for name, configured in notification_status.channels.items() %}
+        <span class="text-xs rounded border px-2 py-1 {{ 'border-emerald-800 text-emerald-300' if configured else 'border-slate-700 text-slate-500' }}">
+          {{ name }} · {{ '已配置' if configured else '未配置' }}
+        </span>
+        {% endfor %}
+      </div>
+      {% if not notification_status.enabled %}
+      <p class="text-xs text-slate-500 mt-2">个人微信推荐在服务器 <span class="mono text-slate-400">.env</span> 配置 <span class="mono text-slate-400">SERVERCHAN_SENDKEY</span>；企业微信群配置 <span class="mono text-slate-400">WECOM_WEBHOOK_URL</span>，然后重启服务。</p>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-3 shrink-0">
+      <span id="notification-test-result" class="text-xs text-slate-500"></span>
+      <button id="notification-test" type="button"
+              class="border border-emerald-700 text-emerald-300 hover:bg-emerald-950/40 text-sm rounded-md px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              {% if not notification_status.enabled %}disabled{% endif %}>发送测试</button>
+    </div>
+  </div>
+</section>
+
 <div class="sticky top-0 z-10 -mx-6 px-6 py-3 bg-slate-950/90 backdrop-blur border-b border-slate-800 mb-5">
   <div class="flex items-center gap-3 flex-wrap">
     <input id="cfg-search" type="text" placeholder="搜索参数名 / 路径…"
@@ -146,6 +178,8 @@
   const saveBtn = document.getElementById('cfg-save');
   const changedEl = document.getElementById('cfg-changed');
   const toast = document.getElementById('cfg-toast');
+  const notificationTest = document.getElementById('notification-test');
+  const notificationResult = document.getElementById('notification-test-result');
 
   function curValue(el) {
     if (el.dataset.type === 'bool') return el.checked ? 'true' : 'false';
@@ -186,6 +220,25 @@
   document.addEventListener('change', e => {
     if (e.target.classList.contains('cfg-input')) refreshChanged();
   });
+
+  if (notificationTest) {
+    notificationTest.addEventListener('click', async () => {
+      notificationTest.disabled = true;
+      notificationResult.textContent = '正在发送…';
+      notificationResult.className = 'text-xs text-slate-400';
+      try {
+        const response = await fetch('/api/config/notifications/test', { method: 'POST' });
+        const data = await response.json();
+        notificationResult.textContent = data.message || (response.ok ? '测试消息已发送' : '发送失败');
+        notificationResult.className = 'text-xs ' + (response.ok ? 'text-emerald-300' : 'text-rose-300');
+      } catch (error) {
+        notificationResult.textContent = '请求失败，请检查服务日志';
+        notificationResult.className = 'text-xs text-rose-300';
+      } finally {
+        notificationTest.disabled = false;
+      }
+    });
+  }
 
   saveBtn.addEventListener('click', async () => {
     const updates = gatherUpdates();

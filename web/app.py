@@ -2981,7 +2981,10 @@ def _refresh_realtime_defaults() -> None:
             if isinstance(payload, dict):
                 from core.notifications.notifier import NotificationService
 
-                NotificationService().notify_realtime_payload(payload)
+                try:
+                    NotificationService().notify_realtime_payload(payload)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Realtime notification failed: %s", exc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Realtime cache refresh failed for %s: %s", key[0], exc)
 
@@ -3392,11 +3395,16 @@ def _df_to_intraday_line(df, trade_date: str) -> List[Dict[str, Any]]:
 def config_page(request: Request) -> Any:
     """参数配置页：只展示日常运行和风控所需的核心参数。"""
     from config.config_registry import build_simple_registry
+    from core.notifications.notifier import NotificationService
 
     return templates.TemplateResponse(
         request,
         "config.html",
-        {"registry": build_simple_registry(), "dates": _list_dates()},
+        {
+            "registry": build_simple_registry(),
+            "dates": _list_dates(),
+            "notification_status": NotificationService().status(),
+        },
     )
 
 
@@ -3417,6 +3425,41 @@ def api_config_save(payload: dict = Body(...)) -> Any:
         return JSONResponse({"error": "updates 必须是数组"}, status_code=400)
     result = apply_updates(updates)
     return JSONResponse(result)
+
+
+@app.get("/api/config/notifications")
+def api_notification_status() -> Any:
+    from core.notifications.notifier import NotificationService
+
+    return JSONResponse({"ok": True, "data": NotificationService().status()})
+
+
+@app.post("/api/config/notifications/test")
+def api_notification_test() -> Any:
+    from datetime import datetime
+
+    from core.notifications.notifier import NotificationService
+
+    service = NotificationService()
+    if not service.enabled:
+        return JSONResponse(
+            {"ok": False, "message": "尚未配置企业微信机器人或Server酱"},
+            status_code=400,
+        )
+    result = service.send(
+        "A股短线系统：微信推送测试",
+        "通知渠道连接正常。盘中出现弱转强、强势延续或高开加速确认后，系统会自动发送买点提醒。\n"
+        f"测试时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+    )
+    status_code = 200 if result.get("ok") else 502
+    return JSONResponse(
+        {
+            "ok": bool(result.get("ok")),
+            "sent": int(result.get("sent") or 0),
+            "message": "测试消息已发送" if result.get("ok") else "测试消息发送失败，请检查密钥和服务器网络",
+        },
+        status_code=status_code,
+    )
 
 
 @app.get("/api/agent/candidate")

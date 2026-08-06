@@ -1913,9 +1913,18 @@ WEB_DATA_DIR/models/health/model_health_YYYYMMDD.json
 WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...
 DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=...
 SERVERCHAN_SENDKEY=SCT...
+APP_PUBLIC_URL=https://astockreview.cn
 ```
 
-推送包括 09:25 竞价预警、盘中弱转强/强势延续/高开加速确认、每日生成完成或失败。未配置任何渠道时服务静默跳过，不影响行情和数据生成。
+个人微信使用 `SERVERCHAN_SENDKEY`，企业微信群使用 `WECOM_WEBHOOK_URL`；两者可以同时配置。`APP_PUBLIC_URL` 可选，用于在买点消息中附加盘中详情链接。修改 `.env` 后需要重启 Web 服务：
+
+```bash
+sudo systemctl restart a-stock
+```
+
+推送包括 09:25 竞价预警、盘中弱转强/强势延续/高开加速确认、每日生成完成或失败。盘中通知由服务器后台任务触发，不要求浏览器保持打开；只推送真实“确认”状态，观察、取消和无法成交不会推送。同一交易日、同一股票、同一入场模式只发送一次，多 Worker 部署时使用 Redis 锁防止重复发送。
+
+管理员可进入“参数配置 → 微信买点提醒”查看渠道状态并点击“发送测试”。页面只显示是否配置，不会返回或展示 webhook、SendKey 等密钥。未配置任何渠道时服务静默跳过，不影响行情和数据生成。
 
 ### 25.15 小资金账户方案
 

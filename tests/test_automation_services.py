@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.automation.internal_scheduler import InternalScheduler
+from core.infrastructure.shared_state import MemoryStateBackend
 from core.models.health_monitor import ModelHealthMonitor
 from core.notifications.notifier import NotificationService
 from core.realtime.auction_alert_service import AuctionAlertService
@@ -38,7 +39,18 @@ def test_realtime_notification_only_sends_confirmed(monkeypatch):
     count = service.notify_realtime_payload({
         "market_date": "20260706",
         "rows": [
-            {"code": "000001", "name": "测试A", "confirm_status": "confirmed", "entry_mode_text": "弱转强", "pct_chg": 2.3},
+            {
+                "code": "000001",
+                "name": "测试A",
+                "confirm_status": "confirmed",
+                "entry_mode_text": "弱转强",
+                "pct_chg": 2.3,
+                "last_price": 12.34,
+                "strategy_name": "弱转强修复",
+                "resonance_sectors": "机器人",
+                "confirm_time": "09:43:00",
+                "suggested_position": "确认后参考10%",
+            },
             {"code": "000002", "name": "测试B", "confirm_status": "observe", "entry_mode_text": "观察", "pct_chg": 1.0},
         ],
     })
@@ -46,6 +58,45 @@ def test_realtime_notification_only_sends_confirmed(monkeypatch):
     assert count == 1
     assert len(calls) == 1
     assert "弱转强确认" in calls[0][1]
+    assert "测试A（000001）" in calls[0][1]
+    assert "12.34" in calls[0][1]
+    assert "机器人" in calls[0][1]
+    assert "确认后参考10%" in calls[0][1]
+
+
+def test_notification_service_reports_channels_without_exposing_secrets(monkeypatch):
+    monkeypatch.setenv("SERVERCHAN_SENDKEY", "SCT-secret-value")
+    monkeypatch.delenv("WECOM_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("DINGTALK_WEBHOOK_URL", raising=False)
+
+    status = NotificationService(backend=MemoryStateBackend("notify-status")).status()
+
+    assert status["enabled"] is True
+    assert status["configured_count"] == 1
+    assert status["channels"]["Server酱个人微信"] is True
+    assert "secret" not in str(status).lower()
+
+
+def test_notification_service_deduplicates_same_signal(monkeypatch):
+    monkeypatch.setenv("WECOM_WEBHOOK_URL", "https://example.invalid/wecom")
+    monkeypatch.delenv("SERVERCHAN_SENDKEY", raising=False)
+    monkeypatch.delenv("DINGTALK_WEBHOOK_URL", raising=False)
+    backend = MemoryStateBackend("notify-dedup")
+    calls = []
+    service = NotificationService(backend=backend)
+    monkeypatch.setattr(
+        service,
+        "_post_json",
+        lambda url, payload: calls.append((url, payload)) or {"ok": True, "status": 200},
+    )
+
+    first = service.send("买点", "测试", event_key="intraday:20260706:000001:weak")
+    second = service.send("买点", "测试", event_key="intraday:20260706:000001:weak")
+
+    assert first["sent"] == 1
+    assert second["sent"] == 0
+    assert second["deduplicated"] is True
+    assert len(calls) == 1
 
 
 def test_internal_scheduler_registers_both_jobs(monkeypatch):
