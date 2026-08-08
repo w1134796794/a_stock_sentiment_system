@@ -64,6 +64,48 @@ def test_realtime_notification_only_sends_confirmed(monkeypatch):
     assert "确认后参考10%" in calls[0][1]
 
 
+def test_realtime_notification_sends_confirmed_leader_strength(monkeypatch):
+    service = NotificationService()
+    calls = []
+
+    def fake_send(title, content, **kwargs):
+        calls.append((title, content, kwargs))
+        return {"ok": True, "sent": 1}
+
+    monkeypatch.setattr(service, "send", fake_send)
+    count = service.notify_realtime_payload({
+        "market_date": "20260707",
+        "profile": "leader_pool",
+        "observation_source": "leader_pool",
+        "strategy": {"id": "leader_pool", "name": "近期龙头池"},
+        "rows": [
+            {
+                "code": "600001",
+                "name": "龙头测试",
+                "status": "confirmed",
+                "entry_mode": "weak_to_strong",
+                "entry_mode_text": "弱转强",
+                "change_pct": 3.25,
+                "last_price": 18.66,
+                "confirm_time": "09:46:00",
+                "leader_roles": ["板块龙头", "情绪龙头"],
+                "lifecycle_state": "分歧龙头",
+                "leader_time_label": "上一交易日龙头",
+                "resonance_sectors": "机器人",
+            },
+            {"code": "600002", "name": "观察龙头", "status": "observe"},
+        ],
+    })
+
+    assert count == 1
+    assert len(calls) == 1
+    assert calls[0][0] == "龙头盘中转强确认：龙头测试"
+    assert "龙头身份：板块龙头、情绪龙头" in calls[0][1]
+    assert "龙头阶段：分歧龙头，上一交易日龙头" in calls[0][1]
+    assert "行情：18.66，涨幅+3.25%" in calls[0][1]
+    assert calls[0][2]["event_key"] == "intraday:20260707:600001:weak_to_strong"
+
+
 def test_notification_service_reports_channels_without_exposing_secrets(monkeypatch):
     monkeypatch.setenv("SERVERCHAN_SENDKEY", "SCT-secret-value")
     monkeypatch.delenv("WECOM_WEBHOOK_URL", raising=False)

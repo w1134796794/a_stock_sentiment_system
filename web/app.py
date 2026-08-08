@@ -2739,6 +2739,21 @@ def _overlay_cache_key(
     )
 
 
+def _intraday_strength_cache_key(
+    trade_date: Optional[str], market_date: Optional[str], profile: str,
+    lookback: int, limit: int, stale_after_seconds: int,
+) -> tuple:
+    return (
+        "intraday-strength",
+        str(trade_date or ""),
+        str(market_date or ""),
+        str(profile or "leader_pool"),
+        int(lookback),
+        int(limit),
+        int(stale_after_seconds),
+    )
+
+
 def _sector_cache_key(
     codes: Optional[List[str]], source: str, limit: int, include_raw: bool,
 ) -> tuple:
@@ -2837,6 +2852,35 @@ def _build_realtime_overlay_payload(
         profile=profile,
         limit=limit,
         persist=False,
+    )
+    snapshot = _load_snapshot(trade_date) if trade_date else None
+    _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    payload["session"] = _current_realtime_session()
+    return payload
+
+
+def _build_intraday_strength_payload(
+    trade_date: Optional[str],
+    *,
+    market_date: Optional[str] = None,
+    profile: str = "leader_pool",
+    lookback: int = 10,
+    limit: int = 30,
+    stale_after_seconds: int = 90,
+) -> Dict[str, Any]:
+    from core.realtime.leader_pool_service import IntradayStrengthService
+
+    quote_date = market_date or _realtime_market_date()
+    service = IntradayStrengthService(
+        quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
+        entry_signal_service=_get_realtime_entry_signal_service(),
+    )
+    payload = service.build(
+        trade_date,
+        market_date=quote_date,
+        profile=profile,
+        lookback=lookback,
+        limit=limit,
     )
     snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
@@ -2968,6 +3012,19 @@ def _refresh_realtime_defaults() -> None:
     market_date = _realtime_market_date()
     trade_date = _realtime_candidate_date(market_date)
     jobs = [
+        (
+            _intraday_strength_cache_key(
+                trade_date, market_date, "leader_pool", 10, 30, 90,
+            ),
+            lambda: _build_intraday_strength_payload(
+                trade_date,
+                market_date=market_date,
+                profile="leader_pool",
+                lookback=10,
+                limit=30,
+                stale_after_seconds=90,
+            ),
+        ),
         (
             _overlay_cache_key(trade_date, market_date, "", 20, 90),
             lambda: _build_realtime_overlay_payload(
@@ -3183,35 +3240,28 @@ def api_intraday_strength(
     limit: int = 30,
     stale_after_seconds: int = 90,
 ) -> Any:
-    from core.realtime.leader_pool_service import IntradayStrengthService
-
     quote_date = market_date or _realtime_market_date()
     trade_date = date or _realtime_candidate_date(quote_date)
     normalized_lookback = max(1, min(int(lookback or 5), 20))
     normalized_limit = max(1, min(int(limit or 30), 100))
 
     def load_payload():
-        service = IntradayStrengthService(
-            quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
-            entry_signal_service=_get_realtime_entry_signal_service(),
-        )
-        return service.build(
+        return _build_intraday_strength_payload(
             trade_date,
             market_date=quote_date,
             profile=profile,
             lookback=normalized_lookback,
             limit=normalized_limit,
+            stale_after_seconds=stale_after_seconds,
         )
 
     payload = _get_cached_realtime_payload(
-        (
-            "intraday-strength", trade_date, quote_date, profile,
-            normalized_lookback, normalized_limit,
+        _intraday_strength_cache_key(
+            trade_date, quote_date, profile,
+            normalized_lookback, normalized_limit, stale_after_seconds,
         ),
         load_payload,
     )
-    snapshot = _load_snapshot(trade_date) if trade_date else None
-    _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
     return JSONResponse(payload)
 
 
@@ -3525,7 +3575,14 @@ def api_agent_intraday(
     from core.agent.evidence_service import AgentEvidenceService
 
     quote_date = market_date or _realtime_market_date()
-    key = ("intraday-strength", date, quote_date, max(1, min(lookback, 20)), max(1, min(limit, 100)))
+    key = _intraday_strength_cache_key(
+        date,
+        quote_date,
+        "leader_pool",
+        max(1, min(lookback, 20)),
+        max(1, min(limit, 100)),
+        90,
+    )
     cached = _REALTIME_PAYLOAD_CACHE.get(key)
     return JSONResponse(AgentEvidenceService().get_intraday_signal(date, code, cached_payload=cached))
 

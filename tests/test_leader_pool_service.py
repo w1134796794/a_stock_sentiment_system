@@ -186,6 +186,10 @@ def test_intraday_strength_uses_weak_to_strong_for_low_open():
     assert result["candidate_date"] == "20260618"
     assert result["market_date"] == "20260619"
     assert result["rows"][0]["status"] == "confirmed"
+    assert result["rows"][0]["confirm_status"] == "confirmed"
+    assert result["rows"][0]["pct_chg"] == 1.0
+    assert result["rows"][0]["is_leader_observation"] is True
+    assert result["rows"][0]["strategy_id"] == "leader_pool"
     assert result["rows"][0]["entry_mode_text"] == "弱转强"
 
 

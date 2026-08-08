@@ -85,15 +85,34 @@ class NotificationService:
     def notify_realtime_payload(self, payload: Dict[str, Any]) -> int:
         sent = 0
         market_date = str(payload.get("market_date") or "")
+        profile = str(payload.get("profile") or "")
+        observation_source = str(payload.get("observation_source") or "")
+        payload_strategy = payload.get("strategy") or {}
+        payload_strategy_name = (
+            str(payload_strategy.get("name") or "")
+            if isinstance(payload_strategy, dict)
+            else ""
+        )
         for row in payload.get("rows") or []:
-            if str(row.get("confirm_status") or "") != "confirmed":
+            status = str(row.get("confirm_status") or row.get("status") or "")
+            if status != "confirmed":
                 continue
             name = str(row.get("name") or row.get("code") or "候选股")
             code = str(row.get("code") or "")
             mode = str(row.get("entry_mode_text") or "盘中信号")
-            pct = float(row.get("pct_chg") or 0.0)
+            pct = float(row.get("pct_chg") or row.get("change_pct") or 0.0)
             price = float(row.get("last_price") or row.get("entry_price") or 0.0)
-            strategy = str(row.get("strategy_name") or row.get("strategy_sources") or "今日决策池")
+            is_leader = bool(
+                row.get("is_leader_observation")
+                or profile == "leader_pool"
+                or observation_source == "leader_pool"
+            )
+            strategy = str(
+                row.get("strategy_name")
+                or row.get("strategy_sources")
+                or payload_strategy_name
+                or ("近期龙头池" if is_leader else "今日决策池")
+            )
             sectors = str(row.get("resonance_sectors") or "").strip()
             confirm_time = str(row.get("confirm_time") or row.get("entry_time") or "实时")
             position = str(row.get("suggested_position") or "按风控上限确认")
@@ -104,6 +123,18 @@ class NotificationService:
                 f"时间：{confirm_time}",
                 f"策略：{strategy}",
             ]
+            if is_leader:
+                roles = row.get("leader_roles") or []
+                if isinstance(roles, str):
+                    roles = [item.strip() for item in roles.split(",") if item.strip()]
+                role_text = "、".join(str(item) for item in roles if item) or str(
+                    row.get("primary_role") or row.get("pool_type") or "近期龙头"
+                )
+                lifecycle = str(row.get("lifecycle_state") or "")
+                leader_age = str(row.get("leader_time_label") or "")
+                lines.append(f"龙头身份：{role_text}")
+                if lifecycle or leader_age:
+                    lines.append(f"龙头阶段：{'，'.join(item for item in (lifecycle, leader_age) if item)}")
             if sectors:
                 lines.append(f"板块：{sectors}")
             lines.extend([
@@ -113,7 +144,7 @@ class NotificationService:
             if self.public_url:
                 lines.append(f"详情：{self.public_url}/intraday")
             result = self.send(
-                f"盘中买点确认：{name}",
+                f"{'龙头盘中转强确认' if is_leader else '盘中买点确认'}：{name}",
                 "\n".join(lines),
                 event_key=f"intraday:{market_date}:{code}:{row.get('entry_mode') or mode}",
                 ttl_seconds=60 * 60 * 12,
