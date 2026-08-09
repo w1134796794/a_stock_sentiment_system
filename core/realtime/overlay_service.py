@@ -11,6 +11,20 @@ from core.realtime.models import normalize_stock_code
 
 DECISION_POOL_PROFILE = "decision_pool"
 
+_STRATEGY_LABELS = {
+    "decision_pool": "今日决策池",
+    "leader_pool": "近期龙头池",
+    "mainline_leader": "主线龙头",
+    "weak_to_strong": "弱转强修复",
+    "first_board_launch": "首板启动",
+    "ultra_short_board": "超短接力",
+    "capital_resonance": "资金共振",
+    "volume_price_repair": "量价修复",
+    "trend_follow": "趋势主升",
+    "defensive_shock": "震荡防守",
+    "weak_market_trial": "弱市试仓",
+}
+
 
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -66,6 +80,7 @@ class RealtimeOverlayService:
         )
         rows = self._dedupe_candidates(rows)[: max(int(limit or 20), 1)]
         strategy = self._strategy_metadata(resolved_profile, rows)
+        strategy_labels = self._strategy_label_map()
         codes = [r["code"] for r in rows if r.get("code")]
 
         quotes = self._quote_map(codes)
@@ -84,15 +99,26 @@ class RealtimeOverlayService:
             quote = quotes.get(cand.get("code") or "", {})
             signal = signals.get(cand.get("code") or "", {})
             row = self._build_row(candidate_date, market_date, cand, quote, signal)
+            strategy_id = str(cand.get("strategy_id") or strategy["id"] or "")
+            strategy_name = str(
+                cand.get("strategy_name")
+                or strategy_labels.get(strategy_id)
+                or strategy["name"]
+            )
+            strategy_sources = str(cand.get("strategy_sources") or "")
             row.update({
-                "strategy_id": cand.get("strategy_id") or strategy["id"],
-                "strategy_name": cand.get("strategy_name") or strategy["name"],
+                "strategy_id": strategy_id,
+                "strategy_name": strategy_name,
                 "strategy_version": cand.get("strategy_version") or strategy["version"],
                 "strategy_execution": dict(cand.get("strategy_execution") or strategy["execution"]),
                 "position_cap_pct": _to_float(
                     cand.get("position_cap_pct"), strategy["position_cap_pct"],
                 ),
-                "strategy_sources": cand.get("strategy_sources") or "",
+                "strategy_sources": strategy_sources,
+                "strategy_sources_text": self._translate_strategy_sources(
+                    strategy_sources or strategy_id,
+                    strategy_labels,
+                ),
                 "action_group": cand.get("action_group") or "",
                 "suggested_position": cand.get("suggested_position") or "",
             })
@@ -331,8 +357,18 @@ class RealtimeOverlayService:
         open_price = _to_float(quote.get("open_price"))
         pre_close = _to_float(quote.get("pre_close"))
         last_price = _to_float(quote.get("last_price"))
-        change_pct = _to_float(quote.get("change_pct"))
+        raw_change_pct = quote.get("change_pct")
+        change_pct = (
+            _to_float(raw_change_pct)
+            if raw_change_pct not in (None, "")
+            else ((last_price / pre_close - 1.0) * 100.0 if last_price > 0 and pre_close > 0 else None)
+        )
         gap_pct = (open_price / pre_close - 1.0) * 100.0 if open_price > 0 and pre_close > 0 else None
+        intraday_lift_pct = (
+            (last_price / open_price - 1.0) * 100.0
+            if last_price > 0 and open_price > 0
+            else None
+        )
         status = str(signal.get("signal_status") or "observe")
         reason = str(signal.get("reason") or "等待当日分钟入场条件")
         mode = str(signal.get("entry_mode") or classify_entry_mode(open_price, pre_close))
@@ -349,8 +385,10 @@ class RealtimeOverlayService:
             "last_price": last_price,
             "open_price": open_price,
             "pre_close": pre_close,
+            "change_pct": change_pct,
             "pct_chg": change_pct,
             "open_gap_pct": gap_pct,
+            "intraday_lift_pct": intraday_lift_pct,
             "sector_rt_score": None,
             "is_stale": bool(quote.get("is_stale")),
             "confirm_status": status,
@@ -375,6 +413,28 @@ class RealtimeOverlayService:
             "action_group": candidate.get("action_group") or "",
             "suggested_position": candidate.get("suggested_position") or "",
         }
+
+    @staticmethod
+    def _strategy_label_map() -> Dict[str, str]:
+        labels = dict(_STRATEGY_LABELS)
+        try:
+            from core.screening.strategy_profiles import StrategyProfileRepository
+
+            for profile in StrategyProfileRepository().list_profiles(enabled_only=False):
+                strategy_id = str(profile.get("id") or "").strip()
+                strategy_name = str(profile.get("name") or "").strip()
+                if strategy_id and strategy_name:
+                    labels[strategy_id] = strategy_name
+        except Exception:
+            pass
+        return labels
+
+    @staticmethod
+    def _translate_strategy_sources(value: Any, labels: Dict[str, str]) -> str:
+        raw = str(value or "").replace("，", ",")
+        tokens = [token.strip() for token in raw.split(",") if token.strip()]
+        translated = [labels.get(token, token) for token in tokens]
+        return "、".join(dict.fromkeys(translated))
 
     @staticmethod
     def _dedupe_candidates(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

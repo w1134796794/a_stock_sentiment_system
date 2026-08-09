@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from core.realtime.overlay_service import RealtimeOverlayService
 
 
@@ -80,6 +82,8 @@ def test_realtime_overlay_uses_shared_minute_entry_signals(tmp_path):
     rows = {row["code"]: row for row in payload["rows"]}
     assert rows["000001"]["confirm_status"] == "confirmed"
     assert rows["000001"]["resonance_sectors"] == "银行,跨境支付"
+    assert rows["000001"]["change_pct"] == 5.0
+    assert rows["000001"]["intraday_lift_pct"] == pytest.approx(2.941176, rel=1e-5)
     assert rows["600000"]["confirm_status"] == "observe"
     assert rows["600000"]["entry_mode_text"] == "弱转强"
     assert rows["300001"]["confirm_status"] == "observe"
@@ -144,6 +148,7 @@ def test_realtime_overlay_defaults_to_the_persisted_decision_pool(tmp_path):
     assert [row["code"] for row in payload["rows"]] == ["000001"]
     row = payload["rows"][0]
     assert row["strategy_sources"] == "mainline_leader,weak_to_strong"
+    assert row["strategy_sources_text"] == "主线龙头、弱转强修复"
     assert row["action_group"] == "重点确认"
     assert row["strategy_execution"]["allowed_entry_modes"] == [
         "weak_to_strong", "continuation",

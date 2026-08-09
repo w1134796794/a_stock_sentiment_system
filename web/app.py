@@ -2093,8 +2093,13 @@ def dragon_page(request: Request, date: Optional[str] = None) -> Any:
 @app.get("/intraday", response_class=HTMLResponse)
 def intraday_page(request: Request, date: Optional[str] = None) -> Any:
     """盘中转强：龙头池或策略候选叠加实时行情确认。"""
-    market_date = _realtime_market_date()
-    candidate_date = date or _realtime_candidate_date(market_date)
+    current_market_date = _realtime_market_date()
+    candidate_date = date or _realtime_candidate_date(current_market_date)
+    market_date = (
+        _realtime_market_date_for_candidate(candidate_date)
+        if date
+        else current_market_date
+    )
     strategy_profiles = [{
         "id": "leader_pool",
         "name": "近期龙头池",
@@ -3062,6 +3067,18 @@ def _enrich_stock_names(rows: List[Dict[str, Any]], snapshot: Optional[Dict], da
     enrich_stock_sector_labels(rows, Path(CACHE_DIR))
 
 
+def _apply_realtime_confirmation_history(payload: Dict[str, Any]) -> None:
+    """Persist confirmations and retain them after the latest state changes."""
+    try:
+        from core.realtime.signal_event_repository import RealtimeSignalEventRepository
+
+        repository = RealtimeSignalEventRepository()
+        repository.record_payload(payload)
+        repository.merge_history(payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Realtime confirmation history failed: %s", exc)
+
+
 def _build_realtime_overlay_payload(
     trade_date: Optional[str],
     *,
@@ -3083,6 +3100,7 @@ def _build_realtime_overlay_payload(
     )
     snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    _apply_realtime_confirmation_history(payload)
     payload["session"] = _current_realtime_session()
     return payload
 
@@ -3112,6 +3130,7 @@ def _build_intraday_strength_payload(
     )
     snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
+    _apply_realtime_confirmation_history(payload)
     payload["session"] = _current_realtime_session()
     return payload
 
@@ -3212,6 +3231,33 @@ def _realtime_candidate_date(market_date: Optional[str] = None) -> str:
     if available:
         return max(available)
     return _latest_date()
+
+
+def _realtime_market_date_for_candidate(candidate_date: str) -> str:
+    """Resolve the T+1 observation date for a selected T-day candidate pool."""
+    candidate_date = str(candidate_date or "").replace("-", "")[:8]
+    if not candidate_date:
+        return _realtime_market_date()
+    later_available = sorted(date for date in _list_dates() if date > candidate_date)
+    if later_available:
+        return later_available[0]
+    try:
+        from backtest.trade_calendar import TradeCalendar
+
+        next_date = str(TradeCalendar().next(candidate_date) or "")
+        if next_date > candidate_date:
+            return next_date
+    except Exception:
+        pass
+    try:
+        from datetime import datetime, timedelta
+
+        current = datetime.strptime(candidate_date, "%Y%m%d") + timedelta(days=1)
+        while current.weekday() >= 5:
+            current += timedelta(days=1)
+        return current.strftime("%Y%m%d")
+    except (TypeError, ValueError):
+        return _realtime_market_date()
 
 
 def _data_generation_running() -> bool:
@@ -3484,8 +3530,13 @@ def api_intraday_strength(
     limit: int = 30,
     stale_after_seconds: int = 90,
 ) -> Any:
-    quote_date = market_date or _realtime_market_date()
-    trade_date = date or _realtime_candidate_date(quote_date)
+    current_market_date = _realtime_market_date()
+    trade_date = date or _realtime_candidate_date(current_market_date)
+    quote_date = market_date or (
+        _realtime_market_date_for_candidate(trade_date)
+        if date
+        else current_market_date
+    )
     normalized_lookback = max(1, min(int(lookback or 5), 20))
     normalized_limit = max(1, min(int(limit or 30), 100))
 
