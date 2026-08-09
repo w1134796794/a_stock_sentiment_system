@@ -33,6 +33,9 @@ def test_role_permission_matrix_controls_menu_and_route(isolated_auth_db):
     viewer = {"role": "viewer"}
 
     assert can_access_path(viewer, "/realtime") is True
+    assert can_access_path(viewer, "/portfolio") is True
+    assert can_access_path(viewer, "/api/portfolio") is True
+    assert can_access_path(viewer, "/backtest") is True
     assert can_access_path(viewer, "/assistant") is True
     assert can_access_path(viewer, "/api/assistant/brief") is True
     assert can_access_path(viewer, "/api/automation/status") is True
@@ -43,6 +46,8 @@ def test_role_permission_matrix_controls_menu_and_route(isolated_auth_db):
     assert can_access_path(viewer, "/strategies") is False
     assert can_access_path(admin, "/strategies") is True
     assert "workbench" in _visible_keys(viewer)
+    assert "portfolio" in _visible_keys(viewer)
+    assert "backtest" not in _visible_keys(viewer)
     assert "realtime" not in _visible_keys(viewer)
     assert "strategy" not in _visible_keys(viewer)
     assert "sector" not in _visible_keys(viewer)

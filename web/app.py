@@ -31,6 +31,10 @@ from fastapi.templating import Jinja2Templates
 from config.settings import (
     CACHE_DIR,
     FACTOR_DB_PATH,
+    PAPER_INITIAL_CAPITAL,
+    PAPER_MAX_POSITIONS,
+    PAPER_POSITION_PCT,
+    PAPER_ROTATION_MIN_EDGE,
     SNAPSHOT_DIR,
     TUSHARE_TOKEN,
     WEB_DATA_DIR,
@@ -80,6 +84,11 @@ templates.env.globals["visible_menu_groups"] = visible_menu_groups
 reader = SnapshotReader(SNAPSHOT_DIR)
 _REALTIME_QUOTE_SERVICE = None
 _REALTIME_SECTOR_SERVICE = None
+_HOLDING_SERVICE = None
+_POSITION_MONITOR = None
+_PAPER_TRADING_SERVICE = None
+_PAPER_REPLAY_STATE: Dict[str, Any] = {}
+_PAPER_REPLAY_LOCK = Lock()
 _REALTIME_ENTRY_SIGNAL_SERVICE = None
 _REALTIME_SERVICE_LOCK = Lock()
 _REALTIME_WORKER_LOCK = Lock()
@@ -1747,6 +1756,7 @@ _CATEGORY_BY_KEY = {c["key"]: c for c in DATA_CATEGORIES}
 async def _app_lifespan(_app: FastAPI):
     from core.automation.internal_scheduler import AUTOMATION_SCHEDULER
 
+    _get_holding_service()
     _start_realtime_refresh_worker()
     AUTOMATION_SCHEDULER.start()
     try:
@@ -2149,6 +2159,185 @@ def realtime_page(request: Request) -> Any:
             "strategy_profiles": strategy_profiles,
         },
     )
+
+
+@app.get("/portfolio", response_class=HTMLResponse)
+def portfolio_page(request: Request) -> Any:
+    """统一模拟交易账户、持仓、退出提醒与历史成交。"""
+    return templates.TemplateResponse(
+        request,
+        "portfolio.html",
+        {
+            "paper_initial_capital": PAPER_INITIAL_CAPITAL,
+            "paper_max_positions": PAPER_MAX_POSITIONS,
+            "paper_position_pct": PAPER_POSITION_PCT,
+            "paper_rotation_min_edge": PAPER_ROTATION_MIN_EDGE,
+            "latest_trade_date": _latest_date(),
+        },
+    )
+
+
+@app.get("/api/portfolio")
+def api_portfolio(account: str = "default") -> Any:
+    return JSONResponse({"ok": True, "data": _get_holding_service().dashboard("default")})
+
+
+@app.post("/api/portfolio/positions")
+def api_portfolio_add_position(payload: dict = Body(default={})) -> Any:
+    try:
+        row = _get_holding_service().add_buy(dict(payload or {}))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "data": row})
+
+
+@app.patch("/api/portfolio/positions/{position_id}")
+def api_portfolio_update_position(position_id: int, payload: dict = Body(default={})) -> Any:
+    try:
+        row = _get_holding_service().update(position_id, dict(payload or {}))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    if not row:
+        return JSONResponse({"ok": False, "error": "持仓不存在"}, status_code=404)
+    return JSONResponse({"ok": True, "data": row})
+
+
+@app.post("/api/portfolio/positions/{position_id}/sell")
+def api_portfolio_sell_position(position_id: int, payload: dict = Body(default={})) -> Any:
+    try:
+        row = _get_holding_service().sell(position_id, dict(payload or {}))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "data": row})
+
+
+@app.post("/api/portfolio/import-backtest")
+def api_portfolio_import_backtest(payload: dict = Body(default={})) -> Any:
+    state = dict((payload or {}).get("state") or payload or {})
+    return JSONResponse({"ok": True, "data": _get_holding_service().import_backtest_state(state)})
+
+
+@app.post("/api/portfolio/monitor")
+def api_portfolio_monitor(payload: dict = Body(default={})) -> Any:
+    result = _get_position_monitor().run_once(
+        account_key="default",
+        signal_date=_realtime_market_date(),
+        auto_execute=True,
+    )
+    return JSONResponse(result, status_code=200 if result.get("ok") else 503)
+
+
+@app.post("/api/portfolio/replay")
+def api_portfolio_replay(payload: dict = Body(default={})) -> Any:
+    start_date = str((payload or {}).get("start_date") or "").replace("-", "")
+    end_date = str((payload or {}).get("end_date") or _latest_date()).replace("-", "")
+    capital = float((payload or {}).get("initial_capital") or PAPER_INITIAL_CAPITAL)
+    if len(start_date) != 8 or not start_date.isdigit():
+        return JSONResponse({"ok": False, "message": "开始日期必须为YYYYMMDD"}, status_code=422)
+    if len(end_date) != 8 or not end_date.isdigit():
+        return JSONResponse({"ok": False, "message": "结束日期必须为YYYYMMDD"}, status_code=422)
+    if start_date > end_date:
+        return JSONResponse({"ok": False, "message": "开始日期不能晚于结束日期"}, status_code=422)
+    with _PAPER_REPLAY_LOCK:
+        if _PAPER_REPLAY_STATE.get("state") in {"prefetching", "running"}:
+            return JSONResponse({"ok": False, "message": "历史回放正在运行"}, status_code=409)
+        _PAPER_REPLAY_STATE.clear()
+        _PAPER_REPLAY_STATE.update({
+            "started_epoch": time.time(),
+            "start_date": start_date,
+            "end_date": end_date,
+            "state": "prefetching",
+            "stage": "统计所需分钟行情",
+            "progress": {},
+            "imported": False,
+            "run_id": "",
+            "import_result": {},
+        })
+    Thread(
+        target=_run_paper_replay,
+        args=(start_date, end_date, capital),
+        name="paper-history-replay",
+        daemon=True,
+    ).start()
+    return JSONResponse({"ok": True, "message": "正在补齐历史分钟行情，完成后自动开始回放"})
+
+
+def _run_paper_replay(start_date: str, end_date: str, capital: float) -> None:
+    from desktop.runner import BACKTEST_CONTROLLER
+
+    def update_progress(progress: Dict[str, Any]) -> None:
+        with _PAPER_REPLAY_LOCK:
+            _PAPER_REPLAY_STATE["stage"] = str(progress.get("stage") or "补齐分钟行情")
+            _PAPER_REPLAY_STATE["progress"] = dict(progress)
+
+    try:
+        prefetch = _get_paper_trading_service().prefetch_replay_minutes(
+            start_date,
+            end_date,
+            progress=update_progress,
+        )
+        with _PAPER_REPLAY_LOCK:
+            _PAPER_REPLAY_STATE.update({
+                "state": "running",
+                "stage": "运行分钟回放",
+                "prefetch_result": prefetch,
+                "backtest_started_epoch": time.time(),
+            })
+        ok, message = BACKTEST_CONTROLLER.start(
+            start_date,
+            end_date,
+            capital,
+            mode="range",
+            entry_mode="hybrid",
+            position_sizing_mode="fixed_risk",
+            exit_policy_mode="strategy",
+            account_profile="aggressive_three",
+        )
+        if not ok:
+            with _PAPER_REPLAY_LOCK:
+                _PAPER_REPLAY_STATE.update({"state": "error", "error": message})
+    except Exception as exc:  # noqa: BLE001
+        with _PAPER_REPLAY_LOCK:
+            _PAPER_REPLAY_STATE.update({"state": "error", "error": str(exc)})
+
+
+@app.get("/api/portfolio/replay/status")
+def api_portfolio_replay_status(since: int = 0) -> Any:
+    from desktop.runner import BACKTEST_CONTROLLER
+
+    replay_state = str(_PAPER_REPLAY_STATE.get("state") or "")
+    if replay_state == "prefetching":
+        return JSONResponse({
+            "state": "prefetching",
+            "next": since,
+            "logs": [],
+            "paper_replay": dict(_PAPER_REPLAY_STATE),
+        })
+    if replay_state == "error":
+        return JSONResponse({
+            "state": "error",
+            "error": _PAPER_REPLAY_STATE.get("error") or "历史回放失败",
+            "next": since,
+            "logs": [],
+            "paper_replay": dict(_PAPER_REPLAY_STATE),
+        })
+    status = BACKTEST_CONTROLLER.status(since)
+    if status.get("state") == "done" and _PAPER_REPLAY_STATE and not _PAPER_REPLAY_STATE.get("imported"):
+        run_id = _get_paper_trading_service().latest_run_id(
+            newer_than=float(_PAPER_REPLAY_STATE.get("backtest_started_epoch") or 0) - 2,
+        )
+        if run_id:
+            try:
+                imported = _get_paper_trading_service().import_backtest_run(run_id, reset=True)
+                _PAPER_REPLAY_STATE.update({
+                    "state": "done",
+                    "imported": True,
+                    "run_id": run_id,
+                    "import_result": imported,
+                })
+            except (OSError, TypeError, ValueError) as exc:
+                _PAPER_REPLAY_STATE["import_error"] = str(exc)
+    return JSONResponse({**status, "paper_replay": dict(_PAPER_REPLAY_STATE)})
 
 
 def _default_realtime_codes(snapshot: Optional[Dict], limit: int = 8) -> List[str]:
@@ -2714,6 +2903,45 @@ def _get_realtime_sector_service():
     return _REALTIME_SECTOR_SERVICE
 
 
+def _get_holding_service():
+    global _HOLDING_SERVICE
+    if _HOLDING_SERVICE is None:
+        with _REALTIME_SERVICE_LOCK:
+            if _HOLDING_SERVICE is None:
+                from core.portfolio.holding_service import HoldingService
+
+                _HOLDING_SERVICE = HoldingService()
+    return _HOLDING_SERVICE
+
+
+def _get_position_monitor():
+    global _POSITION_MONITOR
+    if _POSITION_MONITOR is None:
+        repository = _get_holding_service().repository
+        quote_service = _get_realtime_quote_service()
+        with _REALTIME_SERVICE_LOCK:
+            if _POSITION_MONITOR is None:
+                from core.portfolio.position_monitor import PositionMonitor
+
+                _POSITION_MONITOR = PositionMonitor(
+                    repository=repository,
+                    quote_service=quote_service,
+                )
+    return _POSITION_MONITOR
+
+
+def _get_paper_trading_service():
+    global _PAPER_TRADING_SERVICE
+    if _PAPER_TRADING_SERVICE is None:
+        repository = _get_holding_service().repository
+        with _REALTIME_SERVICE_LOCK:
+            if _PAPER_TRADING_SERVICE is None:
+                from core.portfolio.paper_trading_service import PaperTradingService
+
+                _PAPER_TRADING_SERVICE = PaperTradingService(repository=repository)
+    return _PAPER_TRADING_SERVICE
+
+
 def _get_realtime_entry_signal_service():
     global _REALTIME_ENTRY_SIGNAL_SERVICE
     if _REALTIME_ENTRY_SIGNAL_SERVICE is None:
@@ -3042,8 +3270,24 @@ def _refresh_realtime_defaults() -> None:
                     NotificationService().notify_realtime_payload(payload)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Realtime notification failed: %s", exc)
+                try:
+                    paper_result = _get_paper_trading_service().process_realtime_payload(payload)
+                    if paper_result.get("opened"):
+                        logger.info(
+                            "Automatic paper trading opened %s position(s) from %s",
+                            paper_result["opened"],
+                            payload.get("profile") or payload.get("source"),
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Automatic paper buy failed: %s", exc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Realtime cache refresh failed for %s: %s", key[0], exc)
+    try:
+        _get_position_monitor().run_once(
+            account_key="default", signal_date=market_date, auto_execute=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Position monitor refresh failed: %s", exc)
 
 
 def _realtime_refresh_loop() -> None:

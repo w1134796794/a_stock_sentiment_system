@@ -57,6 +57,17 @@ WEB_DATA_DIR = _env_path("WEB_DATA_DIR", BASE_DIR / "webdata")
 OUTPUT_DIR = _env_path("OUTPUT_DIR", WEB_DATA_DIR / "output")
 SNAPSHOT_DIR = WEB_DATA_DIR / "snapshots"        # 每日整页 JSON 快照
 APP_DB_PATH = WEB_DATA_DIR / "app.sqlite"        # 结构化索引（计划/信号/快照）
+HOLDING_DB_PATH = _env_path("HOLDING_DB_PATH", WEB_DATA_DIR / "portfolio.sqlite")
+PAPER_INITIAL_CAPITAL = float(os.getenv("PAPER_INITIAL_CAPITAL", "1000000"))
+PAPER_MAX_POSITIONS = min(max(1, int(os.getenv("PAPER_MAX_POSITIONS", "3"))), 3)
+PAPER_POSITION_PCT = min(
+    max(float(os.getenv("PAPER_POSITION_PCT", "34")), 1.0),
+    100.0,
+)
+PAPER_ROTATION_MIN_EDGE = min(
+    max(float(os.getenv("PAPER_ROTATION_MIN_EDGE", "6")), 0.0),
+    30.0,
+)
 FACTOR_DB_PATH = WEB_DATA_DIR / "factors.duckdb"  # 因子大表（定量查询，可选）
 DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", "1400MB").strip() or "1400MB"
 DUCKDB_THREADS = max(1, int(os.getenv("DUCKDB_THREADS", "1")))

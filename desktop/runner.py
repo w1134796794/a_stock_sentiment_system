@@ -543,7 +543,8 @@ class BacktestController:
               entry_mode: object = "hybrid",
               position_sizing_mode: object = "fixed_risk",
               exit_policy_mode: object = "strategy",
-              strategy_ids: object = None) -> Tuple[bool, str]:
+              strategy_ids: object = None,
+              account_profile: object = "standard") -> Tuple[bool, str]:
         from backtest.minute_entry import ENTRY_COMPARE, ENTRY_HYBRID, ENTRY_MODES
         from core.screening.enhancements import enhancement_label, normalize_enhancements
 
@@ -559,6 +560,9 @@ class BacktestController:
         selected_exit_policy = str(exit_policy_mode or "strategy").strip().lower()
         if selected_exit_policy not in EXIT_POLICIES:
             selected_exit_policy = "strategy"
+        selected_account_profile = str(account_profile or "standard").strip().lower()
+        if selected_account_profile not in {"standard", "aggressive_three"}:
+            selected_account_profile = "standard"
         try:
             from core.screening.strategy_profiles import StrategyProfileRepository
 
@@ -622,12 +626,13 @@ class BacktestController:
                     "position_sizing_mode": selected_sizing_mode,
                     "exit_policy_mode": selected_exit_policy,
                     "strategy_ids": selected_strategy_ids,
+                    "account_profile": selected_account_profile,
                 }
                 self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.finished_at = None
                 self._thread = threading.Thread(
                     target=self._worker_daily,
-                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_exit_policy, selected_strategy_ids),
+                    args=(target, capital, risk_on, bool(reset_state), max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_exit_policy, selected_strategy_ids, selected_account_profile),
                     daemon=True,
                     name="backtest-run-daily",
                 )
@@ -663,10 +668,11 @@ class BacktestController:
             self.params["position_sizing_mode"] = selected_sizing_mode
             self.params["exit_policy_mode"] = selected_exit_policy
             self.params["strategy_ids"] = selected_strategy_ids
+            self.params["account_profile"] = selected_account_profile
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_exit_policy, selected_strategy_ids),
+                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_exit_policy, selected_strategy_ids, selected_account_profile),
                 daemon=True, name="backtest-run"
             )
             self._publish_state()
@@ -701,7 +707,8 @@ class BacktestController:
                 enhancements: object = None, entry_mode: str = "hybrid",
                 position_sizing_mode: str = "fixed_risk",
                 exit_policy_mode: str = "strategy",
-                strategy_ids: Optional[List[str]] = None) -> None:
+                strategy_ids: Optional[List[str]] = None,
+                account_profile: str = "standard") -> None:
         import loguru
 
         _ensure_file_sink()
@@ -758,9 +765,19 @@ class BacktestController:
             )
             from risk.capital_presets import apply_capital_preset
             capital_preset = apply_capital_preset(config, capital)
+            if account_profile == "aggressive_three":
+                from config.settings import PAPER_MAX_POSITIONS, PAPER_POSITION_PCT, PAPER_ROTATION_MIN_EDGE
+
+                config.max_positions = min(int(PAPER_MAX_POSITIONS), 3)
+                config.max_position_per_stock = float(PAPER_POSITION_PCT) / 100.0
+                config.max_total_position = 1.0
+                config.max_sector_concentration = 1.0
+                config.account_position_pct = float(PAPER_POSITION_PCT) / 100.0
+                config.rotation_enabled = True
+                config.rotation_min_edge = float(PAPER_ROTATION_MIN_EDGE)
             self.buffer.append_line(
-                f"账户方案：{capital_preset.label}，最多{capital_preset.max_positions}只，"
-                f"单票上限{capital_preset.max_position_per_stock:.0%}"
+                f"账户方案：{'激进三仓' if account_profile == 'aggressive_three' else capital_preset.label}，"
+                f"最多{config.max_positions}只，单票目标{config.max_position_per_stock:.0%}"
             )
             config.max_plan_rank = max_plan_rank
             config.entry_mode = "hybrid" if entry_mode == "compare" else entry_mode
@@ -855,6 +872,7 @@ class BacktestController:
                 "entry_mode": entry_mode,
                 "position_sizing_mode": position_sizing_mode,
                 "strategy_ids": selected_strategy_ids,
+                "account_profile": account_profile,
             })
             if entry_comparison is not None:
                 from backtest.entry_mode_comparison import save_entry_mode_comparison
@@ -923,7 +941,8 @@ class BacktestController:
                       entry_mode: str = "hybrid",
                       position_sizing_mode: str = "fixed_risk",
                       exit_policy_mode: str = "strategy",
-                      strategy_ids: Optional[List[str]] = None) -> None:
+                      strategy_ids: Optional[List[str]] = None,
+                      account_profile: str = "standard") -> None:
         import loguru
 
         _ensure_file_sink()
@@ -987,9 +1006,19 @@ class BacktestController:
             )
             from risk.capital_presets import apply_capital_preset
             capital_preset = apply_capital_preset(config, capital)
+            if account_profile == "aggressive_three":
+                from config.settings import PAPER_MAX_POSITIONS, PAPER_POSITION_PCT, PAPER_ROTATION_MIN_EDGE
+
+                config.max_positions = min(int(PAPER_MAX_POSITIONS), 3)
+                config.max_position_per_stock = float(PAPER_POSITION_PCT) / 100.0
+                config.max_total_position = 1.0
+                config.max_sector_concentration = 1.0
+                config.account_position_pct = float(PAPER_POSITION_PCT) / 100.0
+                config.rotation_enabled = True
+                config.rotation_min_edge = float(PAPER_ROTATION_MIN_EDGE)
             self.buffer.append_line(
-                f"账户方案：{capital_preset.label}，最多{capital_preset.max_positions}只，"
-                f"单票上限{capital_preset.max_position_per_stock:.0%}"
+                f"账户方案：{'激进三仓' if account_profile == 'aggressive_three' else capital_preset.label}，"
+                f"最多{config.max_positions}只，单票目标{config.max_position_per_stock:.0%}"
             )
             config.max_plan_rank = max_plan_rank
             config.entry_mode = entry_mode
@@ -1081,6 +1110,7 @@ class BacktestController:
                 "entry_mode": entry_mode,
                 "position_sizing_mode": position_sizing_mode,
                 "strategy_ids": selected_strategy_ids,
+                "account_profile": account_profile,
             })
             state_path = self._save_rolling_state(
                 engine, "daily", state_source=state_source, enhancements=selected_enhancements,

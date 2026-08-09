@@ -53,6 +53,9 @@ class BacktestConfig:
     kelly_max_position: float = 0.10
     kelly_credibility: float = 0.80
     kelly_payoff_haircut: float = 0.80
+    account_position_pct: float = 0.0  # >0 时由账户策略直接指定单票目标仓位
+    rotation_enabled: bool = False
+    rotation_min_edge: float = 6.0
 
     # 入场与市场分层
     entry_mode: str = ENTRY_HYBRID  # 默认按分钟执行弱转强+强势延续
@@ -496,6 +499,13 @@ class BacktestEngine:
             self._clear_entry_state(stock_code)
             return
 
+        if (
+            self.config.rotation_enabled
+            and self.config.risk_control
+            and len(self.current_positions) >= self.config.max_positions
+        ):
+            self._rotate_to_stronger_candidate(plan, date, stock_code, stock_name)
+
         position_size = self._calculate_position_size(plan)
         sizing_meta = dict(self._last_sizing_meta)
         if position_size <= 0:
@@ -516,10 +526,10 @@ class BacktestEngine:
         execution = self._plan_execution(plan)
         exit_config = self._execution_exit_config(execution)
         strategy_position_cap = self._float(plan.get('策略单票仓位上限%')) / 100.0
-        if strategy_position_cap > 0:
+        if strategy_position_cap > 0 and self.config.account_position_pct <= 0:
             position_size = min(position_size, self.total_capital * strategy_position_cap)
         portfolio_position_cap = self._float(plan.get('组合建议仓位%')) / 100.0
-        if portfolio_position_cap > 0:
+        if portfolio_position_cap > 0 and self.config.account_position_pct <= 0:
             position_size = min(position_size, self.total_capital * portfolio_position_cap)
         strategy_max_positions = int(execution.get('max_positions') or 0)
         if strategy_max_positions > 0:
@@ -551,24 +561,35 @@ class BacktestEngine:
                 position_size = max_position_value
 
             # c) 总仓位上限
-            market_total_position_cap = self._float(
-                plan.get('市场总仓位上限%'), 100.0
-            ) / 100.0
+            # 激进三仓账户由账户画像统一管理仓位，不再叠加交易计划中的
+            # 市场阶段仓位折扣，否则第三仓经常在已有明确信号时被提前拦截。
+            market_total_position_cap = (
+                1.0
+                if self.config.account_position_pct > 0
+                else self._float(plan.get('市场总仓位上限%'), 100.0) / 100.0
+            )
             effective_total_position_cap = min(
                 self.config.max_total_position,
                 max(market_total_position_cap, 0.0),
             )
             max_total = self.total_capital * effective_total_position_cap
             if current_position_value + position_size > max_total:
-                logger.warning(
-                    f"总仓位超限({effective_total_position_cap:.0%})，跳过买入 {stock_name}"
-                )
-                self._record_gate_attempt(
-                    plan, date, "portfolio_gate", "total_position_limit",
-                    f"当前情绪阶段总仓位上限{effective_total_position_cap:.0%}",
-                )
-                self._clear_entry_state(stock_code)
-                return
+                remaining_total = max(max_total - current_position_value, 0.0)
+                if (
+                    self.config.account_position_pct > 0
+                    and remaining_total >= self.total_capital * 0.005
+                ):
+                    position_size = remaining_total
+                else:
+                    logger.warning(
+                        f"总仓位超限({effective_total_position_cap:.0%})，跳过买入 {stock_name}"
+                    )
+                    self._record_gate_attempt(
+                        plan, date, "portfolio_gate", "total_position_limit",
+                        f"当前情绪阶段总仓位上限{effective_total_position_cap:.0%}",
+                    )
+                    self._clear_entry_state(stock_code)
+                    return
 
             # d) 板块集中度
             sector = str(plan.get('共振板块', '') or '').split(',')[0].strip()
@@ -599,11 +620,15 @@ class BacktestEngine:
             )
 
         # 入场确认和追高降仓后再检查现金。
-        if position_size > self.cash:
-            logger.warning(f"现金不足，跳过买入 {stock_name}")
-            self._record_gate_attempt(plan, date, "portfolio_gate", "insufficient_cash", "可用现金不足")
-            self._clear_entry_state(stock_code)
-            return
+        max_cash_budget = self.cash / (1 + self.config.commission_rate)
+        if position_size > max_cash_budget:
+            if self.config.account_position_pct > 0 and max_cash_budget > 0:
+                position_size = max_cash_budget
+            else:
+                logger.warning(f"现金不足，跳过买入 {stock_name}")
+                self._record_gate_attempt(plan, date, "portfolio_gate", "insufficient_cash", "可用现金不足")
+                self._clear_entry_state(stock_code)
+                return
         
         if entry_price <= 0:
             logger.warning(f"{stock_name} 买入价格无效，跳过")
@@ -1233,6 +1258,19 @@ class BacktestEngine:
 
     def _calculate_position_size(self, plan: pd.Series) -> float:
         """Use only prior closed trades to size the next order without look-ahead."""
+        if self.config.account_position_pct > 0:
+            position_pct = min(
+                float(self.config.account_position_pct),
+                float(self.config.max_position_per_stock),
+            )
+            self._last_sizing_meta = {
+                "position_pct": round(position_pct, 4),
+                "method": "aggressive_three_position_account",
+                "rationale": f"激进三仓账户按单票{position_pct:.0%}配置",
+                "sample_size": 0,
+            }
+            return self.total_capital * position_pct
+
         position_map = {
             'light': 0.1,
             'medium': 0.15,
@@ -1294,6 +1332,82 @@ class BacktestEngine:
         result["sample_size"] = len(closed)
         self._last_sizing_meta = result
         return self.total_capital * float(result.get("position_pct") or 0.0)
+
+    def _rotate_to_stronger_candidate(
+        self,
+        plan: pd.Series,
+        date: str,
+        stock_code: str,
+        stock_name: str,
+    ) -> bool:
+        """Use a confirmed intraday signal to replace a weaker T+1 holding."""
+        candidate_strength = self._plan_strength(plan)
+        entry_time = str((self._last_entry_meta.get(stock_code) or {}).get("entry_time") or "09:30:00")
+        eligible = []
+        for code, position in self.current_positions.items():
+            if str(position.get("entry_date") or "") >= str(date):
+                continue
+            price = self._minute_price_at(code, date, entry_time)
+            if price <= 0:
+                continue
+            entry_price = self._float(position.get("entry_price"))
+            pnl_pct = (price / entry_price - 1.0) * 100.0 if entry_price > 0 else 0.0
+            current_strength = max(
+                0.0,
+                min(
+                    100.0,
+                    self._float(position.get("plan_score"), 50.0)
+                    + max(min(pnl_pct * 0.8, 12.0), -12.0),
+                ),
+            )
+            eligible.append((current_strength, code, price, position))
+        if not eligible:
+            return False
+        current_strength, weak_code, sell_price, weak_position = min(eligible, key=lambda item: item[0])
+        edge = candidate_strength - current_strength
+        if edge < float(self.config.rotation_min_edge):
+            return False
+        weak_name = str(weak_position.get("stock_name") or weak_code)
+        self._execute_sell(weak_code, sell_price, date, "rotation_to_stronger")
+        logger.info(
+            f"[{date} {entry_time}] 换仓 {weak_name}({current_strength:.1f}) -> "
+            f"{stock_name}({candidate_strength:.1f})，强度差{edge:.1f}"
+        )
+        self._record_gate_attempt(
+            plan,
+            date,
+            "portfolio_gate",
+            "rotation_to_stronger",
+            f"卖出{weak_name}，新信号强度高{edge:.1f}分",
+            status="rotated",
+        )
+        return True
+
+    @classmethod
+    def _plan_strength(cls, plan: pd.Series) -> float:
+        for key in (
+            "综合评分",
+            "计划评分",
+            "转强分",
+            "龙头评分",
+            "3日强势成功率%",
+            "score",
+        ):
+            value = cls._float(plan.get(key), -1.0)
+            if value >= 0:
+                return max(0.0, min(100.0, value))
+        return 50.0
+
+    def _minute_price_at(self, stock_code: str, date: str, at_time: str) -> float:
+        frame = self._load_exit_minute_bars(stock_code, date)
+        if frame.empty:
+            return 0.0
+        bars = self._normalize_full_minute_bars(frame)
+        if bars.empty or "time" not in bars.columns:
+            return 0.0
+        matched = bars[bars["time"].astype(str) >= str(at_time)]
+        row = matched.iloc[0] if not matched.empty else bars.iloc[-1]
+        return self._float(row.get("open"), self._float(row.get("close")))
 
     @staticmethod
     def _quality_ratio(plan: pd.Series, *keys: str) -> float:

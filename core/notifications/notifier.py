@@ -152,6 +152,51 @@ class NotificationService:
             sent += int(result.get("sent") or 0)
         return sent
 
+    def notify_exit_signal(
+        self,
+        position: Dict[str, Any],
+        decision: Dict[str, Any],
+        *,
+        signal_date: str = "",
+    ) -> Dict[str, Any]:
+        """Send one alert when a holding enters reduce/sell/blocked state."""
+        action = str(decision.get("action") or "watch")
+        if action not in {"reduce", "sell", "blocked"}:
+            return {"ok": True, "sent": 0, "skipped": True}
+        name = str(position.get("name") or position.get("stock_name") or position.get("code") or "持仓")
+        code = str(position.get("code") or "")
+        label = str(decision.get("action_label") or action)
+        current = float(decision.get("current_price") or 0.0)
+        protect = float(decision.get("protect_price") or 0.0)
+        pnl_pct = float(decision.get("pnl_pct") or 0.0)
+        reasons = decision.get("reasons") or []
+        if isinstance(reasons, str):
+            reasons = [reasons]
+        lines = [
+            f"股票：{name}（{code}）" if code else f"股票：{name}",
+            f"建议动作：{label}",
+            f"持仓收益：{pnl_pct:+.2f}%",
+            f"当前价格：{current:.2f}" if current > 0 else "当前价格：--",
+        ]
+        if protect > 0:
+            lines.append(f"保护价格：{protect:.2f}")
+        lines.extend([
+            f"市场：{decision.get('market_state') or '待确认'}",
+            f"板块：{decision.get('sector_state') or '待确认'}",
+            "原因：",
+        ])
+        lines.extend(f"{index}. {reason}" for index, reason in enumerate(reasons[:4], start=1))
+        lines.append(f"当前可卖：{'是' if decision.get('can_sell') else '否，受T+1或交易状态限制'}")
+        if self.public_url:
+            lines.append(f"详情：{self.public_url}/portfolio")
+        title_prefix = "持仓风险预警" if action == "blocked" else "持仓卖出提醒"
+        return self.send(
+            f"{title_prefix}：{name}",
+            "\n".join(lines),
+            event_key=f"portfolio-exit:{signal_date}:{position.get('id')}:{action}",
+            ttl_seconds=60 * 60 * 24,
+        )
+
     def _post_json(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         return self._open(request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST"))

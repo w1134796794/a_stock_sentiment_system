@@ -144,12 +144,12 @@ MENU_GROUPS: List[Dict[str, Any]] = [
         "label": "回测",
         "items": [
             {
-                "key": "backtest",
+                "key": "portfolio",
                 "label": "模拟交易",
-                "href": "/backtest",
-                "prefix": "/backtest",
+                "href": "/portfolio",
+                "prefix": "/portfolio",
                 "roles": ALL_ROLES,
-                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M19 9l-5 5-3-3-4 4"/></svg>'),
+                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M8 6V4h8v2M3 11h18"/><path d="M9 15h6"/></svg>'),
             },
             {
                 "key": "drawdown",
@@ -291,7 +291,7 @@ PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "dragon": ("/dragon", "/api/leader-pool", "/api/v1/mobile/leaders"),
     "intraday": ("/intraday", "/api/intraday-strength"),
     "realtime": ("/realtime", "/api/realtime", "/api/v1/mobile/realtime"),
-    "backtest": ("/backtest", "/api/backtest"),
+    "portfolio": ("/portfolio", "/api/portfolio", "/backtest", "/api/backtest"),
     "drawdown": ("/drawdown",),
     "users": ("/admin/users", "/api/admin/users"),
     "permissions": ("/admin/permissions", "/api/admin/permissions"),

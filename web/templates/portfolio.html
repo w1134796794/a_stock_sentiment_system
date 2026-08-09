@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}模拟交易 · 管理控制台{% endblock %}
+{% block page_title %}模拟交易{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ '%.0f'|format(paper_initial_capital / 10000) }}万模拟账户 · 最多{{ paper_max_positions }}只 · 分钟确认自动交易</div>{% endblock %}
+
+{% block header_extra %}
+  {% if is_admin %}
+  <button id="add-position" class="pf-primary" type="button">手工买入</button>
+  {% endif %}
+  <button id="run-monitor" class="pf-button" type="button" title="立即检查持仓退出条件">检查持仓</button>
+{% endblock %}
+
+{% block content %}
+<section class="pf-account-bar" aria-label="模拟账户">
+  <div class="pf-auto-status"><span></span><strong>激进交易已开启</strong><small>每只约{{ '%.0f'|format(paper_position_pct) }}%，最多{{ paper_max_positions }}只；满仓时新信号强{{ '%.0f'|format(paper_rotation_min_edge) }}分以上自动换出弱持仓</small></div>
+  {% if is_admin %}
+  <div id="replay-controls" class="pf-replay">
+    <label>开始日期<input id="replay-start" value="" maxlength="8" placeholder="YYYYMMDD"></label>
+    <label>结束日期<input id="replay-end" value="{{ latest_trade_date }}" maxlength="8" placeholder="YYYYMMDD"></label>
+    <button id="start-replay" class="pf-button" type="button">运行历史模拟</button>
+    <span id="replay-status">任选日期范围；历史模拟将重建当前账户</span>
+  </div>
+  {% endif %}
+</section>
+<section class="pf-summary" aria-label="持仓概况">
+  <div><strong id="kpi-assets" class="mono">0</strong><span>总资产</span></div>
+  <div><strong id="kpi-cash" class="mono">0</strong><span>可用现金</span></div>
+  <div><strong id="kpi-value" class="mono">0</strong><span>当前市值</span></div>
+  <div><strong id="kpi-pnl" class="mono">0</strong><span>账户收益</span></div>
+  <div><strong id="kpi-count" class="mono">0 / {{ paper_max_positions }}</strong><span>持仓数量</span></div>
+  <div><strong id="kpi-risk" class="mono text-amber-300">0</strong><span>减仓/卖出提醒</span></div>
+</section>
+
+<div id="page-message" class="hidden pf-message" role="status"></div>
+
+<nav class="pf-tabs" aria-label="持仓数据视图">
+  <button class="active" data-tab="positions" type="button">当前持仓 <span id="tab-position-count">0</span></button>
+  <button data-tab="signals" type="button">退出提醒 <span id="tab-signal-count">0</span></button>
+  <button data-tab="trades" type="button">历史成交 <span id="tab-trade-count">0</span></button>
+</nav>
+
+<section id="panel-positions" class="pf-panel">
+  <div id="positions" class="pf-position-list"></div>
+  <div id="positions-empty" class="pf-empty hidden">暂无持仓。可手工买入，或等待交易时段出现分时确认信号。</div>
+</section>
+
+<section id="panel-signals" class="pf-panel hidden">
+  <div class="pf-table-wrap">
+    <table class="pf-table">
+      <thead><tr><th>时间</th><th>股票</th><th>动作</th><th>价格</th><th>收益</th><th>保护价</th><th>原因</th><th>通知</th></tr></thead>
+      <tbody id="signals"></tbody>
+    </table>
+  </div>
+  <div id="signals-empty" class="pf-empty hidden">暂无退出提醒。</div>
+</section>
+
+<section id="panel-trades" class="pf-panel hidden">
+  <div class="pf-table-wrap">
+    <table class="pf-table">
+      <thead><tr><th>日期</th><th>股票</th><th>动作</th><th>价格</th><th>股数</th><th>金额</th><th>已实现盈亏</th><th>策略/原因</th></tr></thead>
+      <tbody id="trades"></tbody>
+    </table>
+  </div>
+  <div id="trades-empty" class="pf-empty hidden">暂无历史成交。</div>
+</section>
+
+{% if is_admin %}
+<dialog id="position-dialog" class="pf-dialog">
+  <form id="position-form" method="dialog">
+    <div class="pf-dialog-head"><h2 id="position-dialog-title">手工买入</h2><button class="dialog-close" title="关闭" type="button">×</button></div>
+    <input id="position-id" type="hidden">
+    <div class="pf-form-grid">
+      <label>股票代码<input id="position-code" maxlength="9" required placeholder="000001"></label>
+      <label>股票名称<input id="position-name" placeholder="平安银行"></label>
+      <label>买入日期<input id="position-date" maxlength="8" required placeholder="YYYYMMDD"></label>
+      <label>买入时间<input id="position-time" type="time" step="1"></label>
+      <label>买入价格<input id="position-price" type="number" min="0.01" step="0.01" required></label>
+      <label>持仓股数<input id="position-shares" type="number" min="100" step="100" required></label>
+      <label>策略<select id="position-strategy"><option value="">未指定</option><option value="mainline_leader">主线龙头</option><option value="weak_to_strong">弱转强</option><option value="first_board_launch">首板启动</option></select></label>
+      <label>结构保护价<input id="position-stop" type="number" min="0" step="0.01" placeholder="可选"></label>
+      <label class="wide">所属板块<input id="position-sectors" placeholder="机器人,减速器"></label>
+      <label>极端风险上限<input id="position-emergency" type="number" min="2" max="20" step="0.5" value="6"><small>%</small></label>
+    </div>
+    <div class="pf-dialog-actions"><button class="pf-button dialog-close" type="button">取消</button><button id="save-position" class="pf-primary" type="button">保存</button></div>
+  </form>
+</dialog>
+
+<dialog id="sell-dialog" class="pf-dialog">
+  <form method="dialog">
+    <div class="pf-dialog-head"><h2>记录卖出</h2><button class="dialog-close" title="关闭" type="button">×</button></div>
+    <input id="sell-position-id" type="hidden">
+    <div class="pf-form-grid">
+      <label>卖出价格<input id="sell-price" type="number" min="0.01" step="0.01" required></label>
+      <label>卖出股数<input id="sell-shares" type="number" min="100" step="100" required></label>
+      <label>卖出日期<input id="sell-date" maxlength="8" required placeholder="YYYYMMDD"></label>
+      <label>卖出时间<input id="sell-time" type="time" step="1"></label>
+      <label class="wide">卖出原因<input id="sell-reason" placeholder="按提醒减仓、手工止盈等"></label>
+    </div>
+    <div class="pf-dialog-actions"><button class="pf-button dialog-close" type="button">取消</button><button id="save-sell" class="pf-danger" type="button">确认卖出</button></div>
+  </form>
+</dialog>
+{% endif %}
+
+<style>
+  .hidden { display:none !important; }
+  .pf-account-bar { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+  .pf-auto-status { display:flex; align-items:center; gap:.5rem; color:#d1fae5; }
+  .pf-auto-status>span { width:8px; height:8px; border-radius:50%; background:#34d399; box-shadow:0 0 0 4px rgba(52,211,153,.1); }
+  .pf-auto-status small { color:#64748b; margin-left:.35rem; }
+  .pf-replay { display:flex; align-items:flex-end; gap:.5rem; color:#64748b; font-size:.72rem; }
+  .pf-replay label { color:#73829a; }
+  .pf-replay input { display:block; width:112px; margin-top:.2rem; color:#e2e8f0; background:#070d1b; border:1px solid #334155; border-radius:6px; padding:.42rem .55rem; }
+  .pf-summary { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.75rem; margin-bottom:1rem; }
+  .pf-summary>div { min-height:88px; border:1px solid #263449; border-radius:7px; background:#101a2c; padding:1rem; }
+  .pf-summary strong { display:block; font-size:1.65rem; line-height:1.1; }
+  .pf-summary span { display:block; margin-top:.4rem; color:#73829a; font-size:.75rem; }
+  .pf-tabs { display:flex; gap:.25rem; border:1px solid #263449; background:#101a2c; padding:.35rem; border-radius:7px; margin-bottom:1rem; overflow-x:auto; }
+  .pf-tabs button { color:#94a3b8; padding:.55rem .85rem; border-radius:5px; white-space:nowrap; font-size:.85rem; }
+  .pf-tabs button.active { color:#6ee7b7; background:#073b38; font-weight:700; }
+  .pf-tabs span { color:#64748b; margin-left:.25rem; }
+  .pf-position-list { display:grid; gap:.75rem; }
+  .pf-position { border:1px solid #263449; border-radius:7px; background:#101a2c; overflow:hidden; }
+  .pf-position.risk { border-color:#8a5d16; }
+  .pf-position.danger { border-color:#9f3347; }
+  .pf-position-head { display:flex; align-items:center; gap:.75rem; padding:.85rem 1rem; border-bottom:1px solid #263449; }
+  .pf-position-name { font-weight:800; font-size:1rem; }
+  .pf-position-code { color:#64748b; font-size:.72rem; }
+  .pf-action { margin-left:auto; border:1px solid #475569; color:#cbd5e1; padding:.18rem .55rem; border-radius:5px; font-size:.72rem; font-weight:700; }
+  .pf-action.reduce,.pf-action.watch { border-color:#9a6818; color:#fcd34d; background:#3b280d; }
+  .pf-action.sell,.pf-action.blocked { border-color:#9f3347; color:#fda4af; background:#40141d; }
+  .pf-position-body { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.65rem; padding:.85rem 1rem; }
+  .pf-metric { min-width:0; }
+  .pf-metric span { display:block; color:#64748b; font-size:.69rem; margin-bottom:.22rem; }
+  .pf-metric strong { display:block; color:#e2e8f0; font-size:.88rem; overflow-wrap:anywhere; }
+  .pf-reason { grid-column:span 5; color:#cbd5e1; font-size:.78rem; line-height:1.45; padding-top:.35rem; }
+  .pf-controls { grid-column:span 2; display:flex; justify-content:flex-end; align-items:flex-end; gap:.45rem; }
+  .pf-button,.pf-primary,.pf-danger { display:inline-flex; align-items:center; justify-content:center; border-radius:6px; padding:.45rem .8rem; font-size:.8rem; font-weight:700; }
+  .pf-button { border:1px solid #475569; color:#cbd5e1; background:#111c30; }
+  .pf-primary { border:1px solid #059669; color:white; background:#059669; }
+  .pf-danger { border:1px solid #be3d55; color:white; background:#9f3347; }
+  .pf-table-wrap { overflow:auto; border:1px solid #263449; border-radius:7px; background:#101a2c; }
+  .pf-table { width:100%; min-width:940px; border-collapse:collapse; font-size:.78rem; }
+  .pf-table th { color:#73829a; font-weight:600; text-align:left; padding:.7rem .8rem; border-bottom:1px solid #263449; }
+  .pf-table td { padding:.7rem .8rem; border-bottom:1px solid #1c293c; color:#cbd5e1; vertical-align:top; }
+  .pf-empty { border:1px dashed #334155; border-radius:7px; color:#64748b; text-align:center; padding:3rem 1rem; }
+  .pf-message { margin-bottom:1rem; border:1px solid #356454; background:#0c3029; color:#a7f3d0; border-radius:6px; padding:.65rem .8rem; font-size:.8rem; }
+  .pf-dialog { width:min(680px,calc(100vw - 2rem)); color:#e2e8f0; background:#0f172a; border:1px solid #334155; border-radius:7px; padding:0; }
+  .pf-dialog::backdrop { background:rgba(2,6,23,.78); }
+  .pf-dialog-head { display:flex; align-items:center; padding:.85rem 1rem; border-bottom:1px solid #334155; }
+  .pf-dialog-head h2 { font-weight:800; }
+  .pf-dialog-head button { margin-left:auto; color:#94a3b8; font-size:1.4rem; }
+  .pf-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.85rem; padding:1rem; }
+  .pf-form-grid label { color:#94a3b8; font-size:.75rem; }
+  .pf-form-grid label.wide { grid-column:span 2; }
+  .pf-form-grid input,.pf-form-grid select { display:block; width:100%; margin-top:.3rem; color:#e2e8f0; background:#070d1b; border:1px solid #334155; border-radius:6px; padding:.55rem .65rem; }
+  .pf-form-grid small { color:#64748b; }
+  .pf-dialog-actions { display:flex; justify-content:flex-end; gap:.5rem; padding:.85rem 1rem; border-top:1px solid #334155; }
+  .pf-up { color:#fb7185 !important; } .pf-down { color:#34d399 !important; }
+  @media(max-width:900px){.pf-account-bar{align-items:flex-start;flex-direction:column}.pf-replay{flex-wrap:wrap}.pf-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.pf-position-body{grid-template-columns:repeat(2,minmax(0,1fr))}.pf-reason,.pf-controls{grid-column:span 2}.pf-controls{justify-content:flex-start}}
+  @media(max-width:560px){.pf-form-grid{grid-template-columns:1fr}.pf-form-grid label.wide{grid-column:auto}}
+</style>
+
+<script>
+  const admin = {{ 'true' if is_admin else 'false' }};
+  const currentAccount = 'default';
+  let replayCursor = 0;
+  let replayTimer = null;
+  let state = {positions:[], trades:[], exit_signals:[]};
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const money = value => Number(value || 0).toLocaleString('zh-CN',{maximumFractionDigits:2});
+  const pct = value => `${Number(value || 0) >= 0 ? '+' : ''}${Number(value || 0).toFixed(2)}%`;
+  const price = value => Number(value || 0) > 0 ? Number(value).toFixed(2) : '--';
+  const pnlClass = value => Number(value || 0) > 0 ? 'pf-up' : Number(value || 0) < 0 ? 'pf-down' : '';
+  const actionText = {hold:'继续持有',watch:'风险观察',reduce:'建议减仓',sell:'建议卖出',blocked:'当前无法卖出',data_insufficient:'数据不足',sold:'已卖出'};
+  const tradeText = {buy:'买入',sell:'卖出'};
+  const strategyText = {mainline_leader:'主线龙头',weak_to_strong:'弱转强',first_board_launch:'首板启动'};
+
+  async function api(url, options={}) {
+    const response = await fetch(url,{headers:{'Content-Type':'application/json'},...options});
+    const text = await response.text();
+    let data = {}; try { data = JSON.parse(text); } catch { throw new Error(text || `请求失败 ${response.status}`); }
+    if (!response.ok || data.ok === false) throw new Error(data.error || data.message || `请求失败 ${response.status}`);
+    return data;
+  }
+  function message(text, error=false) {
+    const box=$('page-message'); box.textContent=text; box.classList.remove('hidden');
+    box.style.borderColor=error?'#9f3347':'#356454'; box.style.color=error?'#fda4af':'#a7f3d0';
+    setTimeout(()=>box.classList.add('hidden'),5000);
+  }
+  async function load() {
+    try { const payload=await api(`/api/portfolio?account=${currentAccount}`); state=payload.data || {}; render(); }
+    catch(error){ message(error.message,true); }
+  }
+  function render() {
+    const summary=state.summary||{}, positions=state.positions||[], signals=state.exit_signals||[], trades=state.trades||[];
+    $('kpi-assets').textContent=money(summary.total_assets);
+    $('kpi-cash').textContent=money(summary.cash);
+    $('kpi-count').textContent=`${summary.position_count||0} / ${(state.policy||{}).max_positions||{{ paper_max_positions }}}`;
+    $('kpi-value').textContent=money(summary.market_value);
+    $('kpi-pnl').textContent=`${Number(summary.total_pnl||0)>=0?'+':''}${money(summary.total_pnl)} / ${pct(summary.total_pnl_pct)}`;
+    $('kpi-pnl').className=`mono ${pnlClass(summary.total_pnl)}`;
+    const risk=(summary.actions?.reduce||0)+(summary.actions?.sell||0)+(summary.actions?.blocked||0);
+    $('kpi-risk').textContent=risk; $('tab-position-count').textContent=positions.length; $('tab-signal-count').textContent=signals.length; $('tab-trade-count').textContent=trades.length;
+    $('positions').innerHTML=positions.map(positionCard).join(''); $('positions-empty').classList.toggle('hidden',positions.length>0);
+    $('signals').innerHTML=signals.map(signalRow).join(''); $('signals-empty').classList.toggle('hidden',signals.length>0);
+    $('trades').innerHTML=trades.map(tradeRow).join(''); $('trades-empty').classList.toggle('hidden',trades.length>0);
+    if(admin) bindPositionActions();
+  }
+  function positionCard(p) {
+    const action=String(p.latest_action||'hold'), cls=['sell','blocked'].includes(action)?'danger':['watch','reduce'].includes(action)?'risk':'';
+    return `<article class="pf-position ${cls}"><header class="pf-position-head"><div><div class="pf-position-name">${esc(p.name||p.code)}</div><div class="pf-position-code mono">${esc(p.code)} · ${esc(p.strategy_name||strategyText[p.strategy_id]||'未指定策略')}</div></div><span class="pf-action ${esc(action)}">${esc(actionText[action]||action)}</span></header><div class="pf-position-body">
+      <div class="pf-metric"><span>成本 / 现价</span><strong class="mono">${price(p.entry_price)} / ${price(p.last_price)}</strong></div>
+      <div class="pf-metric"><span>持仓收益</span><strong class="mono ${pnlClass(p.unrealized_pnl_pct)}">${pct(p.unrealized_pnl_pct)}</strong></div>
+      <div class="pf-metric"><span>股数 / 市值</span><strong class="mono">${money(p.shares)} / ${money(p.market_value)}</strong></div>
+      <div class="pf-metric"><span>结构保护价</span><strong class="mono">${price(p.structural_stop)}</strong></div>
+      <div class="pf-metric"><span>所属板块</span><strong>${esc(p.sector_names||'未配置')}</strong></div>
+      <div class="pf-metric"><span>买入日</span><strong class="mono">${esc(p.entry_date||'--')}</strong></div>
+      <div class="pf-metric"><span>当前强度</span><strong class="mono">${Number(p.current_strength_score||0).toFixed(1)} 分</strong></div>
+      <div class="pf-reason">${esc(p.latest_reason||'等待交易时段检查持仓条件')}</div>
+      <div class="pf-controls">${admin&&currentAccount==='default'?`<button class="pf-button edit-position" data-id="${p.id}" type="button">修改</button><button class="pf-danger sell-position" data-id="${p.id}" type="button">记录卖出</button>`:''}</div>
+    </div></article>`;
+  }
+  function signalRow(s) { return `<tr><td class="mono">${esc(s.signal_date||'')} ${esc(s.signal_time||'')}</td><td>${esc(s.name||s.code)}<div class="mono text-slate-500">${esc(s.code||'')}</div></td><td>${esc(s.action_label||actionText[s.action]||s.action)}</td><td class="mono">${price(s.current_price)}</td><td class="mono ${pnlClass(s.pnl_pct)}">${pct(s.pnl_pct)}</td><td class="mono">${price(s.protect_price)}</td><td>${esc(s.reason||'--')}</td><td>${s.notified_at?'已推送':'未推送'}</td></tr>`; }
+  function tradeRow(t) { return `<tr><td class="mono">${esc(t.trade_date||'')}</td><td>${esc(t.name||t.code)}<div class="mono text-slate-500">${esc(t.code||'')}</div></td><td>${esc(tradeText[t.action]||t.action)}</td><td class="mono">${price(t.price)}</td><td class="mono">${money(t.shares)}</td><td class="mono">${money(t.amount)}</td><td class="mono ${pnlClass(t.realized_pnl)}">${Number(t.realized_pnl||0)?`${Number(t.realized_pnl)>=0?'+':''}${money(t.realized_pnl)} / ${pct(t.realized_pnl_pct)}`:'--'}</td><td>${esc(strategyText[t.strategy_id]||t.strategy_id||'--')}<div class="text-slate-500">${esc(t.reason||'')}</div></td></tr>`; }
+
+  document.querySelectorAll('.pf-tabs button').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('.pf-tabs button').forEach(item=>item.classList.toggle('active',item===button)); document.querySelectorAll('.pf-panel').forEach(panel=>panel.classList.add('hidden')); $(`panel-${button.dataset.tab}`).classList.remove('hidden');}));
+  $('run-monitor').addEventListener('click',async()=>{try{$('run-monitor').disabled=true;const result=await api('/api/portfolio/monitor',{method:'POST',body:JSON.stringify({account:currentAccount})});message(`检查完成：${result.count||0}只持仓，推送${result.notified||0}条提醒${result.executed?`，自动退出${result.executed}只`:''}`);await load();}catch(error){message(error.message,true);}finally{$('run-monitor').disabled=false;}});
+
+  {% if is_admin %}
+  function today(){const d=new Date();return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;}
+  document.querySelectorAll('.dialog-close').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
+  $('add-position').addEventListener('click',()=>{ $('position-form').reset(); $('position-id').value=''; $('position-date').value=today(); $('position-emergency').value='6'; $('position-dialog-title').textContent='手工买入'; $('position-code').disabled=false; $('position-price').disabled=false; $('position-shares').disabled=false; $('position-dialog').showModal(); });
+  function bindPositionActions(){document.querySelectorAll('.edit-position').forEach(button=>button.onclick=()=>{const p=(state.positions||[]).find(row=>String(row.id)===button.dataset.id);if(!p)return;$('position-id').value=p.id;$('position-code').value=p.code;$('position-name').value=p.name;$('position-date').value=p.entry_date;$('position-time').value=p.entry_time||'';$('position-price').value=p.entry_price;$('position-shares').value=p.shares;$('position-strategy').value=p.strategy_id||'';$('position-stop').value=p.structural_stop||'';$('position-sectors').value=p.sector_names||'';$('position-emergency').value=p.emergency_loss_pct||6;$('position-dialog-title').textContent='修改持仓设置';$('position-code').disabled=true;$('position-price').disabled=true;$('position-shares').disabled=true;$('position-dialog').showModal();});document.querySelectorAll('.sell-position').forEach(button=>button.onclick=()=>{const p=(state.positions||[]).find(row=>String(row.id)===button.dataset.id);if(!p)return;$('sell-position-id').value=p.id;$('sell-price').value=p.last_price||'';$('sell-shares').value=p.shares;$('sell-shares').max=p.shares;$('sell-date').value=today();$('sell-time').value='';$('sell-reason').value='';$('sell-dialog').showModal();});}
+  $('save-position').addEventListener('click',async()=>{const id=$('position-id').value;const strategy=$('position-strategy').value;const body={name:$('position-name').value,strategy_id:strategy,strategy_name:strategyText[strategy]||'',sector_names:$('position-sectors').value,structural_stop:Number($('position-stop').value||0),emergency_loss_pct:Number($('position-emergency').value||6)};let url='/api/portfolio/positions',method='POST';if(id){url+=`/${id}`;method='PATCH';}else{Object.assign(body,{code:$('position-code').value,entry_date:$('position-date').value,entry_time:$('position-time').value,entry_price:Number($('position-price').value),shares:Number($('position-shares').value)});}try{await api(url,{method,body:JSON.stringify(body)});$('position-dialog').close();message('持仓已保存');await load();}catch(error){message(error.message,true);}});
+  $('save-sell').addEventListener('click',async()=>{const id=$('sell-position-id').value;const body={price:Number($('sell-price').value),shares:Number($('sell-shares').value),trade_date:$('sell-date').value,trade_time:$('sell-time').value,reason:$('sell-reason').value};try{await api(`/api/portfolio/positions/${id}/sell`,{method:'POST',body:JSON.stringify(body)});$('sell-dialog').close();message('卖出成交已记录');await load();}catch(error){message(error.message,true);}});
+  async function pollReplay(){try{const result=await api(`/api/portfolio/replay/status?since=${replayCursor}`);replayCursor=result.next||replayCursor;const replay=result.paper_replay||{};const progress=replay.progress||{};const progressText=progress.total?`${progress.completed||0}/${progress.total}`:'';$('replay-status').innerHTML=result.state==='prefetching'?`${esc(replay.stage||'补齐分钟行情')} ${progressText}`:result.state==='running'?'历史分钟模拟运行中…':result.state==='error'?`模拟失败：${esc(result.error||'请查看运行日志')}`:replay.imported?`已导入批次 ${esc(replay.run_id)}：买入${replay.import_result?.buy||0}、卖出${replay.import_result?.sell||0}、持仓${replay.import_result?.open||0} · <a class="text-emerald-300" href="/backtest?run=${encodeURIComponent(replay.run_id)}">查看详细结果</a>`:'等待模拟结果';if(result.state==='done'&&replay.imported){clearInterval(replayTimer);replayTimer=null;await load();}if(result.state==='error'){clearInterval(replayTimer);replayTimer=null;}}catch(error){$('replay-status').textContent=error.message;}}
+  $('start-replay').addEventListener('click',async()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if(!/^\d{8}$/.test(start)||!/^\d{8}$/.test(end)){message('请输入完整的开始和结束日期（YYYYMMDD）',true);return;}if(start>end){message('开始日期不能晚于结束日期',true);return;}if(!window.confirm(`历史模拟将按{{ '%.0f'|format(paper_initial_capital / 10000) }}万元初始资金重建当前账户，并替换现有持仓和成交记录。运行 ${start} 至 ${end}？`))return;try{$('start-replay').disabled=true;replayCursor=0;const result=await api('/api/portfolio/replay',{method:'POST',body:JSON.stringify({start_date:start,end_date:end,initial_capital:{{ paper_initial_capital }}})});message(result.message);if(replayTimer)clearInterval(replayTimer);replayTimer=setInterval(pollReplay,2000);await pollReplay();}catch(error){message(error.message,true);}finally{$('start-replay').disabled=false;}});
+  {% endif %}
+  load();
+</script>
+{% endblock %}
