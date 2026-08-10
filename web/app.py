@@ -43,6 +43,7 @@ from config.settings import (
 from core.realtime.overlay_service import RealtimeOverlayService
 from core.realtime.quote_service import RealtimeQuoteService
 from core.realtime.sector_service import RealtimeSectorService
+from snapshot.artifact_cache import GLOBAL_ARTIFACT_CACHE, GLOBAL_DIRECTORY_CACHE
 from snapshot.reader import SnapshotReader
 from web.auth_store import (
     SESSION_COOKIE_NAME,
@@ -1550,7 +1551,7 @@ def _external_screening_sections(date: str) -> List[Dict[str, Any]]:
     primary = ""
     if comparison_path.exists():
         try:
-            comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
+            comparison = GLOBAL_ARTIFACT_CACHE.load_json(comparison_path) or {}
             payloads = {
                 str(key): dict(value)
                 for key, value in (comparison.get("results") or {}).items()
@@ -1561,7 +1562,7 @@ def _external_screening_sections(date: str) -> List[Dict[str, Any]]:
             logger.debug("Strategy comparison artifact failed: %s", exc)
     if not payloads and canonical_path.exists():
         try:
-            payload = json.loads(canonical_path.read_text(encoding="utf-8"))
+            payload = GLOBAL_ARTIFACT_CACHE.load_json(canonical_path) or {}
             strategy_id = str(payload.get("strategy_id") or payload.get("profile") or "default")
             payloads = {strategy_id: payload}
             primary = strategy_id
@@ -1582,7 +1583,7 @@ def _external_screening_sections(date: str) -> List[Dict[str, Any]]:
     snapshot_path = Path(WEB_DATA_DIR) / "snapshots" / f"{date}.json"
     if snapshot_path.exists():
         try:
-            snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            snapshot = GLOBAL_ARTIFACT_CACHE.load_json(snapshot_path) or {}
             market = snapshot.get("market") or {}
             market_score = float(
                 (market.get("env") or {}).get("market_score")
@@ -1665,16 +1666,13 @@ def _snapshot_stat(date: Any) -> Optional[tuple[int, int]]:
     return int(stat.st_mtime_ns), int(stat.st_size)
 
 
-@lru_cache(maxsize=96)
 def _load_snapshot_cached(date: str, mtime_ns: int, size: int) -> Optional[Dict[str, Any]]:
     path = SNAPSHOT_DIR / f"{date}.json"
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    payload = GLOBAL_ARTIFACT_CACHE.load_json(path)
+    return payload if isinstance(payload, dict) else None
 
 
-@lru_cache(maxsize=96)
+@lru_cache(maxsize=4)
 def _load_prepared_snapshot_cached(
     date: str, mtime_ns: int, size: int, screening_mtime_ns: int, screening_size: int,
 ) -> Optional[Dict[str, Any]]:
@@ -1711,7 +1709,7 @@ def _list_dates() -> List[str]:
         return list(cached)
     dates = reader.list_dates()
     _DATES_CACHE["dates"] = dates
-    _DATES_CACHE["expires_at"] = now + 5.0
+    _DATES_CACHE["expires_at"] = now + 30.0
     return list(dates)
 
 
@@ -1728,7 +1726,6 @@ def _latest_date() -> Optional[str]:
 
 
 def _clear_data_caches() -> None:
-    _load_snapshot_cached.cache_clear()
     _load_prepared_snapshot_cached.cache_clear()
     _stock_concept_map.cache_clear()
     _cached_stock_sector_memberships.cache_clear()
@@ -1736,6 +1733,8 @@ def _clear_data_caches() -> None:
     _sector_meta_map.cache_clear()
     _DATES_CACHE["expires_at"] = 0.0
     _DATES_CACHE["dates"] = []
+    GLOBAL_ARTIFACT_CACHE.clear()
+    GLOBAL_DIRECTORY_CACHE.clear()
 
 # ----------------------------------------------------------------------
 # 数据浏览分类：优先展示指标筛选和板块强度结果。
@@ -1881,6 +1880,21 @@ def _rate_limited_response(request: Request) -> HTMLResponse | JSONResponse:
         '<!doctype html><meta charset="utf-8"><body style="background:#020617;color:#e2e8f0;font-family:sans-serif;padding:40px">请求过于频繁，请稍后再试。</body>',
         status_code=429,
     )
+
+
+@app.middleware("http")
+async def response_timing_middleware(request: Request, call_next):
+    """Expose server render time and let browsers reuse static assets."""
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    response.headers["Server-Timing"] = f'app;dur={elapsed_ms:.1f}'
+    response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+    if request.url.path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=3600")
+    if elapsed_ms >= 1000.0:
+        logger.warning("slow request %s %.1fms", request.url.path, elapsed_ms)
+    return response
 
 
 @app.middleware("http")
@@ -3035,7 +3049,7 @@ def _stock_name_map(snapshot: Optional[Dict], date: Optional[str] = None) -> Dic
     if target:
         screening_path = Path(WEB_DATA_DIR) / "screening" / f"screening_{target}.json"
         try:
-            data = json.loads(screening_path.read_text(encoding="utf-8"))
+            data = GLOBAL_ARTIFACT_CACHE.load_json(screening_path) or {}
             for row in data.get("final") or []:
                 if isinstance(row, dict):
                     scan_row(row)

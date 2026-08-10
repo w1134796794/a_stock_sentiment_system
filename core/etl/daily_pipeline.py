@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -20,6 +19,28 @@ from core.data.data_prep import DataPrep
 from core.factors.jobs.runner import FactorJobRunner
 from core.screening.gold_analysis import build_gold_analysis_summary
 from core.screening.screening_engine import ScreeningEngine
+
+
+def _compact_strategy_result(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove duplicated diagnostics from the cross-strategy aggregate.
+
+    Every strategy already persists its full artifact.  The aggregate is a
+    read model for the decision page and only needs final candidates plus
+    strategy metadata; embedding hundreds of rejected full factor rows again
+    multiplied storage by the number of strategies.
+    """
+    compact = {
+        key: value
+        for key, value in dict(payload or {}).items()
+        if key not in {"candidate_pool", "rejected", "scenarios"}
+    }
+    compact["candidate_pool_count"] = len(payload.get("candidate_pool") or [])
+    compact["rejected_count"] = len(payload.get("rejected") or [])
+    compact["scenario_counts"] = {
+        str(key): len(value or [])
+        for key, value in (payload.get("scenarios") or {}).items()
+    }
+    return compact
 
 
 @dataclass
@@ -223,8 +244,8 @@ class ETLDailyPipeline:
         primary_strategy: str = "",
     ) -> ETLDailyResult:
         """Run screening and snapshots from local factor tables only."""
-        from snapshot import SnapshotWriter
         from core.etl.stage_status import factor_status, require_stage
+        from snapshot import SnapshotWriter
 
         trade_date = str(trade_date)
         prev_trade_date = str(prev_trade_date or "")
@@ -345,8 +366,17 @@ class ETLDailyPipeline:
         comparison_path.parent.mkdir(parents=True, exist_ok=True)
         comparison_path.write_text(
             json.dumps(
-                {"trade_date": trade_date, "primary": primary_strategy, "results": strategy_results},
-                ensure_ascii=False, indent=2, default=str,
+                {
+                    "trade_date": trade_date,
+                    "primary": primary_strategy,
+                    "results": {
+                        strategy_id: _compact_strategy_result(payload)
+                        for strategy_id, payload in strategy_results.items()
+                    },
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
             ),
             encoding="utf-8",
         )

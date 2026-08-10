@@ -6,9 +6,10 @@ Web 端只读访问。仅依赖标准库（不 import core / tushare），保证
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from snapshot.artifact_cache import GLOBAL_ARTIFACT_CACHE, GLOBAL_DIRECTORY_CACHE
 
 
 class SnapshotReader:
@@ -19,8 +20,8 @@ class SnapshotReader:
         if not self.snapshot_dir.exists():
             return []
         dates = [
-            p.stem for p in self.snapshot_dir.glob("*.json")
-            if p.stem.isdigit()
+            stem for stem in GLOBAL_DIRECTORY_CACHE.stems(self.snapshot_dir, "*.json")
+            if stem.isdigit()
         ]
         return sorted(dates, reverse=True)
 
@@ -37,10 +38,8 @@ class SnapshotReader:
         path = self.snapshot_dir / f"{date}.json"
         if not path.exists():
             return None
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return None
+        payload = GLOBAL_ARTIFACT_CACHE.load_json(path)
+        return payload if isinstance(payload, dict) else None
 
     def load_latest(self) -> Optional[Dict[str, Any]]:
         date = self.latest()

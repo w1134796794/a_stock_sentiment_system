@@ -446,7 +446,22 @@ def _limitup_cache_overlay(date: str) -> Dict[str, Any]:
     }
 
 
-def _etl_market_overlay(date: str) -> Dict[str, Any]:
+def _file_version(path: Path) -> tuple[int, int]:
+    try:
+        stat = path.stat()
+        return int(stat.st_mtime_ns), int(stat.st_size)
+    except OSError:
+        return 0, 0
+
+
+@lru_cache(maxsize=16)
+def _etl_market_overlay_cached(
+    date: str,
+    factor_db_version: tuple[int, int],
+    summary_version: tuple[int, int],
+    limit_up_version: tuple[int, int],
+    limit_down_version: tuple[int, int],
+) -> Dict[str, Any]:
     if not date or not Path(FACTOR_DB_PATH).exists():
         return {}
     try:
@@ -524,6 +539,18 @@ def _etl_market_overlay(date: str) -> Dict[str, Any]:
         return out
     except Exception:
         return {}
+
+
+def _etl_market_overlay(date: str) -> Dict[str, Any]:
+    """Return one day's overview and reuse it until its source files change."""
+    market_cache = Path(CACHE_DIR) / "market"
+    return _etl_market_overlay_cached(
+        str(date),
+        _file_version(Path(FACTOR_DB_PATH)),
+        _file_version(Path(CACHE_DIR) / "summary" / "limit_up_stocks.csv"),
+        _file_version(market_cache / "limit_up" / f"{date}.csv"),
+        _file_version(market_cache / "limit_down" / f"{date}.csv"),
+    )
 
 
 def market_overview(reader: SnapshotReader) -> Dict[str, Any]:

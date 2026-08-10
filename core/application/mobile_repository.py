@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from threading import RLock
 from time import monotonic
 from typing import Any, Dict, List
 
 from config.settings import CACHE_DIR, FACTOR_DB_PATH, WEB_DATA_DIR
+from snapshot.artifact_cache import GLOBAL_ARTIFACT_CACHE
 
 
 def _date_text(value: Any) -> str:
@@ -75,7 +75,7 @@ class MobileReadRepository:
                 cached = self._decision_cache.get(date)
                 if cached and cached[0] == mtime_ns:
                     return dict(cached[1])
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = GLOBAL_ARTIFACT_CACHE.load_json(path)
             result = dict(payload) if isinstance(payload, dict) else {}
             with self._cache_lock:
                 self._decision_cache[date] = (mtime_ns, result)

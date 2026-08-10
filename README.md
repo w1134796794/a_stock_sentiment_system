@@ -2006,12 +2006,27 @@ stk_behavior_attention / acceleration / divergence / repair / decay
 服务器 `.env` 推荐配置：
 
 ```dotenv
-DUCKDB_MEMORY_LIMIT=1400MB
+DUCKDB_MEMORY_LIMIT=768MB
 DUCKDB_THREADS=1
 DUCKDB_TEMP_DIR=/srv/a-stock/duckdb_tmp
+WEB_ARTIFACT_CACHE_MB=64
+WEB_ARTIFACT_CACHE_ENTRIES=16
+WEB_ARTIFACT_CACHE_MAX_FILE_MB=12
+WEB_DIRECTORY_CACHE_SECONDS=30
 ```
 
-`DUCKDB_TEMP_DIR` 必须位于空间充足且systemd运行用户可写的目录。4GB内存机器建议额外配置4GB swap作为最后保护，但swap不能替代上述内存限制和任务解耦。批量补算时建议按月运行；发生失败后只重跑失败日期，无需从2025年重新开始。
+`DUCKDB_TEMP_DIR` 必须位于空间充足且systemd运行用户可写的目录。Web产物缓存按文件修改时间自动失效，并同时受条数和估算内存约束；4GB服务器建议使用上面的64MB配置，本地开发机可保留默认96MB。页面响应头中的 `Server-Timing` 和 `X-Response-Time-Ms` 可用于定位仍超过1秒的路由，服务器日志也会记录慢请求。
+
+策略组合汇总文件只保留最终候选和运行元数据，不再重复嵌入各策略的候选全集、场景列表和数百条被拒明细；完整诊断仍保存在每个策略自己的产物中。该调整只影响后续新生成文件，不自动删除历史数据。4GB内存机器建议额外配置4GB swap作为最后保护，但swap不能替代上述内存限制和任务解耦。批量补算时建议按月运行；发生失败后只重跑失败日期，无需从2025年重新开始。
+
+已有历史组合文件先预演可释放空间，确认后再原子覆盖汇总文件：
+
+```bash
+python3 scripts/compact_screening_artifacts.py
+python3 scripts/compact_screening_artifacts.py --apply
+```
+
+该命令不会修改各策略目录中的完整产物，也不会删除快照、涨停、龙虎榜或因子数据。
 
 ## 29. 收益优化改造的运维入口
 

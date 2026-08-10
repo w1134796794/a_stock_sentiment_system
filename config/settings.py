@@ -69,7 +69,7 @@ PAPER_ROTATION_MIN_EDGE = min(
     30.0,
 )
 FACTOR_DB_PATH = WEB_DATA_DIR / "factors.duckdb"  # 因子大表（定量查询，可选）
-DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", "1400MB").strip() or "1400MB"
+DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", "768MB").strip() or "768MB"
 DUCKDB_THREADS = max(1, int(os.getenv("DUCKDB_THREADS", "1")))
 DUCKDB_TEMP_DIR = _env_path("DUCKDB_TEMP_DIR", WEB_DATA_DIR / "duckdb_tmp")
 KB_DB_PATH = WEB_DATA_DIR / "kb.sqlite"          # 知识库块存储（向量 + 词法）
@@ -162,7 +162,7 @@ WECHAT_CONFIG = {
     "author": "A股情绪系统",  # 文章作者
     "preview_wx": "gh_f1c18d75c665",  # 预览微信号（测试用）
     "auto_publish": False,  # 是否自动发布（False则只生成预览）
-    
+
     # LLM配置（用于生成描述性报告）
     "use_llm": True,  # 是否使用LLM生成报告
     "llm_api_key": os.getenv("DASHSCOPE_API_KEY", "your-api-key-here"),  # LLM API密钥
@@ -182,7 +182,7 @@ THS_SECTOR_CONFIG = {
         "use_limit_cpt": True,  # 是否使用limit_cpt_list数据
         "min_member_count": 10,  # 最小成分股数量（过滤小板块）
     },
-    
+
     # 概念/行业差异化参数
     "sector_params": {
         "概念": {
@@ -200,13 +200,13 @@ THS_SECTOR_CONFIG = {
             "hot_threshold_pct": 0.2,    # 行业前20%算热点
         }
     },
-    
+
     # 板块关联分析参数
     "sector_relation": {
         "min_overlap": 0.05,  # 最小重叠度阈值（查找关联板块）
         "default_overlap": 0.1,  # 默认重叠度阈值
     },
-    
+
     # 板块共振分析参数
     "resonance": {
         "top_n": 20,  # 分析前N个板块
@@ -214,14 +214,14 @@ THS_SECTOR_CONFIG = {
         "strong_resonance_threshold": 0.3,  # 强共振重叠度阈值
         "medium_resonance_threshold": 0.1,  # 中共振重叠度阈值
     },
-    
+
     # 板块持续性分析参数
     "persistence": {
         "lookback_days": 10,  # 回溯交易日数量（增加历史数据分析天数，更准确判断持续性）
         "hot_threshold_days": 3,  # 判定为持续热门的最少天数
         "top_n": 10,  # 每日热点板块排名阈值
     },
-    
+
     # 板块内部结构分析参数
     "internal_structure": {
         # 梯队完整性评分权重

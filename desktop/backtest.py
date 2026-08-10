@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -370,7 +371,7 @@ def _has_results() -> bool:
     return bool(list_runs())
 
 
-def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
+def _build_backtest_overview(run: Optional[str]) -> Dict[str, Any]:
     """「模拟交易结果」页：汇总指标 + 净值曲线 + 逐笔交易 + 模式表现。"""
     run = _resolve(run)
     base: Dict[str, Any] = {
@@ -795,6 +796,32 @@ def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
                           "买入信号", "入场时间", "最大浮盈", "最大浮亏", "状态/退出"],
     })
     return base
+
+
+def _run_versions(run: Optional[str]) -> tuple[tuple[int, int], ...]:
+    if not run:
+        return ()
+    versions = []
+    for kind in ("summary", "nav", "trades", "positions"):
+        try:
+            stat = _path(kind, run).stat()
+            versions.append((int(stat.st_mtime_ns), int(stat.st_size)))
+        except OSError:
+            versions.append((0, 0))
+    return tuple(versions)
+
+
+@lru_cache(maxsize=8)
+def _backtest_overview_cached(
+    run: Optional[str], versions: tuple[tuple[int, int], ...],
+) -> Dict[str, Any]:
+    return _build_backtest_overview(run)
+
+
+def backtest_overview(run: Optional[str]) -> Dict[str, Any]:
+    """Build a run once and reuse it until one of its result files changes."""
+    resolved = _resolve(run)
+    return _backtest_overview_cached(resolved, _run_versions(resolved))
 
 
 def drawdown_overview(run: Optional[str]) -> Dict[str, Any]:
