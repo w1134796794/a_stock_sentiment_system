@@ -829,9 +829,9 @@ webdata/models/factor_weights/<profile>/weights_<effective_date>.json
 
 多个用户同时访问时，不能让每个浏览器都直接触发行情接口。Web 进程启动后创建后台线程：
 
-1. 每 5 秒刷新默认实时载荷。
+1. 每 3 秒通过 `pytdx` 长连接批量刷新默认实时载荷。
 2. 只在交易日 09:30 到 15:00 工作。
-3. 缓存默认 TTL 为 `max(刷新间隔 * 3, 15 秒)`。
+3. 缓存默认 TTL 与刷新间隔一致；配置 Redis 后所有 Web Worker 共用一份结果。
 4. 并发请求同一个 key 时只允许一个加载器访问上游，其余请求等待同一结果。
 5. 新请求失败时可返回尚可使用的旧缓存，并标记 stale。
 6. 数据生成任务运行期间优先返回缓存，避免行情与跑批争抢资源。
@@ -839,9 +839,39 @@ webdata/models/factor_weights/<profile>/weights_<effective_date>.json
 环境变量：
 
 ```env
-REALTIME_REFRESH_SECONDS=5
-REALTIME_CACHE_TTL_SECONDS=15
+REALTIME_REFRESH_SECONDS=3
+REALTIME_CACHE_TTL_SECONDS=3
+PYTDX_ENABLED=true
+# 留空时依次尝试 pytdx 自带的行情节点；生产环境建议填写已验证的固定节点。
+PYTDX_HOST=
+PYTDX_PORT=7709
+PYTDX_TIMEOUT_SECONDS=0.8
+PYTDX_MAX_SERVERS=3
+PYTDX_FAILURE_COOLDOWN_SECONDS=60
+REALTIME_SNAPSHOT_MAX_ITEMS=120
+REALTIME_SNAPSHOT_TTL_SECONDS=900
 ```
+
+实时个股行情源按以下顺序降级：
+
+1. `pytdx`：当前交易日的 3 秒批量快照，包含最新价、开高低、累计成交量和成交额。
+2. `pqquotation/easyquotation`：`pytdx` 不可用时的 HTTP 快照降级源。
+3. `eltdx`：最终实时兜底，同时继续负责历史分钟线、K 线和集合竞价。
+
+每轮刷新先把上一交易日候选股和近期龙头合并去重，再把完整代码列表一次传给
+`pytdx` 批量接口，不按股票逐只轮询。`pytdx` 快照使用累计成交量/成交额的相邻
+差值合成一分钟柱，同一笔成交不会因3秒轮询重复累计。
+
+一分钟行情只负责前5分钟高低点、VWAP和量能节奏等结构过滤；最终买点由连续
+3秒快照确认。首次触发后等待下一快照作为模拟成交，封板无卖盘时记为“信号正确
+但无法成交”。服务在盘中途启动时，会先读取当日已完成分钟数据，再以快照增量
+更新当前分钟。
+
+高频快照不写入因子 DuckDB。配置 Redis 时，每只股票只保留最近120条快照并在
+15分钟后过期；未配置 Redis 时降级为进程内有界缓存。确认、取消、无法成交等
+信号事件仍按现有事件仓库持久化。低配服务器无需另建时序数据库，Redis负责热
+状态共享，DuckDB继续负责盘后事实、因子和信号事件。节点全部不可达时进入60秒
+冷却并切换后备行情源，避免每次刷新都被连接超时拖慢。
 
 ### 12.2 缓存内容
 

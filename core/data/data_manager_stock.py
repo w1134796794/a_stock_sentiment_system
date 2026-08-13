@@ -3,8 +3,9 @@
 
 数据来源：
 - Tushare daily / daily_basic：盘后历史日线行情与基本面指标
-- pqquotation / easyquotation：实时快照（可选，优先用于盘中轮询）
-- eltdx：实时/历史分时、K 线、集合竞价
+- pytdx：3 秒实时快照与当日分钟柱增量（盘中优先）
+- pqquotation / easyquotation：实时快照降级源
+- eltdx：历史分时、K 线、集合竞价及最终实时兜底
 - AshareProvider：分钟线 / K 线兜底
 """
 import json
@@ -23,6 +24,36 @@ logger = loguru.logger
 
 class StockDataManager(DataManagerBase):
     """个股数据管理器"""
+
+    def _get_pytdx_provider(self):
+        provider = getattr(self, "_pytdx_provider", None)
+        if provider is not None:
+            return provider
+        try:
+            from config.settings import (
+                PYTDX_ENABLED,
+                PYTDX_FAILURE_COOLDOWN_SECONDS,
+                PYTDX_HOST,
+                PYTDX_MAX_SERVERS,
+                PYTDX_PORT,
+                PYTDX_TIMEOUT_SECONDS,
+            )
+            from core.data.providers.pytdx_provider import PytdxProvider, get_pytdx_provider
+
+            if not PYTDX_ENABLED or not PytdxProvider.available():
+                return None
+            provider = get_pytdx_provider(
+                host=PYTDX_HOST,
+                port=PYTDX_PORT,
+                timeout=PYTDX_TIMEOUT_SECONDS,
+                max_servers=PYTDX_MAX_SERVERS,
+                failure_cooldown_seconds=PYTDX_FAILURE_COOLDOWN_SECONDS,
+            )
+            self._pytdx_provider = provider
+            return provider
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[StockDataManager] pytdx provider unavailable: {e}")
+            return None
 
     def _get_eltdx_provider(self):
         provider = getattr(self, "_eltdx_provider", None)
@@ -571,10 +602,19 @@ class StockDataManager(DataManagerBase):
         """获取个股最新实时行情快照。
 
         仅含 ``last_price`` / ``open_price`` / ``pre_close`` 等盘中实时字段，**不落盘**
-        （快照随行情变化）。优先 pqquotation/easyquotation，失败再回退 eltdx。
+        （快照随行情变化）。优先 pytdx，失败后依次回退 HTTP 行情和 eltdx。
 
         主要服务盘中实时观测（如候选池的实时确认）。
         """
+        provider = self._get_pytdx_provider()
+        if provider is not None:
+            try:
+                quote = provider.get_quote_snapshot(ts_code) or {}
+                if quote:
+                    return quote
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[get_quote_snapshot] pytdx 实时快照失败 {ts_code}: {e}")
+
         provider = self._get_quotation_provider()
         if provider is not None:
             try:
@@ -596,9 +636,18 @@ class StockDataManager(DataManagerBase):
     def get_quote_snapshots(self, ts_codes) -> Dict[str, Dict]:
         """**批量**获取多只实时行情快照。
 
-        返回 ``{6位代码: 快照dict}``。优先 pqquotation/easyquotation 批量 HTTP，
-        失败再回退 eltdx，适合候选池盘中轮询。
+        返回 ``{6位代码: 快照dict}``。优先 pytdx 批量长连接，失败后依次
+        回退 pqquotation/easyquotation 和 eltdx，适合候选池 3 秒轮询。
         """
+        provider = self._get_pytdx_provider()
+        if provider is not None:
+            try:
+                quotes = provider.get_quote_snapshots(ts_codes) or {}
+                if quotes:
+                    return quotes
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[get_quote_snapshots] pytdx 批量快照失败: {e}")
+
         provider = self._get_quotation_provider()
         if provider is not None:
             try:
@@ -618,11 +667,20 @@ class StockDataManager(DataManagerBase):
             return {}
 
     def get_minute_bars_live(self, ts_code: str, trade_date: str) -> pd.DataFrame:
-        """获取个股**实时分时**（eltdx，不落盘）。
+        """获取个股**实时分时**（pytdx 快照聚合，eltdx 兜底，不落盘）。
 
         与 ``get_stock_tick`` 不同：本方法**不读写 CSV 缓存**，每次都取最新分时，
         避免盘中把「半截分时序列」缓存后读到过期数据。专供盘中实时形态判定。
         """
+        provider = self._get_pytdx_provider()
+        if provider is not None:
+            try:
+                df = provider.get_minute_bars(ts_code, trade_date)
+                if df is not None and not df.empty:
+                    return df
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[get_minute_bars_live] pytdx 实时分时失败 {ts_code} {trade_date}: {e}")
+
         provider = self._get_eltdx_provider()
         if provider is None:
             return pd.DataFrame()
@@ -631,6 +689,17 @@ class StockDataManager(DataManagerBase):
             return df if df is not None else pd.DataFrame()
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[get_minute_bars_live] eltdx 实时分时失败 {ts_code} {trade_date}: {e}")
+            return pd.DataFrame()
+
+    def get_realtime_snapshot_ticks(self, ts_code: str, trade_date: str) -> pd.DataFrame:
+        """Read the recent pytdx 3-second sequence without issuing a new quote request."""
+        provider = self._get_pytdx_provider()
+        if provider is None:
+            return pd.DataFrame()
+        try:
+            return provider.get_snapshot_ticks(ts_code, trade_date)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[get_realtime_snapshot_ticks] 快照序列读取失败 {ts_code}: {exc}")
             return pd.DataFrame()
 
     def get_kline(

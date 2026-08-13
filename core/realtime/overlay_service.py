@@ -152,6 +152,16 @@ class RealtimeOverlayService:
             payload["output_path"] = str(self.persist(payload))
         return payload
 
+    def candidate_rows(
+        self, trade_date: str, *, profile: str = "", limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Load the local candidate watchlist without requesting realtime quotes."""
+        resolved_profile = str(profile or "")
+        if not resolved_profile and self._decision_pool_path(trade_date).exists():
+            resolved_profile = DECISION_POOL_PROFILE
+        rows = self._load_candidates(str(trade_date), profile=resolved_profile)
+        return self._dedupe_candidates(rows)[: max(int(limit or 20), 1)]
+
     def persist(self, payload: Dict[str, Any]) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         date = str(payload.get("trade_date") or datetime.now().strftime("%Y%m%d"))

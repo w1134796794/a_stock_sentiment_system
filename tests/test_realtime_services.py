@@ -7,6 +7,35 @@ from core.realtime.quote_service import RealtimeQuoteService
 from core.realtime.sector_service import RealtimeSectorService
 
 
+def test_quote_service_force_refresh_uses_one_batch_call():
+    class FakeDataManager:
+        def __init__(self):
+            self.calls = []
+
+        def get_quote_snapshots(self, codes):
+            self.calls.append(list(codes))
+            return {
+                code: {
+                    "code": code,
+                    "last_price": 10.0,
+                    "pre_close": 9.8,
+                    "date": "20260813",
+                    "time": "09:35:03",
+                }
+                for code in codes
+            }
+
+    dm = FakeDataManager()
+    service = RealtimeQuoteService(dm, ttl_seconds=30)
+
+    payload = service.refresh_quotes(["000001", "600000", "000001"])
+    cached = service.get_quotes(["600000", "000001"])
+
+    assert payload["count"] == 2
+    assert cached["count"] == 2
+    assert dm.calls == [["000001", "600000"]]
+
+
 def test_realtime_package_does_not_eagerly_import_service_modules():
     root = Path(__file__).resolve().parents[1]
     script = """

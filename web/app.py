@@ -104,10 +104,10 @@ def _seconds_env(name: str, default: float) -> float:
         return float(default)
 
 
-_REALTIME_REFRESH_SECONDS = _seconds_env("REALTIME_REFRESH_SECONDS", 5.0)
+_REALTIME_REFRESH_SECONDS = _seconds_env("REALTIME_REFRESH_SECONDS", 3.0)
 _REALTIME_CACHE_TTL_SECONDS = _seconds_env(
     "REALTIME_CACHE_TTL_SECONDS",
-    max(_REALTIME_REFRESH_SECONDS * 3.0, 15.0),
+    _REALTIME_REFRESH_SECONDS,
 )
 _REALTIME_PAYLOAD_CACHE = RealtimePayloadCache(ttl_seconds=_REALTIME_CACHE_TTL_SECONDS)
 
@@ -2910,6 +2910,7 @@ def _get_realtime_quote_service(stale_after_seconds: int = 90):
             if _REALTIME_QUOTE_SERVICE is None:
                 _REALTIME_QUOTE_SERVICE = RealtimeQuoteService(stale_after_seconds=stale_after_seconds)
     _REALTIME_QUOTE_SERVICE.stale_after_seconds = max(float(stale_after_seconds), 1.0)
+    _REALTIME_QUOTE_SERVICE.ttl_seconds = max(_REALTIME_REFRESH_SECONDS * 5.0, 15.0)
     return _REALTIME_QUOTE_SERVICE
 
 
@@ -3299,6 +3300,27 @@ def _refresh_realtime_defaults() -> None:
         return
     market_date = _realtime_market_date()
     trade_date = _realtime_candidate_date(market_date)
+    # Build one deduplicated watchlist first.  pytdx receives this list in a
+    # single batch call; leader/candidate page builders then consume the warm cache.
+    try:
+        from core.realtime.leader_pool_service import LeaderPoolService
+
+        leader_rows = LeaderPoolService().build_pool(
+            trade_date, lookback=10, limit=30,
+        ).get("rows") or []
+        candidate_rows = RealtimeOverlayService().candidate_rows(
+            trade_date, limit=20,
+        )
+        watch_codes = list(dict.fromkeys(
+            _normalize_stock_code(row.get("code") or row.get("stock_code") or "")
+            for row in [*leader_rows, *candidate_rows]
+            if row.get("code") or row.get("stock_code")
+        ))
+        watch_codes = [code for code in watch_codes if code]
+        if watch_codes:
+            _get_realtime_quote_service().refresh_quotes(watch_codes)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Realtime watchlist batch warmup failed: %s", exc)
     jobs = [
         (
             _intraday_strength_cache_key(

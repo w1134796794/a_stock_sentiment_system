@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 from loguru import logger
 
@@ -56,6 +56,25 @@ class RealtimeQuoteService:
             "count": len(rows),
             "requested": normalized_codes,
             "missing": [c for c in normalized_codes if c not in quotes],
+        }
+
+    def refresh_quotes(self, codes: Iterable[str], *, include_raw: bool = False) -> Dict[str, Any]:
+        """Force exactly one provider batch request for a complete watchlist."""
+        normalized_codes = self._normalize_codes(codes)
+        if not normalized_codes:
+            return {"ok": False, "message": "codes 不能为空", "quotes": [], "count": 0}
+        fetched = self._fetch(normalized_codes)
+        rows = [
+            fetched[code].to_dict(include_raw=include_raw)
+            for code in normalized_codes if code in fetched
+        ]
+        return {
+            "ok": bool(rows),
+            "message": "" if rows else (self._last_error or "未获取到实时行情"),
+            "quotes": rows,
+            "count": len(rows),
+            "requested": normalized_codes,
+            "missing": [code for code in normalized_codes if code not in fetched],
         }
 
     def health(self, *, probe: bool = False) -> Dict[str, Any]:

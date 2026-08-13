@@ -82,6 +82,8 @@ class QuoteSnapshot:
     low_price: float = 0.0
     bid1: float = 0.0
     ask1: float = 0.0
+    bid_vol1: float = 0.0
+    ask_vol1: float = 0.0
     vol_hand: float = 0.0
     amount_yuan: float = 0.0
     change_pct: Optional[float] = None
@@ -123,6 +125,8 @@ class QuoteSnapshot:
             low_price=to_float(pick(raw, ("low_price", "low", "最低价"))),
             bid1=to_float(pick(raw, ("bid1", "买一"))),
             ask1=to_float(pick(raw, ("ask1", "卖一"))),
+            bid_vol1=to_float(pick(raw, ("bid_vol1", "买一量"))),
+            ask_vol1=to_float(pick(raw, ("ask_vol1", "卖一量"))),
             vol_hand=to_float(pick(raw, ("vol_hand", "volume_hand", "成交量(手)", "vol"))),
             amount_yuan=to_float(pick(raw, ("amount_yuan", "amount", "成交额"))),
             change_pct=change_pct,
@@ -146,6 +150,8 @@ class QuoteSnapshot:
             "low_price": self.low_price,
             "bid1": self.bid1,
             "ask1": self.ask1,
+            "bid_vol1": self.bid_vol1,
+            "ask_vol1": self.ask_vol1,
             "vol_hand": self.vol_hand,
             "amount_yuan": self.amount_yuan,
             "change_pct": self.change_pct,

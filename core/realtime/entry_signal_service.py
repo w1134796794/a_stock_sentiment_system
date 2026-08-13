@@ -18,13 +18,12 @@ from backtest.minute_entry import (
     normalize_strategy_entry_modes,
 )
 from backtest.trade_calendar import TradeCalendar
+from core.factors.behavior_cycle import intraday_behavior_cycle
 from core.realtime.models import normalize_stock_code
 from core.realtime.sector_breadth import RealtimeSectorBreadthProvider
-from core.factors.behavior_cycle import intraday_behavior_cycle
 from core.signals.confidence_service import ConfidenceService, HistoricalSignalStatsRepository
 from core.signals.minute_amount_profile import MinuteAmountProfileRepository
 from core.utils.price_limit import limit_up_price
-
 
 MODE_LABELS = {
     ENTRY_WEAK: "弱转强",
@@ -68,19 +67,25 @@ class RealtimeEntrySignalService:
         data_manager: Any = None,
         *,
         evaluator: Optional[MinuteEntryEvaluator] = None,
-        minute_ttl_seconds: float = 45.0,
+        minute_ttl_seconds: float = 2.5,
         calendar: Optional[TradeCalendar] = None,
         amount_profile_repository: Optional[MinuteAmountProfileRepository] = None,
         sector_breadth_provider: Any = None,
         signal_stats_repository: Optional[HistoricalSignalStatsRepository] = None,
+        snapshot_signal_service: Any = None,
     ) -> None:
         self.dm = data_manager
         self.evaluator = evaluator or MinuteEntryEvaluator()
-        self.minute_ttl_seconds = max(float(minute_ttl_seconds), 5.0)
+        self.minute_ttl_seconds = max(float(minute_ttl_seconds), 1.0)
         self.calendar = calendar or TradeCalendar()
         self.amount_profiles = amount_profile_repository or MinuteAmountProfileRepository()
         self.sector_breadth = sector_breadth_provider or RealtimeSectorBreadthProvider()
         self.signal_stats = signal_stats_repository or HistoricalSignalStatsRepository()
+        if snapshot_signal_service is None:
+            from core.realtime.snapshot_signal_service import SnapshotSignalService
+
+            snapshot_signal_service = SnapshotSignalService()
+        self.snapshot_signals = snapshot_signal_service
         self._minute_cache: Dict[Tuple[str, str], Tuple[float, pd.DataFrame]] = {}
         self._previous_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._lock = RLock()
@@ -208,6 +213,27 @@ class RealtimeEntrySignalService:
             amount_profile_samples=profile_samples,
             live=True,
         )
+        ticks = self._snapshot_frame(code, market_date)
+        if not ticks.empty:
+            try:
+                sector_state = sector_checker(str(ticks.iloc[-1].get("time") or ""))
+                snapshot_decision = self.snapshot_signals.evaluate(
+                    code=code,
+                    trade_date=market_date,
+                    mode=mode,
+                    minute_bars=frame,
+                    snapshots=ticks,
+                    prev_close=pre_close,
+                    open_gap=gap,
+                    sector_confirmed=sector_state,
+                    is_leader=self._is_leader(row),
+                    limit_price=_float(limit_up_price(pre_close, code, name)),
+                    minute_decision=decision,
+                )
+                if snapshot_decision is not None:
+                    decision = snapshot_decision
+            except Exception:
+                pass
         return self._payload(decision, mode, market_date, sector_detail=sector_detail)
 
     @staticmethod
@@ -294,6 +320,10 @@ class RealtimeEntrySignalService:
             "sector_confirmed": bool(decision.sector_confirmed),
             "sector_detail": sector_detail or {},
             "data_status": decision.data_status,
+            "trigger_source": (
+                "pytdx_3s" if str(decision.data_status).startswith("snapshot_")
+                else "minute_fallback"
+            ),
             "data_completeness": confidence["data_completeness"],
             "profile_samples": decision.profile_samples,
             "hold_minutes": decision.hold_minutes,
@@ -360,6 +390,17 @@ class RealtimeEntrySignalService:
         with self._lock:
             self._previous_cache[market_date] = out
         return out
+
+    def _snapshot_frame(self, code: str, market_date: str) -> pd.DataFrame:
+        dm = self._ensure_data_manager()
+        if dm is None or not hasattr(dm, "get_realtime_snapshot_ticks"):
+            return pd.DataFrame()
+        try:
+            return dm.get_realtime_snapshot_ticks(
+                normalize_stock_code(code, add_suffix=True), market_date,
+            )
+        except Exception:
+            return pd.DataFrame()
 
     def _auction(self, code: str, market_date: str) -> Dict[str, Any]:
         dm = self._ensure_data_manager()

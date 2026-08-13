@@ -82,6 +82,20 @@ REDIS_KEY_PREFIX = os.getenv("REDIS_KEY_PREFIX", "a_stock").strip() or "a_stock"
 REDIS_SOCKET_TIMEOUT_SECONDS = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2"))
 TASK_LOCK_TTL_SECONDS = int(os.getenv("TASK_LOCK_TTL_SECONDS", "180"))
 
+# pytdx is the primary current-session source.  It is lazy-loaded and falls
+# back to the existing HTTP/eltdx chain when unavailable.
+PYTDX_ENABLED = os.getenv("PYTDX_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+PYTDX_HOST = os.getenv("PYTDX_HOST", "").strip()
+PYTDX_PORT = int(os.getenv("PYTDX_PORT", "7709"))
+PYTDX_TIMEOUT_SECONDS = float(os.getenv("PYTDX_TIMEOUT_SECONDS", "0.8"))
+PYTDX_MAX_SERVERS = max(1, int(os.getenv("PYTDX_MAX_SERVERS", "3")))
+PYTDX_FAILURE_COOLDOWN_SECONDS = max(
+    5.0,
+    float(os.getenv("PYTDX_FAILURE_COOLDOWN_SECONDS", "60")),
+)
+REALTIME_SNAPSHOT_MAX_ITEMS = max(20, int(os.getenv("REALTIME_SNAPSHOT_MAX_ITEMS", "120")))
+REALTIME_SNAPSHOT_TTL_SECONDS = max(60, int(os.getenv("REALTIME_SNAPSHOT_TTL_SECONDS", "900")))
+
 # 动态因子权重：YAML weights 仅作为冷启动先验；存在有效发布物时按交易日加载。
 FACTOR_WEIGHT_DIR = _env_path("FACTOR_WEIGHT_DIR", WEB_DATA_DIR / "models" / "factor_weights")
 FACTOR_WEIGHT_MODE = os.getenv("FACTOR_WEIGHT_MODE", "dynamic").strip().lower() or "dynamic"
