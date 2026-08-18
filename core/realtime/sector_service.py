@@ -1,10 +1,12 @@
 """Realtime sector and market quote service backed by optional adata."""
 from __future__ import annotations
 
-import importlib
 import csv
+import importlib
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -37,6 +39,8 @@ class RealtimeSectorService:
         self._sector_cache: Dict[Tuple[str, str], Tuple[float, SectorSnapshot]] = {}
         self._sector_names: Dict[str, str] = dict(self.DEFAULT_SECTOR_NAMES)
         self._sector_types: Dict[str, str] = {}
+        self._sector_names_by_source: Dict[str, Dict[str, str]] = {}
+        self._previous_close_cache: Dict[Tuple[str, str, str], float] = {}
         self._sector_name_sources = set()
         self._last_error = ""
 
@@ -119,7 +123,9 @@ class RealtimeSectorService:
         self._ensure_sector_names(source)
         requested = {str(name or "").strip() for name in names if str(name or "").strip()}
         resolved: Dict[str, str] = {}
-        for code, label in self._sector_names.items():
+        source_key = self._source_key(source)
+        source_names = self._sector_names_by_source.get(source_key) or {}
+        for code, label in source_names.items():
             clean_label = str(label or "").strip()
             for name in requested:
                 if name in resolved:
@@ -207,6 +213,7 @@ class RealtimeSectorService:
                 row.setdefault("source", f"adata_{source}")
                 item = SectorSnapshot.from_raw(row, source=f"adata_{source}")
                 if item.code:
+                    self._enrich_change_pct(item)
                     self._sector_cache[cache_key] = (now, item)
                     self._last_error = ""
                     return item
@@ -222,7 +229,9 @@ class RealtimeSectorService:
         try:
             return future.result(timeout=self.request_timeout_seconds)
         except FutureTimeoutError:
-            raise TimeoutError(f"单板块行情超过 {self.request_timeout_seconds:.1f}s")
+            raise TimeoutError(
+                f"单板块行情超过 {self.request_timeout_seconds:.1f}s",
+            ) from None
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
@@ -237,7 +246,12 @@ class RealtimeSectorService:
                     continue
                 seen.add(code)
                 codes.append(code)
-                self._remember_sector_meta(code, self._row_sector_name(row), row.get("sector_type") or "概念")
+                self._remember_sector_meta(
+                    code,
+                    self._row_sector_name(row),
+                    row.get("sector_type") or "概念",
+                    source=source,
+                )
                 if len(codes) >= max(int(limit or 20), 1):
                     return codes
             if codes:
@@ -270,6 +284,7 @@ class RealtimeSectorService:
                 code = self._clean_code(
                     row.get("code")
                     or row.get("index_code")
+                    or row.get("ts_code")
                     or row.get("板块代码")
                     or row.get("概念代码")
                     or row.get("行业代码")
@@ -282,7 +297,7 @@ class RealtimeSectorService:
                     typ = self._sector_type_label(
                         row.get("sector_type") or row.get("type") or row.get("板块类型") or type_hint
                     )
-                    self._remember_sector_meta(code, label, typ)
+                    self._remember_sector_meta(code, label, typ, source=source)
                 if len(codes) >= max(int(limit or 20), 1):
                     return codes
         return codes
@@ -298,6 +313,7 @@ class RealtimeSectorService:
                     self._row_sector_code(row),
                     self._row_sector_name(row),
                     row.get("sector_type") or "概念",
+                    source=source,
                 )
             self._sector_name_sources.add(source_key)
             return
@@ -321,6 +337,7 @@ class RealtimeSectorService:
                     code = self._clean_code(
                         row.get("code")
                         or row.get("index_code")
+                        or row.get("ts_code")
                         or row.get("concept_code")
                         or row.get("industry_code")
                         or ""
@@ -329,7 +346,7 @@ class RealtimeSectorService:
                     typ = self._sector_type_label(
                         row.get("sector_type") or row.get("type") or row.get("板块类型") or type_hint
                     )
-                    self._remember_sector_meta(code, label, typ)
+                    self._remember_sector_meta(code, label, typ, source=source)
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"[RealtimeSectorService] sector name map failed via {name}: {e}")
         self._sector_name_sources.add(source_key)
@@ -341,9 +358,24 @@ class RealtimeSectorService:
         try:
             from config.settings import CACHE_DIR
 
-            path = Path(CACHE_DIR) / "sector" / "ths_index" / "adata_concept_ths.csv"
-            with path.open("r", encoding="utf-8-sig", newline="") as f:
-                return [dict(row) for row in csv.DictReader(f)]
+            root = Path(CACHE_DIR) / "sector" / "ths_index"
+            records: List[Dict[str, Any]] = []
+            for filename, type_hint in (
+                ("adata_concept_ths.csv", "概念"),
+                ("index_I.csv", "行业"),
+                ("index_N.csv", "概念"),
+            ):
+                path = root / filename
+                if not path.exists():
+                    continue
+                with path.open("r", encoding="utf-8-sig", newline="") as file:
+                    for raw in csv.DictReader(file):
+                        row = dict(raw)
+                        row["sector_type"] = self._sector_type_label(
+                            row.get("sector_type") or row.get("type") or type_hint,
+                        )
+                        records.append(row)
+            return records
         except Exception:
             return []
 
@@ -352,6 +384,7 @@ class RealtimeSectorService:
         return RealtimeSectorService._clean_code(
             row.get("code")
             or row.get("index_code")
+            or row.get("ts_code")
             or row.get("sector_code")
             or row.get("concept_code")
             or row.get("板块代码")
@@ -365,7 +398,9 @@ class RealtimeSectorService:
         text = str(value or "").strip()
         return "" if text.lower() in RealtimeSectorService.INVALID_CODE_TEXT else text
 
-    def _remember_sector_meta(self, code: str, label: str, typ: str) -> None:
+    def _remember_sector_meta(
+        self, code: str, label: str, typ: str, *, source: str = "",
+    ) -> None:
         code = self._clean_code(code)
         if not code:
             return
@@ -377,8 +412,63 @@ class RealtimeSectorService:
         for key in keys:
             if label:
                 self._sector_names[key] = label
+                if source:
+                    source_names = self._sector_names_by_source.setdefault(
+                        self._source_key(source), {},
+                    )
+                    source_names[key] = label
             if typ:
                 self._sector_types[key] = typ
+
+    def _enrich_change_pct(self, item: SectorSnapshot) -> None:
+        if item.change_pct is not None or item.last_price <= 0:
+            return
+        quote_date = str(item.date or datetime.now().strftime("%Y%m%d")).replace("-", "")[:8]
+        previous_close = self._previous_close(item.code, item.name, quote_date)
+        if previous_close <= 0:
+            return
+        item.pre_close = previous_close
+        item.change_pct = (item.last_price / previous_close - 1.0) * 100.0
+        item.raw["change_pct_fallback"] = "sector_daily_silver_previous_close"
+
+    def _previous_close(self, code: str, name: str, quote_date: str) -> float:
+        clean_code = self._clean_code(code).split(".")[0]
+        key = (clean_code, str(name or "").strip(), quote_date)
+        if key in self._previous_close_cache:
+            return self._previous_close_cache[key]
+        value = 0.0
+        try:
+            import duckdb  # type: ignore
+
+            from backtest.trade_calendar import TradeCalendar
+            from config.settings import FACTOR_DB_PATH
+
+            path = Path(FACTOR_DB_PATH)
+            if path.exists():
+                expected_date = TradeCalendar().prev(quote_date)
+                con = duckdb.connect(str(path), read_only=True)
+                try:
+                    row = con.execute(
+                        "SELECT CAST(trade_date AS VARCHAR), close FROM sector_daily_silver "
+                        "WHERE CAST(trade_date AS VARCHAR) < ? AND close > 0 "
+                        "AND (REPLACE(CAST(sector_code AS VARCHAR), '.TI', '') = ? "
+                        "OR sector_name = ?) "
+                        "ORDER BY CAST(trade_date AS VARCHAR) DESC LIMIT 1",
+                        [quote_date, clean_code, str(name or "").strip()],
+                    ).fetchone()
+                    if row and str(row[0]) == expected_date and row[1] is not None:
+                        value = float(row[1])
+                finally:
+                    con.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[RealtimeSectorService] 板块昨收回退失败 {code}/{name}: {exc}")
+        self._previous_close_cache[key] = value
+        return value
+
+    @staticmethod
+    def _source_key(source: str) -> str:
+        key = (source or "east").lower()
+        return "ths" if key in ("ths", "tonghuashun", "同花顺") else "east"
 
     @staticmethod
     def _row_sector_name(row: Dict[str, Any]) -> str:

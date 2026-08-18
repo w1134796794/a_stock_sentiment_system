@@ -29,6 +29,10 @@ def _repository(tmp_path: Path) -> MobileReadRepository:
                 "regime_label": "强市",
                 "market_score": 66.0,
                 "market_risk_labels": ["炸板率偏高"],
+                "crowding_summary": [
+                    {"cluster": "机器人", "count": 3, "ratio_pct": 60.0, "level": "拥挤"}
+                ],
+                "cluster_limits": {"focus_per_cluster": 2, "active_per_cluster": 3},
                 "rows": [
                     {
                         "code": "000001",
@@ -49,6 +53,11 @@ def _repository(tmp_path: Path) -> MobileReadRepository:
                         "规则等级": "B",
                         "expected_gross_return_pct": 2.6,
                         "expected_excess_return_pct": 0.8,
+                        "主题簇": "机器人",
+                        "主题候选数": 3,
+                        "主题占比%": 60.0,
+                        "拥挤等级": "拥挤",
+                        "拥挤说明": "机器人主题集中度偏高",
                     }
                 ],
             },
@@ -143,9 +152,12 @@ def test_mobile_service_reads_generated_local_data(tmp_path, monkeypatch):
 
     assert dashboard["market"]["market_score"] == 66.0
     assert dashboard["market"]["risk_flags"] == ["炸板率偏高"]
+    assert dashboard["crowding_summary"][0]["cluster"] == "机器人"
+    assert dashboard["cluster_limits"]["active_per_cluster"] == 3
     assert candidates["items"][0]["mainline"] == "机器人"
     assert candidates["items"][0]["expected_excess_return_pct"] == 0.8
     assert candidates["items"][0]["confirmation"] == "站上分时均价"
+    assert candidates["items"][0]["crowding_level"] == "拥挤"
     assert limitup["limit_up_count"] == 1
     assert limitup["max_board_height"] == 2
 

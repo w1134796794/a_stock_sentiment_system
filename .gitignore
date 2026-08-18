@@ -31,6 +31,7 @@ htmlcov/
 /webdata/reports/
 /webdata/runtime/
 /webdata/screening/
+/webdata/automation/
 /webdata/snapshots/
 /webdata/warehouse/
 /webdata/fetch_status/

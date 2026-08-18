@@ -17,7 +17,6 @@ import yaml
 
 from core.models.market_state import EMOTION_PHASES
 
-
 STRATEGY_ID = re.compile(r"^[A-Za-z0-9_-]{2,48}$")
 FACTOR_ID = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{1,80}$")
 SUPPORTED_OPERATORS = (">=", ">", "<=", "<", "==", "!=", "between", "in", "not_in")
@@ -188,7 +187,7 @@ class StrategyProfileRepository:
         if not isinstance(raw, Mapping):
             return None
         base_name = str(raw.get("base_profile") or "default")
-        base = deepcopy((self._base_profiles().get(base_name) or {}))
+        base = deepcopy(self._base_profiles().get(base_name) or {})
         ranking = base.get("ranking") or {}
         weights = ranking.get("prior_weights") or ranking.get("weights") or {}
         enhancements = raw.get("enhancements") or {}
@@ -207,6 +206,9 @@ class StrategyProfileRepository:
             "stock_pool": str(raw.get("stock_pool") or "all"),
             "training_scope": str(raw.get("training_scope") or "all"),
             "required_filters": deepcopy(raw.get("required_filters", base.get("hard_filters") or [])),
+            "priority_filters": deepcopy(
+                raw.get("priority_filters", base.get("priority_filters") or [])
+            ),
             "exclusion_filters": deepcopy(raw.get("exclusion_filters") or []),
             "evidence_rules": deepcopy(raw.get("evidence_rules") or []),
             "veto_rules": deepcopy(raw.get("veto_rules") or []),
@@ -230,7 +232,7 @@ class StrategyProfileRepository:
         profile = self.get_profile(profile_id)
         if profile is None:
             raise ValueError(f"策略组合不存在: {profile_id}")
-        base = deepcopy((self._base_profiles().get(profile["base_profile"]) or {}))
+        base = deepcopy(self._base_profiles().get(profile["base_profile"]) or {})
         ranking = base.setdefault("ranking", {})
         weights = {
             str(row["factor"]): float(row["weight"])
@@ -241,6 +243,7 @@ class StrategyProfileRepository:
         ranking["weights"] = weights
         ranking["top_n"] = int(profile["top_n"])
         base["hard_filters"] = deepcopy(profile["required_filters"])
+        base["priority_filters"] = deepcopy(profile["priority_filters"])
         base["exclusion_filters"] = (
             deepcopy(profile["exclusion_filters"])
             + deepcopy(profile["veto_rules"])
@@ -286,7 +289,7 @@ class StrategyProfileRepository:
             raise ValueError("策略标识只能使用2-48位字母、数字、下划线或短横线")
         existing_profile = self.get_profile(profile_id) or {}
         submitted = dict(data or {})
-        for key in ("scope", "evidence_rules", "veto_rules"):
+        for key in ("scope", "priority_filters", "evidence_rules", "veto_rules"):
             if key not in submitted and key in existing_profile:
                 submitted[key] = deepcopy(existing_profile[key])
         if existing_profile.get("scope") == "production":
@@ -359,6 +362,7 @@ class StrategyProfileRepository:
         if scope == "production" and weight_source != "manual":
             raise ValueError("生产策略已冻结模型权重，只允许使用人工规则权重")
         filters_required = self._validate_filters(data.get("required_filters") or [])
+        filters_priority = self._validate_filters(data.get("priority_filters") or [])
         filters_excluded = self._validate_filters(data.get("exclusion_filters") or [])
         evidence_rules = self._validate_filters(data.get("evidence_rules") or [])
         veto_rules = self._validate_filters(data.get("veto_rules") or [])
@@ -402,6 +406,7 @@ class StrategyProfileRepository:
             "stock_pool": stock_pool,
             "training_scope": training_scope,
             "required_filters": filters_required,
+            "priority_filters": filters_priority,
             "exclusion_filters": filters_excluded,
             "evidence_rules": evidence_rules,
             "veto_rules": veto_rules,

@@ -197,9 +197,20 @@ def test_production_strategies_use_the_core_factor_contract():
     assert main_required["stk_sector_mainline_score"] == (">=", 55)
     assert main_required["stk_sector_resonance_score"] == (">=", 55)
     assert main_required["stk_relative_strength_sector"] == (">=", 50)
-    assert main_required["mkt_market_score"] == (">=", 40)
-    assert main_required["mkt_limit_down_count"] == ("<=", 30)
-    assert main_required["mkt_broken_rate"] == ("<=", 35)
+    assert main_required["stk_mainline_leader_identity"] == (">=", 65)
+    assert "mkt_market_score" not in main_required
+    assert "mkt_limit_down_count" not in main_required
+    assert "mkt_broken_rate" not in main_required
+    assert mainline["priority_filters"] == []
+    main_evidence = {
+        row["factor"]: (row["op"], row["value"])
+        for row in mainline["evidence_rules"]
+    }
+    assert main_evidence["mkt_market_score"] == (">=", 40)
+    assert main_evidence["mkt_limit_down_count"] == ("<=", 30)
+    assert main_evidence["mkt_broken_rate"] == ("<=", 35)
+    resolved_mainline = repository.resolve("mainline_leader")
+    assert resolved_mainline["priority_filters"] == []
     main_excluded = {
         row["factor"]: (row["op"], row["value"])
         for row in (
@@ -214,15 +225,16 @@ def test_production_strategies_use_the_core_factor_contract():
         for row in mainline["ranking_factors"]
     }
     assert main_weights == {
-        "stk_sector_mainline_score": 0.15,
-        "stk_sector_resonance_score": 0.14,
-        "stk_kpl_leader_quality": 0.14,
+        "stk_sector_mainline_score": 0.14,
+        "stk_sector_resonance_score": 0.12,
+        "stk_mainline_leader_identity": 0.18,
         "stk_sector_persistence_score": 0.12,
-        "stk_relative_strength_sector": 0.12,
-        "stk_board_position": 0.11,
-        "stk_intraday_seal_quality": 0.10,
+        "stk_relative_strength_sector": 0.11,
+        "stk_board_position": 0.10,
+        "stk_intraday_seal_quality": 0.09,
         "stk_behavior_acceleration": 0.07,
-        "stk_lhb_sector_resonance": 0.05,
+        "stk_lhb_sector_resonance": 0.04,
+        "stk_new_high_20d": 0.03,
     }
 
 

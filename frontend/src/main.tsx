@@ -107,7 +107,7 @@ function CandidateCard({ row, realtime, onOpen, onPrefetch }: { row: Candidate; 
           <strong>{row.name || "未命名股票"}</strong>
           <span className="stock-code">{row.code}</span>
         </div>
-        <div className="candidate-badges"><RealtimeBadge row={realtime} /><span className="consensus-badge">共识 {consensus}</span></div>
+        <div className="candidate-badges"><RealtimeBadge row={realtime} />{row.crowding_level && row.crowding_level !== "正常" && <span className="crowding-badge">{row.theme_cluster} {row.crowding_level}</span>}<span className="consensus-badge">共识 {consensus}</span></div>
       </div>
       <p className="candidate-conclusion">{realtime?.reason || row.conclusion || "等待盘中条件确认，不主动追价。"}</p>
       <div className="strategy-tags">
@@ -350,6 +350,13 @@ function Workbench() {
     {error && <div className="inline-error"><ShieldAlert size={15} />{error}<button onClick={() => setError("")}><X size={14} /></button></div>}
 
     {view === "intelligence" ? <IntelligenceView data={intelligence} loading={loadingIntel} /> : <>
+      {(data.crowding_summary || []).some((item) => item.level !== "正常") && <section className="crowding-alert">
+        <ShieldAlert size={17} />
+        <div>
+          <strong>题材拥挤控制已生效</strong>
+          <p>{(data.crowding_summary || []).filter((item) => item.level !== "正常").map((item) => `${item.cluster} ${item.count}只（${item.ratio_pct.toFixed(0)}%，${item.level}）`).join("；")}。当前市场每个主题最多保留 {data.cluster_limits?.focus_per_cluster || 1} 只重点、{data.cluster_limits?.active_per_cluster || 2} 只可行动标的，其余降为暂不参与。</p>
+        </div>
+      </section>}
       <section className="decision-tools">
         <label><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索股票、代码、策略或主线" /></label>
         <div className="group-filter">{["全部", "重点确认", "盘中观察", "暂不参与"].map((item) => <button type="button" key={item} className={groupFilter === item ? "active" : ""} onClick={() => setGroupFilter(item)}>{item}</button>)}</div>

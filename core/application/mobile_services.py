@@ -93,6 +93,8 @@ class MobileReadService:
             "market": self._market_summary(market, pool),
             "groups": groups,
             "counts": {key: len(rows) for key, rows in groups.items()},
+            "crowding_summary": list(pool.get("crowding_summary") or []),
+            "cluster_limits": dict(pool.get("cluster_limits") or {}),
             "generated_at": str(pool.get("generated_at") or market.get("computed_at") or ""),
             "data_status": "ready" if pool else "missing",
             "data_completeness": 100.0 if pool and market else (50.0 if pool or market else 0.0),
@@ -235,6 +237,11 @@ class MobileReadService:
             "confidence_grade": str(row.get("confidence_grade") or row.get("规则等级") or ""),
             "expected_return_pct": _number(row.get("expected_gross_return_pct") or row.get("expected_return_pct")),
             "expected_excess_return_pct": _number(row.get("expected_excess_return_pct")),
+            "theme_cluster": str(row.get("主题簇") or ""),
+            "theme_candidate_count": int(row.get("主题候选数") or 0),
+            "theme_ratio_pct": _number(row.get("主题占比%")),
+            "crowding_level": str(row.get("拥挤等级") or ""),
+            "crowding_note": str(row.get("拥挤说明") or ""),
         }
 
     def _group_candidates(self, rows: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:

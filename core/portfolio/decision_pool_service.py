@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
-from core.factors.sector_taxonomy import partition_sector_names
+from core.factors.sector_taxonomy import partition_sector_names, theme_cluster_name
 from core.models.market_state import (
     EMOTION_PHASE_LABELS,
     EMOTION_PHASES,
@@ -39,6 +39,11 @@ ENTRY_MODE_LABELS = {
 }
 GRADE_ORDER = {"A": 0, "B": 1, "C": 2, "D": 3}
 MAINLINE_CONFIRM_THRESHOLD = 55.0
+CROWDING_POLICY = {
+    "strong": {"focus_per_cluster": 2, "active_per_cluster": 3},
+    "neutral": {"focus_per_cluster": 1, "active_per_cluster": 2},
+    "weak": {"focus_per_cluster": 1, "active_per_cluster": 2},
+}
 EVIDENCE_FACTORS = (
     ("stk_sector_mainline_score", "主线地位", 55.0),
     ("stk_sector_resonance_score", "板块共振", 55.0),
@@ -178,20 +183,54 @@ class DecisionPoolService:
                 risk_flags=risk_flags,
             )
 
+        crowding_summary = self._annotate_crowding(merged, regime)
+
         actionable = [row for row in merged if not row["_blocked"]]
         inactive = [row for row in merged if row["_blocked"]]
         focus: List[Dict[str, Any]] = []
         watch: List[Dict[str, Any]] = []
+        focus_clusters: Counter[str] = Counter()
+        active_clusters: Counter[str] = Counter()
+        crowding_policy = CROWDING_POLICY[regime]
         for row in actionable:
             grade = str(row.get("规则等级") or "D")
-            if len(focus) < 3 and grade in {"A", "B"}:
+            cluster = str(row.get("主题簇") or "")
+            focus_allowed = bool(
+                not cluster
+                or focus_clusters[cluster] < crowding_policy["focus_per_cluster"]
+            )
+            active_allowed = bool(
+                not cluster
+                or active_clusters[cluster] < crowding_policy["active_per_cluster"]
+            )
+            if len(focus) < 3 and grade in {"A", "B"} and focus_allowed and active_allowed:
                 self._set_group(row, "focus", regime, phase)
                 focus.append(row)
-            elif len(watch) < 5 and len(focus) + len(watch) < 8 and grade in {"A", "B", "C"}:
+                if cluster:
+                    focus_clusters[cluster] += 1
+                    active_clusters[cluster] += 1
+            elif (
+                len(watch) < 5
+                and len(focus) + len(watch) < 8
+                and grade in {"A", "B", "C"}
+                and active_allowed
+            ):
                 self._set_group(row, "watch", regime, phase)
                 watch.append(row)
+                if cluster:
+                    active_clusters[cluster] += 1
             else:
+                crowding_reason = ""
+                if cluster and not active_allowed:
+                    row["拥挤降级"] = True
+                    crowding_reason = (
+                        f"{cluster}候选过度集中，今日决策池最多保留"
+                        f"{crowding_policy['active_per_cluster']}只，当前标的降为研判参考"
+                    )
+                    row["拥挤说明"] = crowding_reason
                 self._set_group(row, "inactive", regime, phase)
+                if crowding_reason:
+                    row["失效条件"] = crowding_reason
                 inactive.append(row)
 
         for row in inactive:
@@ -222,6 +261,8 @@ class DecisionPoolService:
             "active_strategy_ids": applicable,
             "active_strategy_names": active_names,
             "hidden_strategy_names": hidden_names,
+            "crowding_summary": crowding_summary,
+            "cluster_limits": crowding_policy,
             "rows": focus + watch + inactive,
             "groups": [
                 {"key": "focus", "name": "重点确认", "meaning": "多策略共识，盘中满足条件可交易", "rows": focus},
@@ -230,6 +271,50 @@ class DecisionPoolService:
             ],
             "decision_count": len(focus) + len(watch),
         }
+
+    @staticmethod
+    def _annotate_crowding(rows: Sequence[Dict[str, Any]], regime: str) -> List[Dict[str, Any]]:
+        active_rows = [row for row in rows if not row.get("_blocked")]
+        for row in rows:
+            labels = list(row.get("共振板块") or row.get("相关题材") or [])
+            mainline = str(row.get("所属主线") or "")
+            if mainline and mainline != "主线待确认":
+                labels.insert(0, mainline)
+            row["主题簇"] = theme_cluster_name(labels)
+
+        counts = Counter(str(row.get("主题簇") or "") for row in active_rows)
+        counts.pop("", None)
+        total = max(len(active_rows), 1)
+        summary: List[Dict[str, Any]] = []
+        for cluster, count in counts.most_common():
+            ratio = count / total
+            level = (
+                "严重拥挤" if count >= 4 and ratio >= 0.5
+                else "拥挤" if count >= 3 and ratio >= 0.35
+                else "正常"
+            )
+            summary.append({
+                "cluster": cluster,
+                "count": count,
+                "ratio_pct": round(ratio * 100.0, 1),
+                "level": level,
+            })
+
+        summary_map = {item["cluster"]: item for item in summary}
+        for row in rows:
+            item = summary_map.get(str(row.get("主题簇") or ""), {})
+            row["主题候选数"] = int(item.get("count") or 0)
+            row["主题占比%"] = _number(item.get("ratio_pct"))
+            row["拥挤等级"] = str(item.get("level") or "未识别")
+            row["拥挤降级"] = False
+            if row["拥挤等级"] in {"拥挤", "严重拥挤"}:
+                row["拥挤说明"] = (
+                    f"{row['主题簇']}占可用候选{row['主题占比%']:.1f}%"
+                    f"（{row['主题候选数']}只），{regime}市场按主题限额保留"
+                )
+            else:
+                row["拥挤说明"] = "主题集中度正常"
+        return summary
 
     @staticmethod
     def persist(payload: Mapping[str, Any], output_dir: Path, trade_date: str) -> Path:

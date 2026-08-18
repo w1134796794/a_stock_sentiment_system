@@ -166,3 +166,37 @@ def test_realtime_sector_service_filters_missing_code_markers():
     assert RealtimeSectorService._row_sector_code({"index_code": "nan"}) == ""
     assert RealtimeSectorService._row_sector_code({"index_code": "None"}) == ""
     assert RealtimeSectorService._normalize_codes(["nan", "--", None, "886109"]) == ["886109"]
+
+
+def test_sector_name_resolution_keeps_provider_code_spaces_separate():
+    service = RealtimeSectorService(SimpleNamespace(stock=SimpleNamespace()))
+    service._remember_sector_meta("886001", "机器人", "概念", source="ths")
+    service._remember_sector_meta("BK0001", "机器人", "概念", source="east")
+    service._sector_name_sources.update({"ths", "east"})
+
+    assert service.resolve_codes_by_names(["机器人"], source="ths") == {"机器人": "886001"}
+    assert service.resolve_codes_by_names(["机器人"], source="east") == {"机器人": "BK0001"}
+
+
+def test_sector_quote_uses_previous_close_when_provider_omits_change_pct(monkeypatch):
+    fake_adata = SimpleNamespace(
+        stock=SimpleNamespace(
+            market=SimpleNamespace(
+                get_market_concept_current_ths=lambda index_code=None: [{
+                    "index_code": index_code,
+                    "trade_date": "2026-08-18",
+                    "price": 110.0,
+                    "change_pct": None,
+                }],
+            ),
+            info=SimpleNamespace(),
+        ),
+    )
+    service = RealtimeSectorService(fake_adata, ttl_seconds=30)
+    monkeypatch.setattr(service, "_previous_close", lambda *_args: 100.0)
+
+    result = service.get_sector_quotes(["886001"], source="ths")
+
+    assert result["ok"] is True
+    assert result["sectors"][0]["pre_close"] == 100.0
+    assert round(result["sectors"][0]["change_pct"], 2) == 10.0

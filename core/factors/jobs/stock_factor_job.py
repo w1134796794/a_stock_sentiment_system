@@ -154,6 +154,72 @@ def _new_high_position_score(value: float) -> float:
     return max(20.0, 55.0 - (v - 1.20) * 100.0)
 
 
+def _trend_structure_metrics(con, trade_date: str) -> pd.DataFrame:
+    """Return compact 5/10/20/60-day trend evidence without loading all bars."""
+    query = """
+        WITH recent_dates AS (
+            SELECT DISTINCT CAST(trade_date AS VARCHAR) AS trade_date
+            FROM stock_daily_silver
+            WHERE CAST(trade_date AS VARCHAR) <= ?
+            ORDER BY trade_date DESC
+            LIMIT 60
+        ), ranked AS (
+            SELECT
+                LPAD(SPLIT_PART(CAST(code AS VARCHAR), '.', 1), 6, '0') AS code,
+                CAST(trade_date AS VARCHAR) AS trade_date,
+                CAST(close AS DOUBLE) AS close,
+                ROW_NUMBER() OVER (
+                    PARTITION BY LPAD(SPLIT_PART(CAST(code AS VARCHAR), '.', 1), 6, '0')
+                    ORDER BY CAST(trade_date AS VARCHAR) DESC
+                ) AS rn
+            FROM stock_daily_silver
+            WHERE CAST(trade_date AS VARCHAR) IN (SELECT trade_date FROM recent_dates)
+        )
+        SELECT
+            code,
+            AVG(close) FILTER (WHERE rn <= 5) AS trend_ma5,
+            AVG(close) FILTER (WHERE rn <= 10) AS trend_ma10,
+            AVG(close) FILTER (WHERE rn <= 20) AS trend_ma20,
+            AVG(close) FILTER (WHERE rn <= 60) AS trend_ma60,
+            MAX(CASE WHEN rn = 20 THEN close END) AS trend_close_20d_ago,
+            COUNT(*) AS trend_sample_days
+        FROM ranked
+        GROUP BY code
+    """
+    try:
+        return con.execute(query, [str(trade_date)]).df()
+    except Exception:  # noqa: BLE001 - optional evidence must not stop factor generation
+        return pd.DataFrame(columns=[
+            "code", "trend_ma5", "trend_ma10", "trend_ma20", "trend_ma60",
+            "trend_close_20d_ago", "trend_sample_days",
+        ])
+
+
+def _mainline_trend_identity_score(row) -> float:
+    """Score sustained leadership; a one-day sector follower should stay below 65."""
+    sample_days = to_float(getattr(row, "trend_sample_days", 0.0), 0.0)
+    if sample_days < 20:
+        return 0.0
+    close = to_float(getattr(row, "close", 0.0), 0.0)
+    ma5 = to_float(getattr(row, "trend_ma5", 0.0), 0.0)
+    ma10 = to_float(getattr(row, "trend_ma10", 0.0), 0.0)
+    ma20 = to_float(getattr(row, "trend_ma20", 0.0), 0.0)
+    ma60 = to_float(getattr(row, "trend_ma60", 0.0), 0.0)
+    close_20d_ago = to_float(getattr(row, "trend_close_20d_ago", 0.0), 0.0)
+    score = 0.0
+    score += 12.0 if ma5 > ma10 > 0 else 0.0
+    score += 14.0 if ma10 > ma20 > 0 else 0.0
+    score += 14.0 if close > ma20 > 0 else 0.0
+    if sample_days >= 55:
+        score += 18.0 if ma20 > ma60 > 0 else 0.0
+        score += 12.0 if close > ma60 > 0 else 0.0
+    return_20d = close / close_20d_ago - 1.0 if close_20d_ago > 0 else 0.0
+    score += max(0.0, min(20.0, return_20d * 100.0))
+    score += 10.0 if to_float(getattr(row, "new_high_score", 0.0), 0.0) >= 70.0 else 0.0
+    score += 10.0 if to_float(getattr(row, "limit_appearances_5d", 0.0), 0.0) >= 2.0 else 0.0
+    return max(0.0, min(100.0, score))
+
+
 def _stock_sector_scores(
     code: str,
     sector_scores: dict,
@@ -289,6 +355,17 @@ class StockFactorJob:
             return result
 
         hist = stock[stock["trade_date"] < str(trade_date)].copy()
+        trend_metrics = _trend_structure_metrics(con, str(trade_date))
+        if not trend_metrics.empty:
+            trend_metrics["code"] = trend_metrics["code"].astype(str).str.zfill(6)
+            today = today.merge(trend_metrics, on="code", how="left")
+        for column in (
+            "trend_ma5", "trend_ma10", "trend_ma20", "trend_ma60",
+            "trend_close_20d_ago", "trend_sample_days",
+        ):
+            if column not in today.columns:
+                today[column] = 0.0
+            today[column] = pd.to_numeric(today[column], errors="coerce").fillna(0.0)
 
         limit_pool = read_table(con, "limit_up_pool_silver", where="trade_date = ?", params=[str(trade_date)])
         pool_by_code: dict = {}
@@ -638,21 +715,46 @@ class StockFactorJob:
         today["reseal_resilience_score"] = reseal_scores
         today["late_seal_safety_score"] = late_seal_scores
         today["late_seal_delay_minutes"] = late_seal_delays
+        behavior_columns = {}
         for state in BEHAVIOR_STATES:
-            today[f"behavior_{state}_score"] = [item["scores"][state] for item in behavior_rows]
-            today[f"behavior_{state}_probability"] = [
+            behavior_columns[f"behavior_{state}_score"] = [
+                item["scores"][state] for item in behavior_rows
+            ]
+            behavior_columns[f"behavior_{state}_probability"] = [
                 item["probabilities"][state] for item in behavior_rows
             ]
-        today["behavior_repair_quality_score"] = [
-            item["atomic"]["repair_quality"] for item in behavior_rows
-        ]
-        today["behavior_divergence_resilience_score"] = [
-            item["atomic"]["divergence_resilience"] for item in behavior_rows
-        ]
-        today["behavior_dominant_state"] = [item["dominant_state"] for item in behavior_rows]
-        today["behavior_dominant_label"] = [item["dominant_label"] for item in behavior_rows]
-        today["behavior_dominant_probability"] = [item["dominant_probability"] for item in behavior_rows]
-        today["behavior_data_completeness"] = [item["data_completeness"] for item in behavior_rows]
+        behavior_columns.update({
+            "behavior_repair_quality_score": [
+                item["atomic"]["repair_quality"] for item in behavior_rows
+            ],
+            "behavior_divergence_resilience_score": [
+                item["atomic"]["divergence_resilience"] for item in behavior_rows
+            ],
+            "behavior_dominant_state": [item["dominant_state"] for item in behavior_rows],
+            "behavior_dominant_label": [item["dominant_label"] for item in behavior_rows],
+            "behavior_dominant_probability": [item["dominant_probability"] for item in behavior_rows],
+            "behavior_data_completeness": [item["data_completeness"] for item in behavior_rows],
+        })
+        mainline_trend_identity = pd.Series(
+            [_mainline_trend_identity_score(row) for row in today.itertuples()],
+            index=today.index,
+            dtype=float,
+        )
+        kpl_identity = pd.to_numeric(today["leader_quality_score"], errors="coerce").fillna(0.0).where(
+            pd.to_numeric(today["kpl_present"], errors="coerce").fillna(0.0) > 0,
+            0.0,
+        )
+        identity_columns = pd.DataFrame({
+            "mainline_trend_identity_score": mainline_trend_identity,
+            "mainline_leader_identity_score": pd.concat(
+                [mainline_trend_identity, kpl_identity], axis=1,
+            ).max(axis=1).clip(0.0, 100.0),
+        }, index=today.index)
+        today = pd.concat([
+            today,
+            pd.DataFrame(behavior_columns, index=today.index),
+            identity_columns,
+        ], axis=1).copy()
 
         total_score = pd.Series([
             safe_weighted_score([
@@ -730,6 +832,14 @@ class StockFactorJob:
             "limit_appearances_5d",
             "relative_strength_sector_raw",
             "relative_strength_sector_score",
+            "mainline_trend_identity_score",
+            "mainline_leader_identity_score",
+            "trend_ma5",
+            "trend_ma10",
+            "trend_ma20",
+            "trend_ma60",
+            "trend_close_20d_ago",
+            "trend_sample_days",
             "board_score",
             "board_height",
             "board_height_score",
@@ -848,6 +958,12 @@ class StockFactorJob:
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,
                     factor_id="stk_new_high_20d", raw_value=row["new_high_ratio"], score=row["new_high_score"],
                     direction="higher_better",
+                ),
+                make_long_record(
+                    trade_date=trade_date, entity_type="stock", entity_id=entity_id,
+                    factor_id="stk_mainline_leader_identity",
+                    raw_value=row["mainline_trend_identity_score"],
+                    score=row["mainline_leader_identity_score"], direction="higher_better",
                 ),
                 make_long_record(
                     trade_date=trade_date, entity_type="stock", entity_id=entity_id,

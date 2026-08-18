@@ -1,4 +1,5 @@
 import importlib.util
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -7,10 +8,10 @@ from core.factors.jobs.gold_utils import percentile_score
 from core.factors.jobs.runner import FactorJobRunner
 from core.factors.jobs.stock_factor_job import (
     _amount_ratio_target_score,
+    _mainline_trend_identity_score,
     _new_high_position_score,
     _stock_sector_scores,
 )
-
 
 DUCKDB_MISSING = importlib.util.find_spec("duckdb") is None
 
@@ -78,6 +79,24 @@ def test_new_high_position_score_does_not_saturate_after_breakout():
     assert _new_high_position_score(1.06) < 100.0
     assert _new_high_position_score(1.15) < _new_high_position_score(1.06)
     assert _new_high_position_score(0.90) < _new_high_position_score(0.98)
+
+
+def test_mainline_trend_identity_requires_sustained_structure():
+    common = {
+        "close": 23.6,
+        "trend_ma5": 22.0,
+        "trend_ma10": 21.5,
+        "trend_ma20": 20.8,
+        "trend_close_20d_ago": 21.6,
+        "trend_sample_days": 60,
+        "new_high_score": 85.0,
+        "limit_appearances_5d": 1.0,
+    }
+    rebound_below_long_trend = SimpleNamespace(**common, trend_ma60=25.2)
+    sustained_leader = SimpleNamespace(**common, trend_ma60=19.5)
+
+    assert _mainline_trend_identity_score(rebound_below_long_trend) < 65
+    assert _mainline_trend_identity_score(sustained_leader) >= 65
 
 
 def test_stock_sector_scores_use_cached_concept_and_industry(tmp_path):

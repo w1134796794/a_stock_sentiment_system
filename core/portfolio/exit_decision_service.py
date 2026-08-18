@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List
 
+from core.portfolio.protection_price import resolve_protection_price
+
 POLICY_VERSION = "context-exit-v1"
 
 ACTION_LABELS = {
@@ -86,7 +88,7 @@ class ExitDecisionService:
         drawdown_pct = (current / high - 1.0) * 100.0 if high > 0 else 0.0
         change_pct = _number(quote.get("change_pct"), pnl_pct)
         open_price = _number(quote.get("open_price"))
-        structural_stop = _number(position.get("structural_stop"))
+        structural_stop, structural_stop_source = resolve_protection_price(position)
         emergency_loss = max(2.0, _number(position.get("emergency_loss_pct"), 6.0))
         emergency_stop = entry * (1.0 - emergency_loss / 100.0)
 
@@ -103,7 +105,11 @@ class ExitDecisionService:
 
         if shares <= 0:
             hard_reasons.append("持仓股数无效")
-        if structural_stop > 0 and current <= structural_stop:
+        if (
+            structural_stop > 0
+            and structural_stop_source != "账户风险底线"
+            and current <= structural_stop
+        ):
             hard_reasons.append(f"跌破结构保护价{structural_stop:.2f}")
         if current <= emergency_stop:
             hard_reasons.append(f"触及极端风险底线{emergency_stop:.2f}")
@@ -131,6 +137,7 @@ class ExitDecisionService:
             "mfe_pct": round(mfe_pct, 2),
             "drawdown_pct": round(drawdown_pct, 2),
             "structural_stop": round(structural_stop, 4),
+            "structural_stop_source": structural_stop_source,
             "emergency_stop": round(emergency_stop, 4),
             "trailing_stop": round(trailing_stop, 4),
             "strategy_policy": policy,

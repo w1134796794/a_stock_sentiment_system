@@ -612,16 +612,17 @@ class ScreeningEngine:
                     aggfunc="last",
                 )
                 base = base.join(pivot, how="left")
-                raw_scores = stock_scores[
-                    stock_scores["factor_id"].isin(self.RAW_VALUE_FACTORS)
-                ].pivot_table(
-                    index="entity_id",
-                    columns="factor_id",
-                    values="raw_value",
-                    aggfunc="last",
-                )
-                for factor in raw_scores.columns:
-                    base[factor] = raw_scores[factor]
+                if "raw_value" in stock_scores.columns:
+                    raw_scores = stock_scores[
+                        stock_scores["factor_id"].isin(self.RAW_VALUE_FACTORS)
+                    ].pivot_table(
+                        index="entity_id",
+                        columns="factor_id",
+                        values="raw_value",
+                        aggfunc="last",
+                    )
+                    for factor in raw_scores.columns:
+                        base[factor] = raw_scores[factor]
 
             market_scores = value_long[value_long["entity_type"] == "market"].copy()
             for _, row in market_scores.iterrows():

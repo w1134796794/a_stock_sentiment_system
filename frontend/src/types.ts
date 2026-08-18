@@ -17,6 +17,11 @@ export type Candidate = {
   confidence_grade: string;
   expected_return_pct: number;
   expected_excess_return_pct: number;
+  theme_cluster?: string;
+  theme_candidate_count?: number;
+  theme_ratio_pct?: number;
+  crowding_level?: string;
+  crowding_note?: string;
   evidence?: {
     rule_reasons?: string[];
     penalty_reasons?: string[];
@@ -82,6 +87,16 @@ export type WorkbenchData = {
     focus: number;
     watch: number;
     avoid: number;
+  };
+  crowding_summary?: Array<{
+    cluster: string;
+    count: number;
+    ratio_pct: number;
+    level: string;
+  }>;
+  cluster_limits?: {
+    focus_per_cluster: number;
+    active_per_cluster: number;
   };
   quick_links: Array<{ label: string; href: string }>;
 };

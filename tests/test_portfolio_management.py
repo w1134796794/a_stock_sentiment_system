@@ -201,6 +201,23 @@ def test_dashboard_keeps_last_price_when_quote_is_missing(tmp_path):
     assert data["positions"][0]["latest_action"] == "data_insufficient"
 
 
+def test_position_without_manual_structure_price_uses_visible_risk_floor(tmp_path):
+    repository = HoldingRepository(tmp_path / "portfolio.sqlite")
+    opened = repository.open_position(
+        {
+            "code": "000001", "entry_date": "20260801",
+            "entry_price": 10, "shares": 100, "emergency_loss_pct": 6,
+        }
+    )
+    dashboard = HoldingService(repository).dashboard()
+    decision = ExitDecisionService().evaluate(opened, _quote(), signal_date="20260803")
+
+    assert opened["structural_stop"] == 9.4
+    assert dashboard["positions"][0]["structural_stop"] == 9.4
+    assert dashboard["positions"][0]["protection_price_source"] == "账户风险底线"
+    assert decision.protect_price == 9.4
+
+
 def test_exit_notification_is_plain_chinese(monkeypatch):
     service = NotificationService(backend=MemoryStateBackend("portfolio-notify"))
     calls = []

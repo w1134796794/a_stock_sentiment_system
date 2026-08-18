@@ -479,8 +479,8 @@ strategies:
         time_stop_days: 4
         time_stop_profit_threshold: 0.02
   mainline_leader:
-    name: 主线龙头
-    description: 不按候选排名直接认定龙头，强调主线地位、板块持续性、相对强度、封板质量和资金认可。
+    name: 主线龙头候选
+    description: 主线强只证明股票在强题材中；还必须通过连板/明确龙头标签或中期趋势持续领先的身份校验。
     enabled: true
     scope: production
     primary: true
@@ -503,21 +503,14 @@ strategies:
       op: '>='
       value: 50
       reason: ''
-    - name: 市场情绪合格
-      factor: mkt_market_score
+    - name: 龙头身份合格
+      factor: stk_mainline_leader_identity
       op: '>='
-      value: 40
-      reason: 主线龙头需要基本市场容错率
-    - name: 跌停家数可控
-      factor: mkt_limit_down_count
-      op: <=
-      value: 30
-      reason: 跌停过多时停止主动接力
-    - name: 炸板率可控
-      factor: mkt_broken_rate
-      op: <=
-      value: 35
-      reason: 炸板率过高时主线承接不可靠
+      value: 65
+      reason: 必须有连板/明确龙头标签，或者满足均线多头、中期强势与近期新高的趋势龙头证据
+    # 主线身份只由个股与板块证据识别。市场风险控制是否参与和仓位，
+    # 不应让整日主线候选归零。
+    priority_filters: []
     exclusion_filters: []
     veto_rules:
     - name: 龙头衰退
@@ -531,6 +524,21 @@ strategies:
       value: 80
       reason: 席位过度一致增加兑现风险
     evidence_rules:
+    - name: 市场具备主线容错率
+      factor: mkt_market_score
+      op: '>='
+      value: 40
+      reason: 市场分偏低时只观察或降低仓位，不否定主线身份
+    - name: 跌停家数可控
+      factor: mkt_limit_down_count
+      op: <=
+      value: 30
+      reason: 跌停较多时降低参与优先级
+    - name: 炸板率可控
+      factor: mkt_broken_rate
+      op: <=
+      value: 35
+      reason: 炸板率偏高时等待盘中承接确认
     - name: 龙虎榜板块共振
       factor: stk_lhb_sector_resonance
       op: '>='
@@ -543,23 +551,25 @@ strategies:
       reason: 成交额处于可持续区间
     ranking_factors:
     - factor: stk_sector_mainline_score
-      weight: 0.15
+      weight: 0.14
     - factor: stk_sector_resonance_score
-      weight: 0.14
-    - factor: stk_kpl_leader_quality
-      weight: 0.14
+      weight: 0.12
+    - factor: stk_mainline_leader_identity
+      weight: 0.18
     - factor: stk_sector_persistence_score
       weight: 0.12
     - factor: stk_relative_strength_sector
-      weight: 0.12
-    - factor: stk_board_position
       weight: 0.11
+    - factor: stk_board_position
+      weight: 0.10
     - factor: stk_intraday_seal_quality
-      weight: 0.1
+      weight: 0.09
     - factor: stk_behavior_acceleration
       weight: 0.07
     - factor: stk_lhb_sector_resonance
-      weight: 0.05
+      weight: 0.04
+    - factor: stk_new_high_20d
+      weight: 0.03
     weight_source: manual
     weight_profile: mainline_leader
     enhancements:

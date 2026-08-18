@@ -38,6 +38,11 @@ class InternalScheduler:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.RLock()
+        self._job_threads: Dict[str, threading.Thread] = {}
+        self._last_heartbeat_at = ""
+        self._catchup_checked = False
+        self.catch_up_enabled = _env_bool("AUTOMATION_DAILY_CATCH_UP", True)
+        self.max_daily_attempts = max(int(os.getenv("AUTOMATION_DAILY_MAX_ATTEMPTS", "3") or 3), 1)
         self.daily_timeout = max(int(os.getenv("AUTOMATION_DAILY_TIMEOUT", "21600") or 21600), 600)
         self.worker_memory_limit_mb = max(int(os.getenv("AUTOMATION_WORKER_MEMORY_MB", "2400") or 2400), 512)
 
@@ -49,9 +54,15 @@ class InternalScheduler:
             if self._thread and self._thread.is_alive():
                 return
             self.scheduler.clear()
-            self.scheduler.every().day.at(self.auction_time).do(self._auction_job).tag("auction")
-            self.scheduler.every().day.at(self.daily_time).do(self._daily_job).tag("daily")
+            self.scheduler.every().day.at(self.auction_time).do(
+                self._dispatch_job, "auction", self._auction_job,
+            ).tag("auction")
+            self.scheduler.every().day.at(self.daily_time).do(
+                self._dispatch_job, "daily", self._daily_job,
+            ).tag("daily")
+            self.scheduler.every(10).minutes.do(self._recover_due_daily_job).tag("daily")
             self._stop.clear()
+            self._catchup_checked = False
             self._thread = threading.Thread(target=self._loop, daemon=True, name="internal-automation")
             self._thread.start()
             if not self.state.load():
@@ -81,6 +92,12 @@ class InternalScheduler:
             "auction_time": self.auction_time,
             "auto_backtest": self.auto_backtest,
             "capital": self.capital,
+            "catch_up_enabled": self.catch_up_enabled,
+            "max_daily_attempts": self.max_daily_attempts,
+            "scheduler_heartbeat_at": self._last_heartbeat_at,
+            "active_jobs": sorted(
+                name for name, thread in self._job_threads.items() if thread.is_alive()
+            ),
             "jobs": jobs,
             "latest": self.state.load(),
         }
@@ -88,9 +105,67 @@ class InternalScheduler:
     def _loop(self) -> None:
         while not self._stop.wait(1.0):
             try:
+                self._last_heartbeat_at = datetime.now().isoformat(timespec="seconds")
                 self.scheduler.run_pending()
+                if not self._catchup_checked:
+                    # Give application startup a few seconds to finish creating
+                    # database connections before a missed daily job is resumed.
+                    self._catchup_checked = True
+                    if self._stop.wait(3.0):
+                        break
+                    self._recover_due_daily_job()
             except Exception as exc:  # noqa: BLE001
                 logger.exception(f"[Automation] 调度循环异常: {exc}")
+
+    def _dispatch_job(self, name: str, target) -> bool:
+        with self._lock:
+            current = self._job_threads.get(name)
+            if current and current.is_alive():
+                logger.info(f"[Automation] {name} 任务仍在运行，本次触发已跳过")
+                return False
+
+            def run() -> None:
+                try:
+                    target()
+                finally:
+                    with self._lock:
+                        self._job_threads.pop(name, None)
+
+            thread = threading.Thread(
+                target=run, daemon=True, name=f"internal-automation-{name}",
+            )
+            self._job_threads[name] = thread
+            thread.start()
+            return True
+
+    def _recover_due_daily_job(self) -> bool:
+        if not self.catch_up_enabled or self._stop.is_set():
+            return False
+        now = datetime.now()
+        try:
+            due = datetime.strptime(
+                f"{now:%Y-%m-%d} {self.daily_time}", "%Y-%m-%d %H:%M",
+            )
+        except ValueError:
+            logger.error(f"[Automation] 每日任务时间格式无效: {self.daily_time}")
+            return False
+        trade_date = now.strftime("%Y%m%d")
+        if now < due or not self.calendar.is_trade_date(trade_date):
+            return False
+        latest = self.state.load()
+        completed = bool(
+            str(latest.get("trade_date") or "") == trade_date
+            and latest.get("status") == "done"
+            and latest.get("pipeline_ok")
+        )
+        attempts = int(latest.get("attempt") or 0) if str(latest.get("trade_date") or "") == trade_date else 0
+        if completed or attempts >= self.max_daily_attempts:
+            return False
+        logger.warning(
+            f"[Automation] 检测到 {trade_date} 每日流水线未完成，"
+            f"自动恢复第 {attempts + 1}/{self.max_daily_attempts} 次"
+        )
+        return self._dispatch_job("daily", self._daily_job)
 
     def _daily_job(self) -> None:
         trade_date = datetime.now().strftime("%Y%m%d")
@@ -101,11 +176,19 @@ class InternalScheduler:
         if lease is None:
             logger.info(f"[Automation] {trade_date} 每日任务已由其他进程执行")
             return
-        self.state.save({"status": "running", "job": "daily", "trade_date": trade_date, "started_at": datetime.now().isoformat(timespec="seconds")})
+        previous = self.state.load()
+        attempt = (
+            int(previous.get("attempt") or 0) + 1
+            if str(previous.get("trade_date") or "") == trade_date else 1
+        )
+        self.state.save({
+            "status": "running", "job": "daily", "trade_date": trade_date,
+            "attempt": attempt,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+        })
         try:
-            from core.notifications.notifier import NotificationService
-
             from config.settings import BASE_DIR, WEB_DATA_DIR
+            from core.notifications.notifier import NotificationService
 
             result_path = Path(WEB_DATA_DIR) / "automation" / f"daily_{trade_date}.json"
             result_path.unlink(missing_ok=True)
@@ -139,6 +222,7 @@ class InternalScheduler:
                 payload.update({"status": "error", "message": guard_error})
             payload["worker_exit_code"] = exit_code
             payload["worker_log"] = str(log_path)
+            payload["attempt"] = attempt
             self.state.save(payload)
             if payload.get("status") != "done" or not payload.get("pipeline_ok"):
                 message = str(payload.get("message") or f"隔离任务退出码 {exit_code}")

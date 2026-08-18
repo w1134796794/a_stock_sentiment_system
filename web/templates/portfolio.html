@@ -213,7 +213,7 @@
       <div class="pf-metric"><span>成本 / 现价</span><strong class="mono">${price(p.entry_price)} / ${price(p.last_price)}</strong></div>
       <div class="pf-metric"><span>持仓收益</span><strong class="mono ${pnlClass(p.unrealized_pnl_pct)}">${pct(p.unrealized_pnl_pct)}</strong></div>
       <div class="pf-metric"><span>股数 / 市值</span><strong class="mono">${money(p.shares)} / ${money(p.market_value)}</strong></div>
-      <div class="pf-metric"><span>结构保护价</span><strong class="mono">${price(p.structural_stop)}</strong></div>
+      <div class="pf-metric"><span>结构保护价</span><strong class="mono">${price(p.protection_price||p.structural_stop)}</strong><small>${esc(p.protection_price_source||'自动风险底线')}</small></div>
       <div class="pf-metric"><span>所属板块</span><strong>${esc(p.sector_names||'未配置')}</strong></div>
       <div class="pf-metric"><span>买入日</span><strong class="mono">${esc(p.entry_date||'--')}</strong></div>
       <div class="pf-metric"><span>当前强度</span><strong class="mono">${Number(p.current_strength_score||0).toFixed(1)} 分</strong></div>

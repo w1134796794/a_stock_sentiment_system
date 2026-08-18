@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List
 
 from config.settings import HOLDING_DB_PATH
+from core.portfolio.protection_price import resolve_protection_price
 from core.realtime.models import normalize_stock_code
 
 
@@ -277,6 +278,14 @@ class HoldingRepository:
         if len(trade_date) != 8 or not trade_date.isdigit():
             raise ValueError("买入日期必须为YYYYMMDD")
         now = _now()
+        emergency_loss_pct = float(payload.get("emergency_loss_pct") or 6)
+        structural_stop, protection_source = resolve_protection_price({
+            **payload,
+            "entry_price": price,
+            "emergency_loss_pct": emergency_loss_pct,
+        })
+        metadata = dict(payload.get("metadata") or {})
+        metadata.setdefault("protection_price_source", protection_source)
         existing = self.get_open_position(code, account_key)
         with self._connect() as conn:
             account = conn.execute(
@@ -319,9 +328,9 @@ class HoldingRepository:
                         str(payload.get("strategy_id") or ""), str(payload.get("strategy_name") or ""),
                         str(payload.get("sector_names") or ""), trade_date,
                         str(payload.get("entry_time") or ""), price, shares, price * shares,
-                        price, price, float(payload.get("structural_stop") or 0),
-                        float(payload.get("emergency_loss_pct") or 6),
-                        _json(payload.get("metadata")), now, now,
+                        price, price, structural_stop,
+                        emergency_loss_pct,
+                        _json(metadata), now, now,
                     ),
                 )
                 position_id = int(cur.lastrowid)
@@ -462,7 +471,28 @@ class HoldingRepository:
             ).fetchone()
             changed = not previous or str(previous["action"]) != action
             if not changed:
-                return {**dict(previous), "changed": False} if previous else {"changed": False}
+                now = _now()
+                conn.execute(
+                    "UPDATE exit_signals SET signal_date=?, signal_time=?, action_label=?, "
+                    "current_price=?, protect_price=?, pnl_pct=?, reason=?, evidence_json=?, "
+                    "policy_version=? WHERE id=?",
+                    (
+                        str(payload.get("signal_date") or now[:10].replace("-", "")),
+                        str(payload.get("signal_time") or now[11:19]),
+                        str(payload.get("action_label") or action),
+                        float(payload.get("current_price") or 0),
+                        float(payload.get("protect_price") or 0),
+                        float(payload.get("pnl_pct") or 0),
+                        str(payload.get("reason") or ""),
+                        _json(payload.get("evidence")),
+                        str(payload.get("policy_version") or ""),
+                        int(previous["id"]),
+                    ),
+                )
+                row = conn.execute(
+                    "SELECT * FROM exit_signals WHERE id=?", (int(previous["id"]),),
+                ).fetchone()
+                return {**self._signal_row(row), "changed": False}
             now = _now()
             cur = conn.execute(
                 """INSERT INTO exit_signals (

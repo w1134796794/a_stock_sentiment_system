@@ -11,6 +11,7 @@ from config.settings import (
     PAPER_ROTATION_MIN_EDGE,
 )
 from core.portfolio.holding_repository import HoldingRepository
+from core.portfolio.protection_price import resolve_protection_price
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -30,7 +31,16 @@ class HoldingService:
         )
 
     def dashboard(self, account_key: str = "default") -> Dict[str, Any]:
-        positions = [self._decorate(row) for row in self.repository.list_positions(account_key)]
+        exit_signals = self.repository.list_exit_signals(account_key, limit=100)
+        latest_protection: Dict[int, float] = {}
+        for signal in exit_signals:
+            position_id = int(signal.get("position_id") or 0)
+            if position_id and position_id not in latest_protection:
+                latest_protection[position_id] = _number(signal.get("protect_price"))
+        positions = [
+            self._decorate(row, latest_protection.get(int(row.get("id") or 0), 0.0))
+            for row in self.repository.list_positions(account_key)
+        ]
         market_value = sum(_number(row.get("market_value")) for row in positions)
         cost_amount = sum(_number(row.get("cost_amount")) for row in positions)
         unrealized = market_value - cost_amount
@@ -59,7 +69,7 @@ class HoldingService:
                 "actions": actions,
             },
             "positions": positions,
-            "exit_signals": self.repository.list_exit_signals(account_key, limit=100),
+            "exit_signals": exit_signals,
             "trades": self.repository.list_trades(account_key, limit=500),
             "policy": {
                 "initial_capital": PAPER_INITIAL_CAPITAL,
@@ -119,7 +129,7 @@ class HoldingService:
         return {"imported": imported, "skipped": skipped}
 
     @staticmethod
-    def _decorate(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _decorate(row: Dict[str, Any], latest_protect_price: float = 0.0) -> Dict[str, Any]:
         if not row:
             return {}
         data = dict(row)
@@ -129,6 +139,10 @@ class HoldingService:
         market_value = price * shares
         pnl = market_value - cost
         metadata = dict(data.get("metadata") or {})
+        base_protect, protection_source = resolve_protection_price(data)
+        protection_price = max(base_protect, _number(latest_protect_price))
+        if latest_protect_price > base_protect:
+            protection_source = "实时动态保护价"
         entry_strength = _number(metadata.get("entry_strength_score"), 50.0)
         action_adjustment = {
             "hold": 0.0,
@@ -152,6 +166,9 @@ class HoldingService:
                 "unrealized_pnl_pct": round(pnl_pct, 2),
                 "entry_strength_score": round(entry_strength, 2),
                 "current_strength_score": round(current_strength, 2),
+                "structural_stop": round(protection_price, 2),
+                "protection_price": round(protection_price, 2),
+                "protection_price_source": protection_source,
             }
         )
         return data

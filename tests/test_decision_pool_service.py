@@ -306,3 +306,29 @@ def test_decision_pool_persists_as_the_production_execution_artifact(tmp_path):
     assert path.name == "decision_pool_20260720.json"
     assert stored["trade_date"] == "20260720"
     assert stored["rows"][0]["execution_eligible"] is True
+
+
+def test_weak_market_limits_medical_cluster_and_keeps_other_themes():
+    profiles = {
+        "mainline_leader": _profile("mainline_leader", "主线龙头"),
+        "weak_to_strong": _profile("weak_to_strong", "弱转强"),
+    }
+    medical = []
+    for index, sector in enumerate(("创新药", "医疗研发外包", "CRO概念", "医药商业"), start=1):
+        row = _row(f"30000{index}", f"医药{index}")
+        row["resonance_sectors"] = sector
+        medical.append(row)
+    robot = _row("002001", "机器人股")
+    payloads = {
+        "mainline_leader": {"final": [medical[0], robot]},
+        "weak_to_strong": {"final": [*medical, robot]},
+    }
+
+    result = DecisionPoolService().build(payloads, profiles, market_score=39)
+    active = [row for row in result["rows"] if row["execution_eligible"]]
+    active_medical = [row for row in active if row["主题簇"] == "医药医疗"]
+
+    assert len(active_medical) <= 2
+    assert any(row["code"] == "002001" for row in active)
+    assert result["crowding_summary"][0]["cluster"] == "医药医疗"
+    assert result["crowding_summary"][0]["level"] == "严重拥挤"

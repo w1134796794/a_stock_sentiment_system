@@ -35,6 +35,7 @@ class RealtimeSectorBreadthProvider:
         self.calendar = TradeCalendar()
         self._member_cache: Dict[Tuple[str, str], Set[str]] = {}
         self._result_cache: Dict[Tuple[str, Tuple[str, ...]], Tuple[float, Optional[bool], Dict[str, Any]]] = {}
+        self._last_sector_quote_detail: Dict[str, Any] = {}
         self._lock = RLock()
 
     def evaluate(self, sectors: Iterable[str], market_date: str) -> Tuple[Optional[bool], Dict[str, Any]]:
@@ -70,7 +71,8 @@ class RealtimeSectorBreadthProvider:
             "average_change_pct": round(average_change, 4) if average_change is not None else None,
             "index_change_pct": round(sum(index_changes) / len(index_changes), 4) if index_changes else None,
             "data_completeness": completeness,
-            "reason": "板块指数与成分股同步" if state else "板块同步不足" if state is False else "板块实时数据不足",
+            "reason": self._reason(state, breadth, index_positive),
+            "sector_quote_detail": dict(self._last_sector_quote_detail),
         }
         with self._lock:
             self._result_cache[key] = (now, state, detail)
@@ -120,15 +122,66 @@ class RealtimeSectorBreadthProvider:
     def _sector_changes(self, names: Tuple[str, ...]) -> list[float]:
         service = self._ensure_sector_service()
         if service is None:
+            self._last_sector_quote_detail = {"reason": "板块行情服务不可用"}
             return []
+        changes: list[float] = []
+        unresolved = set(names)
+        attempts = []
         try:
-            mapping = service.resolve_codes_by_names(names)
-            if not mapping:
-                return []
-            payload = service.get_sector_quotes(mapping.values(), limit=len(mapping))
-            return [_float(row.get("change_pct")) for row in payload.get("sectors") or [] if row.get("change_pct") is not None]
-        except Exception:
-            return []
+            for source in ("ths", "east"):
+                mapping = service.resolve_codes_by_names(unresolved, source=source)
+                if not mapping:
+                    attempts.append({"source": source, "resolved": 0, "usable": 0})
+                    continue
+                payload = service.get_sector_quotes(
+                    mapping.values(), source=source, limit=len(mapping),
+                )
+                rows = payload.get("sectors") or []
+                usable_codes = {
+                    str(row.get("code") or "").split(".")[0]
+                    for row in rows if row.get("change_pct") is not None
+                }
+                usable_names = {
+                    name for name, code in mapping.items()
+                    if str(code or "").split(".")[0] in usable_codes
+                }
+                changes.extend(
+                    _float(row.get("change_pct"))
+                    for row in rows if row.get("change_pct") is not None
+                )
+                unresolved.difference_update(usable_names)
+                attempts.append({
+                    "source": source,
+                    "resolved": len(mapping),
+                    "quotes": len(rows),
+                    "usable": len(usable_names),
+                    "message": str(payload.get("message") or ""),
+                    "missing_codes": list(payload.get("missing") or []),
+                })
+                if not unresolved:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            attempts.append({"error": str(exc)})
+        self._last_sector_quote_detail = {
+            "attempts": attempts,
+            "usable_count": len(changes),
+            "unresolved_names": sorted(unresolved),
+        }
+        return changes
+
+    @staticmethod
+    def _reason(
+        state: Optional[bool], breadth: Optional[float], index_positive: Optional[bool],
+    ) -> str:
+        if state is True:
+            return "板块指数与成分股同步"
+        if state is False:
+            return "板块同步不足"
+        if breadth is None and index_positive is None:
+            return "板块成分股与指数实时数据均不足"
+        if breadth is None:
+            return "板块成分股实时数据不足"
+        return "板块指数涨幅不足"
 
     def _ensure_quote_service(self):
         if self.quote_service is not None:

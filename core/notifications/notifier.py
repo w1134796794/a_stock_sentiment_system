@@ -4,11 +4,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Any, Dict
+from collections import Counter
+from typing import Any, Dict, List
 from urllib import parse, request
 
 from loguru import logger
 
+from core.factors.sector_taxonomy import theme_cluster_name
 from core.infrastructure.shared_state import get_shared_state_backend
 
 
@@ -93,7 +95,15 @@ class NotificationService:
             if isinstance(payload_strategy, dict)
             else ""
         )
-        for row in payload.get("rows") or []:
+        confirmed_rows = [
+            row for row in payload.get("rows") or []
+            if str(row.get("confirm_status") or row.get("status") or "") == "confirmed"
+        ]
+        confirmed_rows.sort(key=self._notification_priority, reverse=True)
+        cluster_counts = Counter(self._notification_cluster(row) for row in confirmed_rows)
+        cluster_counts.pop("", None)
+        cluster_limit = self._realtime_cluster_limit(payload)
+        for row in confirmed_rows:
             status = str(row.get("confirm_status") or row.get("status") or "")
             if status != "confirmed":
                 continue
@@ -116,6 +126,24 @@ class NotificationService:
             sectors = str(row.get("resonance_sectors") or "").strip()
             confirm_time = str(row.get("confirm_time") or row.get("entry_time") or "实时")
             position = str(row.get("suggested_position") or "按风控上限确认")
+            cluster = self._notification_cluster(row)
+            cluster_lock_key = ""
+            cluster_lock_token = None
+            if cluster:
+                cluster_lock_key = f"notification-cluster:{market_date}:{cluster}"
+                cluster_lock_token = self.backend.acquire_lock(cluster_lock_key, 30)
+                if not cluster_lock_token:
+                    row["notification_status"] = "同主题推送正在处理"
+                    continue
+                pushed = self.backend.get_json(cluster_lock_key + ":count") or {}
+                pushed_count = int(pushed.get("count") or 0) if isinstance(pushed, dict) else 0
+                if pushed_count >= cluster_limit:
+                    row["notification_status"] = "同主题推送已达上限"
+                    row["notification_skip_reason"] = (
+                        f"{cluster}当日已推送{pushed_count}只，当前市场同主题上限{cluster_limit}只"
+                    )
+                    self.backend.release_lock(cluster_lock_key, cluster_lock_token)
+                    continue
             lines = [
                 f"股票：{name}（{code}）" if code else f"股票：{name}",
                 f"信号：{mode}确认",
@@ -137,20 +165,93 @@ class NotificationService:
                     lines.append(f"龙头阶段：{'，'.join(item for item in (lifecycle, leader_age) if item)}")
             if sectors:
                 lines.append(f"板块：{sectors}")
+            if cluster:
+                lines.append(f"风险主题簇：{cluster}")
+                if cluster_counts[cluster] > cluster_limit:
+                    lines.append(
+                        f"拥挤控制：同主题{cluster_counts[cluster]}个确认信号，仅推送优先级前{cluster_limit}只"
+                    )
             lines.extend([
                 f"仓位：{position}",
                 "动作：可进入买入确认，请再次核对价格、可成交性和账户风控。",
             ])
             if self.public_url:
                 lines.append(f"详情：{self.public_url}/intraday")
-            result = self.send(
-                f"{'龙头盘中转强确认' if is_leader else '盘中买点确认'}：{name}",
-                "\n".join(lines),
-                event_key=f"intraday:{market_date}:{code}:{row.get('entry_mode') or mode}",
-                ttl_seconds=60 * 60 * 12,
-            )
-            sent += int(result.get("sent") or 0)
+            try:
+                result = self.send(
+                    f"{'龙头盘中转强确认' if is_leader else '盘中买点确认'}：{name}",
+                    "\n".join(lines),
+                    event_key=f"intraday:{market_date}:{code}:{row.get('entry_mode') or mode}",
+                    ttl_seconds=60 * 60 * 12,
+                )
+                delivered = int(result.get("sent") or 0)
+                sent += delivered
+                row["notification_status"] = "已推送" if delivered else "已去重或渠道不可用"
+                if cluster and delivered:
+                    self.backend.set_json(
+                        cluster_lock_key + ":count",
+                        {"count": pushed_count + 1, "cluster": cluster, "market_date": market_date},
+                        ttl_seconds=60 * 60 * 24,
+                    )
+            finally:
+                if cluster_lock_key and cluster_lock_token:
+                    self.backend.release_lock(cluster_lock_key, cluster_lock_token)
         return sent
+
+    @staticmethod
+    def _notification_priority(row: Dict[str, Any]) -> tuple[float, ...]:
+        def number(value: Any) -> float:
+            try:
+                return float(value or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        consensus = row.get("strategy_consensus_count")
+        if consensus in (None, ""):
+            sources = row.get("strategy_sources") or row.get("命中策略") or []
+            consensus = len(sources) if isinstance(sources, (list, tuple)) else 1
+        return (
+            1.0 if row.get("is_leader_observation") else 0.0,
+            number(consensus),
+            number(row.get("leader_score") or row.get("pool_score")),
+            number(row.get("score") or row.get("综合评分")),
+            number(row.get("sector_strength") or row.get("板块强度")),
+        )
+
+    @staticmethod
+    def _notification_cluster(row: Dict[str, Any]) -> str:
+        explicit = str(row.get("主题簇") or row.get("crowding_cluster") or "").strip()
+        if explicit:
+            return explicit
+        labels: List[str] = []
+        for key in ("所属主线", "mainline_name", "resonance_sectors", "sector_names", "所属板块"):
+            value = row.get(key)
+            if isinstance(value, (list, tuple, set)):
+                labels.extend(str(item).strip() for item in value if str(item).strip())
+            elif value:
+                labels.extend(
+                    item.strip() for item in str(value).replace("，", ",").split(",") if item.strip()
+                )
+        return theme_cluster_name(labels)
+
+    @staticmethod
+    def _realtime_cluster_limit(payload: Dict[str, Any]) -> int:
+        context = payload.get("market_context") or payload.get("market") or {}
+        if not isinstance(context, dict):
+            context = {}
+        regime = str(
+            payload.get("market_regime") or payload.get("regime")
+            or context.get("regime") or context.get("regime_label") or ""
+        )
+        try:
+            score = float(payload.get("market_score") or context.get("market_score") or 50)
+        except (TypeError, ValueError):
+            score = 50.0
+        if score < 45 or any(word in regime for word in ("弱", "退潮", "冰点")):
+            return 1
+        if score >= 65 or any(word in regime for word in ("强", "活跃")):
+            return 3
+        return 2
 
     def notify_exit_signal(
         self,

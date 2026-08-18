@@ -143,6 +143,7 @@ def test_notification_service_deduplicates_same_signal(monkeypatch):
 
 def test_internal_scheduler_registers_both_jobs(monkeypatch):
     monkeypatch.setenv("AUTOMATION_ENABLED", "true")
+    monkeypatch.setenv("AUTOMATION_DAILY_CATCH_UP", "false")
     scheduler = InternalScheduler()
     scheduler.start()
     try:
@@ -152,6 +153,65 @@ def test_internal_scheduler_registers_both_jobs(monkeypatch):
         assert tags == {"auction", "daily"}
     finally:
         scheduler.stop()
+
+
+def test_internal_scheduler_recovers_incomplete_daily_job(monkeypatch):
+    monkeypatch.setenv("AUTOMATION_DAILY_CATCH_UP", "true")
+    monkeypatch.setenv("AUTOMATION_DAILY_TIME", "00:00")
+    scheduler = InternalScheduler()
+    today = __import__("datetime").datetime.now().strftime("%Y%m%d")
+    scheduler.calendar.is_trade_date = lambda trade_date: trade_date == today
+    scheduler.state.save({
+        "status": "error",
+        "job": "daily",
+        "trade_date": today,
+        "attempt": 1,
+        "pipeline_ok": False,
+    })
+    dispatched = []
+    def fake_dispatch(name, target):
+        dispatched.append((name, target))
+        return True
+
+    monkeypatch.setattr(scheduler, "_dispatch_job", fake_dispatch)
+
+    assert scheduler._recover_due_daily_job() is True
+    assert dispatched[0][0] == "daily"
+
+
+def test_realtime_notification_limits_crowded_weak_market_cluster(monkeypatch):
+    backend = MemoryStateBackend("notify-cluster-limit")
+    service = NotificationService(backend=backend)
+    calls = []
+
+    def fake_send(title, content, **kwargs):
+        calls.append((title, content, kwargs))
+        return {"ok": True, "sent": 1}
+
+    monkeypatch.setattr(service, "send", fake_send)
+    rows = []
+    for index, sector in enumerate(("创新药", "医疗研发外包", "CRO概念"), start=1):
+        rows.append({
+            "code": f"30000{index}",
+            "name": f"医药{index}",
+            "confirm_status": "confirmed",
+            "entry_mode": "weak_to_strong",
+            "entry_mode_text": "弱转强",
+            "resonance_sectors": sector,
+            "score": 90 - index,
+        })
+
+    count = service.notify_realtime_payload({
+        "market_date": "20260814",
+        "market_score": 39,
+        "market_regime": "weak",
+        "rows": rows,
+    })
+
+    assert count == 1
+    assert len(calls) == 1
+    assert "风险主题簇：医药医疗" in calls[0][1]
+    assert sum(row.get("notification_status") == "同主题推送已达上限" for row in rows) == 2
 
 
 def test_model_health_reports_active_fallback(tmp_path):

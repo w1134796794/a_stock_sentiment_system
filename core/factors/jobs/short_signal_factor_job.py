@@ -12,7 +12,6 @@ from core.factors.jobs.gold_utils import (
     write_replace_partition,
 )
 
-
 STOCK_SIGNAL_COLUMNS = [
     "trade_date", "signal_date", "effective_date", "code",
     "capital_flow_consensus_score", "capital_flow_persistence_score", "capital_flow_adjustment",
@@ -193,11 +192,20 @@ class ShortSignalFactorJob:
             + data.get("status", pd.Series("", index=data.index)).fillna("").astype(str) + " "
             + data.get("lu_desc", pd.Series("", index=data.index)).fillna("").astype(str)
         )
-        score = pd.Series(62.0, index=data.index)
-        score += text.str.contains("龙头|核心|连板", regex=True).astype(float) * 14.0
+        # KPL's ordinary "limit-up / first-board" rows are observations, not
+        # leader identities.  Keep their score below the leader threshold and
+        # only promote explicit leader tags or proven multi-board status.
+        score = pd.Series(28.0, index=data.index)
+        score += text.str.contains("龙头|核心", regex=True).astype(float) * 35.0
+        board_count = pd.to_numeric(
+            text.str.extract(r"(\d+)\s*连板", expand=False), errors="coerce",
+        ).fillna(0.0)
+        multi_board = board_count.ge(2)
+        score += multi_board.astype(float) * 20.0
+        score += board_count.clip(0, 4) * 5.0
         score += text.str.contains("强势|反包|晋级", regex=True).astype(float) * 8.0
         score -= text.str.contains("炸板|开板|弱", regex=True).astype(float) * 12.0
-        score += percentile_score(_number(data, "limit_order")) * 0.12 - 6.0
+        score += percentile_score(_number(data, "limit_order")) * 0.15
         data["leader_quality_score"] = score.clip(0, 100)
         data["kpl_present"] = 1.0
         return data.groupby("code", as_index=False).agg(

@@ -1,9 +1,8 @@
 import importlib.util
+import json
 
 import pandas as pd
 import pytest
-
-import json
 
 from backtest.plan_source import _rows_from_screening, build_backtest_plan_dir
 from core.etl.normalizers import (
@@ -12,8 +11,21 @@ from core.etl.normalizers import (
 )
 from core.factors.jobs.short_signal_factor_job import ShortSignalFactorJob
 
-
 DUCKDB_MISSING = importlib.util.find_spec("duckdb") is None
+
+
+def test_kpl_leader_quality_does_not_treat_every_first_board_as_a_leader():
+    rows = pd.DataFrame([
+        {"code": "000001", "tag": "涨停", "status": "首板", "lu_desc": "芯片", "limit_order": 100},
+        {"code": "000002", "tag": "涨停", "status": "2连板", "lu_desc": "芯片", "limit_order": 100},
+        {"code": "000003", "tag": "核心龙头", "status": "首板", "lu_desc": "芯片", "limit_order": 100},
+    ])
+
+    scored = ShortSignalFactorJob._leader_features(rows).set_index("code")
+
+    assert scored.loc["000001", "leader_quality_score"] < 65
+    assert scored.loc["000002", "leader_quality_score"] >= 65
+    assert scored.loc["000003", "leader_quality_score"] >= 65
 
 
 def test_short_signal_normalizers_convert_units_and_effective_date():

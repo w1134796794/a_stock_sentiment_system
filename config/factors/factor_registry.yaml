@@ -1136,16 +1136,30 @@ factors:
 
   stk_kpl_leader_quality:
     id: "SIG5"
-    name: "开盘啦龙头质量"
+    name: "开盘啦龙头身份证据"
     category: "moneyflow"
     sub_category: "leader"
-    description: "开盘啦涨停标签、状态和封单质量的确认分"
+    description: "仅明确龙头/核心标签或二板以上状态获得龙头身份加分，普通涨停和首板不等于龙头"
     data_source: "stock_leader_signal_silver"
     output_type: "float"
     value_range: [0.0, 100.0]
     default_weight: 0.20
     enabled: true
     params: {}
+
+  stk_mainline_leader_identity:
+    id: "SIG5B"
+    name: "主线龙头身份"
+    category: "stock_tech"
+    sub_category: "leader"
+    description: "取明确龙头/连板身份与5、10、20、60日趋势持续领先证据的较高值，用于排除强板块中的单日跟风股"
+    data_source: "factor_stock_wide"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.18
+    enabled: true
+    params:
+      identity_threshold: 65
 
   stk_margin_acceleration:
     id: "SIG6"
