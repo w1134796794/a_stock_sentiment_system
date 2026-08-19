@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import warnings
 
 import pandas as pd
 import pytest
@@ -48,6 +49,24 @@ def test_short_signal_normalizers_convert_units_and_effective_date():
     assert stock.iloc[0]["large_net_yuan"] == 30000.0
     assert stock.iloc[0]["effective_date"] == "20260629"
     assert sector.iloc[0]["net_amount_yuan"] == 120000000.0
+
+
+def test_event_features_keep_numeric_dtype_without_fillna_downcast_warning():
+    events = pd.DataFrame([
+        {"code": "000001", "price": 8.0, "amount_yuan": 1000.0},
+        {"code": "000002", "price": 8.0, "amount_yuan": 500.0},
+    ])
+    daily = pd.DataFrame([
+        {"code": "000001", "close": 10.0},
+        {"code": "000002", "close": 0.0},
+    ])
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        result = ShortSignalFactorJob._event_features(events, daily).set_index("code")
+
+    assert result["event_risk_score"].dtype.kind == "f"
+    assert result.loc["000001", "event_risk_score"] > result.loc["000002", "event_risk_score"]
 
 
 @pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed")

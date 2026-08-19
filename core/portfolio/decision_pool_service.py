@@ -183,6 +183,67 @@ class DecisionPoolService:
                 risk_flags=risk_flags,
             )
 
+        # A strategy being disabled by the current market phase is an execution
+        # decision, not evidence that its screened candidates never existed.
+        # Keep those rows visible for review while making them strictly
+        # ineligible for live confirmation, notification and backtesting.
+        visible_codes = {_code(row) for row in merged}
+        hidden_raw_rows: List[Dict[str, Any]] = []
+        hidden_members_by_code: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for strategy_id in hidden:
+            payload = payloads.get(strategy_id) or {}
+            profile = profiles.get(strategy_id) or {}
+            strategy_name = str(payload.get("strategy_name") or profile.get("name") or strategy_id)
+            execution = dict(profile.get("execution") or {})
+            for source in payload.get("final") or []:
+                if not isinstance(source, Mapping) or not _code(source):
+                    continue
+                row = dict(source)
+                row.update({
+                    "策略ID": strategy_id,
+                    "策略名称": strategy_name,
+                    "策略单票仓位上限%": _number(profile.get("position_cap_pct")),
+                    "_entry_modes": list(execution.get("allowed_entry_modes") or []),
+                    "_strategy_execution": execution,
+                    "_evidence_rules": list(profile.get("evidence_rules") or []),
+                    "_veto_rules": list(profile.get("veto_rules") or []),
+                })
+                hidden_raw_rows.append(row)
+                hidden_members_by_code[_code(row)].append(row)
+
+        hidden_rows: List[Dict[str, Any]] = []
+        for row in self.allocator.merge(hidden_raw_rows):
+            code = _code(row)
+            if code in visible_codes:
+                continue
+            members = hidden_members_by_code.get(code, [])
+            self._decorate(
+                row,
+                members,
+                total,
+                regime,
+                phase=phase,
+                phase_label=phase_label,
+                position_scale=position_scale,
+                risk_flags=risk_flags,
+            )
+            strategy_names = _unique(str(item.get("策略名称") or "") for item in members)
+            gate_reason = (
+                f"当前为{REGIME_LABELS[regime]} / {phase_label}，"
+                f"暂不启用{'、'.join(strategy_names) or '该策略'}"
+            )
+            row["_blocked"] = True
+            row["_blocked_reasons"] = _unique([
+                *list(row.get("_blocked_reasons") or []),
+                gate_reason,
+            ])
+            row["市场门控说明"] = gate_reason
+            row["失效条件"] = gate_reason
+            self._set_group(row, "inactive", regime, phase)
+            hidden_rows.append(row)
+
+        merged.extend(hidden_rows)
+
         crowding_summary = self._annotate_crowding(merged, regime)
 
         actionable = [row for row in merged if not row["_blocked"]]
@@ -261,6 +322,9 @@ class DecisionPoolService:
             "active_strategy_ids": applicable,
             "active_strategy_names": active_names,
             "hidden_strategy_names": hidden_names,
+            "raw_candidate_count": len(merged),
+            "hidden_candidate_count": len(hidden_rows),
+            "inactive_count": len(inactive),
             "crowding_summary": crowding_summary,
             "cluster_limits": crowding_policy,
             "rows": focus + watch + inactive,

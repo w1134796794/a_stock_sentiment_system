@@ -179,6 +179,13 @@ def test_internal_scheduler_recovers_incomplete_daily_job(monkeypatch):
     assert dispatched[0][0] == "daily"
 
 
+def test_internal_scheduler_explains_native_segfault():
+    message = InternalScheduler._exit_code_message(-11)
+
+    assert "SIGSEGV" in message
+    assert "原生扩展" in message
+
+
 def test_realtime_notification_limits_crowded_weak_market_cluster(monkeypatch):
     backend = MemoryStateBackend("notify-cluster-limit")
     service = NotificationService(backend=backend)

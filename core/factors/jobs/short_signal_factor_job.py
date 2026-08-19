@@ -240,7 +240,10 @@ class ShortSignalFactorJob:
             close["code"] = close["code"].astype(str).str.zfill(6)
             close = close.drop_duplicates("code")
             data = data.merge(close, on="code", how="left")
-        data["discount_pct"] = (_number(data, "price") / _number(data, "close").replace(0, pd.NA) - 1.0) * 100.0
+        price = _number(data, "price").astype(float)
+        close_price = _number(data, "close").astype(float)
+        valid_close = close_price.mask(close_price.eq(0.0))
+        data["discount_pct"] = (price.div(valid_close) - 1.0) * 100.0
         data["discount_severity"] = (-data["discount_pct"].fillna(0.0) - 2.0).clip(lower=0.0)
         grouped = data.groupby("code", as_index=False).agg(
             discount_severity=("discount_severity", "max"), amount_yuan=("amount_yuan", "sum"),

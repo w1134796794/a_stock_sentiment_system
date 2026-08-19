@@ -162,6 +162,34 @@ def test_supplied_relative_regime_is_corrected_by_the_absolute_market_score():
     assert result["regime_corrected"] is True
 
 
+def test_market_gate_keeps_screened_candidates_visible_but_not_executable():
+    profiles = {
+        "mainline_leader": _profile("mainline_leader", "主线龙头"),
+        "weak_to_strong": _profile("weak_to_strong", "弱转强"),
+    }
+    payloads = {
+        "mainline_leader": {"final": [_row("000001", "主线候选")]},
+        "weak_to_strong": {"final": []},
+    }
+
+    result = DecisionPoolService().build(
+        payloads,
+        profiles,
+        market_score=13.2,
+        market_state={"phase": "decline"},
+    )
+
+    assert result["active_strategy_ids"] == ["weak_to_strong"]
+    assert result["hidden_candidate_count"] == 1
+    assert result["decision_count"] == 0
+    assert len(result["rows"]) == 1
+    candidate = result["rows"][0]
+    assert candidate["code"] == "000001"
+    assert candidate["行动分组"] == "暂不参与"
+    assert candidate["execution_eligible"] is False
+    assert "暂不启用主线龙头" in candidate["市场门控说明"]
+
+
 def test_emotion_phase_is_the_single_strategy_gate_and_is_exposed_to_ui():
     profiles = {
         strategy_id: _profile(strategy_id, strategy_id)

@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import json
 import os
+import signal
+import subprocess
 import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
-
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -20,6 +22,7 @@ if str(ROOT) not in sys.path:
 for _name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
     os.environ.setdefault(_name, "1")
 os.environ.setdefault("DUCKDB_THREADS", "1")
+faulthandler.enable(all_threads=True)
 
 
 def _write(path: Path, payload: Dict[str, Any]) -> None:
@@ -27,6 +30,51 @@ def _write(path: Path, payload: Dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     temporary.replace(path)
+
+
+def _exit_reason(returncode: int) -> str:
+    if returncode >= 0:
+        return f"自动回测子进程退出码 {returncode}"
+    try:
+        signal_name = signal.Signals(-returncode).name
+    except ValueError:
+        signal_name = f"SIGNAL_{-returncode}"
+    return f"自动回测子进程收到 {signal_name}（{-returncode}）"
+
+
+def _run_auto_backtest(trade_date: str, capital: float, result_path: Path) -> Dict[str, Any]:
+    backtest_result = result_path.with_name(f"{result_path.stem}_backtest.json")
+    backtest_result.unlink(missing_ok=True)
+    command = [
+        sys.executable,
+        "-X",
+        "faulthandler",
+        str(ROOT / "scripts" / "automation_backtest_worker.py"),
+        "--date",
+        trade_date,
+        "--capital",
+        str(capital),
+        "--result",
+        str(backtest_result),
+    ]
+    timeout = max(60, int(os.getenv("AUTOMATION_BACKTEST_TIMEOUT", "3600") or 3600))
+    try:
+        completed = subprocess.run(command, cwd=str(ROOT), timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "reason": f"自动回测超过{timeout}秒，已终止"}
+    payload: Dict[str, Any] = {}
+    if backtest_result.exists():
+        try:
+            payload = json.loads(backtest_result.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            payload = {"ok": False, "reason": f"自动回测结果读取失败：{exc}"}
+    if completed.returncode != 0:
+        payload.update({
+            "ok": False,
+            "reason": str(payload.get("reason") or _exit_reason(completed.returncode)),
+            "worker_exit_code": completed.returncode,
+        })
+    return payload or {"ok": False, "reason": "自动回测未生成结果"}
 
 
 def main() -> int:
@@ -44,8 +92,8 @@ def main() -> int:
     }
     _write(args.result, progress)
     try:
-        from main import SentimentSystem
         from core.reports.daily_journal import DailyJournalService
+        from main import SentimentSystem
 
         system = SentimentSystem()
         fetched = system.fetch_post_close_data(trade_date, skip_existing=True)
@@ -66,9 +114,10 @@ def main() -> int:
         journal = DailyJournalService().generate(trade_date, capital=args.capital)
         backtest: Dict[str, Any] = {"ok": False, "reason": "自动回测已关闭"}
         if args.auto_backtest:
-            from core.reports.auto_backtest import AutoBacktestReportService
-
-            backtest = AutoBacktestReportService().run(trade_date, capital=args.capital)
+            progress["stage"] = "backtest"
+            progress["heartbeat_at"] = datetime.now().isoformat(timespec="seconds")
+            _write(args.result, progress)
+            backtest = _run_auto_backtest(trade_date, args.capital, args.result)
         payload = {
             "status": "done",
             "job": "daily",

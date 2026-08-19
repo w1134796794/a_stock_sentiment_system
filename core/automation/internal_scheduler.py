@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -194,6 +195,8 @@ class InternalScheduler:
             result_path.unlink(missing_ok=True)
             command = [
                 sys.executable,
+                "-X",
+                "faulthandler",
                 str(Path(BASE_DIR) / "scripts" / "automation_daily_worker.py"),
                 "--date", trade_date,
                 "--capital", str(self.capital),
@@ -209,6 +212,7 @@ class InternalScheduler:
                     cwd=str(BASE_DIR),
                     stdout=stream,
                     stderr=subprocess.STDOUT,
+                    env={**os.environ, "PYTHONFAULTHANDLER": "1"},
                     start_new_session=(os.name != "nt"),
                 )
                 exit_code, guard_error = self._wait_worker(process, result_path)
@@ -225,7 +229,7 @@ class InternalScheduler:
             payload["attempt"] = attempt
             self.state.save(payload)
             if payload.get("status") != "done" or not payload.get("pipeline_ok"):
-                message = str(payload.get("message") or f"隔离任务退出码 {exit_code}")
+                message = str(payload.get("message") or self._exit_code_message(exit_code))
                 logger.error(f"[Automation] {trade_date} 隔离任务失败: {message}; 日志: {log_path}")
                 NotificationService().send(
                     "每日数据生成失败",
@@ -235,10 +239,21 @@ class InternalScheduler:
                 return
             journal = payload.get("journal") or {}
             backtest = payload.get("backtest") or {}
+            if self.auto_backtest and not backtest.get("ok"):
+                logger.warning(
+                    f"[Automation] {trade_date} 主流水线成功，但自动回测失败: "
+                    f"{backtest.get('reason', '未知原因')}"
+                )
+            backtest_text = (
+                f"近3个月回测胜率{backtest.get('win_rate_pct', '--')}%，"
+                f"最大回撤{backtest.get('max_drawdown_pct', '--')}%。"
+                if backtest.get("ok")
+                else f"自动回测未完成：{backtest.get('reason', '已跳过')}。"
+            )
             NotificationService().send(
                 "每日复盘数据已生成",
                 f"{trade_date} 五阶段流水线完成；候选{journal.get('candidate_count', 0)}只。"
-                f"近3个月回测胜率{backtest.get('win_rate_pct', '--')}%，最大回撤{backtest.get('max_drawdown_pct', '--')}%。",
+                f"{backtest_text}",
                 event_key=f"daily-complete:{trade_date}",
             )
         except Exception as exc:  # noqa: BLE001
@@ -275,6 +290,17 @@ class InternalScheduler:
                     pass
             time.sleep(5.0)
         return int(process.returncode or 0), ""
+
+    @staticmethod
+    def _exit_code_message(exit_code: int) -> str:
+        if exit_code >= 0:
+            return f"隔离任务退出码 {exit_code}"
+        try:
+            signal_name = signal.Signals(-exit_code).name
+        except ValueError:
+            signal_name = f"SIGNAL_{-exit_code}"
+        detail = "，通常表示 DuckDB/Arrow 等原生扩展发生段错误" if signal_name == "SIGSEGV" else ""
+        return f"隔离任务收到 {signal_name}（{-exit_code}）{detail}"
 
     @staticmethod
     def _worker_rss_mb(pid: int) -> float:

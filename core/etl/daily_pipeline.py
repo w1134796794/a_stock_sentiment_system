@@ -455,7 +455,11 @@ class ETLDailyPipeline:
             )
             logger.info(
                 f"[选股策略][生产决策池] {trade_date}: "
-                f"可执行={decision_pool.get('decision_count', 0)}, path={decision_path}"
+                f"策略候选={decision_pool.get('raw_candidate_count', 0)}, "
+                f"可执行={decision_pool.get('decision_count', 0)}, "
+                f"暂不参与={decision_pool.get('inactive_count', 0)}, "
+                f"市场门控保留={decision_pool.get('hidden_candidate_count', 0)}, "
+                f"path={decision_path}"
             )
         except Exception as exc:  # noqa: BLE001
             result.warnings.append(f"生产决策池生成失败: {exc}")
