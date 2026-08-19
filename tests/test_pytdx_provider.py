@@ -131,3 +131,27 @@ def test_snapshot_tick_store_keeps_recent_deltas():
     assert second["delta_volume"] == 8
     assert second["delta_amount"] == 8_080
     assert len(store.frame("000001", "20260813")) == 2
+
+
+def test_snapshot_tick_store_rejects_cumulative_counter_regression():
+    store = SnapshotTickStore(max_items=20)
+    store.update(
+        "000001",
+        {"last_price": 10.0, "vol_hand": 100, "amount_yuan": 100_000},
+        datetime(2026, 8, 13, 9, 31, 1),
+    )
+    bad = store.update(
+        "000001",
+        {"last_price": 10.1, "vol_hand": 90, "amount_yuan": 90_000},
+        datetime(2026, 8, 13, 9, 31, 4),
+    )
+    recovered = store.update(
+        "000001",
+        {"last_price": 10.2, "vol_hand": 105, "amount_yuan": 105_000},
+        datetime(2026, 8, 13, 9, 31, 7),
+    )
+
+    assert bad["quality_ok"] is False
+    assert bad["delta_volume"] == 0
+    assert recovered["quality_ok"] is True
+    assert recovered["delta_volume"] == 5

@@ -128,13 +128,12 @@ class RealtimeSectorBreadthProvider:
         unresolved = set(names)
         attempts = []
         try:
-            for source in ("ths", "east"):
-                mapping = service.resolve_codes_by_names(unresolved, source=source)
-                if not mapping:
-                    attempts.append({"source": source, "resolved": 0, "usable": 0})
-                    continue
+            mapping = service.resolve_codes_by_names(unresolved, source="ths")
+            if not mapping:
+                attempts.append({"source": "ths", "resolved": 0, "usable": 0})
+            else:
                 payload = service.get_sector_quotes(
-                    mapping.values(), source=source, limit=len(mapping),
+                    mapping.values(), source="ths", limit=len(mapping),
                 )
                 rows = payload.get("sectors") or []
                 usable_codes = {
@@ -151,15 +150,13 @@ class RealtimeSectorBreadthProvider:
                 )
                 unresolved.difference_update(usable_names)
                 attempts.append({
-                    "source": source,
+                    "source": "ths",
                     "resolved": len(mapping),
                     "quotes": len(rows),
                     "usable": len(usable_names),
                     "message": str(payload.get("message") or ""),
                     "missing_codes": list(payload.get("missing") or []),
                 })
-                if not unresolved:
-                    break
         except Exception as exc:  # noqa: BLE001
             attempts.append({"error": str(exc)})
         self._last_sector_quote_detail = {

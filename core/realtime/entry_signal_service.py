@@ -157,6 +157,14 @@ class RealtimeEntrySignalService:
                 EntryDecision("observing", reason=f"行情日期{quote_date}与当日{market_date}不一致"),
                 preliminary_mode, market_date,
             )
+        if bool(quote.get("is_stale")):
+            return self._payload(
+                EntryDecision(
+                    "observing", reason="实时行情已过期，拒绝确认买点",
+                    data_status="quote_stale", data_completeness=0.0,
+                ),
+                preliminary_mode, market_date,
+            )
 
         if open_price <= 0 or pre_close <= 0:
             return self._payload(

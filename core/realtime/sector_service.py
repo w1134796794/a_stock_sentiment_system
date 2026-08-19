@@ -37,6 +37,7 @@ class RealtimeSectorService:
         self.ttl_seconds = max(float(ttl_seconds), 0.0)
         self.request_timeout_seconds = max(float(request_timeout_seconds), 0.5)
         self._sector_cache: Dict[Tuple[str, str], Tuple[float, SectorSnapshot]] = {}
+        self._sector_failure_cache: Dict[Tuple[str, str], Tuple[float, str]] = {}
         self._sector_names: Dict[str, str] = dict(self.DEFAULT_SECTOR_NAMES)
         self._sector_types: Dict[str, str] = {}
         self._sector_names_by_source: Dict[str, Dict[str, str]] = {}
@@ -62,7 +63,7 @@ class RealtimeSectorService:
             "last_error": self._last_error,
         }
         if probe and adata_mod is not None:
-            result = self.get_sector_quotes(codes=None, source="east", limit=3)
+            result = self.get_sector_quotes(codes=None, source="ths", limit=3)
             data["probe_ok"] = bool(result.get("ok"))
             data["probe_count"] = result.get("count", 0)
             data["probe_message"] = result.get("message", "")
@@ -72,21 +73,28 @@ class RealtimeSectorService:
         self,
         codes: Optional[Iterable[str]] = None,
         *,
-        source: str = "east",
+        source: str = "ths",
         limit: int = 20,
         include_raw: bool = False,
     ) -> Dict[str, Any]:
+        # Realtime sectors use the THS namespace exclusively. Mixing Eastmoney
+        # BK/700xxx identifiers with THS 8xxxxx identifiers breaks persisted
+        # joins and produces deterministic bad requests to adata.
+        source = "ths"
         adata_mod = self._ensure_adata()
         if adata_mod is None:
             return self._unavailable()
 
         code_list = self._normalize_codes(codes)
         auto_list = not code_list
+        invalid_codes = [
+            code for code in code_list if not self._valid_code_for_source(code, source)
+        ]
+        code_list = [
+            code for code in code_list if self._valid_code_for_source(code, source)
+        ]
         if auto_list:
             code_list = self._list_sector_codes(source=source, limit=limit)
-            if not code_list and (source or "").lower() not in ("ths", "tonghuashun", "同花顺"):
-                source = "ths"
-                code_list = self._list_sector_codes(source=source, limit=limit)
         if not code_list:
             return {
                 "ok": False,
@@ -94,6 +102,7 @@ class RealtimeSectorService:
                 "message": "未找到板块代码；请传 codes 参数或检查 adata 版本",
                 "sectors": [],
                 "count": 0,
+                "missing": invalid_codes,
             }
         rows: List[SectorSnapshot] = []
         errors: List[str] = []
@@ -113,19 +122,22 @@ class RealtimeSectorService:
             "message": "" if rows else "未获取到板块实时行情",
             "sectors": [r.to_dict(include_raw=include_raw) for r in rows],
             "count": len(rows),
-            "missing": errors,
+            "missing": invalid_codes + errors,
         }
 
     def resolve_codes_by_names(
-        self, names: Iterable[str], *, source: str = "east",
+        self, names: Iterable[str], *, source: str = "ths",
     ) -> Dict[str, str]:
         """Resolve persisted sector labels to provider codes for realtime checks."""
+        source = "ths"
         self._ensure_sector_names(source)
         requested = {str(name or "").strip() for name in names if str(name or "").strip()}
         resolved: Dict[str, str] = {}
         source_key = self._source_key(source)
         source_names = self._sector_names_by_source.get(source_key) or {}
         for code, label in source_names.items():
+            if not self._valid_code_for_source(code, source):
+                continue
             clean_label = str(label or "").strip()
             for name in requested:
                 if name in resolved:
@@ -188,6 +200,10 @@ class RealtimeSectorService:
         now = time.monotonic()
         if cached and now - cached[0] <= self.ttl_seconds:
             return cached[1]
+        failed = self._sector_failure_cache.get(cache_key)
+        if failed and now - failed[0] <= max(self.ttl_seconds, 30.0):
+            self._last_error = failed[1]
+            return None
 
         adata_mod = self._ensure_adata()
         market = getattr(getattr(adata_mod, "stock", None), "market", None) if adata_mod is not None else None
@@ -215,12 +231,14 @@ class RealtimeSectorService:
                 if item.code:
                     self._enrich_change_pct(item)
                     self._sector_cache[cache_key] = (now, item)
+                    self._sector_failure_cache.pop(cache_key, None)
                     self._last_error = ""
                     return item
             except Exception as e:  # noqa: BLE001
                 self._last_error = f"{name}({code}) 失败: {e}"
                 logger.debug(f"[RealtimeSectorService] {name}({code}) failed: {e}")
                 continue
+        self._sector_failure_cache[cache_key] = (now, self._last_error)
         return None
 
     def _call_code_method_with_timeout(self, method, code: str):
@@ -242,7 +260,11 @@ class RealtimeSectorService:
             seen = set()
             for row in local_records:
                 code = self._row_sector_code(row)
-                if not code or code in seen:
+                if (
+                    not code
+                    or code in seen
+                    or not self._valid_code_for_source(code, source)
+                ):
                     continue
                 seen.add(code)
                 codes.append(code)
@@ -262,11 +284,7 @@ class RealtimeSectorService:
         if info is None:
             return []
 
-        source_key = (source or "east").lower()
-        if source_key in ("ths", "tonghuashun", "同花顺"):
-            candidates = ("all_concept_code_ths", "all_industry_code_ths")
-        else:
-            candidates = ("all_concept_code_east", "all_industry_code_east")
+        candidates = ("all_concept_code_ths", "all_industry_code_ths")
 
         codes: List[str] = []
         seen = set()
@@ -290,7 +308,11 @@ class RealtimeSectorService:
                     or row.get("行业代码")
                     or ""
                 )
-                if code and code not in seen:
+                if (
+                    code
+                    and code not in seen
+                    and self._valid_code_for_source(code, source)
+                ):
                     seen.add(code)
                     codes.append(code)
                     label = self._row_sector_name(row)
@@ -303,14 +325,17 @@ class RealtimeSectorService:
         return codes
 
     def _ensure_sector_names(self, source: str) -> None:
-        source_key = (source or "east").lower()
+        source_key = "ths"
         if source_key in self._sector_name_sources:
             return
         local_records = self._local_sector_records(source)
         if local_records:
             for row in local_records:
+                code = self._row_sector_code(row)
+                if not self._valid_code_for_source(code, source):
+                    continue
                 self._remember_sector_meta(
-                    self._row_sector_code(row),
+                    code,
                     self._row_sector_name(row),
                     row.get("sector_type") or "概念",
                     source=source,
@@ -323,10 +348,7 @@ class RealtimeSectorService:
         if info is None:
             return
 
-        if source_key in ("ths", "tonghuashun", "同花顺"):
-            candidates = ("all_concept_code_ths", "all_industry_code_ths")
-        else:
-            candidates = ("all_concept_code_east", "all_industry_code_east")
+        candidates = ("all_concept_code_ths", "all_industry_code_ths")
         for name in candidates:
             method = getattr(info, name, None)
             if method is None:
@@ -346,15 +368,13 @@ class RealtimeSectorService:
                     typ = self._sector_type_label(
                         row.get("sector_type") or row.get("type") or row.get("板块类型") or type_hint
                     )
-                    self._remember_sector_meta(code, label, typ, source=source)
+                    if self._valid_code_for_source(code, source):
+                        self._remember_sector_meta(code, label, typ, source=source)
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"[RealtimeSectorService] sector name map failed via {name}: {e}")
         self._sector_name_sources.add(source_key)
 
     def _local_sector_records(self, source: str) -> List[Dict[str, Any]]:
-        source_key = (source or "east").lower()
-        if source_key not in ("ths", "tonghuashun", "同花顺"):
-            return []
         try:
             from config.settings import CACHE_DIR
 
@@ -467,8 +487,21 @@ class RealtimeSectorService:
 
     @staticmethod
     def _source_key(source: str) -> str:
-        key = (source or "east").lower()
-        return "ths" if key in ("ths", "tonghuashun", "同花顺") else "east"
+        return "ths"
+
+    @classmethod
+    def _valid_code_for_source(cls, code: Any, source: str) -> bool:
+        """Reject provider-incompatible identifiers before issuing network calls.
+
+        Tushare's THS index cache also contains ``700xxx`` classification
+        indexes, while adata's THS realtime endpoints only accept the public
+        six-digit ``8xxxxx`` board codes.  Mixing the two namespaces caused the
+        same deterministic request error on every realtime refresh.
+        """
+        clean = cls._clean_code(code).split(".")[0]
+        if not clean:
+            return False
+        return len(clean) == 6 and clean.isdigit() and clean.startswith("8")
 
     @staticmethod
     def _row_sector_name(row: Dict[str, Any]) -> str:
@@ -506,16 +539,9 @@ class RealtimeSectorService:
 
     @staticmethod
     def _sector_method_candidates(source: str) -> Tuple[str, ...]:
-        key = (source or "east").lower()
-        if key in ("ths", "tonghuashun", "同花顺"):
-            return (
-                "get_market_concept_current_ths",
-                "get_market_industry_current_ths",
-                "get_market_index_current",
-            )
         return (
-            "get_market_concept_current_east",
-            "get_market_industry_current_east",
+            "get_market_concept_current_ths",
+            "get_market_industry_current_ths",
             "get_market_index_current",
         )
 

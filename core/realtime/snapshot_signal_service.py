@@ -1,6 +1,7 @@
 """Confirm minute entry structures with a short pytdx snapshot sequence."""
 from __future__ import annotations
 
+from datetime import datetime
 from threading import RLock
 from typing import Any, Dict, Optional, Tuple
 
@@ -31,9 +32,18 @@ def _number(value: Any) -> float:
 class SnapshotSignalService:
     """Use minute structure as a gate and 3-second snapshots as the trigger."""
 
-    def __init__(self, *, deadline: str = "10:00:00", consecutive_ticks: int = 2) -> None:
+    def __init__(
+        self,
+        *,
+        deadline: str = "10:00:00",
+        consecutive_ticks: int = 2,
+        max_snapshot_age_seconds: float = 8.0,
+        clock: Any = None,
+    ) -> None:
         self.deadline = deadline
         self.consecutive_ticks = max(int(consecutive_ticks), 2)
+        self.max_snapshot_age_seconds = max(float(max_snapshot_age_seconds), 3.0)
+        self.clock = clock or datetime.now
         self._pending: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         self._lock = RLock()
 
@@ -52,7 +62,7 @@ class SnapshotSignalService:
         limit_price: float,
         minute_decision: EntryDecision,
     ) -> Optional[EntryDecision]:
-        ticks = self._normalize_ticks(snapshots)
+        ticks = self._normalize_ticks(snapshots, trade_date)
         if len(ticks) < self.consecutive_ticks:
             return None
         minutes = normalize_minute_bars(minute_bars)
@@ -66,7 +76,30 @@ class SnapshotSignalService:
         if minute_decision.status in {"rejected", "cancelled"}:
             return minute_decision
 
+        recent = ticks.tail(self.consecutive_ticks)
+        if not bool(recent["quality_ok"].all()):
+            return EntryDecision(
+                "observing", MODE_LABELS.get(mode, ""), "3秒快照质量校验未通过",
+                open_gap_pct=open_gap, data_status="snapshot_invalid",
+                data_completeness=0.0,
+            )
         latest = ticks.iloc[-1]
+        observed_at = pd.to_datetime(latest.get("received_at"), errors="coerce")
+        if pd.isna(observed_at):
+            observed_at = pd.to_datetime(
+                f"{trade_date} {latest.get('time')}", format="%Y%m%d %H:%M:%S",
+                errors="coerce",
+            )
+        age_seconds = (
+            (self.clock() - observed_at.to_pydatetime()).total_seconds()
+            if not pd.isna(observed_at) else float("inf")
+        )
+        if age_seconds < -1.0 or age_seconds > self.max_snapshot_age_seconds:
+            return EntryDecision(
+                "observing", MODE_LABELS.get(mode, ""), "3秒快照已过期，拒绝确认买点",
+                open_gap_pct=open_gap, data_status="snapshot_stale",
+                data_completeness=0.0,
+            )
         latest_time = str(latest["time"])
         if latest_time > self.deadline:
             return EntryDecision(
@@ -74,7 +107,6 @@ class SnapshotSignalService:
                 open_gap_pct=open_gap,
             )
 
-        recent = ticks.tail(self.consecutive_ticks)
         opening_high = float(first_five["high"].max())
         opening_low = float(first_five["low"].min())
         vwap = self._current_vwap(minutes, ticks)
@@ -173,7 +205,7 @@ class SnapshotSignalService:
         )
 
     @staticmethod
-    def _normalize_ticks(frame: pd.DataFrame) -> pd.DataFrame:
+    def _normalize_ticks(frame: pd.DataFrame, trade_date: str) -> pd.DataFrame:
         if frame is None or frame.empty:
             return pd.DataFrame()
         data = frame.copy()
@@ -182,6 +214,17 @@ class SnapshotSignalService:
             data[column] = pd.to_numeric(data.get(column, 0.0), errors="coerce").fillna(0.0)
         if "time" not in data.columns:
             return pd.DataFrame()
+        if "date" not in data.columns:
+            return pd.DataFrame()
+        data["date"] = data["date"].astype(str).str.replace("-", "", regex=False).str[:8]
+        data = data[data["date"] == str(trade_date)]
+        if data.empty:
+            return data
+        if "quality_ok" not in data.columns:
+            data["quality_ok"] = True
+        data["quality_ok"] = data["quality_ok"].fillna(False).astype(bool)
+        if "received_at" not in data.columns:
+            data["received_at"] = ""
         data["time"] = data["time"].astype(str).str[-8:]
         return data[(data["last_price"] > 0) & data["time"].between("09:30:00", "10:00:00")].sort_values("time").drop_duplicates("time", keep="last")
 

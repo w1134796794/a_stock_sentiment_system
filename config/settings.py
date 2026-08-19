@@ -45,6 +45,11 @@ def _env_path(name: str, default: Path) -> Path:
 
 # 高频写入缓存可放到代码仓库外，避免部署用户与运行用户的权限冲突。
 CACHE_DIR = _env_path("CACHE_DIR", DATA_DIR / "cache")
+# 当日盘后接口并非收盘瞬间全部发布。默认 18:00 后才允许把当日取数
+# 视为正式盘后数据；历史交易日不受此限制。
+POST_CLOSE_DATA_READY_TIME = (
+    os.getenv("POST_CLOSE_DATA_READY_TIME", "18:00").strip() or "18:00"
+)
 
 
 # ============================================

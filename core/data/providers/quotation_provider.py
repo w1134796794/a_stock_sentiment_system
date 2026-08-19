@@ -14,7 +14,8 @@ the existing eltdx fallback can continue to serve realtime features.
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any, Dict, Iterable, List, Optional
 
 from loguru import logger
@@ -77,6 +78,16 @@ class QuotationProvider:
                     return normalized
             except FutureTimeoutError:
                 self._cooldown_backend(backend, f"获取实时行情超过 {self.timeout_seconds:.0f}s")
+                # easyquotation and pqquotation call the same remote endpoint
+                # for a given source. A timeout is therefore a source outage,
+                # not a parser-specific failure; avoid blocking another five
+                # seconds before DataManager can continue to eltdx.
+                for sibling in self.backends:
+                    if sibling != backend:
+                        self._disabled_until[sibling] = (
+                            time.monotonic() + self.backend_cooldown_seconds
+                        )
+                break
             except Exception as e:  # noqa: BLE001
                 self._cooldown_backend(backend, str(e))
                 continue

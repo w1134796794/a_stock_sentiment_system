@@ -50,13 +50,22 @@ class SentimentSystem:
         return result
 
     def fetch_post_close_data(
-        self, date: str | None = None, *, skip_existing: bool = True
+        self,
+        date: str | None = None,
+        *,
+        skip_existing: bool = True,
+        force_refresh: bool = False,
+        allow_early_fetch: bool = False,
     ) -> ETLDailyResult:
         """只获取盘后接口数据并落 Silver；完整日期默认不重复请求。"""
         target = self._resolve_target(date)
         logger.info(f"开始执行 {target} 的盘后取数...")
         result = self.pipeline.fetch_data(
-            target, self.yesterday, skip_existing=skip_existing
+            target,
+            self.yesterday,
+            skip_existing=skip_existing,
+            force_refresh=force_refresh,
+            allow_early_fetch=allow_early_fetch,
         )
         if not result.ok:
             raise RuntimeError("盘后取数未完整成功，请查看数据质量报告")
@@ -205,6 +214,11 @@ def main() -> None:
     parser.add_argument("--date", type=str, help="分析日期 (YYYYMMDD)，默认今日")
     parser.add_argument("--start-date", type=str, help="回测开始日期 (YYYYMMDD)")
     parser.add_argument("--end-date", type=str, help="回测结束日期 (YYYYMMDD)")
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="盘后取数时清除目标日期缓存并覆盖 Silver 分区",
+    )
     args = parser.parse_args()
 
     print(">>> A股短线情绪量化系统启动...")
@@ -216,7 +230,9 @@ def main() -> None:
         if args.mode == "analysis":
             SentimentSystem().run_daily_analysis(args.date)
         elif args.mode == "fetch":
-            SentimentSystem().fetch_post_close_data(args.date)
+            SentimentSystem().fetch_post_close_data(
+                args.date, force_refresh=args.force_refresh,
+            )
         elif args.mode == "factors":
             SentimentSystem().run_factor_calculation(args.date)
         elif args.mode == "screening":

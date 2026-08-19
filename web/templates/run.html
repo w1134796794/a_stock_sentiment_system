@@ -84,6 +84,12 @@
             class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg px-5 py-2 disabled:opacity-40">
       {{ stage_config.action }}
     </button>
+    {% if stage_config.key == 'fetch' %}
+    <label class="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+      <input id="force-refresh" type="checkbox" class="accent-amber-500">
+      强制重新取数（覆盖当日缓存）
+    </label>
+    {% endif %}
     <div class="flex items-center gap-2 text-sm">
       <span class="text-slate-400">状态</span>
       <span id="run-state" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-700 text-slate-200">空闲</span>
@@ -173,6 +179,7 @@
   const autoscroll = document.getElementById('run-autoscroll');
   const strategyChecks = [...document.querySelectorAll('.strategy-check')];
   const strategyPrimary = [...document.querySelectorAll('.strategy-primary')];
+  const forceRefreshEl = document.getElementById('force-refresh');
 
   const STATE = {
     idle:    { t: '空闲',   c: 'bg-slate-700 text-slate-200' },
@@ -290,6 +297,7 @@
     strategyChecks.forEach(input => input.checked = initial.options.strategy_ids.includes(input.value));
     strategyPrimary.forEach(input => input.checked = input.value === initial.options.primary_strategy);
   }
+  if (forceRefreshEl) forceRefreshEl.checked = Boolean(initial.options?.force_refresh);
   strategyChecks.forEach(input => input.addEventListener('change', syncStrategySelection));
   syncStrategySelection();
   setMode(runMode);
@@ -306,6 +314,9 @@
     const payload = runMode === 'batch'
       ? { mode: 'batch', start_date: startDateEl.value.trim(), end_date: endDateEl.value.trim() }
       : { mode: 'single', date: dateEl.value.trim() };
+    if (stageConfig.key === 'fetch') {
+      payload.options = { force_refresh: Boolean(forceRefreshEl?.checked) };
+    }
     if (stageConfig.key === 'screening') {
       payload.strategy_ids = strategyChecks.filter(input => input.checked).map(input => input.value);
       payload.primary_strategy = strategyPrimary.find(input => input.checked && !input.disabled)?.value || '';

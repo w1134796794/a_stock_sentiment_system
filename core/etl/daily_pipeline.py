@@ -133,23 +133,49 @@ class ETLDailyPipeline:
         prev_trade_date: str = "",
         *,
         skip_existing: bool = True,
+        force_refresh: bool = False,
+        allow_early_fetch: bool = False,
     ) -> ETLDailyResult:
         """Fetch all post-close sources and persist the normalized Silver layer."""
-        from core.etl.stage_status import fetch_status, write_fetch_manifest
+        from config.settings import POST_CLOSE_DATA_READY_TIME
+        from core.etl.stage_status import (
+            fetch_status,
+            post_close_data_ready,
+            write_fetch_manifest,
+        )
 
         trade_date = str(trade_date)
         prev_trade_date = str(prev_trade_date or "")
         result = ETLDailyResult(
             trade_date=trade_date, prev_trade_date=prev_trade_date, stage="fetch"
         )
+        if not allow_early_fetch and not post_close_data_ready(trade_date):
+            raise RuntimeError(
+                f"{trade_date} 当日盘后接口尚未稳定，默认请在 "
+                f"{POST_CLOSE_DATA_READY_TIME} 后运行。历史日期不受限制。"
+            )
         existing = fetch_status(
             trade_date, db_path=self.duckdb_path, web_data_dir=self.web_data_dir
         )
-        if skip_existing and existing.get("complete"):
+        auto_refresh = bool(existing.get("premature_fetch"))
+        refresh_requested = bool(force_refresh or auto_refresh)
+        if skip_existing and not refresh_requested and existing.get("complete"):
             existing["skipped"] = True
             result.silver_summary = existing
             logger.info(f"[盘后取数] {trade_date} 本地数据完整，跳过远端接口")
             return result
+
+        cache_reset: Dict[str, Any] = {}
+        if refresh_requested:
+            invalidator = getattr(self.dm, "invalidate_trade_date_cache", None)
+            if callable(invalidator):
+                cache_reset = dict(invalidator(trade_date) or {})
+            elif hasattr(self.dm, "invalidate_cache"):
+                cache_reset = {"memory_keys": self.dm.invalidate_cache()}
+            logger.warning(
+                f"[盘后取数] {trade_date} 使用覆盖刷新"
+                + ("（检测到盘前/盘中半成品）" if auto_refresh else "（用户强制）")
+            )
 
         logger.info(f"[盘后取数] 开始: {trade_date}, prev={prev_trade_date or '-'}")
         phase_started = time.monotonic()
@@ -176,11 +202,21 @@ class ETLDailyPipeline:
             web_data_dir=self.web_data_dir,
             sources=dataset.meta.get("source_fetch_status") or {},
             writes=persisted.get("writes") or {},
+            metadata={
+                "force_refresh": refresh_requested,
+                "auto_refresh_premature": auto_refresh,
+                "cache_reset": cache_reset,
+            },
         )
         status = fetch_status(
             trade_date, db_path=self.duckdb_path, web_data_dir=self.web_data_dir
         )
-        status.update({"persist": persisted, "skipped": False})
+        status.update({
+            "persist": persisted,
+            "skipped": False,
+            "force_refresh": refresh_requested,
+            "cache_reset": cache_reset,
+        })
         result.silver_summary = status
         if not status.get("ready"):
             result.warnings.append(status.get("message") or "盘后数据不完整")

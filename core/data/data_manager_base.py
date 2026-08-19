@@ -5,17 +5,17 @@
 共享缓存策略和目录结构。
 """
 import time
-import pandas as pd
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
 import loguru
+import pandas as pd
 
 from core.utils import (
+    CalculationUtils,
     DateUtils,
     StockCodeUtils,
     TimeUtils,
-    CalculationUtils,
     ValidationUtils,
 )
 
@@ -248,6 +248,45 @@ class DataManagerBase:
         if deleted:
             logger.info(f"[invalidate_disk_cache] 已删除 {deleted} 个文件 (pattern={pattern})")
         return deleted
+
+    def invalidate_trade_date_cache(self, trade_date: str) -> dict:
+        """清除某交易日的内存缓存、接口文件缓存及汇总表旧行。
+
+        盘前或盘中误跑盘后取数时，空结果也可能被写成合法 CSV。再次运行
+        前必须同时清理内存和磁盘，否则仅关闭 ``skip_existing`` 仍会复用
+        半成品缓存。
+        """
+        date = "".join(ch for ch in str(trade_date or "") if ch.isdigit())
+        if len(date) != 8:
+            raise ValueError(f"无效交易日期: {trade_date}")
+
+        memory = self.invalidate_cache()
+        disk = self.invalidate_disk_cache(f"**/*{date}*")
+        summary_rows = 0
+        for path in self.summary_dir.glob("*.csv"):
+            try:
+                frame = pd.read_csv(path)
+                if "trade_date" not in frame.columns:
+                    continue
+                keep = frame["trade_date"].astype(str) != date
+                removed = int((~keep).sum())
+                if removed:
+                    frame.loc[keep].to_csv(path, index=False)
+                    summary_rows += removed
+            except Exception as exc:
+                logger.warning(f"[缓存管理] 清理汇总表 {path} 的 {date} 失败: {exc}")
+
+        result = {
+            "trade_date": date,
+            "memory_keys": memory,
+            "disk_files": disk,
+            "summary_rows": summary_rows,
+        }
+        logger.info(
+            f"[缓存管理] {date} 强制刷新准备完成: "
+            f"内存键={memory}, 文件={disk}, 汇总旧行={summary_rows}"
+        )
+        return result
 
     def clear_memory_cache(self):
         """清理内存缓存（保留以向后兼容；新代码请使用 invalidate_cache()）"""

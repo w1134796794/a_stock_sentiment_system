@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from typing import Any, Dict, Iterable
-
 
 CORE_SILVER_TABLES = (
     "stock_daily_silver",
@@ -60,6 +59,37 @@ POST_CLOSE_SILVER_TABLES = (
     "stock_margin_silver",
     "stock_event_silver",
 )
+
+
+def _ready_time() -> time:
+    from config.settings import POST_CLOSE_DATA_READY_TIME
+
+    try:
+        return datetime.strptime(str(POST_CLOSE_DATA_READY_TIME), "%H:%M").time()
+    except ValueError:
+        return time(18, 0)
+
+
+def post_close_data_ready(trade_date: str, *, now: datetime | None = None) -> bool:
+    """历史日期始终可取；当日需等待盘后接口的默认稳定时间。"""
+    current = now or datetime.now()
+    date = "".join(ch for ch in str(trade_date or "") if ch.isdigit())
+    if date != current.strftime("%Y%m%d"):
+        return True
+    return current.time() >= _ready_time()
+
+
+def _premature_manifest(trade_date: str, manifest: Dict[str, Any]) -> bool:
+    """识别当天在盘后稳定时间前生成的旧快照。"""
+    fetched_at = str(manifest.get("fetched_at") or "")
+    if not fetched_at:
+        return False
+    try:
+        fetched = datetime.fromisoformat(fetched_at)
+    except ValueError:
+        return False
+    date = "".join(ch for ch in str(trade_date or "") if ch.isdigit())
+    return date == fetched.strftime("%Y%m%d") and fetched.time() < _ready_time()
 
 
 def _date_count(db_path: Path, table: str, trade_date: str) -> int:
@@ -132,6 +162,7 @@ def fetch_status(trade_date: str, *, db_path: Path, web_data_dir: Path) -> Dict[
         if not bool((writes.get(table) or {}).get("duckdb"))
     ] if manifest else []
     write_complete = bool(writes and not write_missing)
+    premature_fetch = _premature_manifest(date, manifest)
     legacy_complete = bool(ready and not manifest_path.exists())
     ready_for_factors = bool(ready and (write_complete or legacy_complete))
     return {
@@ -150,11 +181,19 @@ def fetch_status(trade_date: str, *, db_path: Path, web_data_dir: Path) -> Dict[
         "writes": writes,
         "write_missing": write_missing,
         "write_complete": write_complete,
-        "complete": bool(ready_for_factors and (source_complete or legacy_complete)),
+        "complete": bool(
+            ready_for_factors
+            and (source_complete or legacy_complete)
+            and not premature_fetch
+        ),
+        "premature_fetch": premature_fetch,
         "legacy_complete": legacy_complete,
         "message": (
-            "盘后数据已就绪"
-            if ready_for_factors else "盘后数据不完整，请先运行盘后取数"
+            "检测到盘前/盘中生成的当日缓存，请在盘后强制刷新"
+            if premature_fetch else (
+                "盘后数据已就绪"
+                if ready_for_factors else "盘后数据不完整，请先运行盘后取数"
+            )
         ),
     }
 
@@ -181,6 +220,7 @@ def write_fetch_manifest(
     web_data_dir: Path,
     sources: Dict[str, Any],
     writes: Dict[str, Any] | None = None,
+    metadata: Dict[str, Any] | None = None,
 ) -> Path:
     path = Path(web_data_dir) / "fetch_status" / f"fetch_{trade_date}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,6 +231,7 @@ def write_fetch_manifest(
                 "fetched_at": datetime.now().isoformat(timespec="seconds"),
                 "sources": sources or {},
                 "writes": writes or {},
+                "metadata": metadata or {},
             },
             ensure_ascii=False,
             indent=2,
@@ -214,6 +255,7 @@ __all__ = [
     "POST_CLOSE_SILVER_TABLES",
     "factor_status",
     "fetch_status",
+    "post_close_data_ready",
     "require_stage",
     "table_partition_status",
     "write_fetch_manifest",

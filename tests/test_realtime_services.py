@@ -102,7 +102,7 @@ def test_realtime_quote_service_normalizes_and_caches():
 
 
 def test_realtime_sector_service_normalizes_adata_sector_quote():
-    def get_market_concept_current_east(index_code=None):
+    def get_market_concept_current_ths(index_code=None):
         return [{
             "index_code": index_code,
             "index_name": "机器人概念",
@@ -113,27 +113,24 @@ def test_realtime_sector_service_normalizes_adata_sector_quote():
 
     fake_adata = SimpleNamespace(
         stock=SimpleNamespace(
-            market=SimpleNamespace(get_market_concept_current_east=get_market_concept_current_east),
-            info=SimpleNamespace(all_concept_code_east=lambda: [{"index_code": "BK0001"}]),
+            market=SimpleNamespace(get_market_concept_current_ths=get_market_concept_current_ths),
+            info=SimpleNamespace(all_concept_code_ths=lambda: [{"index_code": "885001"}]),
         )
     )
 
     service = RealtimeSectorService(fake_adata, ttl_seconds=30)
-    result = service.get_sector_quotes(["BK0001"], source="east")
+    result = service.get_sector_quotes(["885001"], source="ths")
 
     assert result["ok"] is True
     assert result["count"] == 1
     sector = result["sectors"][0]
-    assert sector["code"] == "BK0001"
+    assert sector["code"] == "885001"
     assert sector["name"] == "机器人概念"
     assert sector["last_price"] == 1234.5
     assert sector["change_pct"] == 2.5
 
 
-def test_realtime_sector_service_falls_back_to_ths_auto_list():
-    def all_concept_code_east():
-        raise FileNotFoundError("missing east cache")
-
+def test_realtime_sector_service_uses_ths_auto_list():
     def get_market_concept_current_ths(index_code=None):
         return [{
             "index_code": index_code,
@@ -146,14 +143,13 @@ def test_realtime_sector_service_falls_back_to_ths_auto_list():
         stock=SimpleNamespace(
             market=SimpleNamespace(get_market_concept_current_ths=get_market_concept_current_ths),
             info=SimpleNamespace(
-                all_concept_code_east=all_concept_code_east,
                 all_concept_code_ths=lambda: [{"index_code": "886109", "name": "2026一季报预增"}],
             ),
         )
     )
 
     service = RealtimeSectorService(fake_adata, ttl_seconds=30)
-    result = service.get_sector_quotes(codes=None, source="east", limit=1)
+    result = service.get_sector_quotes(codes=None, source="ths", limit=1)
 
     assert result["ok"] is True
     assert result["source"] == "ths"
@@ -168,14 +164,72 @@ def test_realtime_sector_service_filters_missing_code_markers():
     assert RealtimeSectorService._normalize_codes(["nan", "--", None, "886109"]) == ["886109"]
 
 
-def test_sector_name_resolution_keeps_provider_code_spaces_separate():
+def test_sector_name_resolution_uses_ths_namespace_only():
     service = RealtimeSectorService(SimpleNamespace(stock=SimpleNamespace()))
     service._remember_sector_meta("886001", "机器人", "概念", source="ths")
-    service._remember_sector_meta("BK0001", "机器人", "概念", source="east")
-    service._sector_name_sources.update({"ths", "east"})
+    service._remember_sector_meta("BK0001", "错误命名空间", "概念", source="east")
+    service._sector_name_sources.add("ths")
 
     assert service.resolve_codes_by_names(["机器人"], source="ths") == {"机器人": "886001"}
-    assert service.resolve_codes_by_names(["机器人"], source="east") == {"机器人": "BK0001"}
+    assert service.resolve_codes_by_names(["错误命名空间"], source="east") == {}
+
+
+def test_ths_resolution_rejects_unsupported_700_classification_codes():
+    service = RealtimeSectorService(SimpleNamespace(stock=SimpleNamespace()))
+    service._remember_sector_meta("700632", "制造业指数", "行业", source="ths")
+    service._remember_sector_meta("885806", "华为概念", "概念", source="ths")
+    service._sector_name_sources.add("ths")
+
+    assert service.resolve_codes_by_names(
+        ["制造业指数", "华为概念"], source="ths",
+    ) == {"华为概念": "885806"}
+
+
+def test_ths_quote_skips_unsupported_code_without_network_call():
+    calls = []
+
+    def get_market_concept_current_ths(index_code=None):
+        calls.append(index_code)
+        return []
+
+    fake_adata = SimpleNamespace(
+        stock=SimpleNamespace(
+            market=SimpleNamespace(
+                get_market_concept_current_ths=get_market_concept_current_ths,
+            ),
+            info=SimpleNamespace(),
+        ),
+    )
+    service = RealtimeSectorService(fake_adata)
+
+    result = service.get_sector_quotes(["700632"], source="ths")
+
+    assert result["ok"] is False
+    assert result["missing"] == ["700632"]
+    assert calls == []
+
+
+def test_sector_quote_failure_is_negative_cached():
+    calls = []
+
+    def get_market_concept_current_ths(index_code=None):
+        calls.append(index_code)
+        raise RuntimeError("temporary failure")
+
+    fake_adata = SimpleNamespace(
+        stock=SimpleNamespace(
+            market=SimpleNamespace(
+                get_market_concept_current_ths=get_market_concept_current_ths,
+            ),
+            info=SimpleNamespace(),
+        ),
+    )
+    service = RealtimeSectorService(fake_adata, ttl_seconds=2)
+
+    service.get_sector_quotes(["885806"], source="ths")
+    service.get_sector_quotes(["885806"], source="ths")
+
+    assert calls == ["885806"]
 
 
 def test_sector_quote_uses_previous_close_when_provider_omits_change_pct(monkeypatch):

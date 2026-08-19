@@ -119,13 +119,27 @@ class SnapshotTickStore:
         amount = max(_float(quote.get("amount_yuan")), 0.0)
         with self._lock:
             previous = self._last_totals.get(code)
+            quality_ok = True
+            quality_reason = ""
             if previous and previous[0] == trade_date:
-                delta_volume = max(volume - previous[1], 0.0)
-                delta_amount = max(amount - previous[2], 0.0)
+                volume_regressed = volume < previous[1]
+                amount_regressed = amount > 0 and previous[2] > 0 and amount < previous[2]
+                if volume_regressed or amount_regressed:
+                    # A cumulative counter cannot move backwards in one session.
+                    # Keep the previous baseline so the next sample cannot create
+                    # an artificial volume spike.
+                    delta_volume = 0.0
+                    delta_amount = 0.0
+                    quality_ok = False
+                    quality_reason = "累计成交量或成交额回退"
+                else:
+                    delta_volume = volume - previous[1]
+                    delta_amount = max(amount - previous[2], 0.0)
             else:
                 delta_volume = 0.0
                 delta_amount = 0.0
-            self._last_totals[code] = (trade_date, volume, amount)
+            if quality_ok:
+                self._last_totals[code] = (trade_date, volume, amount)
             row = {
                 **quote,
                 "code": code,
@@ -133,6 +147,8 @@ class SnapshotTickStore:
                 "time": received_at.strftime("%H:%M:%S"),
                 "delta_volume": delta_volume,
                 "delta_amount": delta_amount,
+                "quality_ok": quality_ok,
+                "quality_reason": quality_reason,
             }
             rows = self._rows.setdefault(
                 (trade_date, code), deque(maxlen=self.max_items),
@@ -374,6 +390,7 @@ class PytdxProvider:
             "change_pct": ((last / pre_close - 1.0) * 100.0) if last > 0 and pre_close > 0 else None,
             "date": received_at.strftime("%Y%m%d"),
             "time": received_at.strftime("%H:%M:%S"),
+            "received_at": received_at.isoformat(timespec="milliseconds"),
             "source": "pytdx_snapshot_3s",
             "server": f"{self._connected_server[0]}:{self._connected_server[1]}" if self._connected_server else "",
         }

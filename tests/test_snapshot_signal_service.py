@@ -24,17 +24,20 @@ def _minutes():
 def _ticks(size=3, start=datetime(2026, 8, 13, 9, 35, 6)):
     return pd.DataFrame([
         {
+            "date": start.strftime("%Y%m%d"),
             "time": (start + timedelta(seconds=index * 3)).strftime("%H:%M:%S"),
+            "received_at": (start + timedelta(seconds=index * 3)).isoformat(),
             "last_price": 10.05 + index * 0.01,
             "ask1": 10.06 + index * 0.01,
             "delta_volume": 10,
+            "quality_ok": True,
         }
         for index in range(size)
     ])
 
 
 def test_snapshot_signal_waits_for_next_tick_then_fills():
-    service = SnapshotSignalService()
+    service = SnapshotSignalService(clock=lambda: datetime(2026, 8, 13, 9, 35, 12))
     common = {
         "code": "000001",
         "trade_date": "20260813",
@@ -58,7 +61,7 @@ def test_snapshot_signal_waits_for_next_tick_then_fills():
 
 
 def test_snapshot_signal_does_not_confirm_without_sector_sync():
-    service = SnapshotSignalService()
+    service = SnapshotSignalService(clock=lambda: datetime(2026, 8, 13, 9, 35, 12))
     result = service.evaluate(
         code="000001",
         trade_date="20260813",
@@ -75,3 +78,23 @@ def test_snapshot_signal_does_not_confirm_without_sector_sync():
 
     assert result.status == "observing"
     assert "板块同步走强" in result.reason
+
+
+def test_snapshot_signal_rejects_stale_ticks():
+    service = SnapshotSignalService(clock=lambda: datetime(2026, 8, 13, 9, 36, 0))
+    result = service.evaluate(
+        code="000001",
+        trade_date="20260813",
+        mode=ENTRY_WEAK,
+        minute_bars=_minutes(),
+        snapshots=_ticks(3),
+        prev_close=10.0,
+        open_gap=-0.02,
+        sector_confirmed=True,
+        is_leader=False,
+        limit_price=11.0,
+        minute_decision=EntryDecision("observing"),
+    )
+
+    assert result.status == "observing"
+    assert result.data_status == "snapshot_stale"

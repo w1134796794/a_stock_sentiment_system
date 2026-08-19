@@ -3003,12 +3003,12 @@ def _intraday_strength_cache_key(
 
 
 def _sector_cache_key(
-    codes: Optional[List[str]], source: str, limit: int, include_raw: bool,
+    codes: Optional[List[str]], limit: int, include_raw: bool,
 ) -> tuple:
     return (
         "sectors",
         tuple(codes or []),
-        str(source or "east").lower(),
+        "ths",
         int(limit),
         bool(include_raw),
     )
@@ -3444,18 +3444,17 @@ def api_realtime_quotes(
 @app.get("/api/realtime/sectors")
 def api_realtime_sectors(
     codes: Optional[str] = None,
-    source: str = "east",
     limit: int = 20,
     include_raw: bool = False,
 ) -> Any:
     code_list = _split_codes(codes) or None
     normalized_limit = max(1, min(int(limit or 20), 100))
-    key = _sector_cache_key(code_list, source, normalized_limit, include_raw)
+    key = _sector_cache_key(code_list, normalized_limit, include_raw)
     payload = _get_cached_realtime_payload(
         key,
         lambda: _build_realtime_sector_payload(
             code_list,
-            source=source,
+            source="ths",
             limit=normalized_limit,
             include_raw=include_raw,
         ),

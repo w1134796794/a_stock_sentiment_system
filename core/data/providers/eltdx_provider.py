@@ -98,11 +98,15 @@ class EltdxProvider:
                 return {}
             open_price = getattr(q, "open_price", None)
             open_amount = getattr(q, "open_amount_yuan", None)
+            received_at = datetime.now()
             return {
                 "open_price": float(open_price) if open_price else 0.0,
                 "open_amount": float(open_amount) if open_amount else 0.0,
                 "pre_close": float(getattr(q, "pre_close_price", 0) or 0),
                 "last_price": float(getattr(q, "last_price", 0) or 0),
+                "date": received_at.strftime("%Y%m%d"),
+                "time": received_at.strftime("%H:%M:%S"),
+                "received_at": received_at.isoformat(timespec="milliseconds"),
                 "source": "eltdx_quote",
             }
         except Exception as e:  # noqa: BLE001
@@ -127,6 +131,7 @@ class EltdxProvider:
         out: dict = {}
         try:
             with self._client() as client:
+                received_at = datetime.now()
                 for i in range(0, len(tdx_codes), 80):
                     chunk = tdx_codes[i:i + 80]
                     snaps = client.quotes.get_snapshots(chunk) or []
@@ -145,6 +150,9 @@ class EltdxProvider:
                             "pre_close": float(pre) if pre else 0.0,
                             "last_price": float(last) if last else 0.0,
                             "change_pct": float(chg) if chg is not None else None,
+                            "date": received_at.strftime("%Y%m%d"),
+                            "time": received_at.strftime("%H:%M:%S"),
+                            "received_at": received_at.isoformat(timespec="milliseconds"),
                             "source": "eltdx_quotes_batch",
                         }
         except Exception as e:  # noqa: BLE001

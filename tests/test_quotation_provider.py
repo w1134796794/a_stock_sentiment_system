@@ -1,6 +1,14 @@
 from core.data.providers.quotation_provider import QuotationProvider
 
 
+class _TimeoutClient:
+    def stocks(self, *_args, **_kwargs):
+        import time
+
+        time.sleep(0.05)
+        return {}
+
+
 def test_quotation_provider_normalizes_sina_quote():
     provider = QuotationProvider()
     out = provider._normalize_quote(
@@ -27,3 +35,20 @@ def test_quotation_provider_normalizes_sina_quote():
     assert out["vol_hand"] == 2032355.46
     assert out["amount_yuan"] == 2263042930.57
     assert out["source"] == "pqquotation_sina"
+
+
+def test_quotation_provider_timeout_cools_same_source_siblings():
+    provider = QuotationProvider(
+        backends=("easyquotation", "pqquotation"),
+        timeout_seconds=0.01,
+        backend_cooldown_seconds=30,
+    )
+    provider.timeout_seconds = 0.01
+    provider._clients = {
+        "easyquotation": _TimeoutClient(),
+        "pqquotation": _TimeoutClient(),
+    }
+
+    assert provider.get_quote_snapshots(["000001"]) == {}
+    assert provider._backend_disabled("easyquotation") is True
+    assert provider._backend_disabled("pqquotation") is True
