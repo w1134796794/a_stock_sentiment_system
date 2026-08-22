@@ -137,9 +137,11 @@ class StrategyProfileRepository:
         path: Optional[Path] = None,
         base_profile_path: Optional[Path] = None,
     ) -> None:
-        from config.settings import BASE_DIR
+        from config.settings import BASE_DIR, STRATEGY_COMBINATIONS_PATH
 
-        self.path = Path(path or BASE_DIR / "config" / "strategy_combinations.yaml")
+        self._path_explicit = path is not None
+        self.path = Path(path or STRATEGY_COMBINATIONS_PATH)
+        self.default_path = BASE_DIR / "config" / "strategy_combinations.yaml"
         self.base_profile_path = Path(
             base_profile_path or BASE_DIR / "config" / "screening_profiles.yaml"
         )
@@ -151,9 +153,12 @@ class StrategyProfileRepository:
         return payload.get("screening_profiles") or {}
 
     def _payload(self) -> Dict[str, Any]:
-        if not self.path.exists():
+        source = self.path
+        if not source.exists() and not self._path_explicit and self.default_path.exists():
+            source = self.default_path
+        if not source.exists():
             return {"version": 1, "strategies": {}}
-        payload = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
+        payload = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
         payload.setdefault("version", 1)
         payload.setdefault("strategies", {})
         return payload
@@ -289,9 +294,16 @@ class StrategyProfileRepository:
             raise ValueError("策略标识只能使用2-48位字母、数字、下划线或短横线")
         existing_profile = self.get_profile(profile_id) or {}
         submitted = dict(data or {})
-        for key in ("scope", "priority_filters", "evidence_rules", "veto_rules"):
+        for key in (
+            "scope", "training_scope", "priority_filters", "evidence_rules", "veto_rules",
+        ):
             if key not in submitted and key in existing_profile:
                 submitted[key] = deepcopy(existing_profile[key])
+        # 页面只编辑入场部分；退出参数等隐藏字段必须继续沿用现有策略配置。
+        submitted["execution"] = _deep_merge(
+            existing_profile.get("execution") or {},
+            submitted.get("execution") or {},
+        )
         if existing_profile.get("scope") == "production":
             submitted["scope"] = "production"
             submitted["weight_source"] = "manual"
@@ -447,11 +459,18 @@ class StrategyProfileRepository:
     def _write(self, payload: Mapping[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(
-            yaml.safe_dump(dict(payload), allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
-        )
-        temporary.replace(self.path)
+        try:
+            temporary.write_text(
+                yaml.safe_dump(dict(payload), allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            temporary.replace(self.path)
+        except PermissionError as exc:
+            temporary.unlink(missing_ok=True)
+            raise PermissionError(
+                f"策略配置目录不可写: {self.path.parent}；请检查 WEB_DATA_DIR 或 "
+                "STRATEGY_COMBINATIONS_PATH 的目录权限"
+            ) from exc
 
 
 def factor_catalog() -> List[Dict[str, Any]]:

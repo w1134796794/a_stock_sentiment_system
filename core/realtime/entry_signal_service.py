@@ -180,18 +180,10 @@ class RealtimeEntrySignalService:
         allowed_modes = normalize_strategy_entry_modes(
             execution.get("allowed_entry_modes") or []
         )
-        if allowed_modes and mode not in allowed_modes:
-            allowed_text = "、".join(MODE_LABELS.get(item, item) for item in sorted(allowed_modes))
-            return self._payload(
-                EntryDecision(
-                    "rejected",
-                    signal=MODE_LABELS.get(mode, ""),
-                    reason=f"该策略仅允许{allowed_text}，当前开盘分层不适用",
-                    open_gap_pct=gap,
-                ),
-                mode,
-                market_date,
-            )
+        strategy_mode_allowed = not allowed_modes or mode in allowed_modes
+        allowed_text = "、".join(
+            MODE_LABELS.get(item, item) for item in sorted(allowed_modes)
+        )
         auction = self._auction(code, market_date) if mode == ENTRY_CONTINUATION else {}
         amount_ratio = self._metric(row, "amount_ratio", 0.0)
         previous_amount = self._previous_amount_yuan(previous)
@@ -242,7 +234,104 @@ class RealtimeEntrySignalService:
                     decision = snapshot_decision
             except Exception:
                 pass
-        return self._payload(decision, mode, market_date, sector_detail=sector_detail)
+        if not strategy_mode_allowed:
+            decision, strength_detected = self._disallowed_mode_observation(
+                decision=decision,
+                mode=mode,
+                frame=frame,
+                limit_price=_float(limit_up_price(pre_close, code, name)),
+                allowed_text=allowed_text,
+                open_gap=gap,
+            )
+        else:
+            strength_detected = decision.status in {
+                "filled", "confirmed", "signal_unfilled",
+            }
+        return self._payload(
+            decision,
+            mode,
+            market_date,
+            sector_detail=sector_detail,
+            strategy_mode_allowed=strategy_mode_allowed,
+            strength_detected=strength_detected,
+        )
+
+    @staticmethod
+    def _disallowed_mode_observation(
+        *,
+        decision: EntryDecision,
+        mode: str,
+        frame: pd.DataFrame,
+        limit_price: float,
+        allowed_text: str,
+        open_gap: float,
+    ) -> Tuple[EntryDecision, bool]:
+        """Keep strong price evidence visible without authorising a strategy buy."""
+        mode_text = MODE_LABELS.get(mode, mode)
+        data = normalize_minute_bars(frame)
+        if mode == ENTRY_ACCELERATION and not data.empty and limit_price > 0:
+            limit_rows = data[
+                (data["high"] >= limit_price * 0.998)
+                | (data["close"] >= limit_price * 0.998)
+            ]
+            if not limit_rows.empty:
+                confirm_time = str(limit_rows.iloc[0].get("time") or "")
+                # The signal is only known after the confirming minute closes.
+                # A lower price inside that same minute is not a future fill window.
+                after_confirm = data[data["time"] > confirm_time]
+                reopened = bool((after_confirm["low"] < limit_price * 0.998).any())
+                status = "observing" if reopened else "signal_unfilled"
+                execution_reason = (
+                    f"；但策略仅允许{allowed_text}，不触发买入"
+                    if allowed_text else "；当前策略不触发买入"
+                )
+                reason = (
+                    f"{mode_text}后快速触及涨停，走势已确认"
+                    + ("，盘中曾打开" if reopened else "，封板后无可成交窗口")
+                    + execution_reason
+                )
+                return (
+                    EntryDecision(
+                        status,
+                        signal=mode_text,
+                        reason=reason,
+                        confirm_time=confirm_time,
+                        open_gap_pct=open_gap,
+                        data_status="strategy_mode_observation",
+                    ),
+                    True,
+                )
+
+        if decision.status in {"filled", "confirmed", "signal_unfilled"}:
+            reason = (
+                f"已识别{mode_text}走势；但策略仅允许{allowed_text}，不触发买入"
+            )
+            return (
+                EntryDecision(
+                    "observing",
+                    signal=mode_text,
+                    reason=reason,
+                    confirm_time=decision.confirm_time,
+                    open_gap_pct=open_gap,
+                    amount_pace=decision.amount_pace,
+                    sector_confirmed=decision.sector_confirmed,
+                    data_status="strategy_mode_observation",
+                    data_completeness=decision.data_completeness,
+                ),
+                True,
+            )
+
+        return (
+            EntryDecision(
+                "rejected",
+                signal=mode_text,
+                reason=f"该策略仅允许{allowed_text}，当前{mode_text}分层不执行",
+                open_gap_pct=open_gap,
+                data_status="strategy_mode_not_allowed",
+                data_completeness=decision.data_completeness,
+            ),
+            False,
+        )
 
     @staticmethod
     def _row_execution(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -273,6 +362,8 @@ class RealtimeEntrySignalService:
     def _payload(
         self, decision: EntryDecision, mode: str, market_date: str,
         *, sector_detail: Optional[Dict[str, Any]] = None,
+        strategy_mode_allowed: bool = True,
+        strength_detected: bool = False,
     ) -> Dict[str, Any]:
         if decision.status in {"filled", "confirmed"}:
             status = "confirmed"
@@ -321,6 +412,8 @@ class RealtimeEntrySignalService:
             "signal_status_text": status_text,
             "signal": signal_name,
             "reason": decision.reason,
+            "strategy_mode_allowed": bool(strategy_mode_allowed),
+            "strength_detected": bool(strength_detected),
             "confirm_time": decision.confirm_time,
             "entry_time": decision.entry_time,
             "entry_price": decision.entry_price or None,

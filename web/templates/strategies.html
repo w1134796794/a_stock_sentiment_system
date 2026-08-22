@@ -17,7 +17,7 @@
   </aside>
 
   <main class="border border-slate-800 bg-slate-900/45 rounded-lg overflow-hidden min-w-0">
-    <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800">
+    <div class="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 bg-slate-950/95 backdrop-blur">
       <div>
         <div id="editor-title" class="font-bold">编辑方案</div>
         <div id="editor-status" class="text-[11px] text-slate-500 mt-0.5">修改仅影响后续选股任务</div>
@@ -32,7 +32,7 @@
     <div class="p-4 space-y-6">
       <section>
         <h2 class="section-title">基本信息</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           <label class="field"><span>策略标识</span><input id="profile-id" placeholder="例如 weak_to_strong"></label>
           <label class="field"><span>显示名称</span><input id="profile-name" placeholder="例如 弱转强"></label>
           <label class="field"><span>基础方案</span><select id="base-profile"></select></label>
@@ -346,8 +346,46 @@
         confirmation_deadline:`${byId('execution-deadline').value || '10:00'}:00`,
         candidate_max_age_days:Number(byId('execution-age').value || 1),
         max_positions:Number(byId('execution-max-positions').value || 0),
+        exit:structuredClone(current?.execution?.exit || {}),
       },
     };
+  }
+
+  async function responsePayload(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try { return JSON.parse(text); }
+    catch (_) {
+      if (response.status === 401) return {error:'登录已失效，请重新登录后保存'};
+      if (response.status === 403) return {error:'当前账号没有修改策略的权限，请使用管理员账号'};
+      return {error:`保存接口返回异常（HTTP ${response.status}）`};
+    }
+  }
+
+  async function saveCurrentProfile() {
+    const id = byId('profile-id').value.trim();
+    if (!id) { byId('editor-status').textContent = '请填写策略标识'; return; }
+    const button = byId('save-profile');
+    button.disabled = true;
+    button.textContent = '保存中…';
+    byId('editor-status').textContent = '正在保存策略配置…';
+    try {
+      const response = await fetch('/api/strategies/' + encodeURIComponent(id), {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(collectProfile()),
+      });
+      const data = await responsePayload(response);
+      if (!response.ok || !data.ok) {
+        byId('editor-status').textContent = data.error || data.message || `保存失败（HTTP ${response.status}）`;
+        return;
+      }
+      await refreshProfiles(id);
+      byId('editor-status').textContent = '已保存，可在选股任务中选择运行';
+    } catch (error) {
+      byId('editor-status').textContent = `保存失败：${error?.message || '网络或服务异常'}`;
+    } finally {
+      button.disabled = false;
+      button.textContent = '保存';
+    }
   }
 
   function updateModelHint() {
@@ -376,15 +414,7 @@
   byId('duplicate-profile').addEventListener('click', () => loadProfile(emptyProfile(collectProfile()), true));
   byId('factor-search').addEventListener('input', renderFactors);
   byId('weight-source').addEventListener('change', updateModelHint);
-  byId('save-profile').addEventListener('click', async () => {
-    const id = byId('profile-id').value.trim();
-    if (!id) { byId('editor-status').textContent = '请填写策略标识'; return; }
-    const response = await fetch('/api/strategies/' + encodeURIComponent(id), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collectProfile())});
-    const data = await response.json();
-    if (!response.ok || !data.ok) { byId('editor-status').textContent = data.error || '保存失败'; return; }
-    await refreshProfiles(id);
-    byId('editor-status').textContent = '已保存，可在选股任务中选择运行';
-  });
+  byId('save-profile').addEventListener('click', saveCurrentProfile);
   byId('delete-profile').addEventListener('click', async () => {
     if (!current || current.protected || !confirm(`删除策略“${current.name}”？`)) return;
     const response = await fetch('/api/strategies/' + encodeURIComponent(current.id), {method:'DELETE'});

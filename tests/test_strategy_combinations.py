@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import yaml
 
+import config.settings as settings
 from core.screening.strategy_profiles import StrategyProfileRepository
 from desktop.runner import RunController
 
@@ -65,6 +66,76 @@ def test_strategy_repository_resolves_engine_configuration(tmp_path):
     assert resolved["allowed_market_regimes"] == ["strong", "neutral"]
     assert resolved["hard_filters"][0]["name"] == "股票池流动性门槛"
     assert resolved["exclusion_filters"][0]["name"] == "拥挤排除"
+
+
+def test_strategy_save_preserves_hidden_exit_rules(tmp_path):
+    base_path = tmp_path / "screening_profiles.yaml"
+    strategy_path = tmp_path / "strategy_combinations.yaml"
+    _base_profiles(base_path)
+    repository = StrategyProfileRepository(strategy_path, base_path)
+    common = {
+        "name": "入场规则测试",
+        "base_profile": "default",
+        "ranking_factors": [{"factor": "tech_score", "weight": 1.0}],
+        "market_regimes": ["strong"],
+    }
+    repository.save("entry_test", {
+        **common,
+        "execution": {
+            "allowed_entry_modes": ["weak_to_strong"],
+            "confirmation_deadline": "09:50:00",
+            "exit": {"hard_stop_loss": 0.03, "time_stop_days": 2},
+        },
+    })
+
+    saved = repository.save("entry_test", {
+        **common,
+        "execution": {
+            "allowed_entry_modes": ["weak_to_strong", "acceleration"],
+            "confirmation_deadline": "10:00:00",
+        },
+    })
+
+    assert saved["execution"]["allowed_entry_modes"] == ["weak_to_strong", "acceleration"]
+    assert saved["execution"]["confirmation_deadline"] == "10:00:00"
+    assert saved["execution"]["exit"]["hard_stop_loss"] == 0.03
+    assert saved["execution"]["exit"]["time_stop_days"] == 2
+
+
+def test_runtime_strategy_file_is_seeded_from_read_only_defaults(tmp_path, monkeypatch):
+    base_dir = tmp_path / "app"
+    config_dir = base_dir / "config"
+    config_dir.mkdir(parents=True)
+    base_path = config_dir / "screening_profiles.yaml"
+    default_path = config_dir / "strategy_combinations.yaml"
+    runtime_path = tmp_path / "runtime" / "strategy_combinations.yaml"
+    _base_profiles(base_path)
+    default_path.write_text(
+        yaml.safe_dump({
+            "version": 1,
+            "strategies": {
+                "seeded": {
+                    "name": "默认策略",
+                    "base_profile": "default",
+                    "ranking_factors": [{"factor": "tech_score", "weight": 1.0}],
+                }
+            },
+        }, allow_unicode=True),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "BASE_DIR", base_dir)
+    monkeypatch.setattr(settings, "STRATEGY_COMBINATIONS_PATH", runtime_path)
+
+    repository = StrategyProfileRepository()
+    profile = repository.get_profile("seeded")
+    assert profile["name"] == "默认策略"
+    profile["execution"]["allowed_entry_modes"] = ["acceleration"]
+    repository.save("seeded", profile)
+
+    assert runtime_path.exists()
+    assert repository.get_profile("seeded")["execution"]["allowed_entry_modes"] == [
+        "acceleration"
+    ]
 
 
 def test_strategy_selection_rejects_disabled_profile(tmp_path):

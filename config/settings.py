@@ -57,6 +57,12 @@ POST_CLOSE_DATA_READY_TIME = (
 # 收盘跑批时，喂给 Excel 的 data_dict 会同步落到这里，供 Web 页面与 KB 复用。
 # ============================================
 WEB_DATA_DIR = _env_path("WEB_DATA_DIR", BASE_DIR / "webdata")
+# 页面可编辑的策略组合属于运行期配置，不能直接写部署目录下的源码 YAML。
+# 默认放在 WEB_DATA_DIR，服务器只需保证该目录对服务账号可写。
+STRATEGY_COMBINATIONS_PATH = _env_path(
+    "STRATEGY_COMBINATIONS_PATH",
+    WEB_DATA_DIR / "settings" / "strategy_combinations.yaml",
+)
 # 回测等运行产物默认跟随 WEB_DATA_DIR，服务器可将整个运行数据目录放到
 # /srv 等可写位置；也可通过 OUTPUT_DIR 单独覆盖。
 OUTPUT_DIR = _env_path("OUTPUT_DIR", WEB_DATA_DIR / "output")

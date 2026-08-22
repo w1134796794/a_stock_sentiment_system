@@ -38,6 +38,7 @@ htmlcov/
 /webdata/config_overrides.json
 /webdata/experiments/
 /webdata/operations/
+/webdata/settings/
 
 # Mutable runtime databases must stay outside Git. The application initializes
 # app/auth schemas when the files are absent.

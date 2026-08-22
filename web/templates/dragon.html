@@ -25,19 +25,20 @@
 {% endblock %}
 
 {% block content %}
-<section class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
-  <div class="lp-kpi"><div id="kpi-total" class="lp-kpi-v mono">--</div><div class="lp-kpi-l">入池</div></div>
-  <div class="lp-kpi"><div id="kpi-core" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">核心龙头</div></div>
-  <div class="lp-kpi"><div id="kpi-short" class="lp-kpi-v mono text-emerald-300">--</div><div class="lp-kpi-l">短线角色</div></div>
-  <div class="lp-kpi"><div id="kpi-board" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">连板角色</div></div>
-  <div class="lp-kpi"><div id="kpi-trend" class="lp-kpi-v mono text-violet-300">--</div><div class="lp-kpi-l">趋势角色</div></div>
-  <div class="lp-kpi"><div id="kpi-sector" class="lp-kpi-v mono text-amber-300">--</div><div class="lp-kpi-l">板块角色</div></div>
-  <div class="lp-kpi"><div id="kpi-emotion" class="lp-kpi-v mono text-cyan-300">--</div><div class="lp-kpi-l">情绪角色</div></div>
+<section id="role-filters" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4" aria-label="按龙头角色筛选">
+  <button type="button" class="lp-kpi active" data-role-filter="all" aria-pressed="true"><div id="kpi-total" class="lp-kpi-v mono">--</div><div class="lp-kpi-l">全部入池</div></button>
+  <button type="button" class="lp-kpi" data-role-filter="核心龙头" aria-pressed="false"><div id="kpi-core" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">核心龙头</div></button>
+  <button type="button" class="lp-kpi" data-role-filter="短线龙头" aria-pressed="false"><div id="kpi-short" class="lp-kpi-v mono text-emerald-300">--</div><div class="lp-kpi-l">短线龙头</div></button>
+  <button type="button" class="lp-kpi" data-role-filter="连板龙头" aria-pressed="false"><div id="kpi-board" class="lp-kpi-v mono text-rose-300">--</div><div class="lp-kpi-l">连板龙头</div></button>
+  <button type="button" class="lp-kpi" data-role-filter="趋势龙头" aria-pressed="false"><div id="kpi-trend" class="lp-kpi-v mono text-violet-300">--</div><div class="lp-kpi-l">趋势龙头</div></button>
+  <button type="button" class="lp-kpi" data-role-filter="板块龙头" aria-pressed="false"><div id="kpi-sector" class="lp-kpi-v mono text-amber-300">--</div><div class="lp-kpi-l">板块龙头</div></button>
+  <button type="button" class="lp-kpi" data-role-filter="情绪龙头" aria-pressed="false"><div id="kpi-emotion" class="lp-kpi-v mono text-cyan-300">--</div><div class="lp-kpi-l">情绪龙头</div></button>
 </section>
 
 <section class="card border border-slate-800 rounded-xl p-4 min-w-0">
   <div class="flex items-center gap-2 mb-4">
     <h2 class="font-bold mr-auto">近段龙头池</h2>
+    <span id="filter-summary" class="text-xs text-slate-400">全部</span>
     <span id="pool-date" class="lp-pill mono">--</span>
     <span id="pool-updated" class="text-xs text-slate-500 mono">--</span>
   </div>
@@ -46,7 +47,11 @@
 </section>
 
 <style>
-  .lp-kpi { background:rgba(15,23,42,.52); border:1px solid rgba(51,65,85,.7); border-radius:.75rem; padding:.85rem .95rem; min-height:78px; }
+  .lp-kpi { width:100%; color:inherit; text-align:left; cursor:pointer; background:rgba(15,23,42,.52); border:1px solid rgba(51,65,85,.7); border-radius:.75rem; padding:.85rem .95rem; min-height:78px; transition:border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+  .lp-kpi:hover { border-color:rgba(16,185,129,.55); background:rgba(15,23,42,.78); }
+  .lp-kpi:focus-visible { outline:2px solid #34d399; outline-offset:2px; }
+  .lp-kpi.active { border-color:rgba(16,185,129,.85); background:rgba(6,78,59,.2); box-shadow:inset 0 0 0 1px rgba(16,185,129,.18); }
+  .lp-kpi.active .lp-kpi-l { color:#6ee7b7; }
   .lp-kpi-v { font-size:1.65rem; font-weight:900; line-height:1.1; overflow-wrap:anywhere; }
   .lp-kpi-l { font-size:.72rem; color:#64748b; margin-top:.3rem; }
   .lp-pill { font-size:.68rem; font-weight:800; border-radius:.45rem; padding:.12rem .5rem; background:rgba(100,116,139,.18); color:#cbd5e1; border:1px solid rgba(100,116,139,.42); }
@@ -94,8 +99,11 @@
     refresh: document.getElementById('refresh-btn'),
     spin: document.getElementById('refresh-spin'),
     grid: document.getElementById('pool-grid'),
-    empty: document.getElementById('pool-empty')
+    empty: document.getElementById('pool-empty'),
+    filterSummary: document.getElementById('filter-summary'),
+    roleFilters: Array.from(document.querySelectorAll('[data-role-filter]'))
   };
+  let activeRoleFilter = 'all';
 
   function esc(v) {
     return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -126,6 +134,27 @@
     return '';
   }
 
+  function applyRoleFilter() {
+    let visibleCount = 0;
+    els.grid.querySelectorAll('.lp-card').forEach(card => {
+      const roles = String(card.dataset.leaderRoles || '').split('|').filter(Boolean);
+      const matched = activeRoleFilter === 'all'
+        || (activeRoleFilter === '核心龙头' && (card.dataset.poolType === '核心龙头' || roles.includes(activeRoleFilter)))
+        || roles.includes(activeRoleFilter);
+      card.classList.toggle('hidden', !matched);
+      if (matched) visibleCount += 1;
+    });
+    const filterLabel = activeRoleFilter === 'all' ? '全部' : activeRoleFilter;
+    els.filterSummary.textContent = `${filterLabel} ${visibleCount}只`;
+    els.roleFilters.forEach(button => {
+      const selected = button.dataset.roleFilter === activeRoleFilter;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+    els.empty.textContent = activeRoleFilter === 'all' ? '暂无入池候选' : `暂无${activeRoleFilter}`;
+    els.empty.classList.toggle('hidden', visibleCount > 0);
+  }
+
   async function loadPool() {
     els.refresh.disabled = true;
     els.spin.classList.remove('hidden');
@@ -149,6 +178,10 @@
     const rows = j.rows || [];
     const counts = j.counts || {};
     const roleCounts = j.role_counts || {};
+    const showConfidenceMetric = rows.some(row => {
+      const grade = String(row.confidence_grade || '').trim().toUpperCase();
+      return grade && grade !== 'D';
+    });
     document.getElementById('kpi-total').textContent = rows.length || 0;
     document.getElementById('kpi-core').textContent = counts['核心龙头'] || 0;
     document.getElementById('kpi-short').textContent = roleCounts['短线龙头'] || 0;
@@ -160,7 +193,7 @@
     document.getElementById('pool-updated').textContent = j.generated_at ? j.generated_at.replace('T', ' ') : '--';
     if (!rows.length) {
       els.grid.innerHTML = '';
-      els.empty.classList.remove('hidden');
+      applyRoleFilter();
       return;
     }
     els.grid.innerHTML = rows.map(row => {
@@ -169,7 +202,7 @@
       const roleClass = role => role === '短线龙头' ? 'short' : role === '连板龙头' ? 'board' : role === '趋势龙头' ? 'trend' : role === '板块龙头' ? 'sector' : role === '情绪龙头' ? 'emotion' : '';
       const roles = (row.leader_roles || []).map(role => `<span class="lp-role ${roleClass(role)}">${esc(role)}</span>`).join('');
       return `
-      <article class="lp-card ${tcls}">
+      <article class="lp-card ${tcls}" data-pool-type="${esc(row.pool_type || '')}" data-leader-roles="${esc((row.leader_roles || []).join('|'))}">
         <div class="lp-head">
           <a href="/stock/${esc(row.code)}?date=${esc(j.trade_date || initialDate)}" class="min-w-0 hover:text-emerald-300">
             <div class="lp-name">${esc(nameOf(row))}</div>
@@ -186,7 +219,7 @@
           <div class="lp-metric"><span>龙头日期</span><strong class="mono">${esc(row.last_leader_date || '--')}</strong></div>
           <div class="lp-metric"><span>龙头时效</span><strong>${esc(row.leader_time_label || '--')}</strong></div>
           <div class="lp-metric"><span>生命周期</span><strong>${esc(row.lifecycle_state || '--')}</strong></div>
-          <div class="lp-metric"><span>可信等级</span><strong class="mono">${esc(row.confidence_grade || 'D')}</strong></div>
+          ${showConfidenceMetric ? `<div class="lp-metric"><span>可信等级</span><strong class="mono">${esc(row.confidence_grade || '--')}</strong></div>` : ''}
           <div class="lp-metric"><span>当日涨幅</span><strong class="${clsPct(row.pct_chg)}">${pct(row.pct_chg)}</strong></div>
           <div class="lp-metric"><span>涨停幅度</span><strong class="mono">${row.limit_pct == null ? '--' : num(row.limit_pct, 0) + 'cm'}</strong></div>
           <div class="lp-metric"><span>涨停进度</span><strong class="mono">${row.limit_progress == null ? '--' : Math.round(Number(row.limit_progress) * 100) + '%'}</strong></div>
@@ -201,8 +234,13 @@
         <div class="lp-action">${esc(row.action || '')}</div>
       </article>`;
     }).join('');
+    applyRoleFilter();
   }
 
+  els.roleFilters.forEach(button => button.addEventListener('click', () => {
+    activeRoleFilter = button.dataset.roleFilter || 'all';
+    applyRoleFilter();
+  }));
   els.refresh.addEventListener('click', loadPool);
   if (els.date) els.date.addEventListener('change', loadPool);
   els.lookback.addEventListener('change', loadPool);
