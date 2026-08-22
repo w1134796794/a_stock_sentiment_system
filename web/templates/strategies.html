@@ -378,7 +378,15 @@
         byId('editor-status').textContent = data.error || data.message || `保存失败（HTTP ${response.status}）`;
         return;
       }
-      await refreshProfiles(id);
+      const saved = data.profile;
+      if (!saved || saved.id !== id) {
+        byId('editor-status').textContent = '保存接口未返回有效的策略配置，请检查服务日志';
+        return;
+      }
+      const index = profiles.findIndex(item => item.id === id);
+      if (index >= 0) profiles[index] = saved;
+      else profiles.push(saved);
+      loadProfile(saved);
       byId('editor-status').textContent = '已保存，可在选股任务中选择运行';
     } catch (error) {
       byId('editor-status').textContent = `保存失败：${error?.message || '网络或服务异常'}`;
@@ -397,8 +405,12 @@
   }
 
   async function refreshProfiles(selectId) {
-    const response = await fetch('/api/strategies');
-    const data = await response.json();
+    const response = await fetch('/api/strategies', {cache:'no-store'});
+    const data = await responsePayload(response);
+    if (!response.ok || !data.ok) {
+      byId('editor-status').textContent = data.error || `读取策略失败（HTTP ${response.status}）`;
+      return;
+    }
     profiles = data.profiles || [];
     loadProfile(profiles.find(item => item.id === selectId) || profiles[0]);
   }

@@ -102,6 +102,33 @@ def test_strategy_save_preserves_hidden_exit_rules(tmp_path):
     assert saved["execution"]["exit"]["time_stop_days"] == 2
 
 
+def test_weak_to_strong_execution_edits_are_persisted(tmp_path):
+    base_path = tmp_path / "screening_profiles.yaml"
+    strategy_path = tmp_path / "strategy_combinations.yaml"
+    _base_profiles(base_path)
+    repository = StrategyProfileRepository(strategy_path, base_path)
+    repository.save("weak_to_strong", {
+        "name": "弱转强修复",
+        "base_profile": "default",
+        "ranking_factors": [{"factor": "tech_score", "weight": 1.0}],
+        "market_regimes": ["strong", "neutral", "weak"],
+        "execution": {
+            "allowed_entry_modes": ["weak_to_strong"],
+            "confirmation_deadline": "09:48:00",
+            "candidate_max_age_days": 2,
+            "max_positions": 1,
+        },
+    })
+
+    reopened = StrategyProfileRepository(strategy_path, base_path).get_profile(
+        "weak_to_strong"
+    )
+
+    assert reopened["execution"]["confirmation_deadline"] == "09:48:00"
+    assert reopened["execution"]["candidate_max_age_days"] == 2
+    assert reopened["execution"]["allowed_entry_modes"] == ["weak_to_strong"]
+
+
 def test_runtime_strategy_file_is_seeded_from_read_only_defaults(tmp_path, monkeypatch):
     base_dir = tmp_path / "app"
     config_dir = base_dir / "config"

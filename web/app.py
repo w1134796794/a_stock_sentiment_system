@@ -2748,11 +2748,14 @@ def api_screening_run_status(since: int = 0) -> Any:
 def api_strategies() -> Any:
     from core.screening.strategy_profiles import StrategyProfileRepository, factor_catalog
 
-    return JSONResponse({
-        "ok": True,
-        "profiles": StrategyProfileRepository().list_profiles(),
-        "factors": factor_catalog(),
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "profiles": StrategyProfileRepository().list_profiles(),
+            "factors": factor_catalog(),
+        },
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/api/strategy-lab")
@@ -2775,7 +2778,10 @@ def api_save_strategy(profile_id: str, payload: dict = Body(default={})) -> Any:
         profile = StrategyProfileRepository().save(profile_id, payload or {})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-    return JSONResponse({"ok": True, "profile": profile})
+    return JSONResponse(
+        {"ok": True, "profile": profile},
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.delete("/api/strategies/{profile_id}")
