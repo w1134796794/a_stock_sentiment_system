@@ -47,6 +47,13 @@ class MemoryStateBackend:
         with self._mutex:
             self._values[self._key(key)] = (_json_dumps(value), expires_at)
 
+    def get_many_json(self, keys: List[str]) -> Dict[str, Any]:
+        return {key: value for key in keys if (value := self.get_json(key)) is not None}
+
+    def set_many_json(self, values: Dict[str, Any], ttl_seconds: int = 0) -> None:
+        for key, value in values.items():
+            self.set_json(key, value, ttl_seconds)
+
     def delete(self, key: str) -> None:
         full = self._key(key)
         with self._mutex:
@@ -142,6 +149,25 @@ class RedisStateBackend:
     def set_json(self, key: str, value: Any, ttl_seconds: int = 0) -> None:
         kwargs = {"ex": max(int(ttl_seconds), 1)} if ttl_seconds > 0 else {}
         self.client.set(self._key(key), _json_dumps(value), **kwargs)
+
+    def get_many_json(self, keys: List[str]) -> Dict[str, Any]:
+        if not keys:
+            return {}
+        rows = self.client.mget([self._key(key) for key in keys])
+        return {
+            key: json.loads(raw)
+            for key, raw in zip(keys, rows)
+            if raw
+        }
+
+    def set_many_json(self, values: Dict[str, Any], ttl_seconds: int = 0) -> None:
+        if not values:
+            return
+        pipe = self.client.pipeline(transaction=False)
+        for key, value in values.items():
+            kwargs = {"ex": max(int(ttl_seconds), 1)} if ttl_seconds > 0 else {}
+            pipe.set(self._key(key), _json_dumps(value), **kwargs)
+        pipe.execute()
 
     def delete(self, key: str) -> None:
         self.client.delete(self._key(key))

@@ -98,6 +98,7 @@ class RealtimeSnapshotRepository:
             "code", "date", "time", "last_price", "open_price", "pre_close",
             "high_price", "low_price", "bid1", "ask1", "bid_vol1", "ask_vol1",
             "vol_hand", "amount_yuan", "delta_volume", "delta_amount", "source",
+            "received_at", "quality_ok", "collector_id", "schema_version",
         )
         return {key: source.get(key) for key in fields if source.get(key) is not None}
 

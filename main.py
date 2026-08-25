@@ -68,7 +68,10 @@ class SentimentSystem:
             allow_early_fetch=allow_early_fetch,
         )
         if not result.ok:
-            raise RuntimeError("盘后取数未完整成功，请查看数据质量报告")
+            status = result.silver_summary or {}
+            missing = status.get("missing") or status.get("write_missing") or []
+            detail = f"；缺失：{', '.join(map(str, missing))}" if missing else ""
+            raise RuntimeError(f"盘后取数未完整成功，请查看数据质量报告{detail}")
         return result
 
     def run_factor_calculation(self, date: str | None = None) -> ETLDailyResult:

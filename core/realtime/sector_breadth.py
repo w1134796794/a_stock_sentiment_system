@@ -195,9 +195,9 @@ class RealtimeSectorBreadthProvider:
         if self.sector_service is not None:
             return self.sector_service
         try:
-            from core.realtime.sector_service import RealtimeSectorService
+            from core.realtime.sector_service import get_realtime_sector_service
 
-            self.sector_service = RealtimeSectorService()
+            self.sector_service = get_realtime_sector_service()
         except Exception:
             self.sector_service = None
         return self.sector_service

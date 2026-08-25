@@ -2925,7 +2925,9 @@ def _get_realtime_sector_service():
     if _REALTIME_SECTOR_SERVICE is None:
         with _REALTIME_SERVICE_LOCK:
             if _REALTIME_SECTOR_SERVICE is None:
-                _REALTIME_SECTOR_SERVICE = RealtimeSectorService()
+                from core.realtime.sector_service import get_realtime_sector_service
+
+                _REALTIME_SECTOR_SERVICE = get_realtime_sector_service()
     return _REALTIME_SECTOR_SERVICE
 
 
@@ -3306,8 +3308,8 @@ def _refresh_realtime_defaults() -> None:
         return
     market_date = _realtime_market_date()
     trade_date = _realtime_candidate_date(market_date)
-    # Build one deduplicated watchlist first.  pytdx receives this list in a
-    # single batch call; leader/candidate page builders then consume the warm cache.
+    # Publish one deduplicated watchlist. The Windows collector sends it to eltdx
+    # in one batch; Web only warms its Redis read cache.
     try:
         from core.realtime.leader_pool_service import LeaderPoolService
 
@@ -3324,7 +3326,18 @@ def _refresh_realtime_defaults() -> None:
         ))
         watch_codes = [code for code in watch_codes if code]
         if watch_codes:
-            _get_realtime_quote_service().refresh_quotes(watch_codes)
+            from core.portfolio.holding_repository import HoldingRepository
+            from core.realtime.watchlist_repository import RealtimeWatchlistRepository
+
+            holding_codes = [
+                row.get("code", "")
+                for row in HoldingRepository().list_positions(status="open")
+            ]
+            RealtimeWatchlistRepository().publish(
+                "web-candidates-leaders-holdings", [*watch_codes, *holding_codes],
+            )
+            # This is a Redis MGET warm-up. It never initiates a market request.
+            _get_realtime_quote_service().refresh_quotes([*watch_codes, *holding_codes])
     except Exception as exc:  # noqa: BLE001
         logger.warning("Realtime watchlist batch warmup failed: %s", exc)
     jobs = [

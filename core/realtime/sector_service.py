@@ -1,72 +1,67 @@
-"""Realtime sector and market quote service backed by optional adata."""
+"""THS sector semantics with realtime strength aggregated from stock snapshots."""
 from __future__ import annotations
 
 import csv
-import importlib
+import statistics
 import time
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
-from datetime import datetime
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from loguru import logger
-
-from core.realtime.models import QuoteSnapshot, SectorSnapshot
+from core.realtime.models import SectorSnapshot, normalize_stock_code
 
 
 class RealtimeSectorService:
-    """Realtime sector quotes through adata when it is installed."""
+    """Use local THS identifiers/members and one Redis stock-quote batch read."""
 
     INVALID_CODE_TEXT = {"", "-", "--", "nan", "none", "null", "nat", "<na>"}
-
-    DEFAULT_SECTOR_NAMES = {
-        "886109": "2026一季报预增",
-        "886108": "AI应用",
-        "886107": "2025年报预增",
-    }
 
     def __init__(
         self,
         adata_module: Any = None,
         *,
-        ttl_seconds: float = 15.0,
+        quote_service: Any = None,
+        cache_dir: Path | str | None = None,
+        ttl_seconds: float = 8.0,
         request_timeout_seconds: float = 3.0,
-    ):
-        self.adata = adata_module
+        failure_ttl_seconds: float = 120.0,
+    ) -> None:
+        del adata_module, request_timeout_seconds, failure_ttl_seconds
+        if cache_dir is None:
+            from config.settings import CACHE_DIR
+
+            cache_dir = CACHE_DIR
+        self.cache_dir = Path(cache_dir)
+        self.quote_service = quote_service
         self.ttl_seconds = max(float(ttl_seconds), 0.0)
-        self.request_timeout_seconds = max(float(request_timeout_seconds), 0.5)
-        self._sector_cache: Dict[Tuple[str, str], Tuple[float, SectorSnapshot]] = {}
-        self._sector_failure_cache: Dict[Tuple[str, str], Tuple[float, str]] = {}
-        self._sector_names: Dict[str, str] = dict(self.DEFAULT_SECTOR_NAMES)
+        self._sector_cache: Dict[str, Tuple[float, SectorSnapshot]] = {}
+        self._member_cache: Dict[str, List[str]] = {}
+        self._sector_names: Dict[str, str] = {}
         self._sector_types: Dict[str, str] = {}
-        self._sector_names_by_source: Dict[str, Dict[str, str]] = {}
-        self._previous_close_cache: Dict[Tuple[str, str, str], float] = {}
-        self._sector_name_sources = set()
+        self._metadata_loaded = False
         self._last_error = ""
 
     @staticmethod
     def available() -> bool:
-        try:
-            importlib.import_module("adata")
-            return True
-        except Exception:
-            return False
+        from config.settings import REDIS_URL
+
+        return bool(REDIS_URL)
 
     def health(self, *, probe: bool = False) -> Dict[str, Any]:
-        adata_mod = self._ensure_adata()
+        service = self._ensure_quote_service()
+        quote_health = service.health() if service is not None else {}
         data = {
-            "available": adata_mod is not None,
-            "provider": "adata" if adata_mod is not None else "",
+            "available": bool(service is not None and quote_health.get("available", True)),
+            "provider": "ths_constituents_from_redis",
             "cache_size": len(self._sector_cache),
+            "member_cache_size": len(self._member_cache),
             "ttl_seconds": self.ttl_seconds,
             "last_error": self._last_error,
+            "quote_health": quote_health,
         }
-        if probe and adata_mod is not None:
-            result = self.get_sector_quotes(codes=None, source="ths", limit=3)
-            data["probe_ok"] = bool(result.get("ok"))
-            data["probe_count"] = result.get("count", 0)
-            data["probe_message"] = result.get("message", "")
+        if probe:
+            result = self.get_sector_quotes(limit=3)
+            data.update(probe_ok=bool(result.get("ok")), probe_count=result.get("count", 0))
         return data
 
     def get_sector_quotes(
@@ -77,74 +72,68 @@ class RealtimeSectorService:
         limit: int = 20,
         include_raw: bool = False,
     ) -> Dict[str, Any]:
-        # Realtime sectors use the THS namespace exclusively. Mixing Eastmoney
-        # BK/700xxx identifiers with THS 8xxxxx identifiers breaks persisted
-        # joins and produces deterministic bad requests to adata.
-        source = "ths"
-        adata_mod = self._ensure_adata()
-        if adata_mod is None:
-            return self._unavailable()
-
-        code_list = self._normalize_codes(codes)
-        auto_list = not code_list
-        invalid_codes = [
-            code for code in code_list if not self._valid_code_for_source(code, source)
-        ]
-        code_list = [
-            code for code in code_list if self._valid_code_for_source(code, source)
-        ]
+        del source
+        self._ensure_metadata()
+        requested = self._normalize_codes(codes)
+        invalid = [code for code in requested if not self._valid_code_for_source(code, "ths")]
+        code_list = [code for code in requested if self._valid_code_for_source(code, "ths")]
+        auto_list = not requested
         if auto_list:
-            code_list = self._list_sector_codes(source=source, limit=limit)
+            code_list = self._list_sector_codes(limit=limit)
+        code_list = code_list[: max(int(limit or 20), 1)]
         if not code_list:
-            return {
-                "ok": False,
-                "available": True,
-                "message": "未找到板块代码；请传 codes 参数或检查 adata 版本",
-                "sectors": [],
-                "count": 0,
-                "missing": invalid_codes,
-            }
-        rows: List[SectorSnapshot] = []
-        errors: List[str] = []
-        for code in code_list[: max(int(limit or 20), 1)]:
-            item = self._get_sector_quote(code, source=source)
-            if item is None:
-                errors.append(code)
-                continue
-            rows.append(item)
+            return self._empty("未找到本地同花顺板块元数据或成分股", invalid)
 
+        now = time.monotonic()
+        result: Dict[str, SectorSnapshot] = {}
+        pending: List[str] = []
+        for code in code_list:
+            cached = self._sector_cache.get(code)
+            if cached and now - cached[0] <= self.ttl_seconds:
+                result[code] = cached[1]
+            else:
+                pending.append(code)
+
+        members_by_sector = {code: self._members(code) for code in pending}
+        all_members = list(dict.fromkeys(
+            member for members in members_by_sector.values() for member in members
+        ))
+        quote_map = self._stock_quotes(all_members)
+        for code, members in members_by_sector.items():
+            item = self._aggregate(code, members, quote_map)
+            if item is not None:
+                result[code] = item
+                self._sector_cache[code] = (now, item)
+
+        rows = [result[code] for code in code_list if code in result]
         if auto_list:
-            rows.sort(key=lambda x: x.change_pct if x.change_pct is not None else -999.0, reverse=True)
+            rows.sort(key=lambda row: row.change_pct if row.change_pct is not None else -999.0, reverse=True)
+        missing = [*invalid, *[code for code in code_list if code not in result]]
+        self._last_error = "" if rows else "板块成分股实时快照不足"
         return {
             "ok": bool(rows),
             "available": True,
-            "source": source,
-            "message": "" if rows else "未获取到板块实时行情",
-            "sectors": [r.to_dict(include_raw=include_raw) for r in rows],
+            "source": "ths_constituent_aggregation",
+            "message": self._last_error,
+            "sectors": [row.to_dict(include_raw=include_raw) for row in rows],
             "count": len(rows),
-            "missing": invalid_codes + errors,
+            "missing": missing,
         }
 
     def resolve_codes_by_names(
         self, names: Iterable[str], *, source: str = "ths",
     ) -> Dict[str, str]:
-        """Resolve persisted sector labels to provider codes for realtime checks."""
-        source = "ths"
-        self._ensure_sector_names(source)
+        del source
+        self._ensure_metadata()
         requested = {str(name or "").strip() for name in names if str(name or "").strip()}
-        resolved: Dict[str, str] = {}
-        source_key = self._source_key(source)
-        source_names = self._sector_names_by_source.get(source_key) or {}
-        for code, label in source_names.items():
-            if not self._valid_code_for_source(code, source):
-                continue
-            clean_label = str(label or "").strip()
+        result: Dict[str, str] = {}
+        for code, label in self._sector_names.items():
             for name in requested:
-                if name in resolved:
-                    continue
-                if clean_label == name or (len(name) >= 3 and (name in clean_label or clean_label in name)):
-                    resolved[name] = code.split(".")[0]
-        return resolved
+                if name not in result and (
+                    label == name or (len(name) >= 3 and (name in label or label in name))
+                ):
+                    result[name] = code
+        return result
 
     def get_market_quotes(
         self,
@@ -153,450 +142,189 @@ class RealtimeSectorService:
         limit: int = 100,
         include_raw: bool = False,
     ) -> Dict[str, Any]:
-        adata_mod = self._ensure_adata()
-        if adata_mod is None:
-            return self._unavailable(rows_key="quotes")
+        service = self._ensure_quote_service()
+        code_list = self._normalize_codes(codes)[: max(int(limit or 100), 1)]
+        if service is None or not code_list:
+            return {"ok": False, "available": service is not None, "quotes": [], "count": 0}
+        return service.get_quotes(code_list, include_raw=include_raw)
 
-        market = getattr(getattr(adata_mod, "stock", None), "market", None)
-        method = getattr(market, "list_market_current", None) if market is not None else None
-        if method is None:
-            return {
-                "ok": False,
-                "available": True,
-                "message": "当前 adata 版本未提供 stock.market.list_market_current",
-                "quotes": [],
-                "count": 0,
-            }
+    def _aggregate(
+        self,
+        code: str,
+        members: List[str],
+        quote_map: Dict[str, Dict[str, Any]],
+    ) -> Optional[SectorSnapshot]:
+        observed = [quote_map[member] for member in members if member in quote_map]
+        usable = [
+            row for row in observed
+            if not row.get("is_stale") and row.get("change_pct") is not None
+        ]
+        if not usable:
+            return None
+        changes = [float(row["change_pct"]) for row in usable]
+        mean_change = sum(changes) / len(changes)
+        coverage = len(usable) / len(members) if members else 0.0
+        latest = max(usable, key=lambda row: (str(row.get("date") or ""), str(row.get("time") or "")))
+        raw = {
+            "aggregation": "equal_weight_constituent_snapshot",
+            "member_count": len(members),
+            "quote_count": len(usable),
+            "coverage": round(coverage, 4),
+            "up_ratio": round(sum(value > 0 for value in changes) / len(changes), 4),
+            "strong_ratio": round(sum(value >= 3 for value in changes) / len(changes), 4),
+            "median_change_pct": round(statistics.median(changes), 4),
+            "stale_excluded": len(observed) - len(usable),
+        }
+        return SectorSnapshot.from_raw({
+            "code": code,
+            "name": self._sector_names.get(code, ""),
+            "sector_type": self._sector_types.get(code, ""),
+            "last_price": 100.0 + mean_change,
+            "pre_close": 100.0,
+            "change_pct": mean_change,
+            "amount_yuan": sum(float(row.get("amount_yuan") or 0) for row in usable),
+            "volume": sum(float(row.get("vol_hand") or 0) for row in usable),
+            "date": latest.get("date", ""),
+            "time": latest.get("time", ""),
+            "source": "ths_constituent_aggregation",
+            **raw,
+        }, source="ths_constituent_aggregation")
 
-        code_list = self._normalize_codes(codes)
-        try:
-            if code_list:
-                raw = method(code_list=code_list)
-            else:
-                raw = method()
-        except TypeError:
-            raw = method(code_list) if code_list else method()
-        except Exception as e:  # noqa: BLE001
-            self._last_error = f"全市场实时行情获取失败: {e}"
-            logger.debug(f"[RealtimeSectorService] list_market_current failed: {e}")
-            return {"ok": False, "available": True, "message": self._last_error, "quotes": [], "count": 0}
-
-        rows = []
-        for raw_row in self._records(raw)[: max(int(limit or 100), 1)]:
-            item = QuoteSnapshot.from_raw(dict(raw_row), stale_after_seconds=90.0)
-            if item.code:
-                rows.append(item.to_dict(include_raw=include_raw))
+    def _stock_quotes(self, codes: List[str]) -> Dict[str, Dict[str, Any]]:
+        service = self._ensure_quote_service()
+        if service is None or not codes:
+            return {}
+        payload = service.get_quotes(codes)
         return {
-            "ok": bool(rows),
-            "available": True,
-            "message": "" if rows else "未获取到全市场实时行情",
-            "quotes": rows,
-            "count": len(rows),
+            normalize_stock_code(row.get("code"), add_suffix=False): row
+            for row in payload.get("quotes") or [] if row.get("code")
         }
 
-    def _get_sector_quote(self, code: str, *, source: str) -> Optional[SectorSnapshot]:
-        cache_key = (source, code)
-        cached = self._sector_cache.get(cache_key)
-        now = time.monotonic()
-        if cached and now - cached[0] <= self.ttl_seconds:
-            return cached[1]
-        failed = self._sector_failure_cache.get(cache_key)
-        if failed and now - failed[0] <= max(self.ttl_seconds, 30.0):
-            self._last_error = failed[1]
-            return None
-
-        adata_mod = self._ensure_adata()
-        market = getattr(getattr(adata_mod, "stock", None), "market", None) if adata_mod is not None else None
-        if market is None:
-            self._last_error = "adata.stock.market 不可用"
-            return None
-
-        self._ensure_sector_names(source)
-        method_names = self._sector_method_candidates(source)
-        for name in method_names:
-            method = getattr(market, name, None)
-            if method is None:
+    def _members(self, code: str) -> List[str]:
+        code6 = self._clean_code(code).split(".")[0]
+        if code6 in self._member_cache:
+            return self._member_cache[code6]
+        root = self.cache_dir / "sector" / "ths_member"
+        members: List[str] = []
+        for path in (root / f"{code6}.TI.csv", root / f"{code6}.csv"):
+            if not path.exists():
                 continue
-            try:
-                raw = self._call_code_method_with_timeout(method, code)
-                records = self._records(raw)
-                if not records:
-                    continue
-                row = dict(records[0])
-                row.setdefault("code", code)
-                row.setdefault("name", self._sector_names.get(code, ""))
-                row.setdefault("sector_type", self._sector_types.get(code, ""))
-                row.setdefault("source", f"adata_{source}")
-                item = SectorSnapshot.from_raw(row, source=f"adata_{source}")
-                if item.code:
-                    self._enrich_change_pct(item)
-                    self._sector_cache[cache_key] = (now, item)
-                    self._sector_failure_cache.pop(cache_key, None)
-                    self._last_error = ""
-                    return item
-            except Exception as e:  # noqa: BLE001
-                self._last_error = f"{name}({code}) 失败: {e}"
-                logger.debug(f"[RealtimeSectorService] {name}({code}) failed: {e}")
-                continue
-        self._sector_failure_cache[cache_key] = (now, self._last_error)
-        return None
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                members = [
+                    normalize_stock_code(row.get("con_code") or row.get("code"), add_suffix=False)
+                    for row in csv.DictReader(handle)
+                ]
+            break
+        members = [member for member in dict.fromkeys(members) if member]
+        self._member_cache[code6] = members
+        return members
 
-    def _call_code_method_with_timeout(self, method, code: str):
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(self._call_code_method, method, code)
+    def _ensure_quote_service(self):
+        if self.quote_service is not None:
+            return self.quote_service
         try:
-            return future.result(timeout=self.request_timeout_seconds)
-        except FutureTimeoutError:
-            raise TimeoutError(
-                f"单板块行情超过 {self.request_timeout_seconds:.1f}s",
-            ) from None
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            from core.realtime.quote_service import RealtimeQuoteService
 
-    def _list_sector_codes(self, *, source: str, limit: int) -> List[str]:
-        local_records = self._local_sector_records(source)
-        if local_records:
-            codes: List[str] = []
-            seen = set()
-            for row in local_records:
-                code = self._row_sector_code(row)
-                if (
-                    not code
-                    or code in seen
-                    or not self._valid_code_for_source(code, source)
-                ):
-                    continue
-                seen.add(code)
-                codes.append(code)
-                self._remember_sector_meta(
-                    code,
-                    self._row_sector_name(row),
-                    row.get("sector_type") or "概念",
-                    source=source,
-                )
-                if len(codes) >= max(int(limit or 20), 1):
-                    return codes
-            if codes:
-                return codes
-
-        adata_mod = self._ensure_adata()
-        info = getattr(getattr(adata_mod, "stock", None), "info", None) if adata_mod is not None else None
-        if info is None:
-            return []
-
-        candidates = ("all_concept_code_ths", "all_industry_code_ths")
-
-        codes: List[str] = []
-        seen = set()
-        for name in candidates:
-            method = getattr(info, name, None)
-            if method is None:
-                continue
-            type_hint = "概念" if "concept" in name else ("行业" if "industry" in name else "")
-            try:
-                records = self._records(method())
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"[RealtimeSectorService] {name} failed: {e}")
-                continue
-            for row in records:
-                code = self._clean_code(
-                    row.get("code")
-                    or row.get("index_code")
-                    or row.get("ts_code")
-                    or row.get("板块代码")
-                    or row.get("概念代码")
-                    or row.get("行业代码")
-                    or ""
-                )
-                if (
-                    code
-                    and code not in seen
-                    and self._valid_code_for_source(code, source)
-                ):
-                    seen.add(code)
-                    codes.append(code)
-                    label = self._row_sector_name(row)
-                    typ = self._sector_type_label(
-                        row.get("sector_type") or row.get("type") or row.get("板块类型") or type_hint
-                    )
-                    self._remember_sector_meta(code, label, typ, source=source)
-                if len(codes) >= max(int(limit or 20), 1):
-                    return codes
-        return codes
-
-    def _ensure_sector_names(self, source: str) -> None:
-        source_key = "ths"
-        if source_key in self._sector_name_sources:
-            return
-        local_records = self._local_sector_records(source)
-        if local_records:
-            for row in local_records:
-                code = self._row_sector_code(row)
-                if not self._valid_code_for_source(code, source):
-                    continue
-                self._remember_sector_meta(
-                    code,
-                    self._row_sector_name(row),
-                    row.get("sector_type") or "概念",
-                    source=source,
-                )
-            self._sector_name_sources.add(source_key)
-            return
-
-        adata_mod = self._ensure_adata()
-        info = getattr(getattr(adata_mod, "stock", None), "info", None) if adata_mod is not None else None
-        if info is None:
-            return
-
-        candidates = ("all_concept_code_ths", "all_industry_code_ths")
-        for name in candidates:
-            method = getattr(info, name, None)
-            if method is None:
-                continue
-            type_hint = "概念" if "concept" in name else ("行业" if "industry" in name else "")
-            try:
-                for row in self._records(method()):
-                    code = self._clean_code(
-                        row.get("code")
-                        or row.get("index_code")
-                        or row.get("ts_code")
-                        or row.get("concept_code")
-                        or row.get("industry_code")
-                        or ""
-                    )
-                    label = self._row_sector_name(row)
-                    typ = self._sector_type_label(
-                        row.get("sector_type") or row.get("type") or row.get("板块类型") or type_hint
-                    )
-                    if self._valid_code_for_source(code, source):
-                        self._remember_sector_meta(code, label, typ, source=source)
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"[RealtimeSectorService] sector name map failed via {name}: {e}")
-        self._sector_name_sources.add(source_key)
-
-    def _local_sector_records(self, source: str) -> List[Dict[str, Any]]:
-        try:
-            from config.settings import CACHE_DIR
-
-            root = Path(CACHE_DIR) / "sector" / "ths_index"
-            records: List[Dict[str, Any]] = []
-            for filename, type_hint in (
-                ("adata_concept_ths.csv", "概念"),
-                ("index_I.csv", "行业"),
-                ("index_N.csv", "概念"),
-            ):
-                path = root / filename
-                if not path.exists():
-                    continue
-                with path.open("r", encoding="utf-8-sig", newline="") as file:
-                    for raw in csv.DictReader(file):
-                        row = dict(raw)
-                        row["sector_type"] = self._sector_type_label(
-                            row.get("sector_type") or row.get("type") or type_hint,
-                        )
-                        records.append(row)
-            return records
+            self.quote_service = RealtimeQuoteService(stale_after_seconds=12.0)
         except Exception:
-            return []
+            self.quote_service = None
+        return self.quote_service
+
+    def _ensure_metadata(self) -> None:
+        if self._metadata_loaded:
+            return
+        root = self.cache_dir / "sector" / "ths_index"
+        for filename, type_hint in (
+            ("adata_concept_ths.csv", "概念"),
+            ("index_I.csv", "行业"),
+            ("index_N.csv", "概念"),
+        ):
+            path = root / filename
+            if not path.exists():
+                continue
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    code = self._row_sector_code(row).split(".")[0]
+                    if not self._valid_code_for_source(code, "ths"):
+                        continue
+                    name = self._row_sector_name(row)
+                    if name:
+                        self._sector_names[code] = name
+                    self._sector_types[code] = self._sector_type_label(
+                        row.get("sector_type") or row.get("type") or type_hint,
+                    )
+        self._metadata_loaded = True
+
+    def _list_sector_codes(self, *, limit: int) -> List[str]:
+        self._ensure_metadata()
+        return list(self._sector_names)[: max(int(limit or 20), 1)]
+
+    @classmethod
+    def _valid_code_for_source(cls, code: Any, source: str) -> bool:
+        del source
+        clean = cls._clean_code(code).split(".")[0]
+        return len(clean) == 6 and clean.isdigit() and clean.startswith("8")
 
     @staticmethod
     def _row_sector_code(row: Dict[str, Any]) -> str:
         return RealtimeSectorService._clean_code(
-            row.get("code")
-            or row.get("index_code")
-            or row.get("ts_code")
-            or row.get("sector_code")
-            or row.get("concept_code")
-            or row.get("板块代码")
-            or row.get("概念代码")
-            or row.get("行业代码")
-            or ""
+            row.get("code") or row.get("index_code") or row.get("ts_code")
+            or row.get("sector_code") or row.get("concept_code") or ""
         )
+
+    @staticmethod
+    def _row_sector_name(row: Dict[str, Any]) -> str:
+        return str(
+            row.get("name") or row.get("index_name") or row.get("concept_name")
+            or row.get("industry_name") or row.get("板块名称") or ""
+        ).strip()
+
+    @staticmethod
+    def _sector_type_label(value: Any) -> str:
+        text = str(value or "").strip()
+        return {"N": "概念", "I": "行业", "R": "地域", "S": "特色"}.get(text, text)
 
     @staticmethod
     def _clean_code(value: Any) -> str:
         text = str(value or "").strip()
         return "" if text.lower() in RealtimeSectorService.INVALID_CODE_TEXT else text
 
-    def _remember_sector_meta(
-        self, code: str, label: str, typ: str, *, source: str = "",
-    ) -> None:
-        code = self._clean_code(code)
-        if not code:
-            return
-        keys = [code]
-        if "." not in code and code.isdigit():
-            keys.append(f"{code}.TI")
-        label = str(label or "").strip()
-        typ = self._sector_type_label(typ)
-        for key in keys:
-            if label:
-                self._sector_names[key] = label
-                if source:
-                    source_names = self._sector_names_by_source.setdefault(
-                        self._source_key(source), {},
-                    )
-                    source_names[key] = label
-            if typ:
-                self._sector_types[key] = typ
-
-    def _enrich_change_pct(self, item: SectorSnapshot) -> None:
-        if item.change_pct is not None or item.last_price <= 0:
-            return
-        quote_date = str(item.date or datetime.now().strftime("%Y%m%d")).replace("-", "")[:8]
-        previous_close = self._previous_close(item.code, item.name, quote_date)
-        if previous_close <= 0:
-            return
-        item.pre_close = previous_close
-        item.change_pct = (item.last_price / previous_close - 1.0) * 100.0
-        item.raw["change_pct_fallback"] = "sector_daily_silver_previous_close"
-
-    def _previous_close(self, code: str, name: str, quote_date: str) -> float:
-        clean_code = self._clean_code(code).split(".")[0]
-        key = (clean_code, str(name or "").strip(), quote_date)
-        if key in self._previous_close_cache:
-            return self._previous_close_cache[key]
-        value = 0.0
-        try:
-            import duckdb  # type: ignore
-
-            from backtest.trade_calendar import TradeCalendar
-            from config.settings import FACTOR_DB_PATH
-
-            path = Path(FACTOR_DB_PATH)
-            if path.exists():
-                expected_date = TradeCalendar().prev(quote_date)
-                con = duckdb.connect(str(path), read_only=True)
-                try:
-                    row = con.execute(
-                        "SELECT CAST(trade_date AS VARCHAR), close FROM sector_daily_silver "
-                        "WHERE CAST(trade_date AS VARCHAR) < ? AND close > 0 "
-                        "AND (REPLACE(CAST(sector_code AS VARCHAR), '.TI', '') = ? "
-                        "OR sector_name = ?) "
-                        "ORDER BY CAST(trade_date AS VARCHAR) DESC LIMIT 1",
-                        [quote_date, clean_code, str(name or "").strip()],
-                    ).fetchone()
-                    if row and str(row[0]) == expected_date and row[1] is not None:
-                        value = float(row[1])
-                finally:
-                    con.close()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"[RealtimeSectorService] 板块昨收回退失败 {code}/{name}: {exc}")
-        self._previous_close_cache[key] = value
-        return value
-
-    @staticmethod
-    def _source_key(source: str) -> str:
-        return "ths"
-
-    @classmethod
-    def _valid_code_for_source(cls, code: Any, source: str) -> bool:
-        """Reject provider-incompatible identifiers before issuing network calls.
-
-        Tushare's THS index cache also contains ``700xxx`` classification
-        indexes, while adata's THS realtime endpoints only accept the public
-        six-digit ``8xxxxx`` board codes.  Mixing the two namespaces caused the
-        same deterministic request error on every realtime refresh.
-        """
-        clean = cls._clean_code(code).split(".")[0]
-        if not clean:
-            return False
-        return len(clean) == 6 and clean.isdigit() and clean.startswith("8")
-
-    @staticmethod
-    def _row_sector_name(row: Dict[str, Any]) -> str:
-        return str(
-            row.get("name")
-            or row.get("index_name")
-            or row.get("concept_name")
-            or row.get("industry_name")
-            or row.get("板块名称")
-            or row.get("概念名称")
-            or row.get("行业名称")
-            or ""
-        ).strip()
-
-    @staticmethod
-    def _sector_type_label(value: Any) -> str:
-        text = str(value or "").strip()
-        return {
-            "N": "概念",
-            "I": "行业",
-            "R": "地域",
-            "S": "特色",
-        }.get(text, text)
-
-    def _ensure_adata(self):
-        if self.adata is not None:
-            return self.adata
-        try:
-            self.adata = importlib.import_module("adata")
-            return self.adata
-        except Exception as e:  # noqa: BLE001
-            self._last_error = f"adata 未安装或无法导入: {e}"
-            logger.debug(f"[RealtimeSectorService] adata unavailable: {e}")
-            return None
-
-    @staticmethod
-    def _sector_method_candidates(source: str) -> Tuple[str, ...]:
-        return (
-            "get_market_concept_current_ths",
-            "get_market_industry_current_ths",
-            "get_market_index_current",
-        )
-
-    @staticmethod
-    def _call_code_method(method, code: str):
-        for kwargs in ({"index_code": code}, {"code": code}):
-            try:
-                return method(**kwargs)
-            except TypeError:
-                continue
-        return method(code)
-
-    @staticmethod
-    def _records(raw: Any) -> List[Dict[str, Any]]:
-        if raw is None:
-            return []
-        if hasattr(raw, "to_dict"):
-            try:
-                return list(raw.to_dict(orient="records"))
-            except TypeError:
-                pass
-        if isinstance(raw, list):
-            return [dict(x) for x in raw if isinstance(x, dict)]
-        if isinstance(raw, tuple):
-            return [dict(x) for x in raw if isinstance(x, dict)]
-        if isinstance(raw, dict):
-            for key in ("data", "rows", "items", "result"):
-                value = raw.get(key)
-                if isinstance(value, list):
-                    return [dict(x) for x in value if isinstance(x, dict)]
-            return [raw]
-        return []
-
     @staticmethod
     def _normalize_codes(codes: Optional[Iterable[str]]) -> List[str]:
         if codes is None:
             return []
-        if isinstance(codes, str):
-            parts = [x.strip() for x in codes.replace("，", ",").split(",")]
-        else:
-            parts = [RealtimeSectorService._clean_code(x) for x in codes]
-        out: List[str] = []
-        seen = set()
-        for code in parts:
-            code = RealtimeSectorService._clean_code(code)
-            if code and code not in seen:
-                seen.add(code)
-                out.append(code)
-        return out
+        values = codes.replace("，", ",").split(",") if isinstance(codes, str) else codes
+        result: List[str] = []
+        for value in values:
+            code = RealtimeSectorService._clean_code(value).split(".")[0]
+            if code and code not in result:
+                result.append(code)
+        return result
 
-    def _unavailable(self, *, rows_key: str = "sectors") -> Dict[str, Any]:
+    @staticmethod
+    def _empty(message: str, missing: List[str]) -> Dict[str, Any]:
         return {
             "ok": False,
-            "available": False,
-            "message": self._last_error or "adata 未安装，板块实时行情不可用",
-            rows_key: [],
+            "available": True,
+            "source": "ths_constituent_aggregation",
+            "message": message,
+            "sectors": [],
             "count": 0,
+            "missing": missing,
         }
+
+
+_SERVICE: Optional[RealtimeSectorService] = None
+_SERVICE_LOCK = RLock()
+
+
+def get_realtime_sector_service() -> RealtimeSectorService:
+    global _SERVICE
+    if _SERVICE is None:
+        with _SERVICE_LOCK:
+            if _SERVICE is None:
+                _SERVICE = RealtimeSectorService()
+    return _SERVICE
+
+
+__all__ = ["RealtimeSectorService", "get_realtime_sector_service"]

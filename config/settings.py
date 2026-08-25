@@ -93,16 +93,34 @@ REDIS_KEY_PREFIX = os.getenv("REDIS_KEY_PREFIX", "a_stock").strip() or "a_stock"
 REDIS_SOCKET_TIMEOUT_SECONDS = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2"))
 TASK_LOCK_TTL_SECONDS = int(os.getenv("TASK_LOCK_TTL_SECONDS", "180"))
 
-# pytdx is the primary current-session source.  It is lazy-loaded and falls
-# back to the existing HTTP/eltdx chain when unavailable.
-PYTDX_ENABLED = os.getenv("PYTDX_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
-PYTDX_HOST = os.getenv("PYTDX_HOST", "").strip()
-PYTDX_PORT = int(os.getenv("PYTDX_PORT", "7709"))
-PYTDX_TIMEOUT_SECONDS = float(os.getenv("PYTDX_TIMEOUT_SECONDS", "0.8"))
-PYTDX_MAX_SERVERS = max(1, int(os.getenv("PYTDX_MAX_SERVERS", "3")))
-PYTDX_FAILURE_COOLDOWN_SECONDS = max(
-    5.0,
-    float(os.getenv("PYTDX_FAILURE_COOLDOWN_SECONDS", "60")),
+# 实时行情采用「Windows eltdx采集器 -> Redis -> Linux/Web只读消费」架构。
+# server 角色严禁直连行情节点；collector 用于 Windows 独立采集进程；
+# workstation 允许本地直接使用 eltdx 的竞价、分钟历史与调试能力。
+MARKET_DATA_NODE_ROLE = (
+    os.getenv("MARKET_DATA_NODE_ROLE", "workstation").strip().lower() or "workstation"
+)
+if MARKET_DATA_NODE_ROLE not in {"server", "collector", "workstation"}:
+    MARKET_DATA_NODE_ROLE = "workstation"
+REALTIME_QUOTE_STALE_SECONDS = max(
+    3.0, float(os.getenv("REALTIME_QUOTE_STALE_SECONDS", "12"))
+)
+REALTIME_QUOTE_TTL_SECONDS = max(
+    60, int(os.getenv("REALTIME_QUOTE_TTL_SECONDS", "86400"))
+)
+ELTDX_POLL_INTERVAL_SECONDS = max(
+    2.0, float(os.getenv("ELTDX_POLL_INTERVAL_SECONDS", "3"))
+)
+ELTDX_TIMEOUT_SECONDS = max(1.0, float(os.getenv("ELTDX_TIMEOUT_SECONDS", "5")))
+ELTDX_RETRY_COUNT = min(max(1, int(os.getenv("ELTDX_RETRY_COUNT", "3"))), 5)
+ELTDX_RETRY_BACKOFF_SECONDS = max(
+    0.2, float(os.getenv("ELTDX_RETRY_BACKOFF_SECONDS", "0.8"))
+)
+ELTDX_MINUTE_SYNC_SECONDS = max(
+    30, int(os.getenv("ELTDX_MINUTE_SYNC_SECONDS", "60"))
+)
+ELTDX_HOST = os.getenv("ELTDX_HOST", "").strip()
+ELTDX_COLLECTOR_ID = (
+    os.getenv("ELTDX_COLLECTOR_ID", "eltdx-windows").strip() or "eltdx-windows"
 )
 REALTIME_SNAPSHOT_MAX_ITEMS = max(20, int(os.getenv("REALTIME_SNAPSHOT_MAX_ITEMS", "120")))
 REALTIME_SNAPSHOT_TTL_SECONDS = max(60, int(os.getenv("REALTIME_SNAPSHOT_TTL_SECONDS", "900")))

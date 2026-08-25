@@ -133,6 +133,7 @@ class QuoteSnapshot:
             date=date,
             time=time,
             source=str(raw.get("source") or ""),
+            received_at=str(raw.get("received_at") or now_iso()),
             stale_seconds=stale_seconds,
             is_stale=bool(stale_seconds is not None and stale_seconds > stale_after_seconds),
             raw=raw,

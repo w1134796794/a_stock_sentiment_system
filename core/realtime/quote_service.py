@@ -17,8 +17,12 @@ class RealtimeQuoteService:
         data_manager: Any = None,
         *,
         ttl_seconds: float = 2.0,
-        stale_after_seconds: float = 90.0,
+        stale_after_seconds: float | None = None,
     ):
+        if stale_after_seconds is None:
+            from config.settings import REALTIME_QUOTE_STALE_SECONDS
+
+            stale_after_seconds = REALTIME_QUOTE_STALE_SECONDS
         self.dm = data_manager
         self.ttl_seconds = max(float(ttl_seconds), 0.0)
         self.stale_after_seconds = max(float(stale_after_seconds), 1.0)
@@ -104,8 +108,6 @@ class RealtimeQuoteService:
         try:
             if hasattr(dm, "get_quote_snapshots"):
                 raw_map = dm.get_quote_snapshots(codes) or {}
-            if not raw_map and hasattr(dm, "get_quote_snapshot"):
-                raw_map = {code: dm.get_quote_snapshot(code) or {} for code in codes}
         except Exception as e:  # noqa: BLE001
             self._last_error = f"实时行情获取失败: {e}"
             logger.debug(f"[RealtimeQuoteService] quote fetch failed: {e}")

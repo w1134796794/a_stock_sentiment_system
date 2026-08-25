@@ -1,4 +1,4 @@
-"""Confirm minute entry structures with a short pytdx snapshot sequence."""
+"""Confirm minute entry structures with a short normalized eltdx snapshot sequence."""
 from __future__ import annotations
 
 from datetime import datetime

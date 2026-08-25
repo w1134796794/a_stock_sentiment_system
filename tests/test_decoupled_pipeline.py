@@ -10,7 +10,7 @@ import pytest
 from starlette.requests import Request
 
 from core.data.data_manager_base import DataManagerBase
-from core.etl.daily_pipeline import ETLDailyPipeline
+from core.etl.daily_pipeline import ETLDailyPipeline, ETLDailyResult
 from core.etl.stage_status import (
     POST_CLOSE_SILVER_TABLES,
     POST_CLOSE_SOURCES,
@@ -58,6 +58,16 @@ def test_stage_status_requires_local_partitions(tmp_path):
     assert missing["ready"] is False
     with pytest.raises(RuntimeError, match="请先运行因子计算"):
         require_stage(missing)
+
+
+def test_fetch_result_requires_ready_silver_not_only_quality_report():
+    result = ETLDailyResult(
+        trade_date=DATE,
+        stage="fetch",
+        silver_summary={"ready": False, "quality_ok": True},
+    )
+
+    assert result.ok is False
 
 
 def test_fetch_skips_complete_date_without_touching_data_manager(tmp_path):

@@ -3,18 +3,15 @@
 
 数据来源：
 - Tushare daily / daily_basic：盘后历史日线行情与基本面指标
-- pytdx：候选股与龙头池的批量 3 秒快照，只负责最终触发确认
-- pqquotation / easyquotation：非交易页面的展示行情，不参与买点确认
-- eltdx：实时/历史分钟结构、K 线与集合竞价
+- Redis：Windows eltdx采集器写入的批量实时快照，Web/Linux只读
+- eltdx：实时快照、竞价、分钟历史与 K 线
 - AshareProvider：分钟线 / K 线兜底
 """
 import json
-import time
-import pandas as pd
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Tuple
+
 import loguru
+import pandas as pd
 
 from core.data.data_manager_base import DataManagerBase
 from core.utils.stock_code_utils import StockCodeUtils
@@ -25,34 +22,18 @@ logger = loguru.logger
 class StockDataManager(DataManagerBase):
     """个股数据管理器"""
 
-    def _get_pytdx_provider(self):
-        provider = getattr(self, "_pytdx_provider", None)
+    def _get_realtime_quote_provider(self):
+        provider = getattr(self, "_realtime_quote_provider", None)
         if provider is not None:
             return provider
         try:
-            from config.settings import (
-                PYTDX_ENABLED,
-                PYTDX_FAILURE_COOLDOWN_SECONDS,
-                PYTDX_HOST,
-                PYTDX_MAX_SERVERS,
-                PYTDX_PORT,
-                PYTDX_TIMEOUT_SECONDS,
-            )
-            from core.data.providers.pytdx_provider import PytdxProvider, get_pytdx_provider
+            from core.data.providers.redis_quote_provider import RedisQuoteProvider
 
-            if not PYTDX_ENABLED or not PytdxProvider.available():
-                return None
-            provider = get_pytdx_provider(
-                host=PYTDX_HOST,
-                port=PYTDX_PORT,
-                timeout=PYTDX_TIMEOUT_SECONDS,
-                max_servers=PYTDX_MAX_SERVERS,
-                failure_cooldown_seconds=PYTDX_FAILURE_COOLDOWN_SECONDS,
-            )
-            self._pytdx_provider = provider
+            provider = RedisQuoteProvider()
+            self._realtime_quote_provider = provider
             return provider
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"[StockDataManager] pytdx provider unavailable: {e}")
+            logger.debug(f"[StockDataManager] Redis实时行情不可用: {e}")
             return None
 
     def _get_eltdx_provider(self):
@@ -60,32 +41,25 @@ class StockDataManager(DataManagerBase):
         if provider is not None:
             return provider
         try:
+            from config.settings import MARKET_DATA_NODE_ROLE
             from core.data.providers.eltdx_provider import EltdxProvider
 
+            if MARKET_DATA_NODE_ROLE == "server":
+                return None
             if not EltdxProvider.available():
                 return None
-            provider = EltdxProvider(timeout=3.0)
+            from config.settings import ELTDX_HOST, ELTDX_TIMEOUT_SECONDS
+
+            provider = EltdxProvider(
+                timeout=ELTDX_TIMEOUT_SECONDS,
+                host=ELTDX_HOST or None,
+            )
             self._eltdx_provider = provider
             return provider
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[StockDataManager] eltdx provider unavailable: {e}")
             return None
 
-    def _get_quotation_provider(self):
-        provider = getattr(self, "_quotation_provider", None)
-        if provider is not None:
-            return provider
-        try:
-            from core.data.providers.quotation_provider import QuotationProvider
-
-            if not QuotationProvider.available():
-                return None
-            provider = QuotationProvider(source="sina")
-            self._quotation_provider = provider
-            return provider
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"[StockDataManager] quotation provider unavailable: {e}")
-            return None
 
     def _get_ashare_provider(self):
         provider = getattr(self, "_ashare_provider", None)
@@ -602,60 +576,49 @@ class StockDataManager(DataManagerBase):
         """获取个股最新实时行情快照。
 
         仅含 ``last_price`` / ``open_price`` / ``pre_close`` 等盘中实时字段，**不落盘**
-        （快照随行情变化）。优先 pytdx，失败后回退 eltdx。HTTP 行情不进入
-        交易确认链路，避免来源时间戳不完整时误用旧行情。
+        （快照随行情变化）。只读取 eltdx 采集器写入的 Redis 标准快照；Web
+        进程不触发行情请求，避免多用户重复连接和不同来源口径漂移。
 
         主要服务盘中实时观测（如候选池的实时确认）。
         """
-        provider = self._get_pytdx_provider()
-        if provider is not None:
-            try:
-                quote = provider.get_quote_snapshot(ts_code) or {}
-                if quote:
-                    return quote
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"[get_quote_snapshot] pytdx 实时快照失败 {ts_code}: {e}")
-
-        provider = self._get_eltdx_provider()
+        provider = self._get_realtime_quote_provider()
         if provider is None:
             return {}
         try:
             return provider.get_quote_snapshot(ts_code) or {}
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"[get_quote_snapshot] eltdx 实时快照失败 {ts_code}: {e}")
+            logger.debug(f"[get_quote_snapshot] Redis实时快照读取失败 {ts_code}: {e}")
             return {}
 
     def get_quote_snapshots(self, ts_codes) -> Dict[str, Dict]:
         """**批量**获取多只实时行情快照。
 
-        返回 ``{6位代码: 快照dict}``。优先 pytdx 批量长连接，失败后回退
-        eltdx。pqquotation/easyquotation 仅保留给非交易展示，不参与买点确认。
+        返回 ``{6位代码: 快照dict}``。一次从 Redis 批量读取 eltdx 标准快照，
+        不在 Web 请求内连接任何外部行情节点。
         """
-        provider = self._get_pytdx_provider()
-        if provider is not None:
-            try:
-                quotes = provider.get_quote_snapshots(ts_codes) or {}
-                if quotes:
-                    return quotes
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"[get_quote_snapshots] pytdx 批量快照失败: {e}")
-
-        provider = self._get_eltdx_provider()
+        provider = self._get_realtime_quote_provider()
         if provider is None:
             return {}
         try:
             return provider.get_quote_snapshots(ts_codes) or {}
         except Exception as e:  # noqa: BLE001
-            logger.debug(f"[get_quote_snapshots] eltdx 批量快照失败: {e}")
+            logger.debug(f"[get_quote_snapshots] Redis批量快照读取失败: {e}")
             return {}
 
     def get_minute_bars_live(self, ts_code: str, trade_date: str) -> pd.DataFrame:
-        """获取个股**实时分时**（eltdx 权威分钟序列，不落盘）。
+        """读取实时分钟序列。
 
-        与 ``get_stock_tick`` 不同：本方法**不读写 CSV 缓存**，每次都取最新分时，
-        避免盘中把「半截分时序列」缓存后读到过期数据。pytdx 的 3 秒采样
-        可能漏掉分钟内高低点，只用于最后的快照确认，不再合成结构分钟线。
+        Linux/server 只读 Windows 采集器写入 Redis 的 eltdx 分钟序列；
+        collector/workstation 可在缓存缺失时直连 eltdx，且不会落半截 CSV。
         """
+        realtime_provider = self._get_realtime_quote_provider()
+        if realtime_provider is not None:
+            try:
+                cached = realtime_provider.get_minute_bars(ts_code, trade_date)
+                if cached is not None and not cached.empty:
+                    return cached
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[get_minute_bars_live] Redis分钟序列读取失败 {ts_code}: {e}")
         provider = self._get_eltdx_provider()
         if provider is None:
             return pd.DataFrame()
@@ -667,8 +630,8 @@ class StockDataManager(DataManagerBase):
             return pd.DataFrame()
 
     def get_realtime_snapshot_ticks(self, ts_code: str, trade_date: str) -> pd.DataFrame:
-        """Read the recent pytdx 3-second sequence without issuing a new quote request."""
-        provider = self._get_pytdx_provider()
+        """Read recent eltdx snapshots from Redis without issuing a market request."""
+        provider = self._get_realtime_quote_provider()
         if provider is None:
             return pd.DataFrame()
         try:

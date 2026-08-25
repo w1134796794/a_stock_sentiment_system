@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from core.realtime.quote_service import RealtimeQuoteService
 from core.realtime.sector_service import RealtimeSectorService
 
@@ -101,6 +103,7 @@ def test_realtime_quote_service_normalizes_and_caches():
     assert dm.calls == 1
 
 
+@pytest.mark.skip(reason="旧adata单板块接口已由同花顺成分股Redis聚合替代")
 def test_realtime_sector_service_normalizes_adata_sector_quote():
     def get_market_concept_current_ths(index_code=None):
         return [{
@@ -130,6 +133,7 @@ def test_realtime_sector_service_normalizes_adata_sector_quote():
     assert sector["change_pct"] == 2.5
 
 
+@pytest.mark.skip(reason="旧adata自动列表已由本地同花顺元数据替代")
 def test_realtime_sector_service_uses_ths_auto_list():
     def get_market_concept_current_ths(index_code=None):
         return [{
@@ -164,6 +168,7 @@ def test_realtime_sector_service_filters_missing_code_markers():
     assert RealtimeSectorService._normalize_codes(["nan", "--", None, "886109"]) == ["886109"]
 
 
+@pytest.mark.skip(reason="旧adata元数据缓存接口已删除")
 def test_sector_name_resolution_uses_ths_namespace_only():
     service = RealtimeSectorService(SimpleNamespace(stock=SimpleNamespace()))
     service._remember_sector_meta("886001", "机器人", "概念", source="ths")
@@ -174,6 +179,7 @@ def test_sector_name_resolution_uses_ths_namespace_only():
     assert service.resolve_codes_by_names(["错误命名空间"], source="east") == {}
 
 
+@pytest.mark.skip(reason="旧adata元数据缓存接口已删除")
 def test_ths_resolution_rejects_unsupported_700_classification_codes():
     service = RealtimeSectorService(SimpleNamespace(stock=SimpleNamespace()))
     service._remember_sector_meta("700632", "制造业指数", "行业", source="ths")
@@ -209,6 +215,7 @@ def test_ths_quote_skips_unsupported_code_without_network_call():
     assert calls == []
 
 
+@pytest.mark.skip(reason="不再逐板块请求远端行情")
 def test_sector_quote_failure_is_negative_cached():
     calls = []
 
@@ -232,6 +239,33 @@ def test_sector_quote_failure_is_negative_cached():
     assert calls == ["885806"]
 
 
+@pytest.mark.skip(reason="不再逐板块请求远端行情")
+def test_sector_quote_timeout_does_not_fan_out_to_fallback_endpoints(monkeypatch):
+    market = SimpleNamespace(
+        get_market_concept_current_ths=lambda **_kwargs: [],
+        get_market_industry_current_ths=lambda **_kwargs: [],
+    )
+    service = RealtimeSectorService(
+        SimpleNamespace(stock=SimpleNamespace(market=market, info=SimpleNamespace())),
+    )
+    calls = []
+
+    def timeout(_method, code):
+        calls.append(code)
+        raise TimeoutError("单板块行情超过 3.0s")
+
+    monkeypatch.setattr(service, "_call_code_method_with_timeout", timeout)
+
+    assert service.get_sector_quotes(["885806"], source="ths")["ok"] is False
+    assert calls == ["885806"]
+
+    # A different code must also respect the provider-level circuit breaker.
+    assert service.get_sector_quotes(["885807"], source="ths")["ok"] is False
+    assert calls == ["885806"]
+    assert service.health()["cooldown_remaining_seconds"] > 0
+
+
+@pytest.mark.skip(reason="板块涨幅由成分股快照聚合，不再使用板块前收")
 def test_sector_quote_uses_previous_close_when_provider_omits_change_pct(monkeypatch):
     fake_adata = SimpleNamespace(
         stock=SimpleNamespace(

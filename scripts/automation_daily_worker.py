@@ -96,8 +96,21 @@ def main() -> int:
         from main import SentimentSystem
 
         system = SentimentSystem()
-        fetched = system.fetch_post_close_data(trade_date, skip_existing=True)
+        # The scheduled job is the authoritative post-close run. Force-refresh
+        # current-date caches so an early/manual partial fetch cannot poison all
+        # later retries with a missing Silver partition.
+        fetched = system.fetch_post_close_data(
+            trade_date,
+            skip_existing=False,
+            force_refresh=True,
+        )
         progress["stages"]["fetch"] = bool(fetched.ok)
+        if not fetched.ok:
+            missing = (fetched.silver_summary or {}).get("missing") or []
+            raise RuntimeError(
+                "盘后取数未生成因子必需的 Silver 数据"
+                + (f"：{', '.join(map(str, missing))}" if missing else "")
+            )
         progress["stage"] = "factors"
         progress["heartbeat_at"] = datetime.now().isoformat(timespec="seconds")
         _write(args.result, progress)

@@ -142,7 +142,8 @@ flowchart LR
     I --> J["Phase 5 JSON 快照和 SQLite 索引"]
     J --> K["Web 数据浏览"]
     H --> L["T+1 交易计划"]
-    R["easyquotation / pqquotation / adata / TDX"] --> M["实时行情缓存"]
+    R["Windows eltdx批量采集器"] --> S["Redis标准行情"]
+    S --> M["Linux Web只读行情缓存"]
     L --> M
     M --> N["实时确认 / 龙头池 / 盘中转强"]
     L --> O["模拟交易"]
@@ -254,14 +255,15 @@ a_stock_sentiment_system/
 
 ### 6.2 实时行情来源
 
-实时个股和板块行情通过本地已安装的行情包获取，当前支持：
+实时行情采用采集与 Web 分离的单一链路：
 
-- `easyquotation`
-- `pqquotation`
-- `adata`
-- `eltdx` 兜底
+- Windows 行情机通过 `eltdx` 一次批量获取观察列表的约 3 秒快照。
+- `eltdx` 同时负责集合竞价、分钟历史和 K 线，不接入 QMT 或原始 `pytdx`。
+- 采集器统一代码、时间、价格、成交量和成交额后写入 Redis。
+- Linux Web、盘中确认、持仓监控只批量读取 Redis，禁止直接连接行情节点。
+- 板块名称、代码和成分股继续使用本地同花顺数据；板块实时强度由其成分股快照聚合，不调用单板块网络接口。
 
-不同环境的数据可用性取决于网络、包版本、上游站点策略和本地缓存。服务器与本地即使代码相同，若 Python 包、网络出口或缓存不同，实时价格也可能不同。
+这样本地和服务器消费同一份快照，不再因 Python 包、网络出口或代码命名空间不同而产生行情偏差。详细部署见 `docs/eltdx实时行情部署.md`。
 
 ### 6.3 本地历史数据
 
@@ -827,39 +829,39 @@ webdata/models/factor_weights/<profile>/weights_<effective_date>.json
 
 ### 12.1 为什么使用后台缓存
 
-多个用户同时访问时，不能让每个浏览器都直接触发行情接口。Web 进程启动后创建后台线程：
+多个用户同时访问时，不能让每个浏览器或 Web Worker 直接触发行情接口：
 
-1. 每 3 秒通过 `pytdx` 长连接批量刷新默认实时载荷。
-2. 只在交易日 09:30 到 15:00 工作。
-3. 缓存默认 TTL 与刷新间隔一致；配置 Redis 后所有 Web Worker 共用一份结果。
-4. 并发请求同一个 key 时只允许一个加载器访问上游，其余请求等待同一结果。
-5. 新请求失败时可返回尚可使用的旧缓存，并标记 stale。
-6. 数据生成任务运行期间优先返回缓存，避免行情与跑批争抢资源。
+1. Windows 独立采集器约每 3 秒通过 eltdx 批量刷新默认观察列表。
+2. 采集器只在交易日 09:15 到 15:05 工作，并将标准快照写入 Redis。
+3. Linux Web 与所有用户只批量读取 Redis，不持有行情连接。
+4. Redis 中的相邻累计成交量和成交额用于生成 3 秒增量，旧快照会标记过期。
+5. 分钟结构数据由 Windows 侧 eltdx 定期同步到 Redis。
+6. 页面请求、盘中确认和持仓监控共享同一份行情，不会重复访问上游。
 
 环境变量：
 
 ```env
 REALTIME_REFRESH_SECONDS=3
 REALTIME_CACHE_TTL_SECONDS=3
-PYTDX_ENABLED=true
-# 留空时依次尝试 pytdx 自带的行情节点；生产环境建议填写已验证的固定节点。
-PYTDX_HOST=
-PYTDX_PORT=7709
-PYTDX_TIMEOUT_SECONDS=0.8
-PYTDX_MAX_SERVERS=3
-PYTDX_FAILURE_COOLDOWN_SECONDS=60
+MARKET_DATA_NODE_ROLE=collector
+ELTDX_POLL_INTERVAL_SECONDS=3
+ELTDX_TIMEOUT_SECONDS=5
+ELTDX_RETRY_COUNT=3
+ELTDX_RETRY_BACKOFF_SECONDS=0.8
+ELTDX_MINUTE_SYNC_SECONDS=60
+ELTDX_COLLECTOR_ID=eltdx-windows
+REALTIME_QUOTE_STALE_SECONDS=12
+REALTIME_QUOTE_TTL_SECONDS=86400
+REDIS_URL=redis://:password@redis-host:6379/0
 REALTIME_SNAPSHOT_MAX_ITEMS=120
 REALTIME_SNAPSHOT_TTL_SECONDS=900
 ```
 
-实时个股行情源按以下顺序降级：
-
-1. `pytdx`：当前交易日的 3 秒批量快照，包含最新价、开高低、累计成交量和成交额。
-2. `pqquotation/easyquotation`：`pytdx` 不可用时的 HTTP 快照降级源。
-3. `eltdx`：最终实时兜底，同时继续负责历史分钟线、K 线和集合竞价。
+实时个股行情仅使用 `eltdx`：当前交易日批量快照包含最新价、开高低、买卖一档、
+累计成交量和成交额；分钟线、K 线和集合竞价也来自同一个适配器。
 
 每轮刷新先把上一交易日候选股和近期龙头合并去重，再把完整代码列表一次传给
-`pytdx` 批量接口，不按股票逐只轮询。`pytdx` 快照使用累计成交量/成交额的相邻
+eltdx 批量接口，不按股票逐只轮询。快照使用累计成交量/成交额的相邻
 差值合成一分钟柱，同一笔成交不会因3秒轮询重复累计。
 
 一分钟行情只负责前5分钟高低点、VWAP和量能节奏等结构过滤；最终买点由连续
@@ -870,8 +872,8 @@ REALTIME_SNAPSHOT_TTL_SECONDS=900
 高频快照不写入因子 DuckDB。配置 Redis 时，每只股票只保留最近120条快照并在
 15分钟后过期；未配置 Redis 时降级为进程内有界缓存。确认、取消、无法成交等
 信号事件仍按现有事件仓库持久化。低配服务器无需另建时序数据库，Redis负责热
-状态共享，DuckDB继续负责盘后事实、因子和信号事件。节点全部不可达时进入60秒
-冷却并切换后备行情源，避免每次刷新都被连接超时拖慢。
+状态共享，DuckDB继续负责盘后事实、因子和信号事件。eltdx 请求失败时按指数退避
+重试，失败批次不会覆盖 Redis 中上一份行情，页面会按新鲜度明确标记为过期。
 
 ### 12.2 缓存内容
 
@@ -1692,12 +1694,12 @@ systemd 正在运行时不要重复手工启动。
 
 依次检查：
 
-1. `easyquotation`、`pqquotation`、`adata`、`eltdx` 是否安装在 systemd 使用的虚拟环境。
-2. 服务器能否访问上游行情站点。
-3. 当前是否在交易日 09:30 到 15:00。
-4. `/api/realtime/health` 的数据源状态。
-5. 候选代码是否已经标准化。
-6. 是否错误启动多个 Uvicorn worker。
+1. Windows 的 `run_eltdx_quote_collector.py` 是否运行，eltdx 是否可以连接行情节点。
+2. Windows 与 Linux 是否连接同一个 `REDIS_URL`，Redis 中 `realtime:quotes:meta` 是否更新。
+3. Linux 是否设置 `MARKET_DATA_NODE_ROLE=server`；服务器不应直连行情节点。
+4. 当前是否为交易日 09:15 到 15:05，快照是否在 12 秒新鲜度范围内。
+5. `/api/realtime/health` 是否显示 Redis 行情及最新采集时间。
+6. 候选、龙头、持仓观察代码是否已经发布到共享观察列表。
 
 ## 24. 当前边界和后续扩展
 

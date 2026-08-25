@@ -59,7 +59,9 @@ class EltdxProvider:
                     result = client.get_auction_0925(code, self._parse_trade_date(trade_date))
                 else:
                     helper = getattr(client, "helpers", None)
-                    result = getattr(helper, "get_auction_data")(code, self._parse_trade_date(trade_date)).snapshot_0925
+                    result = helper.get_auction_data(
+                        code, self._parse_trade_date(trade_date)
+                    ).snapshot_0925
             return self._auction_0925_to_dict(result, ts_code, trade_date)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] auction 09:25 unavailable {ts_code} {trade_date}: {e}")
@@ -89,29 +91,8 @@ class EltdxProvider:
         ``open_amount_yuan`` 是 09:25 开盘集合竞价的撮合成交额（元），仅对**最近/当前
         交易日**有意义（该接口不接受日期参数，返回的是最新一笔快照）。
         """
-        code = self._to_tdx_code(ts_code)
-        try:
-            with self._client() as client:
-                q = client.get_quote(code)
-            q = q[0] if isinstance(q, (list, tuple)) and q else q
-            if q is None:
-                return {}
-            open_price = getattr(q, "open_price", None)
-            open_amount = getattr(q, "open_amount_yuan", None)
-            received_at = datetime.now()
-            return {
-                "open_price": float(open_price) if open_price else 0.0,
-                "open_amount": float(open_amount) if open_amount else 0.0,
-                "pre_close": float(getattr(q, "pre_close_price", 0) or 0),
-                "last_price": float(getattr(q, "last_price", 0) or 0),
-                "date": received_at.strftime("%Y%m%d"),
-                "time": received_at.strftime("%H:%M:%S"),
-                "received_at": received_at.isoformat(timespec="milliseconds"),
-                "source": "eltdx_quote",
-            }
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"[EltdxProvider] quote snapshot unavailable {ts_code}: {e}")
-            return {}
+        code6 = StockCodeUtils.standardize_code(ts_code, add_suffix=False)
+        return self.get_quote_snapshots([ts_code]).get(code6, {})
 
     def get_quote_snapshots(self, ts_codes) -> dict:
         """**批量**取实时行情快照（一条连接、按 80 只分块）。
@@ -121,8 +102,9 @@ class EltdxProvider:
         百毫秒级，适合候选池盘中轮询。
 
         Returns:
-            dict: ``{6位代码: {open_price, open_amount, pre_close, last_price,
-                   change_pct, source}}``；eltdx 不可用或异常时返回空字典。
+            dict: ``{6位代码: {open_price, pre_close, last_price, high_price,
+                   low_price, vol_hand, amount_yuan, bid1, ask1, source}}``；
+                   eltdx 不可用或异常时返回空字典。
         """
         codes = list(ts_codes or [])
         if not codes:
@@ -139,26 +121,72 @@ class EltdxProvider:
                         code6 = str(getattr(s, "code", "") or "").split(".")[0].zfill(6)
                         if not code6 or code6 == "000000":
                             continue
-                        last = getattr(s, "last_price", None)
-                        pre = getattr(s, "pre_close_price", None)
-                        op = getattr(s, "open_price", None)
-                        oa = getattr(s, "open_amount_yuan", None)
-                        chg = getattr(s, "change_pct", None)
-                        out[code6] = {
-                            "open_price": float(op) if op else 0.0,
-                            "open_amount": float(oa) if oa else 0.0,
-                            "pre_close": float(pre) if pre else 0.0,
-                            "last_price": float(last) if last else 0.0,
-                            "change_pct": float(chg) if chg is not None else None,
-                            "date": received_at.strftime("%Y%m%d"),
-                            "time": received_at.strftime("%H:%M:%S"),
-                            "received_at": received_at.isoformat(timespec="milliseconds"),
-                            "source": "eltdx_quotes_batch",
-                        }
+                        out[code6] = self._normalize_quote_snapshot(s, received_at)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] batch quote snapshots unavailable ({len(codes)} codes): {e}")
             return {}
         return out
+
+    @classmethod
+    def _normalize_quote_snapshot(cls, snapshot: Any, received_at: datetime) -> dict:
+        """Normalize one eltdx quote without changing its documented units."""
+        code6 = str(getattr(snapshot, "code", "") or "").split(".")[0].zfill(6)
+        last = cls._float(getattr(snapshot, "last_price", None))
+        pre_close = cls._float(getattr(snapshot, "pre_close_price", None))
+        bid1, bid_vol1 = cls._first_level(getattr(snapshot, "buy_levels", None))
+        ask1, ask_vol1 = cls._first_level(getattr(snapshot, "sell_levels", None))
+        return {
+            "code": code6,
+            "ts_code": StockCodeUtils.standardize_code(code6),
+            "open_price": cls._float(getattr(snapshot, "open_price", None)),
+            "open_amount": cls._float(getattr(snapshot, "open_amount_yuan", None)),
+            "pre_close": pre_close,
+            "last_price": last,
+            "high_price": cls._float(getattr(snapshot, "high_price", None)),
+            "low_price": cls._float(getattr(snapshot, "low_price", None)),
+            "bid1": bid1,
+            "ask1": ask1,
+            "bid_vol1": bid_vol1,
+            "ask_vol1": ask_vol1,
+            # eltdx total_hand/level volume are hands; amount is yuan.
+            "vol_hand": cls._float(getattr(snapshot, "total_hand", None)),
+            "amount_yuan": cls._float(getattr(snapshot, "amount", None)),
+            "current_hand": cls._float(getattr(snapshot, "current_hand", None)),
+            "inside_hand": cls._float(getattr(snapshot, "inside_dish", None)),
+            "outside_hand": cls._float(getattr(snapshot, "outer_disc", None)),
+            "change_pct": ((last - pre_close) / pre_close * 100.0) if pre_close > 0 else None,
+            "date": received_at.strftime("%Y%m%d"),
+            "time": cls._source_time(getattr(snapshot, "time_raw", None), received_at),
+            "received_at": received_at.isoformat(timespec="milliseconds"),
+            "source": "eltdx_batch",
+        }
+
+    @staticmethod
+    def _float(value: Any) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @classmethod
+    def _first_level(cls, levels: Any) -> tuple[float, float]:
+        level = levels[0] if levels else None
+        if level is None:
+            return 0.0, 0.0
+        if isinstance(level, dict):
+            return cls._float(level.get("price")), cls._float(level.get("volume"))
+        return cls._float(getattr(level, "price", None)), cls._float(getattr(level, "volume", None))
+
+    @staticmethod
+    def _source_time(raw: Any, fallback: datetime) -> str:
+        try:
+            digits = str(int(raw)).zfill(8)
+            hour, minute, second = map(int, (digits[:2], digits[2:4], digits[4:6]))
+            if 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
+                return f"{hour:02d}:{minute:02d}:{second:02d}"
+        except (TypeError, ValueError):
+            pass
+        return fallback.strftime("%H:%M:%S")
 
     def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
         """Get K-line bars from eltdx.

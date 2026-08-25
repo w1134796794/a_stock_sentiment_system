@@ -422,7 +422,7 @@ class RealtimeEntrySignalService:
             "sector_detail": sector_detail or {},
             "data_status": decision.data_status,
             "trigger_source": (
-                "pytdx_3s" if str(decision.data_status).startswith("snapshot_")
+                "eltdx_snapshot" if str(decision.data_status).startswith("snapshot_")
                 else "minute_fallback"
             ),
             "data_completeness": confidence["data_completeness"],

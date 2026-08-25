@@ -10,10 +10,7 @@ loguru>=0.6.0
 openpyxl>=3.0.0
 schedule>=1.1.0
 requests>=2.31.0
-# 实时行情：pytdx 3秒快照、个股双 HTTP 源、板块行情及 eltdx 历史分时兜底
-pytdx>=1.72
-easyquotation>=0.7.7
-pqquotation>=0.8.5
+# 实时行情：Windows 使用 eltdx 批量采集，Linux/Web 只读 Redis。
 adata>=2.9.5
 eltdx>=1.0.2
 # 环境变量管理（.env 文件，缺失时 settings.py 会优雅降级）

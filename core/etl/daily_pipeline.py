@@ -60,7 +60,9 @@ class ETLDailyResult:
     @property
     def ok(self) -> bool:
         if self.stage == "fetch":
-            return bool(self.silver_summary.get("ready") or self.silver_summary.get("quality_ok"))
+            # A quality report alone is not enough: all required Silver writes
+            # must exist before factor jobs are allowed to start.
+            return bool(self.silver_summary.get("ready"))
         if self.stage == "factors":
             return bool(self.factor_results and all(item.get("ok") for item in self.factor_results))
         if self.stage == "screening":
