@@ -156,7 +156,10 @@ class EltdxProvider:
             "outside_hand": cls._float(getattr(snapshot, "outer_disc", None)),
             "change_pct": ((last - pre_close) / pre_close * 100.0) if pre_close > 0 else None,
             "date": received_at.strftime("%Y%m%d"),
-            "time": cls._source_time(getattr(snapshot, "time_raw", None), received_at),
+            # eltdx documents time_raw as an opaque protocol value, not HHMMSS.
+            # Freshness therefore uses the successful receive time.
+            "time": received_at.strftime("%H:%M:%S"),
+            "source_time_raw": getattr(snapshot, "time_raw", None),
             "received_at": received_at.isoformat(timespec="milliseconds"),
             "source": "eltdx_batch",
         }
@@ -176,17 +179,6 @@ class EltdxProvider:
         if isinstance(level, dict):
             return cls._float(level.get("price")), cls._float(level.get("volume"))
         return cls._float(getattr(level, "price", None)), cls._float(getattr(level, "volume", None))
-
-    @staticmethod
-    def _source_time(raw: Any, fallback: datetime) -> str:
-        try:
-            digits = str(int(raw)).zfill(8)
-            hour, minute, second = map(int, (digits[:2], digits[2:4], digits[4:6]))
-            if 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
-                return f"{hour:02d}:{minute:02d}:{second:02d}"
-        except (TypeError, ValueError):
-            pass
-        return fallback.strftime("%H:%M:%S")
 
     def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
         """Get K-line bars from eltdx.

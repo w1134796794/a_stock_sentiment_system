@@ -5,7 +5,7 @@
 系统只保留一条实时行情链路：
 
 ```text
-Windows eltdx 批量采集器
+Web 内置或独立 eltdx 批量采集器
   -> Redis 标准快照与分钟缓存
   -> Linux Web / 盘中确认 / 持仓监控只读
 ```
@@ -13,7 +13,10 @@ Windows eltdx 批量采集器
 不需要 QMT、券商客户端或资金门槛，也不接入原始 `pytdx`。板块代码、名称和成分股
 继续使用同花顺口径，盘中板块强度由成分股的 eltdx 批量快照聚合。
 
-## Windows 采集端
+## 默认：Web 内置采集
+
+Web 启动时会自动启动 eltdx 采集线程，无需再手动执行脚本。多 Worker 使用 Redis
+任务锁竞争，只有一个实例实际连接行情节点。配置：
 
 安装项目依赖后配置：
 
@@ -25,12 +28,24 @@ ELTDX_TIMEOUT_SECONDS=5
 ELTDX_RETRY_COUNT=3
 ELTDX_RETRY_BACKOFF_SECONDS=0.8
 ELTDX_MINUTE_SYNC_SECONDS=60
-ELTDX_COLLECTOR_ID=eltdx-windows
+ELTDX_COLLECTOR_ID=eltdx-auto
+ELTDX_EMBEDDED_COLLECTOR_ENABLED=true
 REALTIME_QUOTE_STALE_SECONDS=12
 REALTIME_QUOTE_TTL_SECONDS=86400
 ```
 
 若要固定使用某个 eltdx 节点，可额外设置 `ELTDX_HOST`；默认留空，让 eltdx 自行选择。
+
+将 `ELTDX_COLLECTOR_ID` 改为服务器名称有助于排查来源。`time_raw` 是 eltdx 的协议
+原始值，不能当作 HHMMSS 解析；系统以成功接收时间判断新鲜度，并保留原始值用于诊断。
+
+## 可选：独立采集进程
+
+只有需要把采集与 Web 进程完全隔离时才关闭内置采集并运行以下脚本：
+
+```env
+ELTDX_EMBEDDED_COLLECTOR_ENABLED=false
+```
 
 先做一次连通性检查：
 
@@ -56,7 +71,8 @@ REDIS_URL=redis://:password@redis-host:6379/0
 REALTIME_QUOTE_STALE_SECONDS=12
 ```
 
-服务端不需要安装 QMT、`xtquant` 或原始 `pytdx`，也不直接连接行情节点。
+服务端不需要安装 QMT、`xtquant` 或原始 `pytdx`。使用默认内置模式时，Web
+进程中的唯一采集线程连接 eltdx；使用独立模式时，Web 只读取 Redis。
 
 ## 稳定性规则
 
@@ -65,7 +81,7 @@ REALTIME_QUOTE_STALE_SECONDS=12
 - 页面根据 eltdx 源端时间计算新鲜度，超过阈值明确标记为过期，不能用于买点确认。
 - 采集器健康状态写入 `realtime:collector:health`，有效行情元数据写入
   `realtime:quotes:meta`。
-- 分钟序列按独立周期更新，不占用每轮快照请求。
+- 分钟序列在独立后台线程更新，不阻塞每轮快照请求。
 - 高频快照只进 Redis 的有界序列，不写入日度因子表或 DuckDB。
 
 ## 排查

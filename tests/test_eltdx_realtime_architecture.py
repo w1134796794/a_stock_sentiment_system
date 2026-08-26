@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from threading import Event
+from time import monotonic
 from types import SimpleNamespace
 
 from core.data.providers.eltdx_provider import EltdxProvider
 from core.infrastructure.shared_state import MemoryStateBackend
+from core.realtime.eltdx_collector import EltdxQuoteCollector
 from core.realtime.quote_cache import RealtimeQuoteCache
 from core.realtime.sector_service import RealtimeSectorService
 
@@ -121,8 +124,29 @@ def test_eltdx_provider_uses_one_connection_and_normalizes_source_fields():
     assert row["amount_yuan"] == 128_000
     assert row["bid1"] == 10.49
     assert row["ask1"] == 10.5
-    assert row["time"] == "09:31:02"
+    assert row["time"] == row["received_at"][11:19]
+    assert row["source_time_raw"] == 9310200
     assert row["source"] == "eltdx_batch"
+
+
+def test_minute_sync_does_not_block_snapshot_loop():
+    collector = EltdxQuoteCollector()
+    started = Event()
+    release = Event()
+
+    def slow_sync(_codes):
+        started.set()
+        release.wait(2)
+
+    collector._sync_minutes = slow_sync
+    before = monotonic()
+    collector._schedule_minute_sync(["000001"])
+    elapsed = monotonic() - before
+
+    assert elapsed < 0.2
+    assert started.wait(0.5)
+    release.set()
+    collector._minute_sync_thread.join(timeout=1)
 
 
 def test_sector_strength_uses_one_constituent_quote_batch(tmp_path):

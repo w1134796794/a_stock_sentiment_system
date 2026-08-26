@@ -95,6 +95,8 @@ _REALTIME_SERVICE_LOCK = Lock()
 _REALTIME_WORKER_LOCK = Lock()
 _REALTIME_REFRESH_STOP = Event()
 _REALTIME_REFRESH_THREAD = None
+_ELTDX_COLLECTOR = None
+_ELTDX_COLLECTOR_THREAD = None
 
 
 def _seconds_env(name: str, default: float) -> float:
@@ -1757,12 +1759,14 @@ async def _app_lifespan(_app: FastAPI):
 
     _get_holding_service()
     _start_realtime_refresh_worker()
+    _start_eltdx_collector_worker()
     AUTOMATION_SCHEDULER.start()
     try:
         yield
     finally:
         AUTOMATION_SCHEDULER.stop()
         _stop_realtime_refresh_worker()
+        _stop_eltdx_collector_worker()
 
 
 app = FastAPI(title="A股情绪系统 · 指标看板", docs_url="/api/docs", lifespan=_app_lifespan)
@@ -3213,10 +3217,19 @@ def _build_realtime_market_payload(
 
 
 def _build_realtime_health_payload(*, probe: bool = False) -> Dict[str, Any]:
+    from config.settings import ELTDX_EMBEDDED_COLLECTOR_ENABLED
+
     return {
         "ok": True,
         "quotes": _get_realtime_quote_service().health(probe=probe),
         "sectors": _get_realtime_sector_service().health(probe=probe),
+        "collector_runtime": {
+            "embedded_enabled": ELTDX_EMBEDDED_COLLECTOR_ENABLED,
+            "thread_alive": bool(
+                _ELTDX_COLLECTOR_THREAD and _ELTDX_COLLECTOR_THREAD.is_alive()
+            ),
+            "instance_ready": _ELTDX_COLLECTOR is not None,
+        },
         "session": _current_realtime_session(),
     }
 
@@ -3308,8 +3321,8 @@ def _refresh_realtime_defaults() -> None:
         return
     market_date = _realtime_market_date()
     trade_date = _realtime_candidate_date(market_date)
-    # Publish one deduplicated watchlist. The Windows collector sends it to eltdx
-    # in one batch; Web only warms its Redis read cache.
+    # Publish one deduplicated watchlist. The built-in collector sends it to
+    # eltdx in one batch; Web only warms its shared read cache.
     try:
         from core.realtime.leader_pool_service import LeaderPoolService
 
@@ -3427,6 +3440,48 @@ def _stop_realtime_refresh_worker() -> None:
     if thread and thread.is_alive():
         thread.join(timeout=3.0)
     _REALTIME_REFRESH_THREAD = None
+
+
+def _start_eltdx_collector_worker() -> None:
+    """Start the quote source so Web never depends on a manual command."""
+    global _ELTDX_COLLECTOR, _ELTDX_COLLECTOR_THREAD
+    from config.settings import ELTDX_EMBEDDED_COLLECTOR_ENABLED
+
+    if not ELTDX_EMBEDDED_COLLECTOR_ENABLED:
+        logger.info("Built-in eltdx collector is disabled by configuration")
+        return
+    with _REALTIME_WORKER_LOCK:
+        if _ELTDX_COLLECTOR_THREAD and _ELTDX_COLLECTOR_THREAD.is_alive():
+            return
+
+        def run_collector() -> None:
+            global _ELTDX_COLLECTOR
+            try:
+                from core.realtime.eltdx_collector import EltdxQuoteCollector
+
+                _ELTDX_COLLECTOR = EltdxQuoteCollector()
+                _ELTDX_COLLECTOR.run()
+            except Exception:  # noqa: BLE001
+                logger.exception("Built-in eltdx collector failed to start")
+
+        _ELTDX_COLLECTOR_THREAD = Thread(
+            target=run_collector,
+            name="eltdx-quote-collector",
+            daemon=True,
+        )
+        _ELTDX_COLLECTOR_THREAD.start()
+
+
+def _stop_eltdx_collector_worker() -> None:
+    global _ELTDX_COLLECTOR, _ELTDX_COLLECTOR_THREAD
+    collector = _ELTDX_COLLECTOR
+    if collector is not None:
+        collector.stop()
+    thread = _ELTDX_COLLECTOR_THREAD
+    if thread and thread.is_alive():
+        thread.join(timeout=3.0)
+    _ELTDX_COLLECTOR = None
+    _ELTDX_COLLECTOR_THREAD = None
 
 
 @app.get("/api/realtime/quote/{code}")

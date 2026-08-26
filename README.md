@@ -142,7 +142,7 @@ flowchart LR
     I --> J["Phase 5 JSON 快照和 SQLite 索引"]
     J --> K["Web 数据浏览"]
     H --> L["T+1 交易计划"]
-    R["Windows eltdx批量采集器"] --> S["Redis标准行情"]
+    R["内置/独立 eltdx批量采集器"] --> S["Redis标准行情"]
     S --> M["Linux Web只读行情缓存"]
     L --> M
     M --> N["实时确认 / 龙头池 / 盘中转强"]
@@ -257,7 +257,7 @@ a_stock_sentiment_system/
 
 实时行情采用采集与 Web 分离的单一链路：
 
-- Windows 行情机通过 `eltdx` 一次批量获取观察列表的约 3 秒快照。
+- Web 默认自动启动内置 `eltdx` 采集线程，也可使用独立采集进程；观察列表约每3秒批量获取一次。
 - `eltdx` 同时负责集合竞价、分钟历史和 K 线，不接入 QMT 或原始 `pytdx`。
 - 采集器统一代码、时间、价格、成交量和成交额后写入 Redis。
 - Linux Web、盘中确认、持仓监控只批量读取 Redis，禁止直接连接行情节点。
@@ -831,7 +831,7 @@ webdata/models/factor_weights/<profile>/weights_<effective_date>.json
 
 多个用户同时访问时，不能让每个浏览器或 Web Worker 直接触发行情接口：
 
-1. Windows 独立采集器约每 3 秒通过 eltdx 批量刷新默认观察列表。
+1. Web 内置采集线程约每 3 秒通过 eltdx 批量刷新默认观察列表。
 2. 采集器只在交易日 09:15 到 15:05 工作，并将标准快照写入 Redis。
 3. Linux Web 与所有用户只批量读取 Redis，不持有行情连接。
 4. Redis 中的相邻累计成交量和成交额用于生成 3 秒增量，旧快照会标记过期。
@@ -849,7 +849,8 @@ ELTDX_TIMEOUT_SECONDS=5
 ELTDX_RETRY_COUNT=3
 ELTDX_RETRY_BACKOFF_SECONDS=0.8
 ELTDX_MINUTE_SYNC_SECONDS=60
-ELTDX_COLLECTOR_ID=eltdx-windows
+ELTDX_COLLECTOR_ID=eltdx-auto
+ELTDX_EMBEDDED_COLLECTOR_ENABLED=true
 REALTIME_QUOTE_STALE_SECONDS=12
 REALTIME_QUOTE_TTL_SECONDS=86400
 REDIS_URL=redis://:password@redis-host:6379/0
@@ -1694,8 +1695,8 @@ systemd 正在运行时不要重复手工启动。
 
 依次检查：
 
-1. Windows 的 `run_eltdx_quote_collector.py` 是否运行，eltdx 是否可以连接行情节点。
-2. Windows 与 Linux 是否连接同一个 `REDIS_URL`，Redis 中 `realtime:quotes:meta` 是否更新。
+1. `/api/realtime/health` 中内置 eltdx 采集器是否更新；显式关闭内置采集时再检查独立脚本。
+2. 多进程部署时各实例是否连接同一个 `REDIS_URL`，Redis 中 `realtime:quotes:meta` 是否更新。
 3. Linux 是否设置 `MARKET_DATA_NODE_ROLE=server`；服务器不应直连行情节点。
 4. 当前是否为交易日 09:15 到 15:05，快照是否在 12 秒新鲜度范围内。
 5. `/api/realtime/health` 是否显示 Redis 行情及最新采集时间。

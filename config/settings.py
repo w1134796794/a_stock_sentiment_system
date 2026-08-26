@@ -93,9 +93,9 @@ REDIS_KEY_PREFIX = os.getenv("REDIS_KEY_PREFIX", "a_stock").strip() or "a_stock"
 REDIS_SOCKET_TIMEOUT_SECONDS = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2"))
 TASK_LOCK_TTL_SECONDS = int(os.getenv("TASK_LOCK_TTL_SECONDS", "180"))
 
-# 实时行情采用「Windows eltdx采集器 -> Redis -> Linux/Web只读消费」架构。
-# server 角色严禁直连行情节点；collector 用于 Windows 独立采集进程；
-# workstation 允许本地直接使用 eltdx 的竞价、分钟历史与调试能力。
+# 实时行情采用「eltdx唯一采集实例 -> Redis/进程缓存 -> Web只读消费」架构。
+# Web 默认自动启动内置采集线程；多 Worker 通过 Redis 任务锁只保留一个实例。
+# collector 用于独立采集进程，workstation 也允许本地调试竞价与分钟历史。
 MARKET_DATA_NODE_ROLE = (
     os.getenv("MARKET_DATA_NODE_ROLE", "workstation").strip().lower() or "workstation"
 )
@@ -120,8 +120,11 @@ ELTDX_MINUTE_SYNC_SECONDS = max(
 )
 ELTDX_HOST = os.getenv("ELTDX_HOST", "").strip()
 ELTDX_COLLECTOR_ID = (
-    os.getenv("ELTDX_COLLECTOR_ID", "eltdx-windows").strip() or "eltdx-windows"
+    os.getenv("ELTDX_COLLECTOR_ID", "eltdx-auto").strip() or "eltdx-auto"
 )
+ELTDX_EMBEDDED_COLLECTOR_ENABLED = os.getenv(
+    "ELTDX_EMBEDDED_COLLECTOR_ENABLED", "true"
+).strip().lower() not in {"0", "false", "no", "off"}
 REALTIME_SNAPSHOT_MAX_ITEMS = max(20, int(os.getenv("REALTIME_SNAPSHOT_MAX_ITEMS", "120")))
 REALTIME_SNAPSHOT_TTL_SECONDS = max(60, int(os.getenv("REALTIME_SNAPSHOT_TTL_SECONDS", "900")))
 

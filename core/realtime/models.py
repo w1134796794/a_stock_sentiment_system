@@ -89,6 +89,7 @@ class QuoteSnapshot:
     change_pct: Optional[float] = None
     date: str = ""
     time: str = ""
+    source_time_raw: Any = None
     source: str = ""
     received_at: str = field(default_factory=now_iso)
     stale_seconds: Optional[float] = None
@@ -96,7 +97,7 @@ class QuoteSnapshot:
     raw: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_raw(cls, raw: Dict[str, Any], *, stale_after_seconds: float = 90.0) -> "QuoteSnapshot":
+    def from_raw(cls, raw: Dict[str, Any], *, stale_after_seconds: float = 90.0) -> QuoteSnapshot:
         raw = dict(raw or {})
         code = normalize_stock_code(pick(raw, ("code", "ts_code", "symbol", "股票代码")), add_suffix=False)
         ts_code = normalize_stock_code(code, add_suffix=True) if code else str(raw.get("ts_code") or "")
@@ -132,6 +133,7 @@ class QuoteSnapshot:
             change_pct=change_pct,
             date=date,
             time=time,
+            source_time_raw=raw.get("source_time_raw"),
             source=str(raw.get("source") or ""),
             received_at=str(raw.get("received_at") or now_iso()),
             stale_seconds=stale_seconds,
@@ -158,6 +160,7 @@ class QuoteSnapshot:
             "change_pct": self.change_pct,
             "date": self.date,
             "time": self.time,
+            "source_time_raw": self.source_time_raw,
             "source": self.source,
             "received_at": self.received_at,
             "stale_seconds": self.stale_seconds,
@@ -190,7 +193,7 @@ class SectorSnapshot:
     raw: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_raw(cls, raw: Dict[str, Any], *, source: str = "") -> "SectorSnapshot":
+    def from_raw(cls, raw: Dict[str, Any], *, source: str = "") -> SectorSnapshot:
         raw = dict(raw or {})
         code = str(pick(raw, (
             "code", "index_code", "板块代码", "概念代码", "行业代码", "symbol", "ts_code"
