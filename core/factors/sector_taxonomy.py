@@ -39,6 +39,14 @@ NON_THEME_EXACT = frozenset({
     "小盘股",
     "大盘股",
     "绩优股",
+    # Broad classification indices describe where a stock belongs. They are
+    # not a tradable narrative and must not be presented as a market mainline.
+    "制造业指数",
+    "农业指数",
+    "工业指数",
+    "服务业指数",
+    "消费指数",
+    "综合指数",
 })
 
 NON_THEME_FRAGMENTS = (

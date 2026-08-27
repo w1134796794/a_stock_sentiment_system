@@ -668,7 +668,7 @@ class ScreeningEngine:
         if "stk_limit_progress" not in base.columns:
             base["stk_limit_progress"] = base["limit_progress_score"]
 
-        if candidate_codes:
+        if candidate_codes is not None:
             code_set = {_normalize_code(c) for c in candidate_codes if _normalize_code(c)}
             base = base[base["code"].isin(code_set)]
         return base.reset_index(drop=True)

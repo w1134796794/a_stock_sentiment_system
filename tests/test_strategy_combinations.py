@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import yaml
 
 import config.settings as settings
@@ -127,6 +128,31 @@ def test_weak_to_strong_execution_edits_are_persisted(tmp_path):
     assert reopened["execution"]["confirmation_deadline"] == "09:48:00"
     assert reopened["execution"]["candidate_max_age_days"] == 2
     assert reopened["execution"]["allowed_entry_modes"] == ["weak_to_strong"]
+
+
+def test_confirmation_deadline_accepts_editor_time_and_rejects_out_of_session(tmp_path):
+    base_path = tmp_path / "screening_profiles.yaml"
+    strategy_path = tmp_path / "strategy_combinations.yaml"
+    _base_profiles(base_path)
+    repository = StrategyProfileRepository(strategy_path, base_path)
+    common = {
+        "name": "截止时间测试",
+        "base_profile": "default",
+        "ranking_factors": [{"factor": "tech_score", "weight": 1.0}],
+        "market_regimes": ["strong"],
+    }
+
+    saved = repository.save("deadline_test", {
+        **common,
+        "execution": {"confirmation_deadline": "11:15"},
+    })
+
+    assert saved["execution"]["confirmation_deadline"] == "11:15:00"
+    with pytest.raises(ValueError, match="09:30-11:30"):
+        repository.save("deadline_test", {
+            **common,
+            "execution": {"confirmation_deadline": "12:00"},
+        })
 
 
 def test_runtime_strategy_file_is_seeded_from_read_only_defaults(tmp_path, monkeypatch):

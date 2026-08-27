@@ -74,6 +74,26 @@ def test_leader_pool_from_screening_json(tmp_path: Path):
     assert all(row["code"] != "000001" for row in result["rows"])
 
 
+def test_historical_leader_codes_excludes_current_trade_date(tmp_path: Path):
+    screening_dir = tmp_path / "screening"
+    screening_dir.mkdir()
+    for date, item in (
+        ("20260617", _leader_item(code="002281", name="历史龙头")),
+        ("20260618", _leader_item(code="600000", name="当日龙头")),
+    ):
+        (screening_dir / f"screening_{date}.json").write_text(
+            json.dumps({"trade_date": date, "final": [item]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    service = LeaderPoolService(screening_dir=screening_dir)
+
+    assert service.historical_leader_codes("20260618", lookback=20) == {"002281"}
+    assert service.historical_leader_codes(
+        "20260618", lookback=20, include_trade_date=True,
+    ) == {"002281", "600000"}
+
+
 def test_leader_pool_payload_is_strict_json_when_source_contains_nan(tmp_path: Path):
     screening_dir = tmp_path / "screening"
     screening_dir.mkdir()

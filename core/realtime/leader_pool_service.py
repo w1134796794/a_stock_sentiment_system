@@ -287,6 +287,28 @@ class LeaderPoolService:
             "rows": selected,
         }
 
+    def historical_leader_codes(
+        self,
+        trade_date: str,
+        *,
+        lookback: int = 20,
+        include_trade_date: bool = False,
+    ) -> set[str]:
+        """Return stocks that had a leader identity in the prior screening window."""
+        days = max(int(lookback), 1)
+        dates = self._recent_dates(trade_date, days + 1)
+        if not include_trade_date:
+            dates = [date for date in dates if date < str(trade_date)]
+        dates = dates[-days:]
+        if not dates:
+            return set()
+        pool = self.build_pool(dates[-1], lookback=len(dates), limit=10000)
+        codes = {
+            normalize_stock_code(row.get("code") or "", add_suffix=False)
+            for row in pool.get("rows") or []
+        }
+        return {code for code in codes if code}
+
     @staticmethod
     def _metric(item: Dict[str, Any], factor: str, fallback: float = 50.0) -> float:
         metrics = item.get("metrics") or {}
@@ -305,7 +327,6 @@ class LeaderPoolService:
         candidate_appearances: int,
         prior_events: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        metrics = item.get("metrics") or {}
         context = item.get("context") or {}
         code = normalize_stock_code(item.get("code") or item.get("stock_code") or "", add_suffix=False)
         name = str(item.get("name") or "")

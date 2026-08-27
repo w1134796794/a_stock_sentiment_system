@@ -100,6 +100,8 @@ function RealtimeBadge({ row }: { row?: RealtimeRow }) {
 
 function CandidateCard({ row, realtime, onOpen, onPrefetch }: { row: Candidate; realtime?: RealtimeRow; onOpen: () => void; onPrefetch: () => void }) {
   const consensus = `${row.strategy_consensus}/${row.strategy_total || "-"}`;
+  const sectorLabel = row.mainline_confirmed ? "所属主线" : "关联题材";
+  const sectorName = row.mainline_confirmed ? row.mainline : row.related_themes?.[0];
   return (
     <button className="candidate-card" type="button" onClick={onOpen} onMouseEnter={onPrefetch} onFocus={onPrefetch}>
       <div className="candidate-card__head">
@@ -114,7 +116,7 @@ function CandidateCard({ row, realtime, onOpen, onPrefetch }: { row: Candidate; 
         {(row.hit_strategies || []).slice(0, 3).map((strategy) => <span key={strategy}>{strategy}</span>)}
       </div>
       <div className="candidate-grid">
-        <div><span>所属主线</span><b>{row.mainline || "待确认"}</b></div>
+        <div><span>{sectorLabel}</span><b>{sectorName || "待确认"}</b></div>
         <div><span>{realtime ? "实时涨幅" : "板块强度"}</span><b className={realtime && realtime.pct_chg < 0 ? "price-down" : realtime ? "price-up" : ""}>{realtime ? signedPct(realtime.pct_chg) : row.sector_strength ? row.sector_strength.toFixed(1) : "--"}</b></div>
         <div><span>入场模式</span><b>{realtime?.entry_mode_text || row.entry_mode || "盘中确认"}</b></div>
         <div><span>建议仓位</span><b>{row.position || (row.position_cap_pct ? `${row.position_cap_pct}%以内` : "观察")}</b></div>
@@ -173,6 +175,8 @@ function DetailDrawer({ candidate, date, onClose }: { candidate: Candidate | nul
   if (!candidate) return null;
   const evidence = candidate.evidence || {};
   const metrics = Object.entries(evidence.metrics || {}).slice(0, 8);
+  const sectorLabel = candidate.mainline_confirmed ? "所属主线" : "关联题材";
+  const sectorName = candidate.mainline_confirmed ? candidate.mainline : candidate.related_themes?.[0];
   return (
     <div className="drawer-layer" role="dialog" aria-modal="true" aria-label="候选股证据">
       <button className="drawer-backdrop" type="button" onClick={onClose} aria-label="关闭详情" />
@@ -184,13 +188,14 @@ function DetailDrawer({ candidate, date, onClose }: { candidate: Candidate | nul
         <section className="drawer-summary">
           <div><span>行动分组</span><b>{candidate.action_group}</b></div>
           <div><span>策略共识</span><b>{candidate.strategy_consensus}/{candidate.strategy_total || "-"}</b></div>
-          <div><span>所属主线</span><b>{candidate.mainline || "待确认"}</b></div>
+          <div><span>{sectorLabel}</span><b>{sectorName || "待确认"}</b></div>
           <div><span>板块强度</span><b>{candidate.sector_strength || "--"}</b></div>
         </section>
         {stock && <div className="stock-tags">{[...(stock.industry || []), ...(stock.concepts || []).slice(0, 5)].map((item) => <span key={item}>{item}</span>)}</div>}
         <section className="drawer-section">
           <h3>交易动作</h3>
           <dl className="action-list">
+            <div><dt>命中策略</dt><dd>{candidate.hit_strategies?.join("、") || "未命中生产策略"}</dd></div>
             <div><dt>一句话结论</dt><dd>{candidate.conclusion || "等待盘中确认"}</dd></div>
             <div><dt>确认条件</dt><dd>{candidate.confirmation || "满足策略分钟条件"}</dd></div>
             <div><dt>失效条件</dt><dd>{candidate.invalidation || "板块转弱或个股结构破坏"}</dd></div>

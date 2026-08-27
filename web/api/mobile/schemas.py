@@ -74,6 +74,7 @@ class CandidateSummary(_FlexibleModel):
     strategy_consensus: int = 0
     strategy_total: int = 0
     mainline: str = ""
+    mainline_confirmed: bool = False
     related_themes: List[str] = Field(default_factory=list)
     sector_strength: float = 0.0
     entry_mode: str = ""

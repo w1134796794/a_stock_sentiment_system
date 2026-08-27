@@ -161,7 +161,7 @@ def test_internal_scheduler_recovers_incomplete_daily_job(monkeypatch):
     scheduler = InternalScheduler()
     today = __import__("datetime").datetime.now().strftime("%Y%m%d")
     scheduler.calendar.is_trade_date = lambda trade_date: trade_date == today
-    scheduler.state.save({
+    scheduler.daily_state.save({
         "status": "error",
         "job": "daily",
         "trade_date": today,
@@ -177,6 +177,18 @@ def test_internal_scheduler_recovers_incomplete_daily_job(monkeypatch):
 
     assert scheduler._recover_due_daily_job() is True
     assert dispatched[0][0] == "daily"
+
+
+def test_internal_scheduler_uses_shanghai_timezone_and_separate_job_states(monkeypatch):
+    monkeypatch.setenv("AUTOMATION_TIMEZONE", "Asia/Shanghai")
+    scheduler = InternalScheduler()
+    scheduler._save_daily_state({"status": "done", "job": "daily", "pipeline_ok": True})
+    scheduler._save_auction_state({"status": "done", "job": "auction"})
+
+    assert scheduler.timezone_name == "Asia/Shanghai"
+    assert scheduler._now().utcoffset().total_seconds() == 8 * 3600
+    assert scheduler.daily_state.load()["job"] == "daily"
+    assert scheduler.auction_state.load()["job"] == "auction"
 
 
 def test_internal_scheduler_explains_native_segfault():

@@ -413,20 +413,23 @@ class DecisionPoolService:
         )
         sectors, attribute_labels = partition_sector_names(sector_labels)
         contexts = [item.get("context") or {} for item in members]
+        strategy_ids = _unique(str(item.get("策略ID") or "") for item in members)
         sector_scores = [
             max(_number(ctx.get("sector_mainline_score")), _number(ctx.get("sector_resonance_score")))
             for ctx in contexts
         ]
         sector_strength = max(sector_scores or [0.0]) if sectors else 0.0
+        mainline_strategy_hit = "mainline_leader" in strategy_ids
         mainline_confirmed = bool(
-            sectors and sector_strength >= MAINLINE_CONFIRM_THRESHOLD
+            mainline_strategy_hit
+            and sectors
+            and sector_strength >= MAINLINE_CONFIRM_THRESHOLD
         )
         mainline_name = sectors[0] if mainline_confirmed else "主线待确认"
         raw_modes = _unique(
             str(mode) for item in members for mode in (item.get("_entry_modes") or [])
         )
         modes = [ENTRY_MODE_LABELS.get(mode, mode) for mode in raw_modes]
-        strategy_ids = _unique(str(item.get("策略ID") or "") for item in members)
         primary_strategy_id = str(
             row.get("策略ID") or (strategy_ids[0] if strategy_ids else "")
         )
@@ -466,6 +469,7 @@ class DecisionPoolService:
             "策略共识显示": f"{len(names)}/{strategy_total}",
             "所属主线": mainline_name,
             "主线确认": mainline_confirmed,
+            "主线策略命中": mainline_strategy_hit,
             "共振板块": sectors[:4],
             "相关题材": sectors[:4],
             "证券属性标签": attribute_labels[:4],

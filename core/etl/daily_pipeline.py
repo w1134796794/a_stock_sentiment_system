@@ -318,6 +318,25 @@ class ETLDailyPipeline:
             f"primary={primary_strategy}"
         )
 
+        weak_to_strong_codes: Optional[set[str]] = None
+        if "weak_to_strong" in strategy_ids:
+            from config.settings import WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS
+            from core.realtime.leader_pool_service import LeaderPoolService
+
+            weak_to_strong_codes = LeaderPoolService(
+                screening_dir=self.web_data_dir / "screening",
+                duckdb_path=self.duckdb_path,
+            ).historical_leader_codes(
+                trade_date,
+                lookback=WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS,
+                include_trade_date=False,
+            )
+            logger.info(
+                f"[选股策略][弱转强前置池] 截至上一交易日近"
+                f"{WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS}日曾入龙头池="
+                f"{len(weak_to_strong_codes)}"
+            )
+
         phase_started = time.monotonic()
         logger.info(f"[选股策略][筛选] 开始: {trade_date}")
         strategy_results: Dict[str, Dict[str, Any]] = {}
@@ -333,6 +352,11 @@ class ETLDailyPipeline:
                 trade_date,
                 profile=strategy_id,
                 profile_config=strategy_config,
+                candidate_codes=(
+                    weak_to_strong_codes
+                    if strategy_id == "weak_to_strong"
+                    else None
+                ),
                 persist=True,
             )
             payload = current.to_dict()

@@ -2752,11 +2752,13 @@ def api_screening_run_status(since: int = 0) -> Any:
 def api_strategies() -> Any:
     from core.screening.strategy_profiles import StrategyProfileRepository, factor_catalog
 
+    repository = StrategyProfileRepository()
     return JSONResponse(
         {
             "ok": True,
-            "profiles": StrategyProfileRepository().list_profiles(),
+            "profiles": repository.list_profiles(),
             "factors": factor_catalog(),
+            "storage_path": str(repository.path),
         },
         headers={"Cache-Control": "no-store, max-age=0"},
     )
@@ -2778,12 +2780,13 @@ def api_strategy_lab(date: Optional[str] = None, strategy_ids: Optional[str] = N
 def api_save_strategy(profile_id: str, payload: dict = Body(default={})) -> Any:
     from core.screening.strategy_profiles import StrategyProfileRepository
 
+    repository = StrategyProfileRepository()
     try:
-        profile = StrategyProfileRepository().save(profile_id, payload or {})
+        profile = repository.save(profile_id, payload or {})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     return JSONResponse(
-        {"ok": True, "profile": profile},
+        {"ok": True, "profile": profile, "storage_path": str(repository.path)},
         headers={"Cache-Control": "no-store, max-age=0"},
     )
 

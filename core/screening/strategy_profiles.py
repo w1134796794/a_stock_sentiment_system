@@ -95,9 +95,17 @@ def _execution_config(source: Any, strategy_id: str = "default") -> Dict[str, An
     raw = dict(source or {}) if isinstance(source, Mapping) else {}
     modes = [str(item).strip() for item in raw.get("allowed_entry_modes") or []]
     modes = [item for item in modes if item in ENTRY_MODES]
-    deadline = str(raw.get("confirmation_deadline") or DEFAULT_EXECUTION["confirmation_deadline"])
-    if not re.match(r"^(09|10):[0-5]\d:[0-5]\d$", deadline):
-        deadline = DEFAULT_EXECUTION["confirmation_deadline"]
+    deadline = str(
+        raw.get("confirmation_deadline") or DEFAULT_EXECUTION["confirmation_deadline"]
+    ).strip()
+    if re.fullmatch(r"\d{2}:\d{2}", deadline):
+        deadline = f"{deadline}:00"
+    if not re.fullmatch(r"\d{2}:\d{2}:\d{2}", deadline):
+        raise ValueError("确认截止时间格式必须为 HH:MM，例如 10:30")
+    hour, minute, second = (int(part) for part in deadline.split(":"))
+    seconds = hour * 3600 + minute * 60 + second
+    if not (9 * 3600 + 30 * 60 <= seconds <= 11 * 3600 + 30 * 60):
+        raise ValueError("确认截止时间必须在 09:30-11:30 之间")
     candidate_max_age_days = int(raw.get("candidate_max_age_days") or DEFAULT_EXECUTION["candidate_max_age_days"])
     max_positions = int(raw.get("max_positions") or 0)
     exit_source = raw.get("exit") if isinstance(raw.get("exit"), Mapping) else {}
@@ -407,7 +415,7 @@ class StrategyProfileRepository:
         if not 0.0 <= position_cap_pct <= 100.0:
             raise ValueError("单票仓位上限必须在0-100之间")
         enhancements = data.get("enhancements") or {}
-        execution = _execution_config(data.get("execution"))
+        execution = _execution_config(data.get("execution"), profile_id)
         return {
             "name": str(data.get("name") or profile_id).strip()[:40],
             "description": str(data.get("description") or "").strip()[:300],

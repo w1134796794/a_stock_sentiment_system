@@ -329,6 +329,7 @@
         ranking.push({factor:row.dataset.factorRow, weight:Number(row.querySelector('input[type=number]').value || 0)});
       }
     });
+    const deadlineValue = String(byId('execution-deadline').value || '10:00').slice(0, 5);
     return {
       name:byId('profile-name').value.trim(), description:byId('profile-description').value.trim(),
       enabled:byId('profile-enabled').checked, primary:byId('profile-primary').checked,
@@ -343,7 +344,7 @@
       position_cap_pct:Number(byId('position-cap-pct').value || 0),
       execution:{
         allowed_entry_modes:[...document.querySelectorAll('#execution-modes input:checked')].map(input => input.value),
-        confirmation_deadline:`${byId('execution-deadline').value || '10:00'}:00`,
+        confirmation_deadline:`${deadlineValue}:00`,
         candidate_max_age_days:Number(byId('execution-age').value || 1),
         max_positions:Number(byId('execution-max-positions').value || 0),
         exit:structuredClone(current?.execution?.exit || {}),
@@ -387,7 +388,8 @@
       if (index >= 0) profiles[index] = saved;
       else profiles.push(saved);
       loadProfile(saved);
-      byId('editor-status').textContent = '已保存，可在选股任务中选择运行';
+      const savedDeadline = String(saved.execution?.confirmation_deadline || '').slice(0, 5);
+      byId('editor-status').textContent = `已保存，确认截止时间 ${savedDeadline || '--'}；配置文件：${data.storage_path || '运行期策略配置'}`;
     } catch (error) {
       byId('editor-status').textContent = `保存失败：${error?.message || '网络或服务异常'}`;
     } finally {

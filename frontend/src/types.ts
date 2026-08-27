@@ -6,6 +6,7 @@ export type Candidate = {
   strategy_consensus: number;
   strategy_total: number;
   mainline: string;
+  mainline_confirmed: boolean;
   related_themes: string[];
   sector_strength: number;
   entry_mode: string;

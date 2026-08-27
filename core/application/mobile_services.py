@@ -226,6 +226,7 @@ class MobileReadService:
             "strategy_consensus": int(row.get("策略共识数") or len(strategies)),
             "strategy_total": int(row.get("策略总数") or 0),
             "mainline": str(row.get("所属主线") or ""),
+            "mainline_confirmed": bool(row.get("主线确认")),
             "related_themes": _list_value(row.get("相关题材") or row.get("共振板块"))[:8],
             "sector_strength": _number(row.get("板块强度")),
             "entry_mode": str(row.get("明日入场模式") or row.get("策略模式") or ""),

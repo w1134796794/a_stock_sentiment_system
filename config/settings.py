@@ -50,6 +50,12 @@ CACHE_DIR = _env_path("CACHE_DIR", DATA_DIR / "cache")
 POST_CLOSE_DATA_READY_TIME = (
     os.getenv("POST_CLOSE_DATA_READY_TIME", "18:00").strip() or "18:00"
 )
+# 弱转强只从过去曾经进入龙头池的股票中选择。20 个交易日同时覆盖
+# 用户常用的 10 日观察窗，并允许服务器通过环境变量缩短。
+WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS = min(
+    max(int(os.getenv("WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS", "20") or 20), 10),
+    60,
+)
 
 
 # ============================================

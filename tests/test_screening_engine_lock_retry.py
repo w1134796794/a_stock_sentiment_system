@@ -51,3 +51,33 @@ def test_load_candidates_retries_transient_duckdb_lock(monkeypatch, tmp_path):
     assert len(attempts) == 2
     assert connection.closed is True
     assert result.iloc[0]["code"] == "000001"
+
+
+def test_empty_candidate_code_scope_stays_empty(monkeypatch, tmp_path):
+    db_path = tmp_path / "factors.duckdb"
+    db_path.touch()
+    connection = _Connection()
+    monkeypatch.setitem(
+        sys.modules,
+        "duckdb",
+        SimpleNamespace(connect=lambda _path: connection),
+    )
+    engine = ScreeningEngine(
+        duckdb_path=db_path,
+        output_dir=tmp_path / "screening",
+        weight_repository=SimpleNamespace(resolve=lambda *_args, **_kwargs: None),
+    )
+    stock = pd.DataFrame([
+        {"code": "000001.SZ", "name": "sample", "pct_chg": 1.0, "pre_close": 10.0},
+    ])
+    monkeypatch.setattr(
+        engine,
+        "_read_table",
+        lambda _con, table, _date: (
+            stock.copy() if table == "factor_stock_wide" else pd.DataFrame()
+        ),
+    )
+
+    result = engine.load_candidates("20260720", candidate_codes=set())
+
+    assert result.empty

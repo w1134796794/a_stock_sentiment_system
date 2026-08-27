@@ -143,6 +143,23 @@ def test_related_theme_below_strength_threshold_is_not_called_mainline():
     assert "主线主线待确认" not in candidate["一句话结论"]
 
 
+def test_weak_to_strong_sector_score_does_not_impersonate_mainline_strategy():
+    profiles = {"weak_to_strong": _profile("weak_to_strong", "弱转强")}
+    row = _row("002824", "和胜股份")
+    row["resonance_sectors"] = "制造业指数,储能"
+    payloads = {"weak_to_strong": {"final": [row]}}
+
+    result = DecisionPoolService().build(payloads, profiles, market_score=40)
+    candidate = result["rows"][0]
+
+    assert candidate["命中策略"] == ["弱转强"]
+    assert candidate["主线策略命中"] is False
+    assert candidate["主线确认"] is False
+    assert candidate["所属主线"] == "主线待确认"
+    assert candidate["相关题材"] == ["储能"]
+    assert candidate["证券属性标签"] == ["制造业指数"]
+
+
 def test_supplied_relative_regime_is_corrected_by_the_absolute_market_score():
     profiles = {
         "mainline_leader": _profile("mainline_leader", "主线龙头"),
