@@ -193,7 +193,10 @@ def test_market_gate_keeps_screened_candidates_visible_but_not_executable():
         payloads,
         profiles,
         market_score=13.2,
-        market_state={"phase": "decline"},
+        market_state={
+            "phase": "decline",
+            "phase_reasons": ["炸板率升至42%"],
+        },
     )
 
     assert result["active_strategy_ids"] == ["weak_to_strong"]
@@ -205,6 +208,7 @@ def test_market_gate_keeps_screened_candidates_visible_but_not_executable():
     assert candidate["行动分组"] == "暂不参与"
     assert candidate["execution_eligible"] is False
     assert "暂不启用主线龙头" in candidate["市场门控说明"]
+    assert "判定依据：炸板率升至42%" in candidate["市场门控说明"]
 
 
 def test_emotion_phase_is_the_single_strategy_gate_and_is_exposed_to_ui():

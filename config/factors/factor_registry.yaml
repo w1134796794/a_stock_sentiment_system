@@ -324,6 +324,38 @@ factors:
       mid: 1.0
       low: -1.0
 
+  mkt_profit_effect_score:
+    id: "mkt_profit_effect_score"
+    name: "市场赚钱效应"
+    category: "emotion"
+    sub_category: "core"
+    description: "综合市场赚钱宽度、昨日涨停溢价、连板持续性和涨停交易安全性的盘后评分"
+    data_source: "stock_daily_silver,limit_up_pool_silver,limit_down_pool_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params:
+      strong: 75.0
+      good: 60.0
+      divided: 45.0
+      weak: 30.0
+
+  mkt_promotion_trend_score:
+    id: "mkt_promotion_trend_score"
+    name: "连板接力趋势"
+    category: "emotion"
+    sub_category: "continuity"
+    description: "最近5个交易日一进二、二进三、三进四和高位晋级的小样本平滑趋势评分"
+    data_source: "limit_up_pool_silver"
+    output_type: "float"
+    value_range: [0.0, 100.0]
+    default_weight: 0.0
+    enabled: true
+    params:
+      lookback_days: 5
+      weights: [0.30, 0.30, 0.20, 0.20]
+
   echelon_integrity:
     id: "echelon_integrity"
     name: "连板梯队完整性"

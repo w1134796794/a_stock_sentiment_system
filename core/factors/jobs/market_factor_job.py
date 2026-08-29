@@ -1,6 +1,7 @@
 """Market-level batch factor job."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -144,6 +145,24 @@ def _previous_trade_date(con, trade_date: str) -> str:
         return ""
 
 
+def _previous_limit_pool_date(con, trade_date: str) -> str:
+    """Return the latest earlier date with an official limit-up pool."""
+    if not _table_exists(con, "limit_up_pool_silver"):
+        return ""
+    try:
+        row = con.execute(
+            """
+            SELECT MAX(CAST(trade_date AS VARCHAR))
+            FROM limit_up_pool_silver
+            WHERE CAST(trade_date AS VARCHAR) < ?
+            """,
+            [str(trade_date)],
+        ).fetchone()
+        return str(row[0] or "") if row else ""
+    except Exception:
+        return ""
+
+
 def _echelon_integrity(limit_pool: pd.DataFrame) -> float | None:
     """Measure whether the existing board-height ladder is filled from 1 upward."""
     if limit_pool.empty or "limit_times" not in limit_pool.columns:
@@ -171,7 +190,7 @@ def _previous_limit_feedback(
     trade_date: str,
 ) -> tuple[float | None, float | None, float | None]:
     """Evaluate yesterday's official limit-up cohort on today's actual prices."""
-    previous_date = _previous_trade_date(con, trade_date)
+    previous_date = _previous_limit_pool_date(con, trade_date)
     if not previous_date:
         return None, None, None
     pool = _read_limit_pool(con, previous_date)
@@ -227,6 +246,8 @@ def _previous_market_rows(con, trade_date: str, limit: int = 30) -> pd.DataFrame
             selected.append("emotion_phase")
         if "cycle_duration" in columns:
             selected.append("cycle_duration")
+        if "profit_effect_score" in columns:
+            selected.append("profit_effect_score")
         sql_columns = ", ".join(f'"{column}"' for column in selected)
         return con.execute(
             f"""
@@ -270,6 +291,211 @@ def _previous_market_score(con, trade_date: str) -> float | None:
         return None
 
 
+def _weighted_available(parts: list[tuple[float | None, float]], default: float = 50.0) -> float:
+    valid = [
+        (float(score), float(weight))
+        for score, weight in parts
+        if score is not None and pd.notna(score) and weight > 0
+    ]
+    if not valid:
+        return default
+    weight_sum = sum(weight for _, weight in valid)
+    return sum(score * weight for score, weight in valid) / weight_sum
+
+
+def _promotion_metrics(con, trade_date: str, current_pool: pd.DataFrame) -> dict[str, dict[str, float | int | None]]:
+    """Return raw and small-sample-adjusted board promotion rates."""
+    previous_date = _previous_limit_pool_date(con, trade_date)
+    previous_pool = _read_limit_pool(con, previous_date) if previous_date else pd.DataFrame()
+    names = ("overall", "rate_1to2", "rate_2to3", "rate_3to4", "rate_high")
+    empty = {
+        name: {"rate": None, "adjusted_rate": None, "success": 0, "sample": 0}
+        for name in names
+    }
+    if previous_pool.empty or current_pool.empty:
+        return empty
+
+    def board_map(frame: pd.DataFrame) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for row in frame.to_dict("records"):
+            code = _normalize_code(row.get("code") or row.get("ts_code"))
+            if not code:
+                continue
+            height = max(int(to_float(row.get("limit_times"), 1.0)), 1)
+            result[code] = height
+        return result
+
+    previous = board_map(previous_pool)
+    current = board_map(current_pool)
+
+    def measure(*, level: int | None = None, high: bool = False) -> dict[str, float | int | None]:
+        cohort = [
+            (code, height)
+            for code, height in previous.items()
+            if level is None and not high
+            or level is not None and height == level
+            or high and height >= 3
+        ]
+        sample = len(cohort)
+        if not sample:
+            return {"rate": None, "adjusted_rate": None, "success": 0, "sample": 0}
+        success = sum(1 for code, height in cohort if current.get(code, 0) >= height + 1)
+        raw_rate = success / sample * 100.0
+        # Beta(2, 2): four neutral prior samples prevent tiny cohorts from reading as 0/100.
+        adjusted_rate = (success + 2.0) / (sample + 4.0) * 100.0
+        return {
+            "rate": round(raw_rate, 2),
+            "adjusted_rate": round(adjusted_rate, 2),
+            "success": success,
+            "sample": sample,
+        }
+
+    return {
+        "overall": measure(),
+        "rate_1to2": measure(level=1),
+        "rate_2to3": measure(level=2),
+        "rate_3to4": measure(level=3),
+        "rate_high": measure(high=True),
+    }
+
+
+def _promotion_history(con, trade_date: str, days: int = 5) -> list[dict[str, object]]:
+    if not _table_exists(con, "limit_up_pool_silver"):
+        return []
+    try:
+        rows = con.execute(
+            """
+            SELECT DISTINCT CAST(trade_date AS VARCHAR) AS trade_date
+            FROM limit_up_pool_silver
+            WHERE CAST(trade_date AS VARCHAR) <= ?
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            [str(trade_date), max(int(days) + 1, 2)],
+        ).fetchall()
+    except Exception:
+        return []
+    dates = list(reversed([str(row[0]) for row in rows if row and row[0]]))
+    history: list[dict[str, object]] = []
+    for current_date in dates[1:]:
+        metrics = _promotion_metrics(con, current_date, _read_limit_pool(con, current_date))
+        item: dict[str, object] = {"trade_date": current_date}
+        for key in ("rate_1to2", "rate_2to3", "rate_3to4", "rate_high"):
+            item[key] = metrics[key]["rate"]
+            item[f"{key}_adjusted"] = metrics[key]["adjusted_rate"]
+            item[f"{key}_success"] = metrics[key]["success"]
+            item[f"{key}_sample"] = metrics[key]["sample"]
+        history.append(item)
+    return history[-max(int(days), 1):]
+
+
+def _series_slope(values: list[tuple[int, float]]) -> float | None:
+    if len(values) < 2:
+        return None
+    x_mean = sum(x for x, _ in values) / len(values)
+    y_mean = sum(y for _, y in values) / len(values)
+    denominator = sum((x - x_mean) ** 2 for x, _ in values)
+    if denominator <= 0:
+        return None
+    return sum((x - x_mean) * (y - y_mean) for x, y in values) / denominator
+
+
+def _promotion_trend_from_history(history: list[dict[str, object]]) -> dict[str, object]:
+    keys = ("rate_1to2", "rate_2to3", "rate_3to4", "rate_high")
+    weights = {"rate_1to2": 0.30, "rate_2to3": 0.30, "rate_3to4": 0.20, "rate_high": 0.20}
+    tier_scores: dict[str, float | None] = {}
+    tier_slopes: dict[str, float | None] = {}
+    for key in keys:
+        values = [
+            (index, float(value))
+            for index, row in enumerate(history)
+            if (value := row.get(f"{key}_adjusted")) is not None and pd.notna(value)
+        ]
+        slope = _series_slope(values)
+        tier_slopes[key] = round(slope, 2) if slope is not None else None
+        if not values:
+            tier_scores[key] = None
+            continue
+        recency = list(range(1, len(values) + 1))
+        average = sum(value * weight for (_, value), weight in zip(values, recency, strict=False)) / sum(recency)
+        tier_scores[key] = round(max(0.0, min(100.0, average + (slope or 0.0) * 2.0)), 2)
+
+    valid_scores = [(tier_scores[key], weights[key]) for key in keys if tier_scores[key] is not None]
+    score = (
+        sum(float(value) * weight for value, weight in valid_scores)
+        / sum(weight for _, weight in valid_scores)
+        if valid_scores else None
+    )
+    valid_slopes = [float(value) for value in tier_slopes.values() if value is not None]
+    weighted_slope_parts = [
+        (float(tier_slopes[key]), weights[key])
+        for key in keys if tier_slopes[key] is not None
+    ]
+    overall_slope = (
+        sum(value * weight for value, weight in weighted_slope_parts)
+        / sum(weight for _, weight in weighted_slope_parts)
+        if weighted_slope_parts else None
+    )
+    positive = sum(value >= 2.0 for value in valid_slopes)
+    negative = sum(value <= -2.0 for value in valid_slopes)
+    first_slope = tier_slopes.get("rate_1to2")
+    high_slope = tier_slopes.get("rate_high")
+    mid_rising = any((tier_slopes.get(key) or 0.0) >= 2.0 for key in ("rate_2to3", "rate_3to4"))
+    if len(history) < 3 or len(valid_slopes) < 2:
+        label = "样本不足"
+    elif first_slope is not None and high_slope is not None and first_slope <= -2.0 < high_slope:
+        label = "高位抱团"
+    elif positive >= 3:
+        label = "接力升温"
+    elif negative >= 3:
+        label = "接力退潮"
+    elif mid_rising:
+        label = "主线发酵"
+    else:
+        label = "接力分化"
+    return {
+        "score": round(score, 2) if score is not None else None,
+        "label": label,
+        "slope": round(overall_slope, 2) if overall_slope is not None else None,
+        "sample_days": len(history),
+        "tier_scores": tier_scores,
+        "tier_slopes": tier_slopes,
+        "history": history,
+    }
+
+
+def _promotion_trend(con, trade_date: str, days: int = 5) -> dict[str, object]:
+    return _promotion_trend_from_history(_promotion_history(con, trade_date, days=days))
+
+
+def _profit_effect_label(score: float) -> str:
+    if score >= 75:
+        return "赚钱效应强"
+    if score >= 60:
+        return "赚钱效应较好"
+    if score >= 45:
+        return "赚钱效应分化"
+    if score >= 30:
+        return "赚钱效应较差"
+    return "明显亏钱效应"
+
+
+def _profit_effect_trend(score: float, history: pd.DataFrame) -> tuple[float | None, str]:
+    if history.empty or "profit_effect_score" not in history.columns:
+        return None, "趋势待积累"
+    values = pd.to_numeric(history["profit_effect_score"], errors="coerce").dropna().head(3)
+    if values.empty:
+        return None, "趋势待积累"
+    change = score - float(values.mean())
+    if change > 8:
+        label = "赚钱效应扩散"
+    elif change < -8:
+        label = "赚钱效应退潮"
+    else:
+        label = "赚钱效应稳定"
+    return round(change, 2), label
+
+
 class MarketFactorJob:
     name = "market_factor_job"
 
@@ -300,6 +526,7 @@ class MarketFactorJob:
         up_ratio = float((today["pct_chg"] > 0).sum() / total_count)
         down_ratio = float((today["pct_chg"] < 0).sum() / total_count)
         avg_pct = float(today["pct_chg"].mean())
+        median_pct = float(today["pct_chg"].median())
 
         limit_up_count = _strict_limit_up_count(con, trade_date)
         limit_down_count = _strict_limit_down_count(con, trade_date)
@@ -343,6 +570,38 @@ class MarketFactorJob:
         echelon_integrity = _echelon_integrity(limit_pool)
         prev_premium, prev_positive, prev_first_board_gap = _previous_limit_feedback(
             con, trade_date,
+        )
+        promotion = _promotion_metrics(con, trade_date, limit_pool)
+        promotion_trend = _promotion_trend(con, trade_date, days=5)
+        breadth_profit_score = _weighted_available([
+            (score_between(up_ratio, 0.30, 0.70), 0.60),
+            (score_between(median_pct, -2.0, 2.0), 0.40),
+        ])
+        premium_profit_score = _weighted_available([
+            (None if prev_premium is None else score_between(prev_premium, -3.0, 3.0), 0.55),
+            (None if prev_positive is None else prev_positive * 100.0, 0.45),
+        ])
+        continuation_profit_score = _weighted_available([
+            (promotion["overall"]["adjusted_rate"], 0.35),
+            (promotion["rate_1to2"]["adjusted_rate"], 0.25),
+            (promotion["rate_2to3"]["adjusted_rate"], 0.20),
+            (promotion["rate_3to4"]["adjusted_rate"], 0.10),
+            (promotion["rate_high"]["adjusted_rate"], 0.10),
+        ])
+        safety_profit_score = _weighted_available([
+            (score_between(broken_rate, 10.0, 60.0, invert=True), 0.55),
+            (emotion_score, 0.45),
+        ])
+        profit_effect_score = _weighted_available([
+            (breadth_profit_score, 0.25),
+            (premium_profit_score, 0.30),
+            (continuation_profit_score, 0.25),
+            (safety_profit_score, 0.20),
+        ])
+        profit_effect_label = _profit_effect_label(profit_effect_score)
+        profit_effect_change_3d, profit_effect_trend = _profit_effect_trend(
+            profit_effect_score,
+            _previous_market_rows(con, trade_date, limit=3),
         )
         first_board_market = first_board_market_metrics(
             con, str(trade_date), limit_pool,
@@ -388,6 +647,7 @@ class MarketFactorJob:
             "up_ratio": up_ratio,
             "down_ratio": down_ratio,
             "avg_pct_chg": avg_pct,
+            "median_pct_chg": median_pct,
             "amount_yuan": amount_today,
             "amount_ratio_5d": amount_ratio,
             "limit_up_count": limit_up_count,
@@ -400,6 +660,34 @@ class MarketFactorJob:
             "prev_limit_up_premium": prev_premium,
             "prev_limit_up_positive": prev_positive,
             "prev_first_board_gap_up": prev_first_board_gap,
+            "profit_effect_score": profit_effect_score,
+            "profit_effect_label": profit_effect_label,
+            "profit_effect_trend": profit_effect_trend,
+            "profit_effect_change_3d": profit_effect_change_3d,
+            "profit_breadth_score": breadth_profit_score,
+            "profit_premium_score": premium_profit_score,
+            "profit_continuation_score": continuation_profit_score,
+            "profit_safety_score": safety_profit_score,
+            "promotion_overall_rate": promotion["overall"]["rate"],
+            "promotion_overall_success": promotion["overall"]["success"],
+            "promotion_overall_sample": promotion["overall"]["sample"],
+            "promotion_1to2_rate": promotion["rate_1to2"]["rate"],
+            "promotion_1to2_success": promotion["rate_1to2"]["success"],
+            "promotion_1to2_sample": promotion["rate_1to2"]["sample"],
+            "promotion_2to3_rate": promotion["rate_2to3"]["rate"],
+            "promotion_2to3_success": promotion["rate_2to3"]["success"],
+            "promotion_2to3_sample": promotion["rate_2to3"]["sample"],
+            "promotion_3to4_rate": promotion["rate_3to4"]["rate"],
+            "promotion_3to4_success": promotion["rate_3to4"]["success"],
+            "promotion_3to4_sample": promotion["rate_3to4"]["sample"],
+            "promotion_high_rate": promotion["rate_high"]["rate"],
+            "promotion_high_success": promotion["rate_high"]["success"],
+            "promotion_high_sample": promotion["rate_high"]["sample"],
+            "promotion_trend_score": promotion_trend["score"],
+            "promotion_trend_label": promotion_trend["label"],
+            "promotion_trend_slope": promotion_trend["slope"],
+            "promotion_trend_sample_days": promotion_trend["sample_days"],
+            "promotion_trend_json": json.dumps(promotion_trend, ensure_ascii=False),
             "first_board_sector_resonance_ratio": first_board_market[
                 "first_board_sector_resonance_ratio"
             ],
@@ -423,6 +711,7 @@ class MarketFactorJob:
             "up_ratio",
             "down_ratio",
             "avg_pct_chg",
+            "median_pct_chg",
             "amount_yuan",
             "amount_ratio_5d",
             "limit_up_count",
@@ -435,6 +724,30 @@ class MarketFactorJob:
             "prev_limit_up_premium",
             "prev_limit_up_positive",
             "prev_first_board_gap_up",
+            "profit_effect_score",
+            "profit_effect_change_3d",
+            "profit_breadth_score",
+            "profit_premium_score",
+            "profit_continuation_score",
+            "profit_safety_score",
+            "promotion_overall_rate",
+            "promotion_overall_success",
+            "promotion_overall_sample",
+            "promotion_1to2_rate",
+            "promotion_1to2_success",
+            "promotion_1to2_sample",
+            "promotion_2to3_rate",
+            "promotion_2to3_success",
+            "promotion_2to3_sample",
+            "promotion_3to4_rate",
+            "promotion_3to4_success",
+            "promotion_3to4_sample",
+            "promotion_high_rate",
+            "promotion_high_success",
+            "promotion_high_sample",
+            "promotion_trend_score",
+            "promotion_trend_slope",
+            "promotion_trend_sample_days",
             "first_board_sector_resonance_ratio",
             "first_board_cluster_count",
             "first_board_follow_through_ratio",
@@ -479,6 +792,16 @@ class MarketFactorJob:
                 trade_date=trade_date, entity_type="market", entity_id="market",
                 factor_id="mkt_market_score", raw_value=market_score, score=market_score,
                 direction="higher_better",
+            ),
+            make_long_record(
+                trade_date=trade_date, entity_type="market", entity_id="market",
+                factor_id="mkt_profit_effect_score", raw_value=profit_effect_score,
+                score=profit_effect_score, direction="higher_better",
+            ),
+            make_long_record(
+                trade_date=trade_date, entity_type="market", entity_id="market",
+                factor_id="mkt_promotion_trend_score", raw_value=promotion_trend["score"],
+                score=promotion_trend["score"], direction="higher_better",
             ),
             make_long_record(
                 trade_date=trade_date, entity_type="market", entity_id="market",

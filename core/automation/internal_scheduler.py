@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
@@ -30,7 +30,7 @@ def _env_bool(name: str, default: bool = True) -> bool:
 class InternalScheduler:
     def __init__(self) -> None:
         self.enabled = _env_bool("AUTOMATION_ENABLED", True)
-        self.daily_time = os.getenv("AUTOMATION_DAILY_TIME", "18:30").strip() or "18:30"
+        self.daily_time = os.getenv("AUTOMATION_DAILY_TIME", "20:00").strip() or "20:00"
         self.auction_time = os.getenv("AUTOMATION_AUCTION_TIME", "09:25:10").strip() or "09:25:10"
         self.auto_backtest = _env_bool("AUTOMATION_AUTO_BACKTEST", True)
         self.capital = float(os.getenv("AUTOMATION_CAPITAL", "100000") or 100000)
@@ -48,7 +48,10 @@ class InternalScheduler:
         self._last_heartbeat_at = ""
         self._catchup_checked = False
         self.catch_up_enabled = _env_bool("AUTOMATION_DAILY_CATCH_UP", True)
-        self.max_daily_attempts = max(int(os.getenv("AUTOMATION_DAILY_MAX_ATTEMPTS", "3") or 3), 1)
+        self.max_daily_attempts = max(int(os.getenv("AUTOMATION_DAILY_MAX_ATTEMPTS", "6") or 6), 1)
+        self.daily_retry_minutes = max(
+            int(os.getenv("AUTOMATION_DAILY_RETRY_MINUTES", "15") or 15), 1,
+        )
         self.daily_timeout = max(int(os.getenv("AUTOMATION_DAILY_TIMEOUT", "21600") or 21600), 600)
         self.worker_memory_limit_mb = max(int(os.getenv("AUTOMATION_WORKER_MEMORY_MB", "2400") or 2400), 512)
 
@@ -98,6 +101,7 @@ class InternalScheduler:
             "capital": self.capital,
             "catch_up_enabled": self.catch_up_enabled,
             "max_daily_attempts": self.max_daily_attempts,
+            "daily_retry_minutes": self.daily_retry_minutes,
             "scheduler_heartbeat_at": self._last_heartbeat_at,
             "active_jobs": sorted(
                 name for name, thread in self._job_threads.items() if thread.is_alive()
@@ -187,11 +191,23 @@ class InternalScheduler:
         attempts = int(latest.get("attempt") or 0) if str(latest.get("trade_date") or "") == trade_date else 0
         if completed or attempts >= self.max_daily_attempts:
             return False
-        logger.warning(
-            f"[Automation] 检测到 {trade_date} 每日流水线未完成，"
-            f"自动恢复第 {attempts + 1}/{self.max_daily_attempts} 次"
-        )
-        return self._dispatch_job("daily", self._daily_job)
+        next_retry_at = str(latest.get("next_retry_at") or "")
+        if next_retry_at:
+            try:
+                retry_at = datetime.fromisoformat(next_retry_at)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=self.timezone)
+                if now < retry_at:
+                    return False
+            except ValueError:
+                pass
+        dispatched = self._dispatch_job("daily", self._daily_job)
+        if dispatched:
+            logger.warning(
+                f"[Automation] 检测到 {trade_date} 每日流水线未完成，"
+                f"自动恢复第 {attempts + 1}/{self.max_daily_attempts} 次"
+            )
+        return dispatched
 
     def _recover_due_auction_job(self) -> bool:
         if self._stop.is_set():
@@ -239,6 +255,7 @@ class InternalScheduler:
             "status": "running", "job": "daily", "trade_date": trade_date,
             "attempt": attempt,
             "started_at": self._now().isoformat(timespec="seconds"),
+            "next_retry_at": "",
         })
         try:
             from config.settings import BASE_DIR, WEB_DATA_DIR
@@ -255,6 +272,11 @@ class InternalScheduler:
                 "--capital", str(self.capital),
                 "--result", str(result_path),
             ]
+            if attempt > 1:
+                # The first run clears possible intraday partial caches. Later
+                # attempts preserve successful sources and only refill gaps
+                # such as a delayed ths_daily partition.
+                command.append("--repair-existing")
             if self.auto_backtest:
                 command.append("--auto-backtest")
             log_path = Path(BASE_DIR) / "logs" / f"automation_{trade_date}.log"
@@ -280,6 +302,12 @@ class InternalScheduler:
             payload["worker_exit_code"] = exit_code
             payload["worker_log"] = str(log_path)
             payload["attempt"] = attempt
+            if payload.get("status") != "done" or not payload.get("pipeline_ok"):
+                payload["next_retry_at"] = (
+                    self._now() + timedelta(minutes=self.daily_retry_minutes)
+                ).isoformat(timespec="seconds")
+            else:
+                payload["next_retry_at"] = ""
             self._save_daily_state(payload)
             if payload.get("status") != "done" or not payload.get("pipeline_ok"):
                 message = str(payload.get("message") or self._exit_code_message(exit_code))
@@ -314,6 +342,10 @@ class InternalScheduler:
             self._save_daily_state({
                 "status": "error", "job": "daily", "trade_date": trade_date,
                 "message": str(exc), "finished_at": self._now().isoformat(timespec="seconds"),
+                "attempt": attempt,
+                "next_retry_at": (
+                    self._now() + timedelta(minutes=self.daily_retry_minutes)
+                ).isoformat(timespec="seconds"),
             })
             try:
                 from core.notifications.notifier import NotificationService

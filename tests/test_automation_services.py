@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from core.automation.internal_scheduler import InternalScheduler
 from core.infrastructure.shared_state import MemoryStateBackend
 from core.models.health_monitor import ModelHealthMonitor
@@ -116,7 +118,33 @@ def test_notification_service_reports_channels_without_exposing_secrets(monkeypa
     assert status["enabled"] is True
     assert status["configured_count"] == 1
     assert status["channels"]["Server酱个人微信"] is True
+    assert status["serverchan_recipient_count"] == 1
     assert "secret" not in str(status).lower()
+
+
+def test_notification_service_broadcasts_to_multiple_serverchan_recipients(monkeypatch):
+    monkeypatch.setenv("SERVERCHAN_SENDKEY", "SCT-legacy")
+    monkeypatch.setenv("SERVERCHAN_SENDKEYS", "SCT-first, SCT-second;SCT-first\nSCT-third")
+    monkeypatch.delenv("WECOM_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("DINGTALK_WEBHOOK_URL", raising=False)
+    service = NotificationService(backend=MemoryStateBackend("notify-multiple-serverchan"))
+    calls = []
+    monkeypatch.setattr(
+        service,
+        "_post_form",
+        lambda url, payload: calls.append((url, payload)) or {"ok": True, "status": 200},
+    )
+
+    result = service.send("买点", "测试多接收方")
+    status = service.status()
+
+    assert result["ok"] is True
+    assert result["sent"] == 4
+    assert len(calls) == 4
+    assert status["configured_count"] == 1
+    assert status["serverchan_recipient_count"] == 4
+    assert status["configured_endpoint_count"] == 4
+    assert all("SCT-" not in str(item) for item in result["results"])
 
 
 def test_notification_service_deduplicates_same_signal(monkeypatch):
@@ -177,6 +205,45 @@ def test_internal_scheduler_recovers_incomplete_daily_job(monkeypatch):
 
     assert scheduler._recover_due_daily_job() is True
     assert dispatched[0][0] == "daily"
+
+
+def test_internal_scheduler_waits_until_daily_retry_is_due(monkeypatch):
+    monkeypatch.setenv("AUTOMATION_DAILY_CATCH_UP", "true")
+    monkeypatch.setenv("AUTOMATION_DAILY_TIME", "00:00")
+    monkeypatch.setenv("AUTOMATION_DAILY_RETRY_MINUTES", "15")
+    scheduler = InternalScheduler()
+    now = scheduler._now()
+    today = now.strftime("%Y%m%d")
+    scheduler.calendar.is_trade_date = lambda trade_date: trade_date == today
+    scheduler.daily_state.save({
+        "status": "error",
+        "job": "daily",
+        "trade_date": today,
+        "attempt": 1,
+        "pipeline_ok": False,
+        "next_retry_at": (now + timedelta(minutes=10)).isoformat(timespec="seconds"),
+    })
+    dispatched = []
+    monkeypatch.setattr(
+        scheduler,
+        "_dispatch_job",
+        lambda name, target: dispatched.append((name, target)) or True,
+    )
+
+    assert scheduler._recover_due_daily_job() is False
+    assert dispatched == []
+
+
+def test_internal_scheduler_defaults_allow_delayed_post_close_source(monkeypatch):
+    monkeypatch.delenv("AUTOMATION_DAILY_TIME", raising=False)
+    monkeypatch.delenv("AUTOMATION_DAILY_MAX_ATTEMPTS", raising=False)
+    monkeypatch.delenv("AUTOMATION_DAILY_RETRY_MINUTES", raising=False)
+
+    scheduler = InternalScheduler()
+
+    assert scheduler.daily_time == "20:00"
+    assert scheduler.max_daily_attempts == 6
+    assert scheduler.daily_retry_minutes == 15
 
 
 def test_internal_scheduler_uses_shanghai_timezone_and_separate_job_states(monkeypatch):

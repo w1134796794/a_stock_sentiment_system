@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections import Counter
 from typing import Any, Dict, List
 from urllib import parse, request
@@ -19,24 +20,32 @@ class NotificationService:
         self.timeout = max(float(timeout), 1.0)
         self.wecom_url = os.getenv("WECOM_WEBHOOK_URL", "").strip()
         self.dingtalk_url = os.getenv("DINGTALK_WEBHOOK_URL", "").strip()
-        self.serverchan_key = os.getenv("SERVERCHAN_SENDKEY", "").strip()
+        legacy_key = os.getenv("SERVERCHAN_SENDKEY", "").strip()
+        configured_keys = os.getenv("SERVERCHAN_SENDKEYS", "").strip()
+        self.serverchan_keys = self._parse_serverchan_keys(configured_keys, legacy_key)
+        self.serverchan_key = self.serverchan_keys[0] if self.serverchan_keys else ""
         self.public_url = os.getenv("APP_PUBLIC_URL", "").strip().rstrip("/")
         self.backend = backend or get_shared_state_backend()
 
     @property
     def enabled(self) -> bool:
-        return bool(self.wecom_url or self.dingtalk_url or self.serverchan_key)
+        return bool(self.wecom_url or self.dingtalk_url or self._active_serverchan_keys())
 
     def status(self) -> Dict[str, Any]:
+        serverchan_keys = self._active_serverchan_keys()
         channels = {
             "企业微信机器人": bool(self.wecom_url),
-            "Server酱个人微信": bool(self.serverchan_key),
+            "Server酱个人微信": bool(serverchan_keys),
             "钉钉机器人": bool(self.dingtalk_url),
         }
         return {
             "enabled": self.enabled,
             "channels": channels,
             "configured_count": sum(channels.values()),
+            "serverchan_recipient_count": len(serverchan_keys),
+            "configured_endpoint_count": (
+                int(bool(self.wecom_url)) + int(bool(self.dingtalk_url)) + len(serverchan_keys)
+            ),
             "public_url_configured": bool(self.public_url),
         }
 
@@ -70,9 +79,10 @@ class NotificationService:
                     self.dingtalk_url,
                     {"msgtype": "text", "text": {"content": f"{title}\n{content}"}},
                 ))
-            if self.serverchan_key:
-                url = f"https://sctapi.ftqq.com/{parse.quote(self.serverchan_key)}.send"
-                results.append(self._post_form(url, {"title": title, "desp": content}))
+            for recipient, send_key in enumerate(self._active_serverchan_keys(), start=1):
+                url = f"https://sctapi.ftqq.com/{parse.quote(send_key)}.send"
+                result = self._post_form(url, {"title": title, "desp": content})
+                results.append({"channel": "Server酱", "recipient": recipient, **result})
             sent = sum(bool(item.get("ok")) for item in results)
             if sent and dedup_key:
                 self.backend.set_json(dedup_key, {"sent": True}, ttl_seconds=ttl_seconds)
@@ -83,6 +93,23 @@ class NotificationService:
                     self.backend.release_lock(lock_key, lock_token)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"[Notification] 释放去重锁失败: {exc}")
+
+    @staticmethod
+    def _parse_serverchan_keys(*values: str) -> List[str]:
+        keys: List[str] = []
+        for value in values:
+            for key in re.split(r"[,;\s]+", str(value or "").strip()):
+                if key and key not in keys:
+                    keys.append(key)
+        return keys
+
+    def _active_serverchan_keys(self) -> List[str]:
+        # Keep ``serverchan_key`` compatible with older integrations and tests
+        # that assign the legacy single-key attribute after construction.
+        return self._parse_serverchan_keys(
+            str(getattr(self, "serverchan_key", "") or ""),
+            *[str(key) for key in getattr(self, "serverchan_keys", [])],
+        )
 
     def notify_realtime_payload(self, payload: Dict[str, Any]) -> int:
         sent = 0

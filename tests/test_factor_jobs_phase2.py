@@ -5,6 +5,12 @@ import pandas as pd
 import pytest
 
 from core.factors.jobs.gold_utils import percentile_score
+from core.factors.jobs.market_factor_job import (
+    _previous_limit_pool_date,
+    _promotion_metrics,
+    _promotion_trend_from_history,
+    _read_limit_pool,
+)
 from core.factors.jobs.runner import FactorJobRunner
 from core.factors.jobs.stock_factor_job import (
     _amount_ratio_target_score,
@@ -42,6 +48,14 @@ def _seed_silver_tables(db_path):
         {"trade_date": "20260616", "sector_code": "886002", "sector_name": "机器人", "sector_type": "概念", "open": 90, "high": 92, "low": 88, "close": 89, "pre_close": 90, "pct_chg": -1.1, "vol_hand": 800, "amount_yuan": 7000000, "member_count": 18, "source": "test", "as_of_date": "20260616", "ingested_at": "now"},
     ])
     limit_up = pd.DataFrame([
+        {"trade_date": "20260615", "code": "300059", "ts_code": "300059.SZ", "name": "东方财富",
+         "pct_chg": 20.0, "first_time": "09:35:00", "last_time": "09:35:00", "open_times": 0.0,
+         "limit_times": 2.0, "fd_amount": 8.0e7, "float_mv": 500000.0, "total_mv": 800000.0,
+         "turnover_ratio": 7.0, "source": "test", "as_of_date": "20260615", "ingested_at": "now"},
+        {"trade_date": "20260615", "code": "000001", "ts_code": "000001.SZ", "name": "平安银行",
+         "pct_chg": 10.0, "first_time": "10:00:00", "last_time": "10:00:00", "open_times": 0.0,
+         "limit_times": 1.0, "fd_amount": 5.0e7, "float_mv": 400000.0, "total_mv": 600000.0,
+         "turnover_ratio": 5.0, "source": "test", "as_of_date": "20260615", "ingested_at": "now"},
         {"trade_date": "20260616", "code": "300059", "ts_code": "300059.SZ", "name": "东方财富",
          "pct_chg": 20.0, "first_time": "09:31:00", "last_time": "09:31:00", "open_times": 0.0,
          "limit_times": 3.0, "fd_amount": 1.0e8, "float_mv": 500000.0, "total_mv": 800000.0,
@@ -184,6 +198,14 @@ def test_phase2_factor_jobs_write_gold_tables(tmp_path):
     ).fetchone()[0]
     limit_up_count = con.execute("SELECT limit_up_count FROM factor_market_wide").fetchone()[0]
     limit_down_count = con.execute("SELECT limit_down_count FROM factor_market_wide").fetchone()[0]
+    profit_effect = con.execute(
+        "SELECT profit_effect_score, profit_effect_label, promotion_overall_rate, "
+        "promotion_overall_success, promotion_overall_sample FROM factor_market_wide"
+    ).fetchone()
+    profit_factor = con.execute(
+        "SELECT raw_value FROM factor_value_long "
+        "WHERE entity_type = 'market' AND factor_id = 'mkt_profit_effect_score'"
+    ).fetchone()
     board = con.execute(
         "SELECT board_height, board_height_score, seal_time_score, float_mv, float_mv_fit_score, board_score "
         "FROM factor_stock_wide WHERE code = '300059'"
@@ -209,6 +231,10 @@ def test_phase2_factor_jobs_write_gold_tables(tmp_path):
     assert pct_score_300059 < 90
     assert limit_up_count == 1
     assert limit_down_count == 0
+    assert 0 <= profit_effect[0] <= 100
+    assert profit_effect[1]
+    assert profit_effect[2:] == (50.0, 1, 2)
+    assert profit_factor[0] == profit_effect[0]
 
     # 打板身位子类：300059 在涨停池里（3连板、早封、50亿流通市值）
     assert board[0] == 3.0                # board_height
@@ -223,3 +249,54 @@ def test_phase2_factor_jobs_write_gold_tables(tmp_path):
     assert 37.0 < non_lu_board[3] < 40.0  # 400亿大盘 -> 适配分明显低于中性
     assert non_lu_board[4] == 50.0        # 非涨停票不再用市值制造伪身位差异
     assert {"stk_board_height", "stk_seal_time_quality", "stk_float_mv_fit", "stk_board_position"} <= board_factor_ids
+
+
+@pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
+def test_promotion_uses_previous_limit_pool_date_when_stock_daily_has_gaps(tmp_path):
+    duckdb = _duckdb()
+    db_path = tmp_path / "factors.duckdb"
+    _seed_silver_tables(db_path)
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        """
+        INSERT INTO limit_up_pool_silver
+        SELECT '20260617', '000001', '000001.SZ', '平安银行', 10.0,
+               '09:40:00', '09:40:00', 0.0, 1.0, 5.0e7, 400000.0,
+               600000.0, 5.0, 'test', '20260617', 'now'
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO limit_up_pool_silver
+        SELECT '20260618', '000001', '000001.SZ', '平安银行', 10.0,
+               '09:35:00', '09:35:00', 0.0, 2.0, 6.0e7, 400000.0,
+               600000.0, 6.0, 'test', '20260618', 'now'
+        """
+    )
+
+    assert _previous_limit_pool_date(con, "20260618") == "20260617"
+    promotion = _promotion_metrics(con, "20260618", _read_limit_pool(con, "20260618"))
+    con.close()
+
+    assert promotion["overall"]["rate"] == 100.0
+    assert promotion["overall"]["success"] == 1
+    assert promotion["overall"]["sample"] == 1
+
+
+def test_promotion_trend_detects_broad_relay_warming():
+    history = []
+    for index, value in enumerate((20.0, 25.0, 31.0, 38.0, 46.0), start=1):
+        history.append({
+            "trade_date": f"202606{index:02d}",
+            "rate_1to2_adjusted": value,
+            "rate_2to3_adjusted": value + 2,
+            "rate_3to4_adjusted": value + 4,
+            "rate_high_adjusted": value + 6,
+        })
+
+    trend = _promotion_trend_from_history(history)
+
+    assert trend["label"] == "接力升温"
+    assert trend["sample_days"] == 5
+    assert trend["score"] > 40
+    assert trend["slope"] > 0

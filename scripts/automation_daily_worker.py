@@ -83,6 +83,11 @@ def main() -> int:
     parser.add_argument("--capital", type=float, default=100000.0)
     parser.add_argument("--result", type=Path, required=True)
     parser.add_argument("--auto-backtest", action="store_true")
+    parser.add_argument(
+        "--repair-existing",
+        action="store_true",
+        help="Preserve successful post-close caches and retry only missing sources.",
+    )
     args = parser.parse_args()
     trade_date = str(args.date)
     started_at = datetime.now().isoformat(timespec="seconds")
@@ -102,7 +107,7 @@ def main() -> int:
         fetched = system.fetch_post_close_data(
             trade_date,
             skip_existing=False,
-            force_refresh=True,
+            force_refresh=not args.repair_existing,
         )
         progress["stages"]["fetch"] = bool(fetched.ok)
         if not fetched.ok:

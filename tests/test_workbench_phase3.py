@@ -134,7 +134,46 @@ def _endpoint(service: WorkbenchService, path: str):
 
 
 def test_workbench_builds_action_summary_and_market_brief():
-    service = WorkbenchService(_ReadServiceStub())
+    service = WorkbenchService(
+        _ReadServiceStub(),
+        market_context_loader=lambda date: {
+            "date": date,
+            "indices": [{"name": "上证", "close": 3300, "pct": 0.5}],
+            "up_count": 3100,
+            "down_count": 2100,
+            "vol_word": "放量",
+            "vol_pct": 8.9,
+            "promotion": {
+                "overall": 23.38,
+                "rate_1to2": 16.39,
+                "rate_2to3": 37.5,
+                "rate_3to4": 50.0,
+                "rate_high": 62.5,
+            },
+            "promotion_trend": {
+                "score": 64.2,
+                "label": "接力升温",
+                "slope": 4.8,
+                "sample_days": 5,
+                "history": [
+                    {"trade_date": "20260730", "rate_1to2": 12.0},
+                    {"trade_date": "20260731", "rate_1to2": 16.39},
+                ],
+            },
+            "profit_effect": {
+                "score": 68.4,
+                "label": "赚钱效应较好",
+                "trend": "赚钱效应扩散",
+                "change_3d": 9.2,
+                "up_ratio": 61.0,
+                "prev_limit_up_premium": 1.8,
+                "promotion_rate": 35.0,
+                "promotion_success": 7,
+                "promotion_sample": 20,
+                "broken_rate": 22.0,
+            },
+        },
+    )
     data = service.dashboard("20260731")
 
     assert data["available_dates"] == ["20260731", "20260730"]
@@ -146,6 +185,12 @@ def test_workbench_builds_action_summary_and_market_brief():
         "avoid": 1,
     }
     assert data["market_brief"] == "强市，情绪活跃，市场分 80；注意昨日首板溢价不足。"
+    assert data["market_context"]["up_count"] == 3100
+    assert data["market_context"]["promotion"]["overall"] == 23.38
+    assert data["market_context"]["promotion"]["rate_3to4"] == 50.0
+    assert data["market_context"]["promotion_trend"]["label"] == "接力升温"
+    assert data["market_context"]["profit_effect"]["score"] == 68.4
+    assert data["market_context"]["profit_effect"]["promotion_sample"] == 20
 
 
 def test_workbench_reuses_generated_data_within_cache_window():

@@ -228,9 +228,11 @@ class DecisionPoolService:
                 risk_flags=risk_flags,
             )
             strategy_names = _unique(str(item.get("策略名称") or "") for item in members)
+            phase_detail = "；".join(str(reason) for reason in phase_reasons if reason)
             gate_reason = (
                 f"当前为{REGIME_LABELS[regime]} / {phase_label}，"
                 f"暂不启用{'、'.join(strategy_names) or '该策略'}"
+                + (f"（判定依据：{phase_detail}）" if phase_detail else "")
             )
             row["_blocked"] = True
             row["_blocked_reasons"] = _unique([

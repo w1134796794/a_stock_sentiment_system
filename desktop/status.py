@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import csv
+import json
+import math
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -168,6 +170,14 @@ def _f(v: Any, default: float = 0.0) -> float:
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+def _optional_f(v: Any) -> float | None:
+    try:
+        value = float(v)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
 
 
 def _normalize_stock_code(code: Any) -> str:
@@ -396,7 +406,13 @@ def _limitup_cache_overlay(date: str) -> Dict[str, Any]:
         large = ranked[int(n * 0.9):]
 
     current_board = {code(r): board(r) for r in rows if code(r)}
-    promotion = {"overall": None, "rate_1to2": None, "rate_2to3": None, "rate_high": None}
+    promotion = {
+        "overall": None,
+        "rate_1to2": None,
+        "rate_2to3": None,
+        "rate_3to4": None,
+        "rate_high": None,
+    }
     try:
         by_date: Dict[str, List[Dict[str, Any]]] = {}
         with path.open("r", encoding="utf-8-sig", newline="") as f:
@@ -425,6 +441,7 @@ def _limitup_cache_overlay(date: str) -> Dict[str, Any]:
                 "overall": round(promoted_all / len(base_all) * 100, 2) if base_all else None,
                 "rate_1to2": rate(1),
                 "rate_2to3": rate(2),
+                "rate_3to4": rate(3),
                 "rate_high": rate(high=True),
             }
     except Exception:
@@ -553,9 +570,9 @@ def _etl_market_overlay(date: str) -> Dict[str, Any]:
     )
 
 
-def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
+def market_overview(reader: SnapshotReader, trade_date: str = "") -> Dict[str, Any]:
     """从最新快照的 market 块提取大盘速览：指数涨跌 / 涨跌停 / 涨跌家数 / 量能 / 情绪周期 / 综合趋势。"""
-    snap = reader.load_latest() or {}
+    snap = (reader.load(str(trade_date)) if trade_date else reader.load_latest()) or {}
     m = snap.get("market") or {}
     if not m:
         return {"available": False}
@@ -591,6 +608,35 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
         limit_up = overlay.get("limit_up")
         limit_down = overlay.get("limit_down")
         max_board = overlay.get("max_board")
+        profit_effect = {
+            "score": _optional_f(market_row.get("profit_effect_score")),
+            "label": str(market_row.get("profit_effect_label") or ""),
+            "trend": str(market_row.get("profit_effect_trend") or ""),
+            "change_3d": _optional_f(market_row.get("profit_effect_change_3d")),
+            "up_ratio": up_ratio,
+            "median_pct": _optional_f(market_row.get("median_pct_chg")),
+            "prev_limit_up_premium": _optional_f(market_row.get("prev_limit_up_premium")),
+            "prev_limit_up_positive": _optional_f(market_row.get("prev_limit_up_positive")),
+            "promotion_rate": _optional_f(market_row.get("promotion_overall_rate")),
+            "promotion_success": _optional_f(market_row.get("promotion_overall_success")),
+            "promotion_sample": _optional_f(market_row.get("promotion_overall_sample")),
+            "broken_rate": overlay.get("broken_rate") if overlay.get("broken_rate") is not None else metrics.get("broken_rate"),
+            "components": {
+                "breadth": _optional_f(market_row.get("profit_breadth_score")),
+                "premium": _optional_f(market_row.get("profit_premium_score")),
+                "continuation": _optional_f(market_row.get("profit_continuation_score")),
+                "safety": _optional_f(market_row.get("profit_safety_score")),
+            },
+        }
+        promotion_trend: Dict[str, Any] = {}
+        try:
+            raw_promotion_trend = market_row.get("promotion_trend_json")
+            if raw_promotion_trend:
+                parsed_promotion_trend = json.loads(str(raw_promotion_trend))
+                if isinstance(parsed_promotion_trend, dict):
+                    promotion_trend = parsed_promotion_trend
+        except (TypeError, ValueError, json.JSONDecodeError):
+            promotion_trend = {}
         summary_parts = [
             f"市场分 {market_score:.0f}",
             f"红盘占比 {up_ratio:.1f}%" if up_ratio is not None else "",
@@ -631,6 +677,8 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
             "strategy": m.get("strategy"),
             "cohorts": overlay.get("cohorts") or metrics.get("cohorts") or {},
             "promotion": overlay.get("promotion") or metrics.get("promotion") or {},
+            "promotion_trend": promotion_trend,
+            "profit_effect": profit_effect,
             "new_phase": phase_model.get("phase"),
             "new_momentum": phase_model.get("momentum"),
             "trunk_clarity": round(_f(phase_model.get("trunk_clarity")) * 100, 0) if phase_model.get("trunk_clarity") is not None else None,
@@ -709,6 +757,7 @@ def market_overview(reader: SnapshotReader) -> Dict[str, Any]:
         # P1 分群子指标（大/中军/小票）+ 真·晋级率（仅展示）
         "cohorts": metrics.get("cohorts") or {},
         "promotion": metrics.get("promotion") or {},
+        "profit_effect": metrics.get("profit_effect") or {},
         # 循环相位模型（情绪周期权威来源）
         "new_phase": phase_model.get("phase"),
         "new_momentum": phase_model.get("momentum"),

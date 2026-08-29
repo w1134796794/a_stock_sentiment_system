@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { CandlestickSeries, ColorType, createChart } from "lightweight-charts";
+import { CandlestickSeries, ColorType, createChart, LineSeries } from "lightweight-charts";
 import {
   Activity,
   ArrowRight,
@@ -157,6 +157,41 @@ function DailyChart({ rows }: { rows: StockWorkspace["candles"] }) {
     return () => chart.remove();
   }, [rows]);
   return <div className="daily-chart" ref={host} />;
+}
+
+function PromotionTrendChart({ rows }: { rows: NonNullable<WorkbenchData["market_context"]["promotion_trend"]>["history"] }) {
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!host.current || !rows?.length) return undefined;
+    const chart = createChart(host.current, {
+      height: 178,
+      autoSize: true,
+      layout: { background: { type: ColorType.Solid, color: "#0d1829" }, textColor: "#8190a8" },
+      grid: { vertLines: { color: "#18263a" }, horzLines: { color: "#18263a" } },
+      rightPriceScale: { borderColor: "#26364e", scaleMargins: { top: 0.12, bottom: 0.12 } },
+      timeScale: { borderColor: "#26364e", timeVisible: false },
+      localization: { locale: "zh-CN" },
+    });
+    const definitions = [
+      ["rate_1to2", "#2ed3a3"],
+      ["rate_2to3", "#f4bf4f"],
+      ["rate_3to4", "#ff667d"],
+      ["rate_high", "#6ab7ff"],
+    ] as const;
+    definitions.forEach(([key, color]) => {
+      const series = chart.addSeries(LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+      series.setData(rows.flatMap((row) => {
+        const value = row[key];
+        return value == null ? [] : [{
+          time: `${row.trade_date.slice(0, 4)}-${row.trade_date.slice(4, 6)}-${row.trade_date.slice(6, 8)}`,
+          value: Number(value),
+        }];
+      }));
+    });
+    chart.timeScale().fitContent();
+    return () => chart.remove();
+  }, [rows]);
+  return <div className="promotion-trend__chart" ref={host} />;
 }
 
 function DetailDrawer({ candidate, date, onClose }: { candidate: Candidate | null; date: string; onClose: () => void }) {
@@ -327,6 +362,17 @@ function Workbench() {
 
   const realtimeMap = useMemo(() => new Map((realtime?.rows || []).map((row) => [row.code, row])), [realtime]);
   const riskFlags = useMemo(() => data?.market.risk_flags || [], [data]);
+  const marketContext = data?.market_context || {};
+  const indices = (marketContext.indices || []).filter((item) => ["上证", "深证", "创业板"].includes(item.name));
+  const promotionRate = marketContext.promotion?.overall;
+  const profitEffect = marketContext.profit_effect || {};
+  const promotionTrend = marketContext.promotion_trend || {};
+  const promotionItems = [
+    ["一进二", marketContext.promotion?.rate_1to2],
+    ["二进三", marketContext.promotion?.rate_2to3],
+    ["三进四", marketContext.promotion?.rate_3to4],
+    ["高位晋级", marketContext.promotion?.rate_high],
+  ] as const;
   const normalizedQuery = query.trim().toLowerCase();
 
   if (loading && !data) return <div className="workspace-loading">正在读取今日决策池...</div>;
@@ -340,11 +386,49 @@ function Workbench() {
       <div className="market-controls"><select value={date} onChange={(event) => void load(event.target.value)} aria-label="选择交易日">{(data.available_dates || []).map((item) => <option key={item} value={item}>{item}</option>)}</select><button className="icon-button" type="button" onClick={() => void load(date, true)} title="刷新" disabled={loading}><RefreshCw size={17} /></button></div>
     </section>
 
+    <section className="profit-effect" aria-label="市场赚钱效应">
+      <div className="profit-effect__score">
+        <span>赚钱效应</span>
+        <strong className={profitEffect.score == null ? "" : Number(profitEffect.score) >= 60 ? "up" : Number(profitEffect.score) < 45 ? "down" : ""}>{profitEffect.score == null ? "--" : Number(profitEffect.score).toFixed(0)}</strong>
+        <div><b>{profitEffect.label || "等待盘后计算"}</b><em>{profitEffect.trend || ""}{profitEffect.change_3d == null ? "" : ` ${Number(profitEffect.change_3d) >= 0 ? "+" : ""}${Number(profitEffect.change_3d).toFixed(1)}分`}</em></div>
+      </div>
+      <div className="profit-effect__evidence">
+        <div><span>上涨占比</span><strong>{profitEffect.up_ratio == null ? "--" : `${Number(profitEffect.up_ratio).toFixed(1)}%`}</strong></div>
+        <div><span>昨日涨停溢价</span><strong className={Number(profitEffect.prev_limit_up_premium || 0) >= 0 ? "up" : "down"}>{profitEffect.prev_limit_up_premium == null ? "--" : signedPct(profitEffect.prev_limit_up_premium)}</strong></div>
+        <div><span>连板晋级</span><strong>{profitEffect.promotion_rate == null ? "--" : `${Number(profitEffect.promotion_rate).toFixed(1)}%`}</strong><small>{profitEffect.promotion_sample ? `${Number(profitEffect.promotion_success || 0).toFixed(0)}/${Number(profitEffect.promotion_sample).toFixed(0)}` : ""}</small></div>
+        <div><span>炸板率</span><strong>{profitEffect.broken_rate == null ? "--" : `${Number(profitEffect.broken_rate).toFixed(1)}%`}</strong></div>
+      </div>
+    </section>
+
+    <section className="index-strip" aria-label="三大指数">
+      {indices.map((item) => <div key={item.name}><span>{item.name}</span><strong className={item.pct >= 0 ? "up" : "down"}>{signedPct(item.pct)}</strong><small>{Number(item.close || 0).toFixed(2)}</small></div>)}
+      {!indices.length && <div className="market-data-empty">暂无三大指数数据</div>}
+    </section>
+
     <section className="stat-strip">
-      <div><Activity size={17} /><span>涨停</span><strong className="up">{data.market.limit_up_count}</strong></div>
-      <div><Activity size={17} /><span>跌停</span><strong className="down">{data.market.limit_down_count}</strong></div>
+      <div><Activity size={17} /><span>涨停 / 跌停</span><strong><em className="up">{data.market.limit_up_count}</em> / <em className="down">{data.market.limit_down_count}</em></strong></div>
+      <div><Activity size={17} /><span>上涨 / 下跌</span><strong><em className="up">{marketContext.up_count ?? "--"}</em> / <em className="down">{marketContext.down_count ?? "--"}</em></strong></div>
+      <div><Target size={17} /><span>连板晋级率</span><strong>{promotionRate == null ? "--" : `${Number(promotionRate).toFixed(1)}%`}</strong></div>
+      <div><BarChart3 size={17} /><span>市场量能</span><strong>{marketContext.vol_word || "--"}{marketContext.vol_pct == null ? "" : ` ${signedPct(marketContext.vol_pct)}`}</strong></div>
       <div><BarChart3 size={17} /><span>炸板率</span><strong>{Number(data.market.broken_rate || 0).toFixed(1)}%</strong></div>
       <div><Target size={17} /><span>可行动</span><strong>{data.decision_summary.actionable}</strong></div>
+    </section>
+
+    <section className="promotion-strip" aria-label="连板晋级梯队">
+      <span className="promotion-strip__title">晋级梯队</span>
+      {promotionItems.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value == null ? "--" : `${Number(value).toFixed(1)}%`}</strong></div>)}
+    </section>
+
+    <section className="promotion-trend" aria-label="连板晋级趋势">
+      <div className="promotion-trend__summary">
+        <span>近5日接力趋势</span>
+        <strong>{promotionTrend.score == null ? "--" : Number(promotionTrend.score).toFixed(0)}</strong>
+        <div><b>{promotionTrend.label || "等待盘后计算"}</b><em>{promotionTrend.slope == null ? `${promotionTrend.sample_days || 0}日样本` : `日均斜率 ${Number(promotionTrend.slope) >= 0 ? "+" : ""}${Number(promotionTrend.slope).toFixed(1)}点`}</em></div>
+      </div>
+      <div className="promotion-trend__visual">
+        <div className="promotion-trend__legend"><span className="tier-1">一进二</span><span className="tier-2">二进三</span><span className="tier-3">三进四</span><span className="tier-high">高位晋级</span></div>
+        {promotionTrend.history?.length ? <PromotionTrendChart rows={promotionTrend.history} /> : <div className="promotion-trend__empty">历史样本尚未形成</div>}
+      </div>
     </section>
 
     <div className="workspace-toolbar">

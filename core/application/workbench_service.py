@@ -33,10 +33,12 @@ class WorkbenchService:
         read_service: MobileReadService | None = None,
         *,
         clock: Callable[[], datetime] | None = None,
+        market_context_loader: Callable[[str], Dict[str, Any]] | None = None,
     ) -> None:
         self.read_service = read_service or MobileReadService()
         self._clock = clock or (lambda: datetime.now(ZoneInfo("Asia/Shanghai")))
         self._calendar = TradeCalendar()
+        self._market_context_loader = market_context_loader or self._load_market_context
         self._cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
         self._cache_lock = RLock()
 
@@ -56,6 +58,7 @@ class WorkbenchService:
         watch = list(groups.get("盘中观察") or [])
         avoid = list(groups.get("暂不参与") or [])
         market = dict(data.get("market") or {})
+        market_context = dict(self._market_context_loader(trade_date) or {})
         data.update(
             {
                 "available_dates": dates,
@@ -67,6 +70,7 @@ class WorkbenchService:
                     "avoid": len(avoid),
                 },
                 "market_brief": self._market_brief(market),
+                "market_context": market_context,
                 "quick_links": [
                     {"label": "盘中确认", "href": "/intraday"},
                     {"label": "涨停梯队", "href": "/data/limitup"},
@@ -76,6 +80,15 @@ class WorkbenchService:
             }
         )
         return data
+
+    @staticmethod
+    def _load_market_context(trade_date: str) -> Dict[str, Any]:
+        """Reuse the generated overview snapshot without external data calls."""
+        from config.settings import SNAPSHOT_DIR
+        from desktop.status import market_overview
+        from snapshot.reader import SnapshotReader
+
+        return market_overview(SnapshotReader(SNAPSHOT_DIR), str(trade_date))
 
     def candidate_detail(self, code: str, trade_date: str = "") -> Dict[str, Any]:
         date = trade_date or self.read_service.repository.latest_date()

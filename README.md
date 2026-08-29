@@ -1916,7 +1916,9 @@ Web 应用启动时会同时启动 `core/automation/internal_scheduler.py`，不
 
 ```dotenv
 AUTOMATION_ENABLED=true
-AUTOMATION_DAILY_TIME=18:30
+AUTOMATION_DAILY_TIME=20:00
+AUTOMATION_DAILY_MAX_ATTEMPTS=6
+AUTOMATION_DAILY_RETRY_MINUTES=15
 AUTOMATION_AUCTION_TIME=09:25:10
 AUTOMATION_AUTO_BACKTEST=true
 AUTOMATION_CAPITAL=100000
@@ -1946,10 +1948,12 @@ WEB_DATA_DIR/models/health/model_health_YYYYMMDD.json
 WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...
 DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=...
 SERVERCHAN_SENDKEY=SCT...
+# 多个个人微信接收方，支持逗号、分号、空格或换行分隔
+SERVERCHAN_SENDKEYS=SCT...1,SCT...2
 APP_PUBLIC_URL=https://astockreview.cn
 ```
 
-个人微信使用 `SERVERCHAN_SENDKEY`，企业微信群使用 `WECOM_WEBHOOK_URL`；两者可以同时配置。`APP_PUBLIC_URL` 可选，用于在买点消息中附加盘中详情链接。修改 `.env` 后需要重启 Web 服务：
+单个个人微信使用 `SERVERCHAN_SENDKEY`；多个个人微信使用 `SERVERCHAN_SENDKEYS`，系统会向全部密钥广播且自动去重。两个变量可以同时配置。企业微信群使用 `WECOM_WEBHOOK_URL`，也可以与 Server酱同时启用。`APP_PUBLIC_URL` 可选，用于在买点消息中附加盘中详情链接。修改 `.env` 后需要重启 Web 服务：
 
 ```bash
 sudo systemctl restart a-stock

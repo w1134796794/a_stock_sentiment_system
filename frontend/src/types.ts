@@ -81,6 +81,62 @@ export type WorkbenchData = {
     position_scale: number;
     risk_flags: string[];
   };
+  market_context: {
+    available?: boolean;
+    indices?: Array<{ name: string; close: number; pct: number }>;
+    up_count?: number | null;
+    down_count?: number | null;
+    flat_count?: number | null;
+    vol_word?: string;
+    vol_pct?: number | null;
+    amount_text?: string;
+  promotion?: {
+    overall?: number | null;
+    rate_1to2?: number | null;
+    rate_2to3?: number | null;
+    rate_3to4?: number | null;
+    rate_high?: number | null;
+  };
+  promotion_trend?: {
+    score?: number | null;
+    label?: string;
+    slope?: number | null;
+    sample_days?: number;
+    tier_scores?: Record<string, number | null>;
+    tier_slopes?: Record<string, number | null>;
+    history?: Array<{
+      trade_date: string;
+      rate_1to2?: number | null;
+      rate_2to3?: number | null;
+      rate_3to4?: number | null;
+      rate_high?: number | null;
+      rate_1to2_sample?: number;
+      rate_2to3_sample?: number;
+      rate_3to4_sample?: number;
+      rate_high_sample?: number;
+    }>;
+  };
+  profit_effect?: {
+    score?: number | null;
+    label?: string;
+    trend?: string;
+    change_3d?: number | null;
+    up_ratio?: number | null;
+    median_pct?: number | null;
+    prev_limit_up_premium?: number | null;
+    prev_limit_up_positive?: number | null;
+    promotion_rate?: number | null;
+    promotion_success?: number | null;
+    promotion_sample?: number | null;
+    broken_rate?: number | null;
+    components?: {
+      breadth?: number | null;
+      premium?: number | null;
+      continuation?: number | null;
+      safety?: number | null;
+    };
+  };
+};
   groups: Record<string, Candidate[]>;
   decision_summary: {
     total: number;
