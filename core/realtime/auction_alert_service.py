@@ -70,6 +70,65 @@ class AuctionAlertService:
             payload["output_path"] = str(path)
         return payload
 
+    @staticmethod
+    def notification_content(payload: Dict[str, Any], *, max_rows: int = 20) -> str:
+        """Build a readable auction summary with the stocks behind each count."""
+        rows = [dict(row) for row in payload.get("rows") or [] if isinstance(row, dict)]
+        category_order = (
+            "高开加速观察",
+            "强势延续观察",
+            "弱转强观察",
+            "大幅低开",
+            "数据不足",
+        )
+        grouped: Dict[str, list[Dict[str, Any]]] = {}
+        for row in rows:
+            category = str(row.get("category") or "数据不足")
+            grouped.setdefault(category, []).append(row)
+
+        candidate_date = str(payload.get("candidate_date") or "--")
+        lines = [f"观察{candidate_date}候选：共{len(rows)}只。", "竞价幅度均为开盘价相对昨日收盘价。"]
+        shown = 0
+        categories = [name for name in category_order if name in grouped]
+        categories.extend(name for name in grouped if name not in category_order)
+        for category in categories:
+            category_rows = sorted(
+                grouped[category],
+                key=lambda row: (
+                    -_number(row.get("open_gap_pct"), -999.0),
+                    int(_number(row.get("rank"), 9999)),
+                ),
+            )
+            lines.extend(("", f"【{category}】{len(category_rows)}只"))
+            for row in category_rows:
+                if shown >= max(int(max_rows), 1):
+                    break
+                name = str(row.get("name") or row.get("code") or "候选股")
+                code = str(row.get("code") or "")
+                identity = f"{name}（{code}）" if code else name
+                gap = row.get("open_gap_pct")
+                if gap is None:
+                    quote_text = "竞价数据不足"
+                else:
+                    gap_value = _number(gap)
+                    direction = "高开" if gap_value > 0 else "低开" if gap_value < 0 else "平开"
+                    quote_text = f"{direction}{gap_value:+.2f}%"
+                    open_price = _number(row.get("open_price"))
+                    if open_price > 0:
+                        quote_text += f"，开盘{open_price:.2f}"
+                sectors = row.get("resonance_sectors") or ""
+                if isinstance(sectors, (list, tuple, set)):
+                    sectors = "、".join(str(item) for item in sectors if item)
+                sector_text = f"，板块：{sectors}" if str(sectors).strip() else ""
+                lines.append(f"{shown + 1}. {identity}：{quote_text}{sector_text}")
+                shown += 1
+            if shown >= max(int(max_rows), 1):
+                break
+        if shown < len(rows):
+            lines.extend(("", f"其余{len(rows) - shown}只请在交易工作台查看。"))
+        lines.extend(("", "动作：09:30后等待分钟条件确认，不以竞价结果直接买入。"))
+        return "\n".join(lines)
+
     def _candidates(self, candidate_date: str) -> list[Dict[str, Any]]:
         path = self.screening_dir / f"screening_{candidate_date}.json"
         try:

@@ -283,6 +283,37 @@ def test_promotion_uses_previous_limit_pool_date_when_stock_daily_has_gaps(tmp_p
     assert promotion["overall"]["sample"] == 1
 
 
+@pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
+def test_high_promotion_excludes_three_to_four_cohort(tmp_path):
+    duckdb = _duckdb()
+    db_path = tmp_path / "factors.duckdb"
+    rows = [
+        {"trade_date": "20260831", "code": "000301", "ts_code": "000301.SZ", "limit_times": 3, "open_times": 0},
+        {"trade_date": "20260831", "code": "000302", "ts_code": "000302.SZ", "limit_times": 3, "open_times": 0},
+        {"trade_date": "20260831", "code": "000401", "ts_code": "000401.SZ", "limit_times": 4, "open_times": 0},
+        {"trade_date": "20260831", "code": "000501", "ts_code": "000501.SZ", "limit_times": 5, "open_times": 0},
+        {"trade_date": "20260831", "code": "000601", "ts_code": "000601.SZ", "limit_times": 6, "open_times": 0},
+        {"trade_date": "20260831", "code": "000701", "ts_code": "000701.SZ", "limit_times": 7, "open_times": 0},
+        {"trade_date": "20260901", "code": "000301", "ts_code": "000301.SZ", "limit_times": 4, "open_times": 0},
+        {"trade_date": "20260901", "code": "000401", "ts_code": "000401.SZ", "limit_times": 5, "open_times": 0},
+        {"trade_date": "20260901", "code": "000501", "ts_code": "000501.SZ", "limit_times": 6, "open_times": 0},
+        {"trade_date": "20260901", "code": "000601", "ts_code": "000601.SZ", "limit_times": 7, "open_times": 0},
+    ]
+    con = duckdb.connect(str(db_path))
+    con.register("pool", pd.DataFrame(rows))
+    con.execute("CREATE TABLE limit_up_pool_silver AS SELECT * FROM pool")
+
+    promotion = _promotion_metrics(con, "20260901", _read_limit_pool(con, "20260901"))
+    con.close()
+
+    assert promotion["rate_3to4"] == {
+        "rate": 50.0, "adjusted_rate": 50.0, "success": 1, "sample": 2,
+    }
+    assert promotion["rate_high"]["rate"] == 75.0
+    assert promotion["rate_high"]["success"] == 3
+    assert promotion["rate_high"]["sample"] == 4
+
+
 def test_promotion_trend_detects_broad_relay_warming():
     history = []
     for index, value in enumerate((20.0, 25.0, 31.0, 38.0, 46.0), start=1):

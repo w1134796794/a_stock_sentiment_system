@@ -334,7 +334,7 @@ def _promotion_metrics(con, trade_date: str, current_pool: pd.DataFrame) -> dict
             for code, height in previous.items()
             if level is None and not high
             or level is not None and height == level
-            or high and height >= 3
+            or high and height >= 4
         ]
         sample = len(cohort)
         if not sample:

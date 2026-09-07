@@ -441,10 +441,9 @@ class InternalScheduler:
             for row in payload.get("rows") or []:
                 name = str(row.get("category") or "数据不足")
                 groups[name] = groups.get(name, 0) + 1
-            summary = "；".join(f"{name}{count}只" for name, count in groups.items()) or "没有可用候选"
             NotificationService().send(
                 "09:25 竞价预警",
-                f"观察{candidate_date}候选：{summary}。请在09:30后等待分钟条件确认。",
+                AuctionAlertService.notification_content(payload),
                 event_key=f"auction:{market_date}", ttl_seconds=60 * 60 * 10,
             )
             self._save_auction_state({

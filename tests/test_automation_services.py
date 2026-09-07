@@ -29,6 +29,45 @@ def test_auction_gap_classification_is_plain_language():
     assert AuctionAlertService._classify(None)[0] == "数据不足"
 
 
+def test_auction_notification_lists_stocks_and_open_gaps():
+    content = AuctionAlertService.notification_content({
+        "candidate_date": "20260904",
+        "rows": [
+            {
+                "code": "600001",
+                "name": "竞价甲",
+                "rank": 2,
+                "category": "高开加速观察",
+                "open_gap_pct": 7.26,
+                "open_price": 12.34,
+                "resonance_sectors": "机器人",
+            },
+            {
+                "code": "000002",
+                "name": "竞价乙",
+                "rank": 1,
+                "category": "高开加速观察",
+                "open_gap_pct": 5.18,
+                "open_price": 20.56,
+            },
+            {
+                "code": "300003",
+                "name": "竞价丙",
+                "rank": 3,
+                "category": "数据不足",
+                "open_gap_pct": None,
+            },
+        ],
+    })
+
+    assert "【高开加速观察】2只" in content
+    assert "竞价甲（600001）：高开+7.26%，开盘12.34，板块：机器人" in content
+    assert "竞价乙（000002）：高开+5.18%，开盘20.56" in content
+    assert "【数据不足】1只" in content
+    assert "竞价丙（300003）：竞价数据不足" in content
+    assert "不以竞价结果直接买入" in content
+
+
 def test_realtime_notification_only_sends_confirmed(monkeypatch):
     service = NotificationService()
     calls = []

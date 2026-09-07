@@ -57,7 +57,7 @@
 <section id="panel-trades" class="pf-panel hidden">
   <div class="pf-table-wrap">
     <table class="pf-table">
-      <thead><tr><th>日期</th><th>股票</th><th>动作</th><th>价格</th><th>股数</th><th>金额</th><th>已实现盈亏</th><th>策略/原因</th></tr></thead>
+      <thead><tr><th>日期</th><th>交易时间</th><th>股票</th><th>动作</th><th>价格</th><th>股数</th><th>金额</th><th>已实现盈亏</th><th>策略/原因</th></tr></thead>
       <tbody id="trades"></tbody>
     </table>
   </div>
@@ -222,7 +222,8 @@
     </div></article>`;
   }
   function signalRow(s) { return `<tr><td class="mono">${esc(s.signal_date||'')} ${esc(s.signal_time||'')}</td><td>${esc(s.name||s.code)}<div class="mono text-slate-500">${esc(s.code||'')}</div></td><td>${esc(s.action_label||actionText[s.action]||s.action)}</td><td class="mono">${price(s.current_price)}</td><td class="mono ${pnlClass(s.pnl_pct)}">${pct(s.pnl_pct)}</td><td class="mono">${price(s.protect_price)}</td><td>${esc(s.reason||'--')}</td><td>${s.notified_at?'已推送':'未推送'}</td></tr>`; }
-  function tradeRow(t) { return `<tr><td class="mono">${esc(t.trade_date||'')}</td><td>${esc(t.name||t.code)}<div class="mono text-slate-500">${esc(t.code||'')}</div></td><td>${esc(tradeText[t.action]||t.action)}</td><td class="mono">${price(t.price)}</td><td class="mono">${money(t.shares)}</td><td class="mono">${money(t.amount)}</td><td class="mono ${pnlClass(t.realized_pnl)}">${Number(t.realized_pnl||0)?`${Number(t.realized_pnl)>=0?'+':''}${money(t.realized_pnl)} / ${pct(t.realized_pnl_pct)}`:'--'}</td><td>${esc(strategyText[t.strategy_id]||t.strategy_id||'--')}<div class="text-slate-500">${esc(t.reason||'')}</div></td></tr>`; }
+  function tradeTime(value) { const raw=String(value||'').trim(); if(!raw)return '--'; const match=raw.match(/(?:^|[T\s])(\d{2}:\d{2}(?::\d{2})?)/); return match?match[1]:raw; }
+  function tradeRow(t) { return `<tr><td class="mono">${esc(t.trade_date||'')}</td><td class="mono">${esc(tradeTime(t.trade_time))}</td><td>${esc(t.name||t.code)}<div class="mono text-slate-500">${esc(t.code||'')}</div></td><td>${esc(tradeText[t.action]||t.action)}</td><td class="mono">${price(t.price)}</td><td class="mono">${money(t.shares)}</td><td class="mono">${money(t.amount)}</td><td class="mono ${pnlClass(t.realized_pnl)}">${Number(t.realized_pnl||0)?`${Number(t.realized_pnl)>=0?'+':''}${money(t.realized_pnl)} / ${pct(t.realized_pnl_pct)}`:'--'}</td><td>${esc(strategyText[t.strategy_id]||t.strategy_id||'--')}<div class="text-slate-500">${esc(t.reason||'')}</div></td></tr>`; }
 
   document.querySelectorAll('.pf-tabs button').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('.pf-tabs button').forEach(item=>item.classList.toggle('active',item===button)); document.querySelectorAll('.pf-panel').forEach(panel=>panel.classList.add('hidden')); $(`panel-${button.dataset.tab}`).classList.remove('hidden');}));
   $('run-monitor').addEventListener('click',async()=>{try{$('run-monitor').disabled=true;const result=await api('/api/portfolio/monitor',{method:'POST',body:JSON.stringify({account:currentAccount})});message(`检查完成：${result.count||0}只持仓，推送${result.notified||0}条提醒${result.executed?`，自动退出${result.executed}只`:''}`);await load();}catch(error){message(error.message,true);}finally{$('run-monitor').disabled=false;}});

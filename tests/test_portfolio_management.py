@@ -48,6 +48,7 @@ def test_repository_records_partial_and_full_sell(tmp_path):
             "code": "000001.SZ",
             "name": "测试股份",
             "entry_date": "20260801",
+            "entry_time": "09:36:00",
             "entry_price": 10.0,
             "shares": 1000,
             "strategy_id": "weak_to_strong",
@@ -56,18 +57,32 @@ def test_repository_records_partial_and_full_sell(tmp_path):
 
     partial = repository.sell_position(
         opened["id"],
-        {"trade_date": "20260803", "price": 11.0, "shares": 400, "reason": "减仓"},
+        {
+            "trade_date": "20260803",
+            "trade_time": "10:15:00",
+            "price": 11.0,
+            "shares": 400,
+            "reason": "减仓",
+        },
     )
     closed = repository.sell_position(
         opened["id"],
-        {"trade_date": "20260804", "price": 9.5, "shares": 600, "reason": "退出"},
+        {
+            "trade_date": "20260804",
+            "trade_time": "14:35:00",
+            "price": 9.5,
+            "shares": 600,
+            "reason": "退出",
+        },
     )
 
     assert partial["shares"] == 600
     assert partial["status"] == "open"
     assert closed["shares"] == 0
     assert closed["status"] == "closed"
-    assert [row["action"] for row in repository.list_trades()] == ["sell", "sell", "buy"]
+    trades = repository.list_trades()
+    assert [row["action"] for row in trades] == ["sell", "sell", "buy"]
+    assert [row["trade_time"] for row in trades] == ["14:35:00", "10:15:00", "09:36:00"]
 
 
 def test_market_weakness_alone_does_not_force_sell():

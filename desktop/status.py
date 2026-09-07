@@ -428,7 +428,7 @@ def _limitup_cache_overlay(date: str) -> Dict[str, Any]:
             def rate(prev_level: int | None = None, high: bool = False) -> float | None:
                 base = [
                     (c, b) for c, b in prev_board.items()
-                    if (high and b >= 3) or (prev_level is not None and b == prev_level)
+                    if (high and b >= 4) or (prev_level is not None and b == prev_level)
                 ]
                 if not base:
                     return None

@@ -371,7 +371,7 @@ function Workbench() {
     ["一进二", marketContext.promotion?.rate_1to2],
     ["二进三", marketContext.promotion?.rate_2to3],
     ["三进四", marketContext.promotion?.rate_3to4],
-    ["高位晋级", marketContext.promotion?.rate_high],
+    ["高位晋级（4板+）", marketContext.promotion?.rate_high],
   ] as const;
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -426,7 +426,7 @@ function Workbench() {
         <div><b>{promotionTrend.label || "等待盘后计算"}</b><em>{promotionTrend.slope == null ? `${promotionTrend.sample_days || 0}日样本` : `日均斜率 ${Number(promotionTrend.slope) >= 0 ? "+" : ""}${Number(promotionTrend.slope).toFixed(1)}点`}</em></div>
       </div>
       <div className="promotion-trend__visual">
-        <div className="promotion-trend__legend"><span className="tier-1">一进二</span><span className="tier-2">二进三</span><span className="tier-3">三进四</span><span className="tier-high">高位晋级</span></div>
+        <div className="promotion-trend__legend"><span className="tier-1">一进二</span><span className="tier-2">二进三</span><span className="tier-3">三进四</span><span className="tier-high">高位晋级（4板+）</span></div>
         {promotionTrend.history?.length ? <PromotionTrendChart rows={promotionTrend.history} /> : <div className="promotion-trend__empty">历史样本尚未形成</div>}
       </div>
     </section>

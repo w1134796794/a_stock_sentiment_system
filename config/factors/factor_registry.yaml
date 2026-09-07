@@ -346,7 +346,7 @@ factors:
     name: "连板接力趋势"
     category: "emotion"
     sub_category: "continuity"
-    description: "最近5个交易日一进二、二进三、三进四和高位晋级的小样本平滑趋势评分"
+    description: "最近5个交易日一进二、二进三、三进四和四板以上高位晋级的小样本平滑趋势评分"
     data_source: "limit_up_pool_silver"
     output_type: "float"
     value_range: [0.0, 100.0]
