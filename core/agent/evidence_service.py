@@ -45,6 +45,7 @@ class AgentEvidenceService:
             "rank": row.get("rank"),
             "sectors": row.get("resonance_sectors") or "",
             "reasons": row.get("reasons") or [],
+            "exclusion_reasons": row.get("排除理由") or [],
             "shap": row.get("shap_explanation") or [],
             "model": payload.get("weight_metadata") or {},
         }
@@ -161,6 +162,7 @@ class AgentEvidenceService:
             "code": str(code),
             "decision": evidence.get("decision"),
             "rule_reasons": evidence.get("reasons") or [],
+            "exclusion_reasons": evidence.get("exclusion_reasons") or [],
             "model_contributions": evidence.get("shap") or [],
             "trust_layers": evidence.get("trust_layers") or {},
         }

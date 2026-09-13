@@ -561,6 +561,9 @@ class ScreeningEngine:
             try:
                 con = duckdb.connect(str(self.duckdb_path))
                 stock_wide = self._read_table(con, "factor_stock_wide", trade_date)
+                reversal = self._read_table(con, "factor_reversal_stock_wide", trade_date)
+                if not stock_wide.empty and not reversal.empty:
+                    stock_wide = stock_wide.merge(reversal.drop(columns=["trade_date"], errors="ignore"), on="code", how="left")
                 market_wide = self._read_table(con, "factor_market_wide", trade_date)
                 value_long = self._read_table(con, "factor_value_long", trade_date)
                 last_error = None
@@ -1209,6 +1212,8 @@ class ScreeningEngine:
                 "penalty_reasons": penalty_reasons,
                 "metrics": metrics,
                 "context": context,
+                "reversal_structures": json.loads(row.get("reversal_structures") or "{}")
+                if isinstance(row.get("reversal_structures"), str) else {},
                 "lhb": {
                     "present": lhb_present,
                     "signal_date": str(row.get("signal_date") or ""),

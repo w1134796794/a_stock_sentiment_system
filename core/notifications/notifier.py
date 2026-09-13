@@ -192,6 +192,12 @@ class NotificationService:
                     lines.append(f"龙头阶段：{'，'.join(item for item in (lifecycle, leader_age) if item)}")
             if sectors:
                 lines.append(f"板块：{sectors}")
+            structure = row.get("structure") or {}
+            if structure:
+                lines.append(f"事件日期：{structure.get('event_date', '')}")
+                lines.append(f"确认依据：{row.get('reason') or ''}")
+                lines.append(f"结构保护价：{float(structure.get('protection') or 0):.2f}")
+                lines.append("盘中结构确认，收盘形态仍需收盘后核验。")
             if cluster:
                 lines.append(f"风险主题簇：{cluster}")
                 if cluster_counts[cluster] > cluster_limit:

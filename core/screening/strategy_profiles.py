@@ -29,9 +29,11 @@ PRODUCTION_STRATEGY_IDS = (
     "mainline_leader",
     "weak_to_strong",
     "first_board_launch",
+    "limit_pullback",
+    "limit_reversal",
 )
 ENHANCEMENTS = ("capital_flow", "attention", "leader", "margin", "risk")
-ENTRY_MODES = ("weak_to_strong", "continuation", "acceleration")
+ENTRY_MODES = ("weak_to_strong", "continuation", "acceleration", "limit_pullback", "limit_reversal")
 DEFAULT_EXECUTION = {
     "allowed_entry_modes": ["weak_to_strong", "continuation"],
     "confirmation_deadline": "10:00:00",
@@ -104,8 +106,11 @@ def _execution_config(source: Any, strategy_id: str = "default") -> Dict[str, An
         raise ValueError("确认截止时间格式必须为 HH:MM，例如 10:30")
     hour, minute, second = (int(part) for part in deadline.split(":"))
     seconds = hour * 3600 + minute * 60 + second
-    if not (9 * 3600 + 30 * 60 <= seconds <= 11 * 3600 + 30 * 60):
-        raise ValueError("确认截止时间必须在 09:30-11:30 之间")
+    if minute > 59 or second > 59 or not (
+        9 * 3600 + 30 * 60 <= seconds <= 11 * 3600 + 30 * 60
+        or 13 * 3600 <= seconds <= 14 * 3600 + 55 * 60
+    ):
+        raise ValueError("确认截止时间必须在 09:30-11:30 或 13:00-14:55 之间")
     candidate_max_age_days = int(raw.get("candidate_max_age_days") or DEFAULT_EXECUTION["candidate_max_age_days"])
     max_positions = int(raw.get("max_positions") or 0)
     exit_source = raw.get("exit") if isinstance(raw.get("exit"), Mapping) else {}
@@ -169,6 +174,12 @@ class StrategyProfileRepository:
         payload = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
         payload.setdefault("version", 1)
         payload.setdefault("strategies", {})
+        # Existing server configs gain new built-ins without replacing user edits.
+        if source != self.default_path and self.default_path.exists():
+            defaults = yaml.safe_load(self.default_path.read_text(encoding="utf-8")) or {}
+            for key in ("limit_pullback", "limit_reversal"):
+                if key in (defaults.get("strategies") or {}):
+                    payload["strategies"].setdefault(key, deepcopy(defaults["strategies"][key]))
         return payload
 
     def list_profiles(
@@ -500,6 +511,10 @@ def factor_catalog() -> List[Dict[str, Any]]:
             "description": definition.description,
         })
     extras = {
+        "stk_limit_pullback": "涨停回踩结构",
+        "stk_limit_reversal": "跌停反包结构",
+        "stk_pullback_contraction": "回踩缩量程度",
+        "stk_reversal_recovery": "跌幅收复程度",
         "tech_score": "技术综合分",
         "limit_progress": "涨停进度",
         "amount_ratio": "成交额相对5日",

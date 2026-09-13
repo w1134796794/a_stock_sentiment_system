@@ -17,6 +17,7 @@ from backtest.minute_entry import (
     normalize_minute_bars,
     normalize_strategy_entry_modes,
 )
+from backtest.reversal_entry import STRUCTURAL_LABELS, STRUCTURAL_MODES
 from backtest.trade_calendar import TradeCalendar
 from core.factors.behavior_cycle import intraday_behavior_cycle
 from core.realtime.models import normalize_stock_code
@@ -26,6 +27,7 @@ from core.signals.minute_amount_profile import MinuteAmountProfileRepository
 from core.utils.price_limit import limit_up_price
 
 MODE_LABELS = {
+    **STRUCTURAL_LABELS,
     ENTRY_WEAK: "弱转强",
     ENTRY_CONTINUATION: "强势延续",
     ENTRY_ACCELERATION: "高开加速",
@@ -180,6 +182,16 @@ class RealtimeEntrySignalService:
         allowed_modes = normalize_strategy_entry_modes(
             execution.get("allowed_entry_modes") or []
         )
+        structural = [item for item in STRUCTURAL_MODES if item in allowed_modes]
+        if structural:
+            mode = structural[0]
+        structures = execution.get("structures") or row.get("reversal_structures") or {}
+        if mode in STRUCTURAL_MODES and not frame.empty:
+            quote_time = str(quote.get("time") or quote.get("received_at") or "").replace("T", " ").split(" ")[-1]
+            if len(quote_time) >= 5 and quote_time[2] == ":":
+                frame = frame[frame["time"] < quote_time[:5] + ":00"].copy()
+            else:
+                return self._payload(EntryDecision("observing", reason="缺少行情时间，无法验证完整分钟"), mode, market_date)
         strategy_mode_allowed = not allowed_modes or mode in allowed_modes
         allowed_text = "、".join(
             MODE_LABELS.get(item, item) for item in sorted(allowed_modes)
@@ -196,7 +208,10 @@ class RealtimeEntrySignalService:
         sector_checker, sector_detail = self._sector_checker(
             row, code, all_rows, frames, quotes, market_date,
         )
-        decision = self.evaluator.evaluate(
+        evaluate = self.evaluator.evaluate_strategy if structural else self.evaluator.evaluate
+        strategy_args = {"execution": {**execution, "structures": structures}} if structural else {}
+        evaluated = evaluate(
+            **strategy_args,
             mode=mode,
             bars=frame,
             open_gap=gap,
@@ -212,9 +227,17 @@ class RealtimeEntrySignalService:
             expected_amount_fraction=expected_fraction if self.amount_profiles.available else None,
             amount_profile_samples=profile_samples,
             live=True,
+            structure=structures.get(mode, {}),
+            confirmation_deadline=(execution.get("mode_deadlines") or {}).get(mode) or execution.get("confirmation_deadline", ""),
         )
+        if structural:
+            mode, decision = evaluated
+        else:
+            decision = evaluated
+        if mode in STRUCTURAL_MODES:
+            mode = next((key for key, label in STRUCTURAL_LABELS.items() if label == decision.signal), mode)
         ticks = self._snapshot_frame(code, market_date)
-        if not ticks.empty:
+        if not ticks.empty and mode not in STRUCTURAL_MODES:
             try:
                 sector_state = sector_checker(str(ticks.iloc[-1].get("time") or ""))
                 snapshot_decision = self.snapshot_signals.evaluate(
@@ -247,7 +270,7 @@ class RealtimeEntrySignalService:
             strength_detected = decision.status in {
                 "filled", "confirmed", "signal_unfilled",
             }
-        return self._payload(
+        payload = self._payload(
             decision,
             mode,
             market_date,
@@ -255,6 +278,10 @@ class RealtimeEntrySignalService:
             strategy_mode_allowed=strategy_mode_allowed,
             strength_detected=strength_detected,
         )
+        if mode in STRUCTURAL_MODES:
+            payload["structure"] = structures.get(mode, {})
+            payload["structural_stop"] = (structures.get(mode) or {}).get("protection")
+        return payload
 
     @staticmethod
     def _disallowed_mode_observation(

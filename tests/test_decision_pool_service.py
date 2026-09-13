@@ -57,7 +57,7 @@ def test_strong_market_deduplicates_three_production_strategies():
     assert result["hidden_strategy_names"] == []
     assert len(result["rows"]) == 4
     first = next(row for row in result["rows"] if row["code"] == "000001")
-    assert first["策略共识显示"] == "3/3"
+    assert first["策略共识显示"] == "3/5"
     assert first["行动分组"] == "重点确认"
     assert first["所属主线"] == "机器人"
     assert first["execution_eligible"] is True
@@ -355,6 +355,35 @@ def test_decision_pool_persists_as_the_production_execution_artifact(tmp_path):
     assert path.name == "decision_pool_20260720.json"
     assert stored["trade_date"] == "20260720"
     assert stored["rows"][0]["execution_eligible"] is True
+
+
+def test_inactive_candidate_exposes_failed_rules_as_exclusion_reasons():
+    profile = _profile("weak_to_strong", "弱转强")
+    profile["evidence_rules"] = [
+        {
+            "name": "量价健康",
+            "factor": "stk_amount_ratio_5d",
+            "op": ">=",
+            "value": 55,
+        }
+    ]
+    rows = []
+    for index in range(9):
+        row = _row(f"0000{index + 1:02d}", f"候选{index + 1}")
+        row["score"] = 90 - index * 5
+        row["resonance_sectors"] = f"题材{index + 1}"
+        row["metrics"] = {"stk_amount_ratio_5d": 42}
+        rows.append(row)
+
+    result = DecisionPoolService().build(
+        {"weak_to_strong": {"final": rows}},
+        {"weak_to_strong": profile},
+        market_score=75,
+    )
+
+    candidate = next(row for row in result["rows"] if row["行动分组"] == "暂不参与")
+    assert "规则优势或增强证据不足" in candidate["排除理由"]
+    assert "量价健康未达标（实际42.0，要求≥55）" in candidate["排除理由"]
 
 
 def test_weak_market_limits_medical_cluster_and_keeps_other_themes():

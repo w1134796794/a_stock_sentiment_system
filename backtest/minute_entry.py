@@ -23,6 +23,8 @@ ENTRY_MODES = {
 }
 
 STRATEGY_ENTRY_MODE_ALIASES = {
+    "limit_pullback": "limit_pullback",
+    "limit_reversal": "limit_reversal",
     "weak_to_strong": ENTRY_WEAK,
     ENTRY_WEAK: ENTRY_WEAK,
     "continuation": ENTRY_CONTINUATION,
@@ -105,7 +107,7 @@ def normalize_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
     estimated_amount = data["close"].fillna(0.0) * data["volume"]
     data.loc[data["amount"] <= 0, "amount"] = estimated_amount[data["amount"] <= 0]
     data = data[
-        data["time"].between("09:30:00", "10:01:59")
+        (data["time"].between("09:30:00", "11:30:00") | data["time"].between("13:00:00", "15:00:00"))
         & (data["close"] > 0)
     ].sort_values("time").drop_duplicates("time", keep="last").reset_index(drop=True)
     if data.empty:
@@ -152,6 +154,33 @@ class MinuteEntryEvaluator:
         self.min_auction_volume_ratio = min_auction_volume_ratio
         self.min_auction_amount = min_auction_amount
 
+    def evaluate_strategy(self, *, execution: dict, mode: str, **kwargs):
+        """Evaluate each allowed structure and the opening mode independently."""
+        from backtest.reversal_entry import STRUCTURAL_MODES
+        allowed = normalize_strategy_entry_modes(execution.get("allowed_entry_modes") or [])
+        choices = [key for key in STRUCTURAL_MODES if key in allowed]
+        gap = kwargs["open_gap"]
+        opening = ENTRY_WEAK if gap <= self.weak_max_gap else (
+            ENTRY_CONTINUATION if gap <= self.continuation_max_gap else ENTRY_ACCELERATION)
+        if opening in allowed or not choices:
+            choices.append(opening if choices else mode)
+        decisions = []
+        for key in choices:
+            args = dict(kwargs)
+            for field in ("structure", "confirmation_deadline"):
+                args.pop(field, None)
+            decision = self.evaluate(
+                mode=key, structure=(execution.get("structures") or {}).get(key, {}),
+                confirmation_deadline=(execution.get("mode_deadlines") or {}).get(key)
+                or execution.get("confirmation_deadline", ""), **args,
+            )
+            decisions.append((key, decision))
+        return min(decisions, key=lambda pair: (
+            0 if pair[1].status in {"filled", "confirmed", "signal_unfilled"} else
+            1 if pair[1].status in {"observing", "data_insufficient"} else 2,
+            pair[1].confirm_time or "99:99:99",
+        ))
+
     def evaluate(
         self,
         *,
@@ -170,11 +199,20 @@ class MinuteEntryEvaluator:
         expected_amount_fraction: Optional[Callable[[str], Optional[float]]] = None,
         amount_profile_samples: int = 0,
         live: bool = False,
+        structure: Optional[dict] = None,
+        confirmation_deadline: str = "",
     ) -> EntryDecision:
         data = normalize_minute_bars(bars)
         if data.empty or len(data) < 2:
             status = "observing" if live else "missing_minutes"
             return EntryDecision(status, reason="等待当日一分钟行情", open_gap_pct=open_gap)
+        from backtest.reversal_entry import STRUCTURAL_MODES, evaluate_structure
+        if mode in STRUCTURAL_MODES:
+            return evaluate_structure(
+                self, mode=mode, data=data, structure=structure or {},
+                deadline=confirmation_deadline or "14:30:00", gap=open_gap,
+                prev_close=prev_close, limit_price=limit_price, sector_sync=sector_sync, live=live,
+            )
         opening_rows = data[data["time"] <= "09:35:00"]
         first_five = opening_rows.head(5)
         last_opening_index = int(first_five.index.max()) if not first_five.empty else -1

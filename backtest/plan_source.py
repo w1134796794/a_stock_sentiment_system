@@ -13,6 +13,8 @@ from core.screening.enhancements import enhancement_label, enhancement_slug, nor
 
 DEFAULT_MAX_BACKTEST_RANK = 0
 ENTRY_MODE_LABELS = {
+    "limit_pullback": "涨停回踩转强",
+    "limit_reversal": "跌停反包确认",
     "weak_to_strong": "弱转强",
     "continuation": "强势延续",
     "acceleration": "高开加速",
@@ -136,7 +138,7 @@ def _rows_from_screening(
             "策略ID": resolved_strategy_id,
             "策略名称": strategy_name,
             "策略版本": strategy_version,
-            "策略执行": json.dumps(execution, ensure_ascii=False, sort_keys=True),
+            "策略执行": json.dumps({**execution, "structures": item.get("reversal_structures") or {}}, ensure_ascii=False, sort_keys=True),
             "策略单票仓位上限%": _to_number(
                 item.get("position_budget_pct"), position_cap,
             ),

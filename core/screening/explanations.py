@@ -4,6 +4,10 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 FACTOR_LABELS: Dict[str, str] = {
+    "stk_limit_pullback": "涨停回踩结构",
+    "stk_limit_reversal": "跌停反包结构",
+    "stk_pullback_contraction": "回踩缩量程度",
+    "stk_reversal_recovery": "跌幅收复程度",
     "limit_progress": "涨停进度",
     "board_height": "官方连板高度",
     "tech_score": "技术综合分",

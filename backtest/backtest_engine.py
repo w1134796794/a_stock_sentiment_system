@@ -709,7 +709,7 @@ class BacktestEngine:
             'entry_signal': entry_signal,
             'entry_time': str(entry_meta.get('entry_time') or '09:30:00'),
             'confirm_time': str(entry_meta.get('confirm_time') or ''),
-            'stop_loss_price': entry_price * (1 - exit_config['hard_stop_loss']),
+            'stop_loss_price': max(entry_price * (1 - exit_config['hard_stop_loss']), self._float(entry_meta.get('structural_stop'))),
             'highest_price': entry_price,  # 用于跟踪回撤
             'max_favorable_price': entry_price,
             'min_adverse_price': entry_price,
@@ -950,6 +950,11 @@ class BacktestEngine:
 
     def _entry_mode_for_plan(self, plan: pd.Series, gap: float) -> Optional[str]:
         """Resolve the actual minute mode, constrained by the source strategy."""
+        from backtest.reversal_entry import STRUCTURAL_MODES
+        allowed_structures = self._plan_execution(plan).get('allowed_entry_modes') or []
+        for structural in STRUCTURAL_MODES:
+            if structural in allowed_structures:
+                return structural
         configured = self.config.entry_mode if self.config.entry_mode in ENTRY_MODES else ENTRY_HYBRID
         if configured == ENTRY_COMPARE:
             configured = ENTRY_HYBRID
@@ -1142,7 +1147,14 @@ class BacktestEngine:
             amount_ratio = self._float(
                 plan.get('原始_amount_ratio_5d'), self._float(plan.get('原始_amount_ratio'))
             )
-            decision = self.minute_evaluator.evaluate(
+            execution = self._plan_execution(plan)
+            structural = bool(set(execution.get('allowed_entry_modes') or []).intersection({'limit_pullback', 'limit_reversal'}))
+            evaluate = self.minute_evaluator.evaluate_strategy if structural else self.minute_evaluator.evaluate
+            evaluated = evaluate(
+                **({'execution': execution} if structural else {}),
+                structure=(self._plan_execution(plan).get('structures') or {}).get(entry_mode, {}),
+                confirmation_deadline=(self._plan_execution(plan).get('mode_deadlines') or {}).get(entry_mode)
+                or self._plan_execution(plan).get('confirmation_deadline', ''),
                 mode=entry_mode,
                 bars=self._minute_frames.get((str(date), stock_code), pd.DataFrame()),
                 open_gap=gap,
@@ -1163,6 +1175,10 @@ class BacktestEngine:
                     self._daily_amount_yuan(previous_bar), "10:00:00"
                 )[1],
             )
+            if structural:
+                entry_mode, decision = evaluated
+            else:
+                decision = evaluated
             self._record_entry_attempt(plan, date, stock_code, stock_name, decision, entry_mode=entry_mode)
             if not decision.filled:
                 logger.info(
@@ -1170,7 +1186,10 @@ class BacktestEngine:
                 )
                 return False, 0
             self._last_entry_signal[stock_code] = decision.signal
+            from backtest.reversal_entry import STRUCTURAL_LABELS
+            entry_mode = next((key for key, label in STRUCTURAL_LABELS.items() if label == decision.signal), entry_mode)
             self._last_entry_meta[stock_code] = {
+                'structural_stop': (self._plan_execution(plan).get('structures') or {}).get(entry_mode, {}).get('protection', 0),
                 'confirm_time': decision.confirm_time,
                 'entry_time': decision.entry_time,
                 'amount_pace': decision.amount_pace,

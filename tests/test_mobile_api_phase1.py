@@ -162,6 +162,31 @@ def test_mobile_service_reads_generated_local_data(tmp_path, monkeypatch):
     assert limitup["max_board_height"] == 2
 
 
+def test_candidate_detail_backfills_exclusion_reasons_from_legacy_pool():
+    class LegacyRepository:
+        @staticmethod
+        def load_decision_pool(_trade_date: str) -> dict:
+            return {
+                "trade_date": "20260904",
+                "rows": [{
+                    "code": "600371",
+                    "name": "测试候选",
+                    "行动分组": "暂不参与",
+                    "_blocked_reasons": ["优先级未进入今日8只决策池"],
+                    "penalty_reasons": ["板块同步证据不足"],
+                    "失效条件": "规则优势或增强证据不足",
+                }],
+            }
+
+    detail = MobileReadService(LegacyRepository()).candidate_detail("600371", "20260904")
+
+    assert detail["evidence"]["exclusion_reasons"] == [
+        "优先级未进入今日8只决策池",
+        "板块同步证据不足",
+        "规则优势或增强证据不足",
+    ]
+
+
 def test_mobile_api_success_pagination_and_contract(tmp_path):
     service = MobileReadService(
         _repository(tmp_path),

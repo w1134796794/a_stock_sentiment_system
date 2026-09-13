@@ -1176,4 +1176,6 @@ class StockFactorJob:
             where="trade_date = ? AND entity_type = ?",
             params=[str(trade_date), "stock"],
         )
+        from core.factors.jobs.reversal_factor_job import run_reversal_factors
+        result.rows["factor_reversal_stock_wide"] = run_reversal_factors(con, str(trade_date))
         return result

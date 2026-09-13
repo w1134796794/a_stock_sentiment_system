@@ -26,6 +26,8 @@ export type Candidate = {
   evidence?: {
     rule_reasons?: string[];
     penalty_reasons?: string[];
+    exclusion_reasons?: string[];
+    failed_evidence?: string[];
     enhancements?: Record<string, number>;
     metrics?: Record<string, number>;
     data_completeness?: number;

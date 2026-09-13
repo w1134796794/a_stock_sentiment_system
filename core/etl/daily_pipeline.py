@@ -373,6 +373,7 @@ class ETLDailyPipeline:
                     candidate["strategy_name"] = payload["strategy_name"]
                     candidate["strategy_version"] = payload["strategy_version"]
                     candidate["strategy_execution"] = dict(payload["strategy_execution"])
+                    candidate["strategy_execution"]["structures"] = dict(candidate.get("reversal_structures") or {})
                     candidate["position_cap_pct"] = payload["position_cap_pct"]
             if current.output_path:
                 Path(current.output_path).write_text(

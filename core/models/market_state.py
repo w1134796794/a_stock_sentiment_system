@@ -16,9 +16,9 @@ EMOTION_PHASE_LABELS = {
 }
 PHASE_ALLOWED_STRATEGIES = {
     "freeze": ("weak_to_strong", "mainline_leader"),
-    "warm": ("first_board_launch", "weak_to_strong"),
-    "active": ("mainline_leader", "first_board_launch", "weak_to_strong"),
-    "boom": ("mainline_leader", "first_board_launch"),
+    "warm": ("first_board_launch", "weak_to_strong", "limit_pullback", "limit_reversal"),
+    "active": ("mainline_leader", "first_board_launch", "weak_to_strong", "limit_pullback", "limit_reversal"),
+    "boom": ("mainline_leader", "first_board_launch", "limit_pullback"),
     "decline": ("weak_to_strong",),
 }
 PHASE_ACCOUNT_EXPOSURE = {

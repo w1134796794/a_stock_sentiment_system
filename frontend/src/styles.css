@@ -36,3 +36,5 @@
 @media(max-width:1100px){.mainline-grid,.leader-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:900px){.decision-tools{align-items:stretch;flex-direction:column}.decision-tools label{min-width:100%}.group-filter{align-self:flex-start}.lhb-layout{grid-template-columns:1fr}}
 @media(max-width:640px){.candidate-card__head{align-items:flex-start}.candidate-badges{max-width:145px}.workspace-toolbar{align-items:flex-start;flex-direction:column}.session-status{width:100%;justify-content:flex-end}.view-tabs{width:100%}.view-tabs button{flex:1;justify-content:center}.group-filter{width:100%;overflow-x:auto}.group-filter button{flex:0 0 auto}.mainline-grid,.leader-grid{grid-template-columns:1fr}.echelon-list article{grid-template-columns:56px minmax(0,1fr)}.echelon-height strong{font-size:15px}.intel-section__head{align-items:flex-start}.daily-chart{height:220px}}
+
+.evidence-heading{margin:7px 0 1px;color:#9cacbf;font-size:11px;font-weight:700}.evidence-heading:first-child{margin-top:0}.evidence-heading--negative{color:#ff91a2}

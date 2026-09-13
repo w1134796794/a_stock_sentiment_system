@@ -21,6 +21,31 @@ def _list_value(value: Any) -> List[str]:
     return [part.strip() for part in text.split(",") if part.strip()]
 
 
+def _unique_text(values: Iterable[Any]) -> List[str]:
+    result: List[str] = []
+    seen = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _exclusion_reasons(row: Dict[str, Any]) -> List[str]:
+    reasons = _list_value(row.get("排除理由"))
+    if reasons or str(row.get("行动分组") or "") != "暂不参与":
+        return reasons
+    return _unique_text([
+        *_list_value(row.get("_blocked_reasons")),
+        *_list_value(row.get("规则扣分项")),
+        *_list_value(row.get("增强证据缺口")),
+        *_list_value(row.get("penalty_reasons")),
+        row.get("失效条件"),
+    ])[:8]
+
+
 def _confirmation_text(row: Dict[str, Any]) -> str:
     explicit = str(row.get("次日确认条件") or row.get("确认条件") or "").strip()
     if explicit:
@@ -28,6 +53,8 @@ def _confirmation_text(row: Dict[str, Any]) -> str:
     execution = row.get("strategy_execution") or {}
     modes = _list_value(execution.get("allowed_entry_modes"))
     labels = {
+        "limit_pullback": "支撑区承接后放量突破局部高点",
+        "limit_reversal": "站稳反包目标后放量突破局部高点",
         "weak_to_strong": "收复昨收、站上分时均价并突破前5分钟高点",
         "continuation": "回踩分时均价不破或突破前5分钟高点",
         "high_open_acceleration": "分钟成交确认可买且板块同步走强",
@@ -136,6 +163,8 @@ class MobileReadService:
             summary["evidence"] = {
                 "rule_reasons": list(row.get("rule_reasons") or []),
                 "penalty_reasons": list(row.get("penalty_reasons") or []),
+                "exclusion_reasons": _exclusion_reasons(row),
+                "failed_evidence": list(row.get("增强证据缺口") or []),
                 "enhancements": dict(row.get("enhancements") or {}),
                 "metrics": dict(row.get("metrics") or {}),
                 "confidence_grade": row.get("confidence_grade") or row.get("规则等级"),

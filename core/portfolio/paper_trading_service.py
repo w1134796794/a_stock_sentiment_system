@@ -156,6 +156,7 @@ class PaperTradingService:
                         "entry_date": market_date,
                         "entry_time": row.get("entry_time") or row.get("confirm_time"),
                         "entry_price": price,
+                        "structural_stop": _number(row.get("structural_stop")),
                         "shares": shares,
                         "strategy_id": strategy_id,
                         "strategy_name": strategy_name,
@@ -166,6 +167,8 @@ class PaperTradingService:
                             f"模拟仓位{position_pct:.0f}%，信号强度{candidate_strength:.1f}分"
                         ),
                         "metadata": {
+                            "structure": row.get("structure") or {},
+                            "protection_price_source": "盘后结构保护价" if row.get("structural_stop") else "账户风险底线",
                             "candidate_date": payload.get("candidate_date") or payload.get("trade_date"),
                             "entry_mode": row.get("entry_mode"),
                             "confirm_time": row.get("confirm_time"),

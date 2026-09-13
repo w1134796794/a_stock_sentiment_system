@@ -20,8 +20,8 @@ from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
 PRODUCTION_STRATEGIES = PRODUCTION_STRATEGY_IDS
 REGIME_STRATEGIES = {
     "strong": PRODUCTION_STRATEGIES,
-    "neutral": ("mainline_leader", "first_board_launch", "weak_to_strong"),
-    "weak": ("mainline_leader", "weak_to_strong"),
+    "neutral": ("mainline_leader", "first_board_launch", "weak_to_strong", "limit_pullback", "limit_reversal"),
+    "weak": ("mainline_leader", "weak_to_strong", "limit_reversal"),
 }
 REGIME_LABELS = {"strong": "强市", "neutral": "震荡市", "weak": "弱市"}
 RISK_FLAG_LABELS = {
@@ -33,6 +33,8 @@ RISK_FLAG_LABELS = {
     "first_board_no_premium": "昨日首板今日高开率不足",
 }
 ENTRY_MODE_LABELS = {
+    "limit_pullback": "涨停回踩转强确认",
+    "limit_reversal": "跌停反包确认",
     "weak_to_strong": "弱转强确认",
     "continuation": "强势延续确认",
     "acceleration": "高开加速确认",
@@ -80,6 +82,11 @@ def _unique(values: Iterable[str]) -> List[str]:
 
 
 def _metric(row: Mapping[str, Any], factor: str) -> float:
+    _, value = _metric_observation(row, factor)
+    return value
+
+
+def _metric_observation(row: Mapping[str, Any], factor: str) -> tuple[bool, float]:
     keys = (factor, *FACTOR_ALIASES.get(factor, ()))
     containers = (row, row.get("metrics") or {}, row.get("context") or {})
     for container in containers:
@@ -87,8 +94,8 @@ def _metric(row: Mapping[str, Any], factor: str) -> float:
             continue
         for key in keys:
             if key in container and container.get(key) not in (None, ""):
-                return _number(container.get(key))
-    return 0.0
+                return True, _number(container.get(key))
+    return False, 0.0
 
 
 class DecisionPoolService:
@@ -283,6 +290,14 @@ class DecisionPoolService:
                 if cluster:
                     active_clusters[cluster] += 1
             else:
+                structural_watch = bool(set(row.get("allowed_entry_modes") or []).intersection({"limit_pullback", "limit_reversal"}))
+                if structural_watch and active_allowed:
+                    self._set_group(row, "watch", regime, phase)
+                    row["观察池说明"] = "结构策略独立观察，等待盘中确认"
+                    watch.append(row)
+                    if cluster:
+                        active_clusters[cluster] += 1
+                    continue
                 crowding_reason = ""
                 if cluster and not active_allowed:
                     row["拥挤降级"] = True
@@ -299,6 +314,7 @@ class DecisionPoolService:
         for row in inactive:
             if row.get("行动分组") != "暂不参与":
                 self._set_group(row, "inactive", regime, phase)
+            self._finalize_exclusion_reasons(row)
 
         active_names = [str((profiles.get(key) or {}).get("name") or key) for key in applicable]
         hidden_names = [str((profiles.get(key) or {}).get("name") or key) for key in hidden]
@@ -442,6 +458,10 @@ class DecisionPoolService:
         primary_execution = dict(primary_member.get("_strategy_execution") or {})
         combined_execution = dict(row.get("strategy_execution") or {})
         combined_execution.update({
+            "mode_deadlines": {
+                mode: (item.get("_strategy_execution") or {}).get("confirmation_deadline", "10:00:00")
+                for item in members for mode in item.get("_entry_modes") or []
+            },
             "allowed_entry_modes": raw_modes,
             "source_strategies": strategy_ids,
             "primary_strategy": primary_strategy_id,
@@ -451,6 +471,12 @@ class DecisionPoolService:
         # 合并决策池由组合层统一限制持仓数量，不能沿用某个主策略的单策略上限。
         combined_execution.pop("max_positions", None)
         evidence = self._evidence(members)
+        evidence_gaps = self._failed_evidence_rules(members)
+        penalty_reasons = _unique(
+            str(reason).strip()
+            for item in members
+            for reason in (item.get("penalty_reasons") or [])
+        )
         rule_grade = self._rule_grade(
             members, evidence, sector_strength, _number(row.get("策略组合评分")),
         )
@@ -488,6 +514,9 @@ class DecisionPoolService:
             "策略模式": "规则策略",
             "规则等级": rule_grade,
             "增强证据": evidence[:5],
+            "增强证据缺口": evidence_gaps[:6],
+            "规则扣分项": penalty_reasons[:6],
+            "排除理由": [],
             "否决条件": veto_conditions[:4],
             "数据完整度%": round(data_completeness, 1),
             "情绪阶段": phase_label,
@@ -513,6 +542,22 @@ class DecisionPoolService:
             if blocked_reasons
             else "；".join(veto_conditions[:2] or ["板块转弱", "跌破开盘低点或10:00前未确认"])
         )
+        structural_reasons = []
+        for mode, structure in (combined_execution.get("structures") or {}).items():
+            if mode not in raw_modes:
+                continue
+            anchor = _number(structure.get("support") or structure.get("target"))
+            structural_reasons.append(
+                f"{ENTRY_MODE_LABELS.get(mode, mode)}：事件日{structure.get('event_date', '')}，"
+                f"关键价{anchor:.2f}，结构保护{_number(structure.get('protection')):.2f}"
+            )
+        if structural_reasons:
+            row["rule_reasons"] = _unique([*structural_reasons, *list(row.get("rule_reasons") or [])])
+            row["次日确认条件"] = "；".join(
+                f"{(combined_execution.get('mode_deadlines') or {}).get(mode, '14:30:00')[:5]}前"
+                + ("回踩支撑、承接后放量突破" if mode == "limit_pullback" else "站稳反包目标后放量突破")
+                for mode in raw_modes if mode in {"limit_pullback", "limit_reversal"}
+            )
 
     @staticmethod
     def _evidence(members: Sequence[Mapping[str, Any]]) -> List[str]:
@@ -534,6 +579,64 @@ class DecisionPoolService:
             for rule in item.get("_veto_rules") or []:
                 labels.append(str(rule.get("reason") or rule.get("name") or rule.get("factor") or "风险否决"))
         return _unique(labels)
+
+    @staticmethod
+    def _failed_evidence_rules(members: Sequence[Mapping[str, Any]]) -> List[str]:
+        checks: Dict[tuple[str, str, str, str], Dict[str, Any]] = {}
+        for item in members:
+            for rule in item.get("_evidence_rules") or []:
+                factor = str(rule.get("factor") or "")
+                if not factor:
+                    continue
+                name = str(rule.get("name") or factor)
+                signature = (factor, str(rule.get("op") or ">="), repr(rule.get("value")), name)
+                state = checks.setdefault(signature, {"rule": rule, "observed": False, "values": [], "passed": False})
+                observed, actual = _metric_observation(item, factor)
+                state["observed"] = bool(state["observed"] or observed)
+                if observed:
+                    state["values"].append(actual)
+                if DecisionPoolService._rule_matches(item, rule):
+                    state["passed"] = True
+
+        failures: List[str] = []
+        for state in checks.values():
+            if state["passed"]:
+                continue
+            rule = state["rule"]
+            name = str(rule.get("name") or rule.get("factor") or "增强条件")
+            factor = str(rule.get("factor") or "")
+            if not state["observed"]:
+                failures.append(f"{name}未通过：缺少{factor}数据")
+                continue
+            actual = max(state["values"], default=0.0)
+            failures.append(
+                f"{name}未达标（实际{actual:.1f}，要求{DecisionPoolService._rule_requirement(rule)}）"
+            )
+        return _unique(failures)
+
+    @staticmethod
+    def _rule_requirement(rule: Mapping[str, Any]) -> str:
+        operator = str(rule.get("op") or ">=")
+        value = rule.get("value")
+        labels = {">=": "≥", ">": ">", "<=": "≤", "<": "<", "==": "=", "!=": "≠"}
+        if operator == "between":
+            values = list(value or [])
+            if len(values) >= 2:
+                return f"{values[0]}至{values[1]}"
+        return f"{labels.get(operator, operator)}{value}"
+
+    @staticmethod
+    def _finalize_exclusion_reasons(row: Dict[str, Any]) -> None:
+        if str(row.get("行动分组") or "") != "暂不参与":
+            row["排除理由"] = []
+            return
+        reasons = _unique([
+            *[str(item).strip() for item in row.get("_blocked_reasons") or []],
+            *[str(item).strip() for item in row.get("规则扣分项") or []],
+            *[str(item).strip() for item in row.get("增强证据缺口") or []],
+            str(row.get("失效条件") or "").strip(),
+        ])
+        row["排除理由"] = reasons[:8]
 
     @staticmethod
     def _rule_matches(item: Mapping[str, Any], rule: Mapping[str, Any]) -> bool:

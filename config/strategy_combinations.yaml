@@ -1,5 +1,67 @@
 version: 1
 strategies:
+  limit_pullback:
+    name: 涨停回踩
+    description: 近期涨停后回到预先确定的支撑区，盘中承接并放量突破后确认。
+    enabled: true
+    primary: false
+    protected: true
+    base_profile: default
+    stock_pool: liquid
+    weight_source: manual
+    market_regimes: [strong, neutral]
+    emotion_phases: [warm, active, boom]
+    top_n: 30
+    position_cap_pct: 15
+    priority_filters: []
+    required_filters:
+    - {name: 涨停回踩结构完整, factor: stk_limit_pullback, op: '>=', value: 100, reason: 近期涨停回落至支撑附近且未有效破位}
+    - {name: 基础流动性, factor: stk_liquidity_percentile, op: '>=', value: 35, reason: 成交流动性合格}
+    ranking_factors:
+    - {factor: stk_limit_pullback, weight: 0.3}
+    - {factor: stk_pullback_contraction, weight: 0.3}
+    - {factor: stk_relative_strength_sector, weight: 0.2}
+    - {factor: stk_liquidity_percentile, weight: 0.2}
+    evidence_rules:
+    - {name: 回踩结构, factor: stk_limit_pullback, op: '>=', value: 100}
+    - {name: 回踩缩量, factor: stk_pullback_contraction, op: '>=', value: 50}
+    enhancements: {lhb: false, capital_flow: false, attention: false, leader: false, margin: false, risk: true}
+    execution:
+      allowed_entry_modes: [limit_pullback]
+      confirmation_deadline: '14:30:00'
+      candidate_max_age_days: 1
+      exit: {time_stop_days: 4}
+  limit_reversal:
+    name: 跌停反包
+    description: 近三个交易日跌停事件观察，盘中站稳预定反包目标后放量突破确认。
+    enabled: true
+    primary: false
+    protected: true
+    base_profile: default
+    stock_pool: liquid
+    weight_source: manual
+    market_regimes: [strong, neutral, weak]
+    emotion_phases: [warm, active]
+    top_n: 30
+    position_cap_pct: 10
+    priority_filters: []
+    required_filters:
+    - {name: 跌停修复结构完整, factor: stk_limit_reversal, op: '>=', value: 100, reason: 近期跌停事件且未连续跌停或破位}
+    - {name: 基础流动性, factor: stk_liquidity_percentile, op: '>=', value: 35, reason: 成交流动性合格}
+    ranking_factors:
+    - {factor: stk_limit_reversal, weight: 0.4}
+    - {factor: stk_reversal_recovery, weight: 0.2}
+    - {factor: stk_relative_strength_sector, weight: 0.2}
+    - {factor: stk_liquidity_percentile, weight: 0.2}
+    evidence_rules:
+    - {name: 跌停事件结构, factor: stk_limit_reversal, op: '>=', value: 100}
+    - {name: 跌幅修复, factor: stk_reversal_recovery, op: '>=', value: 50}
+    enhancements: {lhb: false, capital_flow: false, attention: false, leader: false, margin: false, risk: true}
+    execution:
+      allowed_entry_modes: [limit_reversal]
+      confirmation_deadline: '14:30:00'
+      candidate_max_age_days: 1
+      exit: {time_stop_days: 3}
   default:
     name: 默认短线综合
     description: 使用全量个股因子，在候选池内综合量能、板块主线、流动性与技术强度。

@@ -31,6 +31,10 @@ const GROUPS = [
 ] as const;
 
 const METRIC_LABELS: Record<string, string> = {
+  stk_limit_pullback: "涨停回踩结构",
+  stk_limit_reversal: "跌停反包结构",
+  stk_pullback_contraction: "回踩缩量程度",
+  stk_reversal_recovery: "跌幅收复程度",
   stk_behavior_attention: "题材注意形成",
   stk_behavior_acceleration: "一致加速",
   stk_behavior_divergence: "分歧释放",
@@ -245,9 +249,12 @@ function DetailDrawer({ candidate, date, onClose }: { candidate: Candidate | nul
         <section className="drawer-section">
           <h3>专业证据</h3>
           <div className="evidence-list">
+            {candidate.action_group === "暂不参与" && (evidence.exclusion_reasons || []).length > 0 && <h4 className="evidence-heading evidence-heading--negative">不参与理由</h4>}
+            {candidate.action_group === "暂不参与" && (evidence.exclusion_reasons || []).map((reason) => <p key={`exclude-${reason}`} className="negative">{reason}</p>)}
+            {(evidence.rule_reasons || []).length > 0 && <h4 className="evidence-heading">支持证据</h4>}
             {(evidence.rule_reasons || []).map((reason) => <p key={reason} className="positive">{reason}</p>)}
-            {(evidence.penalty_reasons || []).map((reason) => <p key={reason} className="negative">{reason}</p>)}
-            {!evidence.rule_reasons?.length && !evidence.penalty_reasons?.length && <p>暂无展开证据。</p>}
+            {candidate.action_group !== "暂不参与" && (evidence.penalty_reasons || []).map((reason) => <p key={reason} className="negative">{reason}</p>)}
+            {!evidence.rule_reasons?.length && !evidence.penalty_reasons?.length && !evidence.exclusion_reasons?.length && <p>暂无展开证据。</p>}
           </div>
         </section>
         {metrics.length > 0 && <section className="drawer-section"><h3>核心指标</h3><div className="metric-grid">{metrics.map(([key, value]) => <div key={key}><span>{METRIC_LABELS[key] || key}</span><b>{Number(value).toFixed(1)}</b></div>)}</div></section>}

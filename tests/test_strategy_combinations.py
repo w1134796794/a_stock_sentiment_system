@@ -265,6 +265,7 @@ def test_bundled_strategy_templates_are_resolvable():
     assert default_selection[0] == "mainline_leader"
     assert set(default_selection) == {
         "mainline_leader", "weak_to_strong", "first_board_launch",
+        "limit_pullback", "limit_reversal",
     }
     assert all(
         repository.get_profile(strategy_id)["scope"] == "production"

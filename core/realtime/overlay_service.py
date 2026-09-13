@@ -409,6 +409,8 @@ class RealtimeOverlayService:
             "confirm_time": signal.get("confirm_time") or "",
             "entry_time": signal.get("entry_time") or "",
             "entry_price": signal.get("entry_price"),
+            "structure": signal.get("structure") or {},
+            "structural_stop": signal.get("structural_stop"),
             "success_probability": signal.get("success_probability"),
             "historical_samples": signal.get("historical_samples"),
             "historical_stats_basis": signal.get("historical_stats_basis") or "",

@@ -166,6 +166,15 @@ class StrategyPortfolioAllocator:
             if _number(execution.get("candidate_max_age_days")) > 0
         ]
         combined_execution = {
+            "structures": {
+                mode: value for member in members
+                for mode, value in (member.get("reversal_structures") or {}).items()
+            },
+            "mode_deadlines": {
+                mode: execution.get("confirmation_deadline", "10:00:00")
+                for execution in executions
+                for mode in execution.get("allowed_entry_modes", [])
+            },
             "allowed_entry_modes": allowed_entry_modes,
             "confirmation_deadline": deadlines[0] if deadlines else "10:00:00",
             "candidate_max_age_days": min(max_ages) if max_ages else 1,
