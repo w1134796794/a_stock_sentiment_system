@@ -138,7 +138,8 @@ def test_leader_pool_ignores_strategy_combination_candidates(tmp_path: Path):
 def test_intraday_strength_uses_weak_to_strong_for_low_open():
     class FakeBreadth:
         def evaluate(self, sectors, market_date):
-            return True, {"breadth": 0.7, "index_change_pct": 1.0, "data_completeness": 1.0}
+            return True, {"breadth": 0.7, "index_change_pct": 1.0, "data_completeness": 1.0,
+                          "observed_at": "2026-06-19T09:36:00"}
 
     class FakePool:
         def build_pool(self, trade_date, *, lookback=5, limit=30):
@@ -169,6 +170,7 @@ def test_intraday_strength_uses_weak_to_strong_for_low_open():
                         "open_price": 9.9,
                         "last_price": 10.1,
                         "change_pct": 1.0,
+                        "date": "20260619", "time": "09:37:00", "is_stale": False,
                     }
                 ]
             }

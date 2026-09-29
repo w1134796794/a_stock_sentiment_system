@@ -66,9 +66,10 @@ def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path):
     result = pipeline.run("20260616", "20260615")
 
     assert result.ok is True
-    assert result.screening["final_count"] >= 1
-    assert result.plan_cache_summary["cached"] >= 1
-    assert "000001" in dm.warmed_codes
+    # Minimal fixtures have no eligible historical leader or limit-up evidence.
+    # A successful pipeline must not manufacture executable candidates.
+    assert result.screening["final_count"] == 0
+    assert not dm.warmed_codes
     assert result.snapshot_paths.get("json")
     assert (tmp_path / "snapshots" / "20260616.json").exists()
     assert (tmp_path / "webdata" / "screening" / "screening_20260616.json").exists()

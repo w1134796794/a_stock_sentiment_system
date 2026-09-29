@@ -147,6 +147,7 @@ class EltdxQuoteCollector:
         payload = {
             "collector_id": ELTDX_COLLECTOR_ID,
             "source": "eltdx_batch",
+            "lease_owned": bool(getattr(self, "_lease_owned", False)),
             "updated_at": datetime.now().isoformat(timespec="milliseconds"),
             **result,
         }
@@ -195,15 +196,21 @@ class EltdxQuoteCollector:
                 self._wait(15.0)
                 continue
             try:
-                self._run_as_owner(once=once)
+                self._lease_owned = True
+                self._run_as_owner(lease, once=once)
             finally:
+                self._lease_owned = False
                 lease.release()
             if once:
                 return
 
-    def _run_as_owner(self, *, once: bool) -> None:
+    def _run_as_owner(self, lease: TaskLease, *, once: bool) -> None:
         logger.info("eltdx实时采集已取得唯一任务锁")
         while not self._stop:
+            if not lease.is_owner():
+                self._lease_owned = False
+                self._record_health({"ok": False, "message": "采集器租约已丢失"})
+                break
             if not once and not self._is_collection_session():
                 self._wait(15.0)
                 continue

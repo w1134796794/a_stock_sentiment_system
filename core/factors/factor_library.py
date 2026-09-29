@@ -32,6 +32,7 @@ _SAFE_FACTOR = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _FACTOR_WIDE_COLUMNS: Dict[str, str] = {
     "stk_liquidity_percentile": "fw.liquidity_score",
     "stk_sector_mainline_score": "fw.sector_mainline_score",
+    "stk_mainline_leader_identity": "fw.mainline_leader_identity_score",
     "stk_sector_resonance_score": "fw.sector_resonance_score",
     "stk_sector_persistence_score": "fw.sector_persistence_score",
     "stk_sector_rotation_momentum": "fw.sector_rotation_momentum_score",

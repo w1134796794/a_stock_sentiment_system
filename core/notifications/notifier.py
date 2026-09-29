@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections import Counter
 from typing import Any, Dict, List
 from urllib import parse, request
@@ -18,6 +19,7 @@ from core.infrastructure.shared_state import get_shared_state_backend
 class NotificationService:
     def __init__(self, *, timeout: float = 8.0, backend: Any = None) -> None:
         self.timeout = max(float(timeout), 1.0)
+        self.retry_seconds = 30.0
         self.wecom_url = os.getenv("WECOM_WEBHOOK_URL", "").strip()
         self.dingtalk_url = os.getenv("DINGTALK_WEBHOOK_URL", "").strip()
         legacy_key = os.getenv("SERVERCHAN_SENDKEY", "").strip()
@@ -53,40 +55,48 @@ class NotificationService:
         if not self.enabled:
             return {"ok": False, "sent": 0, "message": "未配置通知渠道"}
         dedup_key = f"notification:{event_key}" if event_key else ""
-        if dedup_key and self.backend.get_json(dedup_key):
-            return {"ok": True, "sent": 0, "deduplicated": True}
+        endpoints = []
+        for channel, url in (("企业微信", self.wecom_url), ("钉钉", self.dingtalk_url)):
+            if url:
+                endpoints.append((channel, url, False))
+        endpoints.extend(("Server酱", f"https://sctapi.ftqq.com/{parse.quote(key)}.send", True)
+                         for key in self._active_serverchan_keys())
 
         lock_key = ""
         lock_token = None
         if event_key:
             digest = hashlib.sha256(event_key.encode("utf-8")).hexdigest()[:24]
             lock_key = f"notification-send:{digest}"
-            lock_token = self.backend.acquire_lock(lock_key, max(int(self.timeout * 4), 30))
+            lock_token = self.backend.acquire_lock(lock_key, max(int(self.timeout * (len(endpoints) + 1)) + 30, 30))
             if not lock_token:
-                return {"ok": True, "sent": 0, "deduplicated": True, "inflight": True}
+                return {"ok": False, "sent": 0, "all_delivered": False, "inflight": True}
 
         try:
-            if dedup_key and self.backend.get_json(dedup_key):
-                return {"ok": True, "sent": 0, "deduplicated": True}
             results = []
-            if self.wecom_url:
-                results.append(self._post_json(
-                    self.wecom_url,
-                    {"msgtype": "text", "text": {"content": f"{title}\n{content}"}},
-                ))
-            if self.dingtalk_url:
-                results.append(self._post_json(
-                    self.dingtalk_url,
-                    {"msgtype": "text", "text": {"content": f"{title}\n{content}"}},
-                ))
-            for recipient, send_key in enumerate(self._active_serverchan_keys(), start=1):
-                url = f"https://sctapi.ftqq.com/{parse.quote(send_key)}.send"
-                result = self._post_form(url, {"title": title, "desp": content})
-                results.append({"channel": "Server酱", "recipient": recipient, **result})
-            sent = sum(bool(item.get("ok")) for item in results)
-            if sent and dedup_key:
-                self.backend.set_json(dedup_key, {"sent": True}, ttl_seconds=ttl_seconds)
-            return {"ok": sent > 0, "sent": sent, "results": results}
+            for recipient, (channel, url, form) in enumerate(endpoints, start=1):
+                endpoint_key = dedup_key + ":" + hashlib.sha256(url.encode()).hexdigest()[:24] if dedup_key else ""
+                previous = self.backend.get_json(endpoint_key) or {} if endpoint_key else {}
+                if previous.get("sent"):
+                    results.append({"ok": True, "deduplicated": True, "channel": channel, "recipient": recipient})
+                    continue
+                if float(previous.get("retry_at") or 0) > time.time():
+                    results.append({"ok": False, "retry_pending": True, "channel": channel, "recipient": recipient})
+                    continue
+                try:
+                    result = (self._post_form(url, {"title": title, "desp": content}) if form else
+                              self._post_json(url, {"msgtype": "text", "text": {"content": f"{title}\n{content}"}}))
+                except Exception:
+                    result = {"ok": False, "message": "通知渠道请求失败"}
+                if endpoint_key:
+                    attempts = int(previous.get("attempts") or 0) + 1
+                    self.backend.set_json(endpoint_key, {"sent": bool(result.get("ok")), "attempts": attempts,
+                                          "retry_at": time.time() + min(self.retry_seconds * 2 ** min(attempts-1, 6), 1800)},
+                                          ttl_seconds=ttl_seconds)
+                results.append({"channel": channel, "recipient": recipient, **result})
+            sent = sum(bool(item.get("ok")) and not item.get("deduplicated", False) for item in results)
+            complete = all(item.get("ok") for item in results)
+            return {"ok": complete, "all_delivered": complete, "sent": sent,
+                    "deduplicated": complete and not sent, "results": results}
         finally:
             if lock_key and lock_token:
                 try:
@@ -164,7 +174,8 @@ class NotificationService:
                     continue
                 pushed = self.backend.get_json(cluster_lock_key + ":count") or {}
                 pushed_count = int(pushed.get("count") or 0) if isinstance(pushed, dict) else 0
-                if pushed_count >= cluster_limit:
+                pushed_codes = list(pushed.get("codes") or [])
+                if pushed_count >= cluster_limit and code not in pushed_codes:
                     row["notification_status"] = "同主题推送已达上限"
                     row["notification_skip_reason"] = (
                         f"{cluster}当日已推送{pushed_count}只，当前市场同主题上限{cluster_limit}只"
@@ -220,10 +231,11 @@ class NotificationService:
                 delivered = int(result.get("sent") or 0)
                 sent += delivered
                 row["notification_status"] = "已推送" if delivered else "已去重或渠道不可用"
-                if cluster and delivered:
+                row["notification_result"] = result
+                if cluster and delivered and code not in pushed_codes:
                     self.backend.set_json(
                         cluster_lock_key + ":count",
-                        {"count": pushed_count + 1, "cluster": cluster, "market_date": market_date},
+                        {"count": pushed_count + 1, "codes": [*pushed_codes, code], "cluster": cluster, "market_date": market_date},
                         ttl_seconds=60 * 60 * 24,
                     )
             finally:

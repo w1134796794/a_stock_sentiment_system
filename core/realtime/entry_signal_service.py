@@ -16,6 +16,7 @@ from backtest.minute_entry import (
     MinuteEntryEvaluator,
     normalize_minute_bars,
     normalize_strategy_entry_modes,
+    resolve_entry_deadline,
 )
 from backtest.reversal_entry import STRUCTURAL_LABELS, STRUCTURAL_MODES
 from backtest.trade_calendar import TradeCalendar
@@ -186,7 +187,7 @@ class RealtimeEntrySignalService:
         if structural:
             mode = structural[0]
         structures = execution.get("structures") or row.get("reversal_structures") or {}
-        if mode in STRUCTURAL_MODES and not frame.empty:
+        if not frame.empty:
             quote_time = str(quote.get("time") or quote.get("received_at") or "").replace("T", " ").split(" ")[-1]
             if len(quote_time) >= 5 and quote_time[2] == ":":
                 frame = frame[frame["time"] < quote_time[:5] + ":00"].copy()
@@ -228,7 +229,7 @@ class RealtimeEntrySignalService:
             amount_profile_samples=profile_samples,
             live=True,
             structure=structures.get(mode, {}),
-            confirmation_deadline=(execution.get("mode_deadlines") or {}).get(mode) or execution.get("confirmation_deadline", ""),
+            confirmation_deadline=resolve_entry_deadline(execution, mode),
         )
         if structural:
             mode, decision = evaluated
@@ -281,6 +282,11 @@ class RealtimeEntrySignalService:
         if mode in STRUCTURAL_MODES:
             payload["structure"] = structures.get(mode, {})
             payload["structural_stop"] = (structures.get(mode) or {}).get("protection")
+        payload["strategy_execution"] = execution
+        payload["strategy_version"] = row.get("strategy_version", "")
+        deadline = resolve_entry_deadline(execution, mode, self.evaluator.deadline)
+        if decision.confirm_time and decision.confirm_time > deadline:
+            return self._payload(EntryDecision("cancelled", reason="超过策略确认截止时间"), mode, market_date)
         return payload
 
     @staticmethod
@@ -552,7 +558,28 @@ class RealtimeEntrySignalService:
         try:
             state, detail = self.sector_breadth.evaluate(sectors, market_date)
             if state is not None:
-                return (lambda _at_time: state), detail
+                from datetime import datetime, timedelta
+
+                observed = str(detail.get("observed_at") or datetime.now().isoformat(timespec="seconds"))
+                stamp = datetime.fromisoformat(observed)
+                if stamp.tzinfo is not None:
+                    from zoneinfo import ZoneInfo
+
+                    stamp = stamp.astimezone(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
+                history = getattr(self, "_sector_observations", {})
+                key = (market_date, tuple(sorted(sectors)))
+                samples = history.setdefault(key, [])
+                if not samples or samples[-1][0] != stamp:
+                    samples.append((stamp, state))
+                history[key] = samples[-120:]
+                self._sector_observations = {k: v for k, v in history.items() if k[0] == market_date}
+
+                def at_minute(at_time):
+                    end = datetime.strptime(market_date + str(at_time)[:8], "%Y%m%d%H:%M:%S") + timedelta(minutes=1)
+                    known = [(time, value) for time, value in history[key] if time <= end and (end-time).total_seconds() <= 90]
+                    return known[-1][1] if known else None
+
+                return at_minute, {**detail, "observed_at": observed}
         except Exception:
             detail = {}
         peers: List[str] = []

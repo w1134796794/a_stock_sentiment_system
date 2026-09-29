@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -94,7 +95,9 @@ def _metric_observation(row: Mapping[str, Any], factor: str) -> tuple[bool, floa
             continue
         for key in keys:
             if key in container and container.get(key) not in (None, ""):
-                return True, _number(container.get(key))
+                value = _number(container.get(key), math.nan)
+                if math.isfinite(value):
+                    return True, value
     return False, 0.0
 
 
@@ -139,9 +142,14 @@ class DecisionPoolService:
         )
         risk_flags = list(state_payload.get("risk_flags") or snapshot.risk_flags)
         phase_reasons = list(state_payload.get("phase_reasons") or snapshot.phase_reasons)
-        allowed_strategies = set(PHASE_ALLOWED_STRATEGIES[phase]).intersection(
-            REGIME_STRATEGIES[regime]
-        )
+        allowed_strategies = set()
+        for strategy_id, profile in profiles.items():
+            regimes = profile.get("market_regimes")
+            phases = profile.get("emotion_phases")
+            regime_ok = regime in regimes if regimes is not None else strategy_id in REGIME_STRATEGIES[regime]
+            phase_ok = phase in phases if phases is not None else strategy_id in PHASE_ALLOWED_STRATEGIES[phase]
+            if regime_ok and phase_ok and profile.get("enabled", True):
+                allowed_strategies.add(strategy_id)
         available = [
             strategy_id for strategy_id in PRODUCTION_STRATEGIES
             if strategy_id in payloads and strategy_id in profiles
@@ -540,7 +548,7 @@ class DecisionPoolService:
         row["失效条件"] = (
             "；".join(blocked_reasons)
             if blocked_reasons
-            else "；".join(veto_conditions[:2] or ["板块转弱", "跌破开盘低点或10:00前未确认"])
+            else "；".join(veto_conditions[:2] or ["板块转弱", "跌破开盘低点或超过策略截止时间未确认"])
         )
         structural_reasons = []
         for mode, structure in (combined_execution.get("structures") or {}).items():
@@ -606,13 +614,28 @@ class DecisionPoolService:
             name = str(rule.get("name") or rule.get("factor") or "增强条件")
             factor = str(rule.get("factor") or "")
             if not state["observed"]:
-                failures.append(f"{name}未通过：缺少{factor}数据")
+                failures.append(DecisionPoolService._missing_evidence_reason(members, factor, name))
                 continue
             actual = max(state["values"], default=0.0)
             failures.append(
                 f"{name}未达标（实际{actual:.1f}，要求{DecisionPoolService._rule_requirement(rule)}）"
             )
         return _unique(failures)
+
+    @staticmethod
+    def _missing_evidence_reason(members: Sequence[Mapping[str, Any]], factor: str, name: str) -> str:
+        if factor.startswith("stk_lhb_"):
+            sources = [_metric_observation(item, "lhb_source_available") for item in members]
+            presence = [_metric_observation(item, "lhb_present") for item in members]
+            if any(observed and value > 0 for observed, value in presence):
+                return f"{name}未确认：该股已上榜，但候选结果未携带{factor}因子，请核查计算或导出"
+            if any(observed and value > 0 for observed, value in sources):
+                return f"{name}未增强：该股无适用龙虎榜上榜记录（非基础数据缺失）"
+            if any(observed for observed, _ in sources):
+                return f"{name}未确认：该日龙虎榜因子来源未就绪，请核查取数或计算"
+            if any(observed for observed, _ in presence):
+                return f"{name}未增强：该股无适用上榜增强指标（不等于龙虎榜基础数据未获取）"
+        return f"{name}未确认：候选结果未提供{factor}因子，请核查计算或导出"
 
     @staticmethod
     def _rule_requirement(rule: Mapping[str, Any]) -> str:

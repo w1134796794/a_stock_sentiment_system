@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -260,6 +261,16 @@ class ETLDailyPipeline:
         phase_started = time.monotonic()
         factor_results = FactorJobRunner(self.duckdb_path).run(trade_date)
         result.factor_results = [item.to_dict() for item in factor_results]
+        status_dir = self.web_data_dir / "factor_status"
+        status_dir.mkdir(parents=True, exist_ok=True)
+        status_path = status_dir / f"factors_{trade_date}.json"
+        pending_path = status_path.with_suffix(".json.tmp")
+        pending_path.write_text(json.dumps({
+            "trade_date": trade_date,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "jobs": result.factor_results,
+        }, ensure_ascii=False, default=str), encoding="utf-8")
+        pending_path.replace(status_path)
         failed = [item for item in result.factor_results if not item.get("ok")]
         if failed:
             result.warnings.append(f"因子任务失败: {[item.get('name') for item in failed]}")
@@ -291,6 +302,13 @@ class ETLDailyPipeline:
             trade_date=trade_date, prev_trade_date=prev_trade_date, stage="screening"
         )
         require_stage(factor_status(trade_date, db_path=self.duckdb_path))
+        job_path = self.web_data_dir / "factor_status" / f"factors_{trade_date}.json"
+        if job_path.exists():
+            job_status = json.loads(job_path.read_text(encoding="utf-8"))
+            expected_jobs = set(FactorJobRunner.JOBS)
+            passed_jobs = FactorJobRunner.successful_job_keys(job_status.get("jobs") or [])
+            if job_status.get("trade_date") != trade_date or passed_jobs != expected_jobs:
+                raise RuntimeError(f"因子任务未逐项成功: {sorted(expected_jobs - passed_jobs)}")
         from core.screening.strategy_profiles import StrategyProfileRepository
 
         strategy_repository = StrategyProfileRepository()
@@ -318,29 +336,12 @@ class ETLDailyPipeline:
             f"primary={primary_strategy}"
         )
 
-        weak_to_strong_codes: Optional[set[str]] = None
-        if "weak_to_strong" in strategy_ids:
-            from config.settings import WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS
-            from core.realtime.leader_pool_service import LeaderPoolService
-
-            weak_to_strong_codes = LeaderPoolService(
-                screening_dir=self.web_data_dir / "screening",
-                duckdb_path=self.duckdb_path,
-            ).historical_leader_codes(
-                trade_date,
-                lookback=WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS,
-                include_trade_date=False,
-            )
-            logger.info(
-                f"[选股策略][弱转强前置池] 截至上一交易日近"
-                f"{WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS}日曾入龙头池="
-                f"{len(weak_to_strong_codes)}"
-            )
-
         phase_started = time.monotonic()
         logger.info(f"[选股策略][筛选] 开始: {trade_date}")
         strategy_results: Dict[str, Dict[str, Any]] = {}
         screening = None
+        candidate_frame = ScreeningEngine(duckdb_path=self.duckdb_path,
+                                           output_dir=self.web_data_dir / "screening").load_candidates(trade_date)
         for strategy_id in strategy_ids:
             strategy_profile = strategy_repository.get_profile(strategy_id) or {}
             strategy_config = strategy_repository.resolve(strategy_id)
@@ -352,11 +353,7 @@ class ETLDailyPipeline:
                 trade_date,
                 profile=strategy_id,
                 profile_config=strategy_config,
-                candidate_codes=(
-                    weak_to_strong_codes
-                    if strategy_id == "weak_to_strong"
-                    else None
-                ),
+                candidate_frame=candidate_frame,
                 persist=True,
             )
             payload = current.to_dict()

@@ -11,7 +11,7 @@ import numpy as np
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 import loguru
 
@@ -28,6 +28,7 @@ from backtest.minute_entry import (
     MinuteEntryEvaluator,
     normalize_minute_bars,
     normalize_strategy_entry_modes,
+    resolve_entry_deadline,
 )
 from backtest.trade_calendar import TradeCalendar
 from core.signals.minute_amount_profile import MinuteAmountProfileRepository
@@ -1153,8 +1154,7 @@ class BacktestEngine:
             evaluated = evaluate(
                 **({'execution': execution} if structural else {}),
                 structure=(self._plan_execution(plan).get('structures') or {}).get(entry_mode, {}),
-                confirmation_deadline=(self._plan_execution(plan).get('mode_deadlines') or {}).get(entry_mode)
-                or self._plan_execution(plan).get('confirmation_deadline', ''),
+                confirmation_deadline=resolve_entry_deadline(self._plan_execution(plan), entry_mode),
                 mode=entry_mode,
                 bars=self._minute_frames.get((str(date), stock_code), pd.DataFrame()),
                 open_gap=gap,
@@ -1179,6 +1179,10 @@ class BacktestEngine:
                 entry_mode, decision = evaluated
             else:
                 decision = evaluated
+            if (decision.filled and self._float(lu_price) > 0
+                    and decision.entry_price * (1 + self.config.slippage) >= self._float(lu_price)):
+                decision = replace(decision, status="signal_unfilled", entry_price=0,
+                                   reason="计入滑点后达到涨停价，缺少可成交证据")
             self._record_entry_attempt(plan, date, stock_code, stock_name, decision, entry_mode=entry_mode)
             if not decision.filled:
                 logger.info(
@@ -1575,6 +1579,7 @@ class BacktestEngine:
         stop_price = self._float(position.get("stop_loss_price"))
         exit_config = self._position_exit_config(position)
         peak = max(self._float(position.get("highest_price"), entry_price), entry_price)
+        holding_days = self._calculate_holding_days(position["entry_date"], date)
         session_low = entry_price
         session_high = peak
         first = True
@@ -1610,6 +1615,13 @@ class BacktestEngine:
                 price = min(minute_open, trailing_price) if 0 < minute_open < trailing_price else trailing_price
                 return {"sell": True, "price": price, "reason": "trailing_stop_minute"}
             position["last_close"] = minute_close
+
+            minute_pnl = minute_close / entry_price - 1 if entry_price > 0 else 0.0
+            if (str(getattr(row, "time", "")) >= "14:55:00"
+                    and holding_days >= int(exit_config["time_stop_days"])
+                    and minute_pnl < exit_config["time_stop_profit_threshold"]):
+                self._update_excursion(position, session_high, session_low)
+                return {"sell": True, "price": minute_close, "reason": "time_stop_minute_close"}
 
         self._update_excursion(position, session_high, session_low)
         close_price = self._float(bars.iloc[-1].get("close"), self._float(daily_bar.get("close")))
@@ -1720,16 +1732,15 @@ class BacktestEngine:
     ) -> float:
         """Return the pullback distance for the current profit stage."""
         cfg = exit_config or self._execution_exit_config({})
-        profit = max(self._float(peak_profit_pct), 0.0)
-        if profit >= cfg['trailing_high_profit']:
-            return max(cfg['trailing_stop'], 0.0)
-        if profit >= cfg['trailing_mid_profit']:
-            return max(cfg['trailing_mid_stop'], 0.0)
-        return max(cfg['trailing_early_stop'], 0.0)
+        from backtest.exit_policy import trailing_distance
+
+        return trailing_distance(max(self._float(peak_profit_pct), 0.0), cfg)
 
     def _execution_exit_config(self, execution: Dict[str, Any]) -> Dict[str, Any]:
+        from backtest.exit_policy import normalize_exit_parameters
+
         raw = execution.get('exit') if isinstance(execution.get('exit'), dict) else {}
-        return {
+        return normalize_exit_parameters({
             'hard_stop_loss': self._float(raw.get('hard_stop_loss'), self.config.stop_loss_pct),
             'trailing_activation': self._float(raw.get('trailing_activation'), self.config.trailing_activation_pct),
             'trailing_early_stop': self._float(raw.get('trailing_early_stop'), self.config.trailing_early_stop_pct),
@@ -1741,7 +1752,7 @@ class BacktestEngine:
             'time_stop_profit_threshold': self._float(
                 raw.get('time_stop_profit_threshold'), self.config.time_stop_profit_threshold,
             ),
-        }
+        })
 
     def _position_exit_config(self, position: Dict[str, Any]) -> Dict[str, Any]:
         saved = position.get('exit_config')

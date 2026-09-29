@@ -1159,6 +1159,8 @@ class IntradayStrengthService:
             "confidence": signal.get("confidence") or {},
             "sector_detail": signal.get("sector_detail") or {},
             "quote_time": quote.get("received_at") or quote.get("time") or "",
+            "quote_source_time": quote.get("time") or "",
+            "received_at": quote.get("received_at") or "",
             "quote_source": quote.get("source") or "",
             "strategy_id": self.LEADER_POOL_PROFILE,
             "strategy_name": "近期龙头池",

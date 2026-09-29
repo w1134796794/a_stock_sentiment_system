@@ -416,7 +416,17 @@ function Workbench() {
       <div><Activity size={17} /><span>涨停 / 跌停</span><strong><em className="up">{data.market.limit_up_count}</em> / <em className="down">{data.market.limit_down_count}</em></strong></div>
       <div><Activity size={17} /><span>上涨 / 下跌</span><strong><em className="up">{marketContext.up_count ?? "--"}</em> / <em className="down">{marketContext.down_count ?? "--"}</em></strong></div>
       <div><Target size={17} /><span>连板晋级率</span><strong>{promotionRate == null ? "--" : `${Number(promotionRate).toFixed(1)}%`}</strong></div>
-      <div><BarChart3 size={17} /><span>市场量能</span><strong>{marketContext.vol_word || "--"}{marketContext.vol_pct == null ? "" : ` ${signedPct(marketContext.vol_pct)}`}</strong></div>
+      <div className="stat-volume">
+        <BarChart3 size={17} />
+        <span>市场量能</span>
+        <strong>{marketContext.vol_word || "--"}</strong>
+        <small>
+          {marketContext.amount_text ? `成交额 ${marketContext.amount_text}` : "成交额待更新"}
+          {marketContext.amount_prev_date && marketContext.vol_pct != null
+            ? ` · 较${marketContext.amount_prev_date} ${marketContext.vol_pct >= 0 ? "+" : ""}${Number(marketContext.vol_pct).toFixed(1)}%`
+            : ""}
+        </small>
+      </div>
       <div><BarChart3 size={17} /><span>炸板率</span><strong>{Number(data.market.broken_rate || 0).toFixed(1)}%</strong></div>
       <div><Target size={17} /><span>可行动</span><strong>{data.decision_summary.actionable}</strong></div>
     </section>

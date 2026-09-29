@@ -349,7 +349,6 @@ COLUMN_LABELS: Dict[str, str] = {
     "trading": "交易可信度",
     "portfolio": "组合可信度",
     "status": "状态",
-    "description": "说明",
     "confidence_score": "可信度%",
     "data_completeness": "数据完整度%",
     "regime_match": "市场适配度%",
@@ -2202,7 +2201,14 @@ def portfolio_page(request: Request) -> Any:
 
 @app.get("/api/portfolio")
 def api_portfolio(account: str = "default") -> Any:
-    return JSONResponse({"ok": True, "data": _get_holding_service().dashboard("default")})
+    return JSONResponse({"ok": True, "data": _get_holding_service().dashboard(account)})
+
+
+@app.get("/api/portfolio/accounts")
+def api_portfolio_accounts() -> Any:
+    from core.portfolio.holding_repository import HoldingRepository
+
+    return JSONResponse({"ok": True, "data": HoldingRepository().list_accounts()})
 
 
 @app.post("/api/portfolio/positions")
@@ -2254,13 +2260,18 @@ def api_portfolio_monitor(payload: dict = Body(default={})) -> Any:
 def api_portfolio_replay(payload: dict = Body(default={})) -> Any:
     start_date = str((payload or {}).get("start_date") or "").replace("-", "")
     end_date = str((payload or {}).get("end_date") or _latest_date()).replace("-", "")
-    capital = float((payload or {}).get("initial_capital") or PAPER_INITIAL_CAPITAL)
-    if len(start_date) != 8 or not start_date.isdigit():
+    if start_date and (len(start_date) != 8 or not start_date.isdigit()):
         return JSONResponse({"ok": False, "message": "开始日期必须为YYYYMMDD"}, status_code=422)
     if len(end_date) != 8 or not end_date.isdigit():
         return JSONResponse({"ok": False, "message": "结束日期必须为YYYYMMDD"}, status_code=422)
-    if start_date > end_date:
+    if start_date and start_date > end_date:
         return JSONResponse({"ok": False, "message": "开始日期不能晚于结束日期"}, status_code=422)
+    from core.portfolio.incremental_replay import IncrementalPaperReplay
+
+    service = IncrementalPaperReplay()
+    checkpoint = service.checkpoint()
+    if checkpoint.get("config_version") and checkpoint["config_version"] != service.config_version():
+        return JSONResponse({"ok": False, "message": "策略配置版本已变化；请使用独立历史重建账户"}, status_code=409)
     with _PAPER_REPLAY_LOCK:
         if _PAPER_REPLAY_STATE.get("state") in {"prefetching", "running"}:
             return JSONResponse({"ok": False, "message": "历史回放正在运行"}, status_code=409)
@@ -2269,23 +2280,76 @@ def api_portfolio_replay(payload: dict = Body(default={})) -> Any:
             "started_epoch": time.time(),
             "start_date": start_date,
             "end_date": end_date,
-            "state": "prefetching",
-            "stage": "统计所需分钟行情",
+            "mode": "incremental",
+            "state": "running",
+            "stage": "准备逐日接力",
             "progress": {},
-            "imported": False,
-            "run_id": "",
-            "import_result": {},
         })
     Thread(
         target=_run_paper_replay,
-        args=(start_date, end_date, capital),
-        name="paper-history-replay",
+        args=(start_date, end_date),
+        name="paper-incremental-replay",
         daemon=True,
     ).start()
-    return JSONResponse({"ok": True, "message": "正在补齐历史分钟行情，完成后自动开始回放"})
+    return JSONResponse({"ok": True, "message": "从账户检查点的下一交易日逐日补跑；缺证据会停在当天"})
 
 
-def _run_paper_replay(start_date: str, end_date: str, capital: float) -> None:
+def _run_paper_replay(start_date: str, end_date: str) -> None:
+    from core.portfolio.incremental_replay import IncrementalPaperReplay, ReplayBlocked
+
+    try:
+        def update(progress: Dict[str, Any]) -> None:
+            with _PAPER_REPLAY_LOCK:
+                _PAPER_REPLAY_STATE.update({"stage": progress.get("stage"), "progress": progress})
+
+        result = IncrementalPaperReplay().run(start_date, end_date, progress=update)
+        with _PAPER_REPLAY_LOCK:
+            _PAPER_REPLAY_STATE.update({"state": "done", "stage": "逐日补跑完成", "result": result})
+    except ReplayBlocked as exc:
+        with _PAPER_REPLAY_LOCK:
+            _PAPER_REPLAY_STATE.update({"state": "blocked", "blocked_date": exc.trade_date,
+                                        "error": exc.reason})
+    except Exception as exc:  # noqa: BLE001
+        with _PAPER_REPLAY_LOCK:
+            _PAPER_REPLAY_STATE.update({"state": "error", "error": str(exc)})
+
+
+@app.get("/api/portfolio/replay/checkpoint")
+def api_portfolio_replay_checkpoint() -> Any:
+    from core.portfolio.incremental_replay import IncrementalPaperReplay
+
+    service = IncrementalPaperReplay()
+    checkpoint = service.checkpoint()
+    checkpoint.pop("state", None)
+    _, _, _, last_trade_date = service._account_snapshot()
+    anchor = str(checkpoint.get("last_completed_date") or last_trade_date)
+    checkpoint["account_last_trade_date"] = last_trade_date
+    checkpoint["next_trade_date"] = service.calendar.next(anchor) if anchor and service.calendar.is_real else ""
+    return JSONResponse({"ok": True, "data": checkpoint,
+                         "config_version": service.config_version()})
+
+
+@app.post("/api/portfolio/rebuild")
+def api_portfolio_rebuild(payload: dict = Body(default={})) -> Any:
+    start_date = str((payload or {}).get("start_date") or "").replace("-", "")
+    end_date = str((payload or {}).get("end_date") or _latest_date()).replace("-", "")
+    capital = float((payload or {}).get("initial_capital") or PAPER_INITIAL_CAPITAL)
+    if not (len(start_date) == 8 and start_date.isdigit() and len(end_date) == 8 and end_date.isdigit()
+            and start_date <= end_date):
+        return JSONResponse({"ok": False, "message": "请提供有效的历史重建日期范围"}, status_code=422)
+    with _PAPER_REPLAY_LOCK:
+        if _PAPER_REPLAY_STATE.get("state") in {"prefetching", "running"}:
+            return JSONResponse({"ok": False, "message": "回放正在运行"}, status_code=409)
+        _PAPER_REPLAY_STATE.clear()
+        _PAPER_REPLAY_STATE.update({"mode": "rebuild", "state": "prefetching", "stage": "补齐分钟行情",
+                                    "start_date": start_date, "end_date": end_date,
+                                    "progress": {}, "imported": False})
+    Thread(target=_run_paper_rebuild, args=(start_date, end_date, capital),
+           name="paper-history-rebuild", daemon=True).start()
+    return JSONResponse({"ok": True, "message": "历史重建将在独立账户运行，不覆盖当前模拟持仓"})
+
+
+def _run_paper_rebuild(start_date: str, end_date: str, capital: float) -> None:
     from desktop.runner import BACKTEST_CONTROLLER
 
     def update_progress(progress: Dict[str, Any]) -> None:
@@ -2329,6 +2393,9 @@ def api_portfolio_replay_status(since: int = 0) -> Any:
     from desktop.runner import BACKTEST_CONTROLLER
 
     replay_state = str(_PAPER_REPLAY_STATE.get("state") or "")
+    if _PAPER_REPLAY_STATE.get("mode") == "incremental":
+        return JSONResponse({"state": replay_state or "idle", "next": since,
+                             "logs": [], "paper_replay": dict(_PAPER_REPLAY_STATE)})
     if replay_state == "prefetching":
         return JSONResponse({
             "state": "prefetching",
@@ -2351,7 +2418,8 @@ def api_portfolio_replay_status(since: int = 0) -> Any:
         )
         if run_id:
             try:
-                imported = _get_paper_trading_service().import_backtest_run(run_id, reset=True)
+                imported = _get_paper_trading_service().import_backtest_run(
+                    run_id, reset=True, account_key=f"history_{run_id}")
                 _PAPER_REPLAY_STATE.update({
                     "state": "done",
                     "imported": True,
@@ -3319,6 +3387,45 @@ def _get_cached_realtime_payload(key: tuple, loader) -> Any:
     return _REALTIME_PAYLOAD_CACHE.get_or_load(key, loader)
 
 
+@lru_cache(maxsize=16)
+def _postclose_gate_for_date(trade_date: str, market_date: str, minute_bucket: int) -> dict:
+    from core.operations.health import postclose_health
+
+    return postclose_health(trade_date, as_of_market_date=market_date)
+
+
+@lru_cache(maxsize=1)
+def _trading_ledger():
+    from core.operations.ledger import TradingLedger
+
+    return TradingLedger()
+
+
+def _prepare_signal_payload(payload: dict) -> dict:
+    from core.operations.evidence import attach_evidence
+    from core.operations.health import gate_realtime_payload
+    from core.realtime.quote_cache import RealtimeQuoteCache
+
+    confirmed = any(
+        str(row.get("confirm_status") or row.get("status") or "") == "confirmed"
+        for row in payload.get("rows") or []
+    )
+    if confirmed:
+        candidate_date = str(payload.get("candidate_date") or payload.get("trade_date") or "")
+        postclose = _postclose_gate_for_date(
+            candidate_date, str(payload.get("market_date") or ""), int(time.time() // 60),
+        )
+        if not postclose["ok"]:
+            for row in payload.get("rows") or []:
+                if str(row.get("confirm_status") or row.get("status") or "") == "confirmed":
+                    row["confirm_status"] = row["status"] = "observe"
+                    row["status_text"] = row["signal_status_text"] = "数据待恢复"
+                    row["health_gate_reason"] = "盘后证据未就绪：" + "；".join(postclose["reasons"])
+                    row["reason"] = row["health_gate_reason"]
+        gate_realtime_payload(payload, collector=RealtimeQuoteCache().health())
+    return attach_evidence(payload)
+
+
 def _refresh_realtime_defaults() -> None:
     if _data_generation_running() or not _current_realtime_session()["is_open"]:
         return
@@ -3381,10 +3488,31 @@ def _refresh_realtime_defaults() -> None:
         try:
             payload = _REALTIME_PAYLOAD_CACHE.refresh(key, loader)
             if isinstance(payload, dict):
+                from core.operations.ledger import stable_id
+
+                _prepare_signal_payload(payload)
+                ledger = _trading_ledger()
+                for row in payload.get("rows") or []:
+                    status = str(row.get("confirm_status") or row.get("status") or "")
+                    if status not in {"confirmed", "cancelled", "unfilled"} and not row.get("health_gate_reason"):
+                        continue
+                    signal_id = str(row["signal_id"])
+                    evidence = dict(row["signal_evidence"])
+                    if ledger.event(stable_id(signal_id, "signal", status, evidence["trigger_reason"]),
+                                    "signal", evidence, signal_id=signal_id):
+                        ledger.evidence(signal_id, evidence)
                 from core.notifications.notifier import NotificationService
 
                 try:
                     NotificationService().notify_realtime_payload(payload)
+                    for row in payload.get("rows") or []:
+                        result = row.get("notification_result") or {}
+                        if int(result.get("sent") or 0) and row.get("signal_id"):
+                            signal_id = str(row["signal_id"])
+                            ledger.event(stable_id(signal_id, "notification", "buy"), "notification",
+                                         {"sent": result["sent"], "code": row.get("code"), "side": "buy",
+                                          "channel_results": result.get("results") or []}, signal_id=signal_id)
+                        row.pop("notification_result", None)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Realtime notification failed: %s", exc)
                 try:
@@ -3611,7 +3739,9 @@ def api_realtime_overlay(
                 stale_after_seconds=normalized_stale,
             ),
         )
-    return JSONResponse(payload)
+    from copy import deepcopy
+
+    return JSONResponse(_prepare_signal_payload(deepcopy(payload)))
 
 
 @app.get("/api/leader-pool")
@@ -3669,7 +3799,9 @@ def api_intraday_strength(
         ),
         load_payload,
     )
-    return JSONResponse(payload)
+    from copy import deepcopy
+
+    return JSONResponse(_prepare_signal_payload(deepcopy(payload)))
 
 
 @app.get("/api/etl/screening/{date}")
@@ -3954,6 +4086,71 @@ def api_automation_status() -> Any:
         except (OSError, ValueError, TypeError):
             payload[key] = {}
     return JSONResponse(payload)
+
+
+@app.get("/api/operations/health/{trade_date}")
+def api_operations_health(trade_date: str) -> Any:
+    from core.operations.health import postclose_health
+    from core.realtime.quote_cache import RealtimeQuoteCache
+
+    return JSONResponse({
+        "postclose": postclose_health(trade_date),
+        "realtime_collector": RealtimeQuoteCache().health(),
+    })
+
+
+@app.get("/api/operations/signals/{signal_id}")
+def api_operations_signal(signal_id: str) -> Any:
+    from core.operations.ledger import TradingLedger
+
+    return JSONResponse(TradingLedger().timeline(signal_id))
+
+
+@app.get("/api/operations/experiments")
+def api_operations_experiments() -> Any:
+    from core.operations.ledger import TradingLedger
+
+    return JSONResponse({"rows": TradingLedger().list_experiments()})
+
+
+@app.get("/strategy-evaluation", response_class=HTMLResponse)
+def strategy_evaluation_page(request: Request) -> Any:
+    return templates.TemplateResponse(
+        request, "strategy_evaluation.html", {"latest_trade_date": _latest_date()},
+    )
+
+
+@app.post("/api/operations/experiments/freeze")
+def api_operations_experiment_freeze(payload: dict = Body(default={})) -> Any:
+    from core.operations.experiments import StrategyExperimentLedger
+
+    label = str((payload or {}).get("label") or "production-five").strip()[:80]
+    return JSONResponse(StrategyExperimentLedger().freeze(label=label))
+
+
+@app.post("/api/operations/experiments/{experiment_id}/evaluate")
+def api_operations_experiment_evaluate(experiment_id: str, payload: dict = Body(default={})) -> Any:
+    from core.operations.experiments import StrategyExperimentLedger
+
+    data = payload or {}
+    try:
+        report = StrategyExperimentLedger().evaluate(
+            experiment_id, start=str(data.get("start") or "").replace("-", ""),
+            end=str(data.get("end") or "").replace("-", ""),
+            train_days=int(data.get("train_days") or 60),
+            validation_days=int(data.get("validation_days") or 20),
+        )
+    except (ValueError, TypeError) as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+    return JSONResponse(report)
+
+
+@app.get("/api/operations/experiments/{experiment_id}")
+def api_operations_experiment(experiment_id: str) -> Any:
+    from core.operations.ledger import TradingLedger
+
+    report = TradingLedger().experiment(experiment_id)
+    return JSONResponse(report or {"ok": False, "message": "实验不存在"}, status_code=200 if report else 404)
 
 
 @app.get("/api/realtime/auction-alert")
@@ -4270,7 +4467,9 @@ def _mobile_realtime_cache(
     payload = _REALTIME_PAYLOAD_CACHE.get(key)
     if not isinstance(payload, dict):
         return None
-    result = dict(payload)
+    from copy import deepcopy
+
+    result = _prepare_signal_payload(deepcopy(payload))
     cache_stats = _REALTIME_PAYLOAD_CACHE.stats()
     result.setdefault("trade_date", trade_date)
     result.setdefault("market_date", quote_date)

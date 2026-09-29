@@ -16,8 +16,10 @@ def _continuation_bars() -> pd.DataFrame:
             "high": close + (0.06 if minute == 36 else 0.02),
             "low": close - 0.03,
             "close": close,
-            "volume": 100_000,
-            "amount": 2_000_000,
+            "volume": 200_000,
+            "amount": close * 200_000,
+            "volume_unit": "shares",
+            "amount_is_estimated": False,
         })
     return pd.DataFrame(rows)
 

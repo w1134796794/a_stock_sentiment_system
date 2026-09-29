@@ -52,15 +52,15 @@ def test_build_factor_state_structure():
     assert st["factor_total"] > 0
     assert st["factor_groups"], "因子分组为空"
     assert st["enabled_factor_list"], "启用指标列表为空"
-    assert "default" in st["profile_names"]
+    assert st["core_catalog"]
+    assert st["strategy_factor_roles"]
     assert "strategies" not in st
     assert "param_groups" not in st
     assert "confidence_modes" not in st
-    assert st["dynamic_weights"]["rows"]
-    assert st["dynamic_weights"]["source"] in {
-        "冷启动先验", "IC/IR 动态权重", "LightGBM + IC/IR",
-    }
+    assert "dynamic_weights" not in st
     lhb_group = next((group for group in st["factor_groups"] if group["category"] == "lhb"), None)
     assert lhb_group is not None
     assert lhb_group["label"] == "龙虎榜"
-    assert len(lhb_group["factors"]) == 6
+    assert {row["factor_id"] for row in lhb_group["factors"]} == {
+        "stk_lhb_crowding_risk", "stk_lhb_sector_resonance",
+    }

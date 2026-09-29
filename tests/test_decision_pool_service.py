@@ -386,6 +386,25 @@ def test_inactive_candidate_exposes_failed_rules_as_exclusion_reasons():
     assert "量价健康未达标（实际42.0，要求≥55）" in candidate["排除理由"]
 
 
+def test_missing_lhb_evidence_distinguishes_unlisted_from_source_failure():
+    rule = {"name": "龙虎榜净买认可", "factor": "stk_lhb_net_buy_score", "op": ">=", "value": 55}
+    unlisted = {"_evidence_rules": [rule], "context": {"lhb_present": 0, "lhb_source_available": 1}}
+    reasons = DecisionPoolService._failed_evidence_rules([unlisted])
+    assert reasons == ["龙虎榜净买认可未增强：该股无适用龙虎榜上榜记录（非基础数据缺失）"]
+
+    unavailable = {"_evidence_rules": [rule], "context": {"lhb_present": 0, "lhb_source_available": 0}}
+    assert "因子来源未就绪" in DecisionPoolService._failed_evidence_rules([unavailable])[0]
+
+    listed = {"_evidence_rules": [rule], "context": {"lhb_present": 1, "lhb_source_available": 1}}
+    assert "该股已上榜" in DecisionPoolService._failed_evidence_rules([listed])[0]
+
+
+def test_nan_evidence_is_not_reported_as_an_observed_score():
+    row = {"_evidence_rules": [{"name": "市场共识", "factor": "mkt_market_score", "value": 55}],
+           "metrics": {"mkt_market_score": float("nan")}, "context": {"mkt_market_score": 65}}
+    assert DecisionPoolService._failed_evidence_rules([row]) == []
+
+
 def test_weak_market_limits_medical_cluster_and_keeps_other_themes():
     profiles = {
         "mainline_leader": _profile("mainline_leader", "主线龙头"),

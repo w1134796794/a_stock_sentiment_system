@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import math
+from copy import copy
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Optional
 
 import pandas as pd
@@ -36,6 +38,13 @@ STRATEGY_ENTRY_MODE_ALIASES = {
     ENTRY_FIXED: ENTRY_FIXED,
     ENTRY_HYBRID: ENTRY_HYBRID,
 }
+
+
+def resolve_entry_deadline(execution: dict, mode: str, fallback: str = "") -> str:
+    canonical = STRATEGY_ENTRY_MODE_ALIASES.get(mode, mode)
+    deadlines = [str(value) for key, value in (execution.get("mode_deadlines") or {}).items()
+                 if value and STRATEGY_ENTRY_MODE_ALIASES.get(key, key) == canonical]
+    return min(deadlines) if deadlines else str(execution.get("confirmation_deadline") or fallback)
 
 
 def normalize_strategy_entry_modes(values: Any) -> set[str]:
@@ -104,7 +113,18 @@ def normalize_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
         data["amount"] = pd.to_numeric(data["amount"], errors="coerce").fillna(0.0)
     else:
         data["amount"] = 0.0
-    estimated_amount = data["close"].fillna(0.0) * data["volume"]
+    units = data.get("volume_unit", pd.Series("shares", index=data.index)).fillna("shares")
+    # Legacy eltdx data uses lots even when the old cache omitted the unit.
+    if "volume_unit" not in data and "source" in data:
+        units = units.mask(data["source"].eq("eltdx"), "lots")
+    multiplier = units.map({"shares": 1.0, "lots": 100.0, "hand": 100.0}).fillna(float("nan"))
+    amount_estimated = data.get("amount_is_estimated", pd.Series(False, index=data.index)).fillna(True).astype(bool)
+    if "amount_is_estimated" not in data and "source" in data:
+        amount_estimated = amount_estimated | data["source"].eq("eltdx")
+    amount_estimated = amount_estimated | data["amount"].le(0)
+    data["volume_shares"] = data["volume"] * multiplier
+    data["amount_is_estimated"] = amount_estimated
+    estimated_amount = data["close"].fillna(0.0) * data["volume_shares"]
     data.loc[data["amount"] <= 0, "amount"] = estimated_amount[data["amount"] <= 0]
     data = data[
         (data["time"].between("09:30:00", "11:30:00") | data["time"].between("13:00:00", "15:00:00"))
@@ -114,10 +134,18 @@ def normalize_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
         return data
     weighted = data["close"] * data["volume"]
     cum_volume = data["volume"].cumsum()
-    calculated_vwap = weighted.cumsum() / cum_volume.replace(0, pd.NA)
+    approximate_vwap = weighted.cumsum() / cum_volume.replace(0, pd.NA)
+    accurate = ~data["amount_is_estimated"].cummax() & data["volume_shares"].notna().cummin()
+    calculated_vwap = (data["amount"].cumsum() / data["volume_shares"].cumsum().replace(0, pd.NA)).where(accurate, approximate_vwap)
     source_avg = pd.to_numeric(data.get("avg_price"), errors="coerce") if "avg_price" in data.columns else None
+    if source_avg is not None:
+        source_avg = source_avg.where(source_avg.gt(0) & source_avg.lt(float("inf")))
     data["vwap"] = source_avg.fillna(calculated_vwap) if source_avg is not None else calculated_vwap
     data["vwap"] = data["vwap"].fillna(data["close"])
+    data["vwap_source"] = "estimated_close_weighted"
+    data.loc[accurate, "vwap_source"] = "amount_volume"
+    if source_avg is not None:
+        data.loc[source_avg.notna() & source_avg.gt(0), "vwap_source"] = "provider_average"
     data["cum_amount"] = data["amount"].cumsum()
     buy_source = next((column for column in ("active_buy_amount", "buy_amount", "主动买入额") if column in data.columns), "")
     sell_source = next((column for column in ("active_sell_amount", "sell_amount", "主动卖出额") if column in data.columns), "")
@@ -171,8 +199,7 @@ class MinuteEntryEvaluator:
                 args.pop(field, None)
             decision = self.evaluate(
                 mode=key, structure=(execution.get("structures") or {}).get(key, {}),
-                confirmation_deadline=(execution.get("mode_deadlines") or {}).get(key)
-                or execution.get("confirmation_deadline", ""), **args,
+                confirmation_deadline=resolve_entry_deadline(execution, key), **args,
             )
             decisions.append((key, decision))
         return min(decisions, key=lambda pair: (
@@ -202,6 +229,22 @@ class MinuteEntryEvaluator:
         structure: Optional[dict] = None,
         confirmation_deadline: str = "",
     ) -> EntryDecision:
+        if not confirmation_deadline and mode in {"limit_pullback", "limit_reversal"}:
+            confirmation_deadline = "14:30:00"
+        if confirmation_deadline and confirmation_deadline != self.deadline:
+            local = copy(self)
+            parsed = datetime.strptime(confirmation_deadline, "%H:%M:%S" if len(confirmation_deadline) == 8 else "%H:%M")
+            local.deadline = parsed.strftime("%H:%M:%S")
+            return local.evaluate(
+                mode=mode, bars=bars, open_gap=open_gap, prev_close=prev_close,
+                previous_amount=previous_amount, previous_volume=previous_volume,
+                auction_amount=auction_amount, auction_volume=auction_volume,
+                plan_amount_ratio=plan_amount_ratio, limit_price=limit_price,
+                is_leader=is_leader, sector_sync=sector_sync,
+                expected_amount_fraction=expected_amount_fraction,
+                amount_profile_samples=amount_profile_samples, live=live,
+                structure=structure, confirmation_deadline=local.deadline,
+            )
         data = normalize_minute_bars(bars)
         if data.empty or len(data) < 2:
             status = "observing" if live else "missing_minutes"
@@ -210,7 +253,7 @@ class MinuteEntryEvaluator:
         if mode in STRUCTURAL_MODES:
             return evaluate_structure(
                 self, mode=mode, data=data, structure=structure or {},
-                deadline=confirmation_deadline or "14:30:00", gap=open_gap,
+                deadline=self.deadline, gap=open_gap,
                 prev_close=prev_close, limit_price=limit_price, sector_sync=sector_sync, live=live,
             )
         opening_rows = data[data["time"] <= "09:35:00"]
@@ -293,7 +336,7 @@ class MinuteEntryEvaluator:
                 and sector_ok
                 and self.min_amount_pace <= pace <= self.max_amount_pace
             )
-            if confirmed:
+            if confirmed and (not live or index >= len(data) - 2):
                 return self._next_minute_fill(
                     data, index, "弱转强", "收复昨收、站上VWAP并突破前5分钟高点",
                     gap, pace, sector_ok, limit_price, live=live,
@@ -315,7 +358,7 @@ class MinuteEntryEvaluator:
             )
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "弱转强", "弱转强条件尚未全部满足", open_gap_pct=gap)
-        return EntryDecision("cancelled", "弱转强", "10:00前未完成弱转强确认", open_gap_pct=gap)
+        return EntryDecision("cancelled", "弱转强", f"{self.deadline[:5]}前未完成弱转强确认", open_gap_pct=gap)
 
     def _continuation(
         self, data, first_five, scan, gap, previous_amount, previous_volume,
@@ -362,7 +405,7 @@ class MinuteEntryEvaluator:
                     )
                     signal = "开盘强势确认"
                     reason = "竞价明细缺失，按突破前5分钟高点、站稳VWAP和分钟量能确认"
-                if confirmed:
+                if confirmed and (not live or index >= len(data) - 2):
                     if not sector_observed:
                         reason += "（缺少板块确认）"
                     return self._next_minute_fill(
@@ -387,7 +430,7 @@ class MinuteEntryEvaluator:
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "强势延续", "强势延续条件尚未全部满足", open_gap_pct=gap)
         signal = "强势延续" if auction_available else "开盘强势确认"
-        reason = "10:00前未出现有效承接或突破" if auction_available else "缺少竞价明细且10:00前未完成开盘强势确认"
+        reason = f"{self.deadline[:5]}前未出现有效承接或突破" if auction_available else f"缺少竞价明细且{self.deadline[:5]}前未完成开盘强势确认"
         return EntryDecision("cancelled", signal, reason, open_gap_pct=gap)
 
     def _acceleration(
@@ -407,7 +450,7 @@ class MinuteEntryEvaluator:
             sector_observed = sector_observed or sector_state is not None
             sector_ok = bool(sector_state)
             sector_check_passed = sector_ok if sector_observed else False
-            if sector_check_passed and (
+            if sector_check_passed and (not live or index >= len(data) - 2) and (
                 float(row["high"]) > opening_high
                 or (limit_price > 0 and float(row["high"]) >= limit_price * 0.998)
             ):
@@ -426,11 +469,11 @@ class MinuteEntryEvaluator:
             )
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "高开加速", "高开加速条件尚未全部满足", open_gap_pct=gap)
-        return EntryDecision("cancelled", "高开加速", "10:00前未出现龙头加速确认", open_gap_pct=gap)
+        return EntryDecision("cancelled", "高开加速", f"{self.deadline[:5]}前未出现龙头加速确认", open_gap_pct=gap)
 
     def _next_minute_fill(
         self, data, index, signal, reason, gap, pace, sector_ok, limit_price,
-        unfilled_when_locked: bool = False,
+        unfilled_when_locked: bool = True,
         live: bool = False,
         profile_samples: int = 0,
         hold_minutes: int = 0,
@@ -449,10 +492,13 @@ class MinuteEntryEvaluator:
                 )
             return EntryDecision("signal_unfilled", signal, f"{reason}，但缺少下一分钟成交", str(data.loc[index, "time"]), open_gap_pct=gap)
         next_row = following.iloc[0]
+        elapsed = (datetime.strptime(str(next_row["time"]), "%H:%M:%S") - datetime.strptime(str(data.loc[index, "time"]), "%H:%M:%S")).total_seconds()
+        if elapsed != 60 or str(next_row["time"]) > self.deadline:
+            return EntryDecision("signal_unfilled", signal, "下一分钟缺失或超过执行截止时间", str(data.loc[index, "time"]), open_gap_pct=gap)
         price = float(next_row.get("open") or next_row.get("close") or 0.0)
         volume = float(next_row.get("volume") or 0.0)
         locked = limit_price > 0 and price >= limit_price * 0.998
-        if price <= 0 or volume <= 0 or (unfilled_when_locked and locked):
+        if not math.isfinite(price) or not math.isfinite(volume) or price <= 0 or volume <= 0 or locked:
             return EntryDecision(
                 "signal_unfilled", signal, f"{reason}，下一分钟无可成交量或仍封涨停",
                 str(data.loc[index, "time"]), str(next_row.get("time") or ""),

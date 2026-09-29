@@ -15,10 +15,12 @@
   <div class="pf-auto-status"><span></span><strong>激进交易已开启</strong><small>每只约{{ '%.0f'|format(paper_position_pct) }}%，最多{{ paper_max_positions }}只；满仓时新信号强{{ '%.0f'|format(paper_rotation_min_edge) }}分以上自动换出弱持仓</small></div>
   {% if is_admin %}
   <div id="replay-controls" class="pf-replay">
-    <label>开始日期<input id="replay-start" value="" maxlength="8" placeholder="YYYYMMDD"></label>
+    <label>账户<select id="portfolio-account"><option value="default">模拟交易账户</option></select></label>
+    <label>首次开始日<input id="replay-start" value="" maxlength="8" placeholder="自动接力"></label>
     <label>结束日期<input id="replay-end" value="{{ latest_trade_date }}" maxlength="8" placeholder="YYYYMMDD"></label>
-    <button id="start-replay" class="pf-button" type="button">运行历史模拟</button>
-    <span id="replay-status">任选日期范围；历史模拟将重建当前账户</span>
+    <button id="start-replay" class="pf-button" type="button">补跑至结束日</button>
+    <button id="start-rebuild" class="pf-button" type="button">独立历史重建</button>
+    <span id="replay-status">读取账户检查点中…</span>
   </div>
   {% endif %}
 </section>
@@ -103,13 +105,14 @@
 
 <style>
   .hidden { display:none !important; }
-  .pf-account-bar { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+  .pf-account-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
   .pf-auto-status { display:flex; align-items:center; gap:.5rem; color:#d1fae5; }
   .pf-auto-status>span { width:8px; height:8px; border-radius:50%; background:#34d399; box-shadow:0 0 0 4px rgba(52,211,153,.1); }
   .pf-auto-status small { color:#64748b; margin-left:.35rem; }
-  .pf-replay { display:flex; align-items:flex-end; gap:.5rem; color:#64748b; font-size:.72rem; }
+  .pf-replay { display:flex; flex-wrap:wrap; align-items:flex-end; max-width:100%; gap:.5rem; color:#64748b; font-size:.72rem; }
   .pf-replay label { color:#73829a; }
-  .pf-replay input { display:block; width:112px; margin-top:.2rem; color:#e2e8f0; background:#070d1b; border:1px solid #334155; border-radius:6px; padding:.42rem .55rem; }
+  .pf-replay input,.pf-replay select { display:block; width:112px; margin-top:.2rem; color:#e2e8f0; background:#070d1b; border:1px solid #334155; border-radius:6px; padding:.42rem .55rem; }
+  .pf-replay select { width:150px; }
   .pf-summary { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.75rem; margin-bottom:1rem; }
   .pf-summary>div { min-height:88px; border:1px solid #263449; border-radius:7px; background:#101a2c; padding:1rem; }
   .pf-summary strong { display:block; font-size:1.65rem; line-height:1.1; }
@@ -162,7 +165,7 @@
 
 <script>
   const admin = {{ 'true' if is_admin else 'false' }};
-  const currentAccount = 'default';
+  let currentAccount = 'default';
   let replayCursor = 0;
   let replayTimer = null;
   let state = {positions:[], trades:[], exit_signals:[]};
@@ -189,7 +192,7 @@
     setTimeout(()=>box.classList.add('hidden'),5000);
   }
   async function load() {
-    try { const payload=await api(`/api/portfolio?account=${currentAccount}`); state=payload.data || {}; render(); }
+    try { const payload=await api(`/api/portfolio?account=${encodeURIComponent(currentAccount)}`); state=payload.data || {}; render(); $('run-monitor').disabled=currentAccount!=='default'; if(admin)$('add-position').disabled=currentAccount!=='default'; }
     catch(error){ message(error.message,true); }
   }
   function render() {
@@ -229,14 +232,21 @@
   $('run-monitor').addEventListener('click',async()=>{try{$('run-monitor').disabled=true;const result=await api('/api/portfolio/monitor',{method:'POST',body:JSON.stringify({account:currentAccount})});message(`检查完成：${result.count||0}只持仓，推送${result.notified||0}条提醒${result.executed?`，自动退出${result.executed}只`:''}`);await load();}catch(error){message(error.message,true);}finally{$('run-monitor').disabled=false;}});
 
   {% if is_admin %}
+  async function loadAccounts(){try{const result=await api('/api/portfolio/accounts');$('portfolio-account').innerHTML=(result.data||[]).map(row=>`<option value="${esc(row.account_key)}">${esc(row.name||row.account_key)} · ${esc(row.account_key)}</option>`).join('');if((result.data||[]).some(row=>row.account_key===currentAccount))$('portfolio-account').value=currentAccount;}catch(error){message(error.message,true);}}
+  $('portfolio-account').addEventListener('change',async event=>{currentAccount=event.target.value;await load();});
   function today(){const d=new Date();return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;}
   document.querySelectorAll('.dialog-close').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
   $('add-position').addEventListener('click',()=>{ $('position-form').reset(); $('position-id').value=''; $('position-date').value=today(); $('position-emergency').value='6'; $('position-dialog-title').textContent='手工买入'; $('position-code').disabled=false; $('position-price').disabled=false; $('position-shares').disabled=false; $('position-dialog').showModal(); });
   function bindPositionActions(){document.querySelectorAll('.edit-position').forEach(button=>button.onclick=()=>{const p=(state.positions||[]).find(row=>String(row.id)===button.dataset.id);if(!p)return;$('position-id').value=p.id;$('position-code').value=p.code;$('position-name').value=p.name;$('position-date').value=p.entry_date;$('position-time').value=p.entry_time||'';$('position-price').value=p.entry_price;$('position-shares').value=p.shares;$('position-strategy').value=p.strategy_id||'';$('position-stop').value=p.structural_stop||'';$('position-sectors').value=p.sector_names||'';$('position-emergency').value=p.emergency_loss_pct||6;$('position-dialog-title').textContent='修改持仓设置';$('position-code').disabled=true;$('position-price').disabled=true;$('position-shares').disabled=true;$('position-dialog').showModal();});document.querySelectorAll('.sell-position').forEach(button=>button.onclick=()=>{const p=(state.positions||[]).find(row=>String(row.id)===button.dataset.id);if(!p)return;$('sell-position-id').value=p.id;$('sell-price').value=p.last_price||'';$('sell-shares').value=p.shares;$('sell-shares').max=p.shares;$('sell-date').value=today();$('sell-time').value='';$('sell-reason').value='';$('sell-dialog').showModal();});}
   $('save-position').addEventListener('click',async()=>{const id=$('position-id').value;const strategy=$('position-strategy').value;const body={name:$('position-name').value,strategy_id:strategy,strategy_name:strategyText[strategy]||'',sector_names:$('position-sectors').value,structural_stop:Number($('position-stop').value||0),emergency_loss_pct:Number($('position-emergency').value||6)};let url='/api/portfolio/positions',method='POST';if(id){url+=`/${id}`;method='PATCH';}else{Object.assign(body,{code:$('position-code').value,entry_date:$('position-date').value,entry_time:$('position-time').value,entry_price:Number($('position-price').value),shares:Number($('position-shares').value)});}try{await api(url,{method,body:JSON.stringify(body)});$('position-dialog').close();message('持仓已保存');await load();}catch(error){message(error.message,true);}});
   $('save-sell').addEventListener('click',async()=>{const id=$('sell-position-id').value;const body={price:Number($('sell-price').value),shares:Number($('sell-shares').value),trade_date:$('sell-date').value,trade_time:$('sell-time').value,reason:$('sell-reason').value};try{await api(`/api/portfolio/positions/${id}/sell`,{method:'POST',body:JSON.stringify(body)});$('sell-dialog').close();message('卖出成交已记录');await load();}catch(error){message(error.message,true);}});
-  async function pollReplay(){try{const result=await api(`/api/portfolio/replay/status?since=${replayCursor}`);replayCursor=result.next||replayCursor;const replay=result.paper_replay||{};const progress=replay.progress||{};const progressText=progress.total?`${progress.completed||0}/${progress.total}`:'';$('replay-status').innerHTML=result.state==='prefetching'?`${esc(replay.stage||'补齐分钟行情')} ${progressText}`:result.state==='running'?'历史分钟模拟运行中…':result.state==='error'?`模拟失败：${esc(result.error||'请查看运行日志')}`:replay.imported?`已导入批次 ${esc(replay.run_id)}：买入${replay.import_result?.buy||0}、卖出${replay.import_result?.sell||0}、持仓${replay.import_result?.open||0} · <a class="text-emerald-300" href="/backtest?run=${encodeURIComponent(replay.run_id)}">查看详细结果</a>`:'等待模拟结果';if(result.state==='done'&&replay.imported){clearInterval(replayTimer);replayTimer=null;await load();}if(result.state==='error'){clearInterval(replayTimer);replayTimer=null;}}catch(error){$('replay-status').textContent=error.message;}}
-  $('start-replay').addEventListener('click',async()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if(!/^\d{8}$/.test(start)||!/^\d{8}$/.test(end)){message('请输入完整的开始和结束日期（YYYYMMDD）',true);return;}if(start>end){message('开始日期不能晚于结束日期',true);return;}if(!window.confirm(`历史模拟将按{{ '%.0f'|format(paper_initial_capital / 10000) }}万元初始资金重建当前账户，并替换现有持仓和成交记录。运行 ${start} 至 ${end}？`))return;try{$('start-replay').disabled=true;replayCursor=0;const result=await api('/api/portfolio/replay',{method:'POST',body:JSON.stringify({start_date:start,end_date:end,initial_capital:{{ paper_initial_capital }}})});message(result.message);if(replayTimer)clearInterval(replayTimer);replayTimer=setInterval(pollReplay,2000);await pollReplay();}catch(error){message(error.message,true);}finally{$('start-replay').disabled=false;}});
+  async function replayCheckpoint(){try{const result=await api('/api/portfolio/replay/checkpoint');const row=result.data||{};$('replay-status').textContent=row.blocked_date?`停在 ${row.blocked_date}：${row.blocked_reason}`:row.last_completed_date?`已完成至 ${row.last_completed_date} · 下一日 ${row.next_trade_date}`:row.account_last_trade_date?`账户成交至 ${row.account_last_trade_date} · 只能从 ${row.next_trade_date} 接力；更早请用独立重建`:'尚无检查点；首次请填写开始日';}catch(error){$('replay-status').textContent=error.message;}}
+  async function pollReplay(){try{const result=await api(`/api/portfolio/replay/status?since=${replayCursor}`);replayCursor=result.next||replayCursor;const replay=result.paper_replay||{},progress=replay.progress||{};if(replay.mode==='incremental'){$('replay-status').textContent=result.state==='blocked'?`停在 ${replay.blocked_date}：${replay.error}`:result.state==='error'?`补跑失败：${replay.error}`:result.state==='done'?`已完成至 ${replay.result?.last_completed_date||'--'} · 新增成交${replay.result?.fill_count||0}笔`:`${replay.stage||'逐日补跑'} ${progress.trade_date||''} · 已完成${progress.completed_days||0}日`;}else{$('replay-status').textContent=result.state==='error'?`重建失败：${replay.error||result.error}`:replay.imported?`独立账户 ${replay.import_result?.account_key} 已重建，未覆盖当前账户`:`${replay.stage||'历史重建'} ${progress.completed||0}/${progress.total||0}`;}if(['done','blocked','error'].includes(result.state)){clearInterval(replayTimer);replayTimer=null;await loadAccounts();await load();}}catch(error){$('replay-status').textContent=error.message;}}
+  async function launchReplay(path,start,end){try{$('start-replay').disabled=true;$('start-rebuild').disabled=true;replayCursor=0;const result=await api(path,{method:'POST',body:JSON.stringify({start_date:start,end_date:end,initial_capital:{{ paper_initial_capital }}})});message(result.message);if(replayTimer)clearInterval(replayTimer);replayTimer=setInterval(pollReplay,2000);await pollReplay();}catch(error){message(error.message,true);}finally{$('start-replay').disabled=false;$('start-rebuild').disabled=false;}}
+  $('start-replay').addEventListener('click',()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if((start&&!/^\d{8}$/.test(start))||!/^\d{8}$/.test(end)){message('日期请填写YYYYMMDD；已有检查点时开始日可留空',true);return;}if(start&&start>end){message('开始日期不能晚于结束日期',true);return;}launchReplay('/api/portfolio/replay',start,end);});
+  $('start-rebuild').addEventListener('click',()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if(!/^\d{8}$/.test(start)||!/^\d{8}$/.test(end)||start>end){message('独立重建需填写完整起止日期',true);return;}if(window.confirm(`在独立账户重建 ${start} 至 ${end}？当前模拟持仓和手工成交不会被覆盖。`))launchReplay('/api/portfolio/rebuild',start,end);});
+  replayCheckpoint();
+  loadAccounts();
   {% endif %}
   load();
 </script>

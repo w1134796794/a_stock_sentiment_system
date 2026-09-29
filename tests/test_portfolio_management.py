@@ -36,6 +36,9 @@ def _quote(**overrides):
         "high_price": 10.3,
         "change_pct": 2.0,
         "is_stale": False,
+        "date": "20260803",
+        "time": "09:36:00",
+        "pre_close": 10.0,
     }
     data.update(overrides)
     return data
@@ -272,6 +275,7 @@ def test_confirmed_realtime_signal_opens_only_one_simulation_position(tmp_path):
         initial_capital=100_000,
         max_positions=4,
         position_pct=10,
+        quote_service=_FakeQuotes(_quote(last_price=10.0, pre_close=10.0)),
     )
     payload = {
         "market_date": "20260803",
@@ -297,10 +301,29 @@ def test_confirmed_realtime_signal_opens_only_one_simulation_position(tmp_path):
     assert first["opened"] == 1
     assert second["opened"] == 0
     assert len(repository.list_positions("default")) == 1
-    assert repository.account("default")["cash"] == 90_000
+    assert 90_000 < repository.account("default")["cash"] < 91_000
+    assert repository.list_trades("default")[0]["fees"] > 0
+
+
+def test_paper_buy_rejects_quote_before_entry_time(tmp_path):
+    repository = HoldingRepository(tmp_path / "portfolio.sqlite")
+    service = PaperTradingService(
+        repository, initial_capital=100_000,
+        quote_service=_FakeQuotes(_quote(last_price=10, pre_close=10, time="09:35:59")),
+    )
+    result = service.process_realtime_payload({
+        "market_date": "20260803", "candidate_date": "20260802",
+        "rows": [{"code": "000001", "confirm_status": "confirmed",
+                  "entry_price": 9.9, "entry_time": "09:36:00"}],
+    })
+    assert result["opened"] == 0
+    assert "成交报价早于预定成交时间" in result["skipped"]
+    assert repository.list_trades("default") == []
 
 
 def test_manual_and_automatic_buys_share_one_million_account(tmp_path):
+    from types import SimpleNamespace
+
     repository = HoldingRepository(tmp_path / "portfolio.sqlite")
     holding_service = HoldingService(repository)
     holding_service.add_buy(
@@ -313,7 +336,14 @@ def test_manual_and_automatic_buys_share_one_million_account(tmp_path):
             "source": "manual",
         }
     )
-    trading_service = PaperTradingService(repository)
+    trading_service = PaperTradingService(
+        repository,
+        quote_service=SimpleNamespace(get_quotes=lambda codes: {"quotes": [
+            _quote(code=code, last_price=20.0 if code == "000002" else 10.0,
+                   pre_close=20.0 if code == "000002" else 10.0,
+                   time="09:38:00") for code in codes
+        ]}),
+    )
     result = trading_service.process_realtime_payload(
         {
             "market_date": "20260803",
@@ -335,12 +365,14 @@ def test_manual_and_automatic_buys_share_one_million_account(tmp_path):
 
     assert result["opened"] == 1
     assert dashboard["account"]["initial_capital"] == 1_000_000
-    assert dashboard["summary"]["cash"] == 650_000
-    assert dashboard["summary"]["total_assets"] == 1_000_000
+    assert 650_000 < dashboard["summary"]["cash"] < 660_000
+    assert dashboard["summary"]["total_assets"] < 1_000_000
     assert len(dashboard["positions"]) == 2
 
 
 def test_stronger_confirmed_signal_rotates_out_weakest_t1_holding(tmp_path):
+    from types import SimpleNamespace
+
     repository = HoldingRepository(tmp_path / "portfolio.sqlite")
     service = PaperTradingService(
         repository,
@@ -348,6 +380,10 @@ def test_stronger_confirmed_signal_rotates_out_weakest_t1_holding(tmp_path):
         max_positions=3,
         position_pct=34,
         rotation_min_edge=6,
+        quote_service=SimpleNamespace(get_quotes=lambda codes: {"quotes": [
+            _quote(code=code, last_price=20 if code == "000009" else 10,
+                   pre_close=20 if code == "000009" else 10) for code in codes
+        ]}),
     )
     for index, strength in enumerate((45, 62, 74), start=1):
         repository.open_position(
@@ -394,6 +430,8 @@ def test_stronger_confirmed_signal_rotates_out_weakest_t1_holding(tmp_path):
 
 
 def test_rotation_respects_t1_and_strength_edge(tmp_path):
+    from types import SimpleNamespace
+
     repository = HoldingRepository(tmp_path / "portfolio.sqlite")
     service = PaperTradingService(
         repository,
@@ -401,6 +439,9 @@ def test_rotation_respects_t1_and_strength_edge(tmp_path):
         max_positions=1,
         position_pct=100,
         rotation_min_edge=6,
+        quote_service=SimpleNamespace(get_quotes=lambda codes: {"quotes": [
+            _quote(code=code, last_price=10, pre_close=10) for code in codes
+        ]}),
     )
     repository.open_position(
         {
@@ -422,6 +463,7 @@ def test_rotation_respects_t1_and_strength_edge(tmp_path):
                 "entry_price": 10.0,
                 "entry_mode": "weak_to_strong",
                 "screening_score": 90,
+                "entry_time": "09:36:00",
             }
         ],
     }
@@ -432,6 +474,9 @@ def test_rotation_respects_t1_and_strength_edge(tmp_path):
     assert same_day["skipped"] == {"没有可换出的更弱持仓": 1}
 
     payload["market_date"] = "20260804"
+    service.quote_service = type("Quotes", (), {"get_quotes": lambda self, codes: {
+        "quotes": [_quote(code=code, date="20260804", last_price=10) for code in codes]
+    }})()
     payload["rows"][0]["screening_score"] = 40
     not_stronger = service.process_realtime_payload(payload)
     assert not_stronger["opened"] == 0

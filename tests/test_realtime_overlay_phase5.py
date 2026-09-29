@@ -148,7 +148,12 @@ def test_realtime_overlay_defaults_to_the_persisted_decision_pool(tmp_path):
     assert [row["code"] for row in payload["rows"]] == ["000001"]
     row = payload["rows"][0]
     assert row["strategy_sources"] == "mainline_leader,weak_to_strong"
-    assert row["strategy_sources_text"] == "主线龙头、弱转强修复"
+    from core.screening.strategy_profiles import StrategyProfileRepository
+
+    profiles = StrategyProfileRepository()
+    assert row["strategy_sources_text"] == "、".join(
+        profiles.get_profile(key)["name"] for key in ("mainline_leader", "weak_to_strong")
+    )
     assert row["action_group"] == "重点确认"
     assert row["strategy_execution"]["allowed_entry_modes"] == [
         "weak_to_strong", "continuation",

@@ -1,6 +1,7 @@
 """Automatic paper fills and historical replay imports."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -37,8 +38,10 @@ class PaperTradingService:
         max_positions: int = PAPER_MAX_POSITIONS,
         position_pct: float = PAPER_POSITION_PCT,
         rotation_min_edge: float = PAPER_ROTATION_MIN_EDGE,
+        quote_service: Any = None,
     ) -> None:
         self.repository = repository or HoldingRepository()
+        self.quote_service = quote_service
         self.initial_capital = max(float(initial_capital), 10_000.0)
         self.max_positions = min(max(int(max_positions), 1), 3)
         self.position_pct = min(max(float(position_pct), 1.0), 100.0)
@@ -50,6 +53,11 @@ class PaperTradingService:
         )
 
     def process_realtime_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        from core.portfolio.execution_quotes import execution_price, quote_error
+        from core.operations.ledger import TradingLedger, stable_id
+        from core.realtime.quote_service import RealtimeQuoteService
+        from risk.risk_config import RiskConfig
+
         market_date = str(payload.get("market_date") or "").replace("-", "")[:8]
         profile = str(payload.get("profile") or "realtime")
         strategy = dict(payload.get("strategy") or {})
@@ -61,12 +69,49 @@ class PaperTradingService:
             key=self._candidate_strength,
             reverse=True,
         )
+        confirmed_codes = [normalize_stock_code(row.get("code"), add_suffix=False)
+                           for row in rows if not self._skip_reason(row, market_date)]
+        existing = self.repository.list_positions(self.ACCOUNT_KEY)
+        codes = list(dict.fromkeys([*confirmed_codes, *[p["code"] for p in existing]])) if confirmed_codes else []
+        quotes = {}
+        if codes:
+            try:
+                service = self.quote_service or RealtimeQuoteService()
+                quote_rows = service.get_quotes(codes).get("quotes") or []
+                quotes = {normalize_stock_code(q.get("code"), add_suffix=False): q for q in quote_rows}
+            except Exception:
+                quotes = {}
+        costs = RiskConfig.load()
+        ledger = TradingLedger(self.repository.db_path)
         for row in rows:
             reason = self._skip_reason(row, market_date)
             if reason:
                 skipped[reason] = skipped.get(reason, 0) + 1
                 continue
             code = normalize_stock_code(row.get("code"), add_suffix=False)
+            signal_id = str(row.get("signal_id") or stable_id(
+                "signal", payload.get("candidate_date") or payload.get("trade_date"),
+                market_date, code, profile, row.get("entry_mode"), row.get("confirm_time"),
+            ))
+
+            def reject(message: str) -> None:
+                skipped[message] = skipped.get(message, 0) + 1
+                ledger.event(stable_id(signal_id, "not_executable", message), "paper_order_rejected",
+                             {"code": code, "reason": message, "market_date": market_date},
+                             signal_id=signal_id, account_key=self.ACCOUNT_KEY)
+
+            buy_quote = quotes.get(code) or {}
+            entry_time = str(row.get("entry_time") or "")
+            error = quote_error(buy_quote, market_date, side="buy", reference_time=entry_time)
+            if error or not entry_time:
+                reject(error or "缺少成交时间")
+                continue
+            try:
+                price = execution_price(buy_quote, side="buy", reference_time=entry_time,
+                                        slippage=costs.slippage)
+            except (TypeError, ValueError, KeyError) as exc:
+                reject(str(exc) or "成交报价无效")
+                continue
             if self.repository.get_open_position(code, self.ACCOUNT_KEY):
                 skipped["已有持仓"] = skipped.get("已有持仓", 0) + 1
                 continue
@@ -76,42 +121,58 @@ class PaperTradingService:
             positions = self.repository.list_positions(self.ACCOUNT_KEY)
             account = self.repository.account(self.ACCOUNT_KEY)
             cash = _number(account.get("cash"))
-            price = _number(row.get("entry_price"))
+            if any(quote_error(quotes.get(p["code"]), market_date,
+                               reference_time=buy_quote["time"]) for p in positions):
+                reject("持仓行情不足，暂停估值与买入")
+                continue
             equity = cash + sum(
-                _number(item.get("last_price"), _number(item.get("entry_price")))
+                _number((quotes.get(item["code"]) or {}).get("last_price"))
                 * int(item.get("shares") or 0)
                 for item in positions
             )
             position_pct = self._position_pct(row)
-            per_position = min(equity * position_pct / 100.0, cash)
+            per_position = min(equity * position_pct / 100.0, cash) / (1 + costs.commission_rate)
             shares = int(per_position / price / 100) * 100
             candidate_strength = self._candidate_strength(row)
             rotation = None
+            rotation_order = None
             if len(positions) >= self.max_positions or shares < 100:
+                if any(quote_error(quotes.get(p["code"]), market_date,
+                                   reference_time=buy_quote["time"]) for p in positions):
+                    reject("持仓行情不足，暂停换股")
+                    continue
+                positions = [{**p, "last_price": _number((quotes.get(p["code"]) or {}).get("last_price")),
+                              "execution_quote": quotes.get(p["code"], {})} for p in positions]
+                equity = cash + sum(p["last_price"] * int(p["shares"]) for p in positions)
                 target = self._rotation_target(
                     positions,
                     market_date=market_date,
                     candidate_strength=candidate_strength,
+                    reference_time=buy_quote["time"],
                 )
                 if not target:
                     key = "没有可换出的更弱持仓" if positions else "可用资金不足一手"
-                    skipped[key] = skipped.get(key, 0) + 1
+                    reject(key)
                     continue
-                sell_price = _number(target.get("last_price"), _number(target.get("entry_price")))
-                expected_cash = cash + sell_price * int(target.get("shares") or 0)
+                sell_price = execution_price(target["execution_quote"], side="sell",
+                                             reference_time=target["execution_quote"]["time"],
+                                             slippage=costs.slippage)
+                sell_fees = sell_price * int(target.get("shares") or 0) * (
+                    costs.commission_rate + costs.stamp_duty_rate)
+                expected_cash = cash + sell_price * int(target.get("shares") or 0) - sell_fees
                 expected_shares = int(
-                    min(equity * position_pct / 100.0, expected_cash) / price / 100
+                    min(equity * position_pct / 100.0, expected_cash)
+                    / (1 + costs.commission_rate) / price / 100
                 ) * 100
                 if sell_price <= 0 or expected_shares < 100:
-                    skipped["换股后资金仍不足一手"] = skipped.get("换股后资金仍不足一手", 0) + 1
+                    reject("换股后资金仍不足一手")
                     continue
                 target_strength = self._holding_strength(target)
-                self.repository.sell_position(
-                    int(target["id"]),
-                    {
+                rotation_order = {
                         "trade_date": market_date,
-                        "trade_time": row.get("confirm_time") or row.get("entry_time") or "",
+                        "trade_time": target["execution_quote"]["time"],
                         "price": sell_price,
+                        "fees": sell_fees,
                         "shares": int(target.get("shares") or 0),
                         "reason": (
                             f"强弱换股：新信号{candidate_strength:.1f}分，"
@@ -123,8 +184,7 @@ class PaperTradingService:
                             "candidate_strength": candidate_strength,
                             "holding_strength": target_strength,
                         },
-                    },
-                )
+                    }
                 rotation = {
                     "sold_code": target.get("code"),
                     "sold_name": target.get("name"),
@@ -132,30 +192,22 @@ class PaperTradingService:
                     "bought_code": code,
                     "candidate_strength": round(candidate_strength, 2),
                 }
-                positions = self.repository.list_positions(self.ACCOUNT_KEY)
-                cash = _number(self.repository.account(self.ACCOUNT_KEY).get("cash"))
-                equity = cash + sum(
-                    _number(item.get("last_price"), _number(item.get("entry_price")))
-                    * int(item.get("shares") or 0)
-                    for item in positions
-                )
-                per_position = min(equity * position_pct / 100.0, cash)
-                shares = int(per_position / price / 100) * 100
+                shares = expected_shares
             if shares < 100:
-                skipped["可用资金不足一手"] = skipped.get("可用资金不足一手", 0) + 1
+                reject("可用资金不足一手")
                 continue
             strategy_id = str(row.get("strategy_id") or strategy.get("id") or profile)
             strategy_name = str(row.get("strategy_name") or strategy.get("name") or profile)
             sectors = row.get("resonance_sectors") or row.get("sector_names") or ""
             if isinstance(sectors, (list, tuple, set)):
                 sectors = ",".join(str(item) for item in sectors if item)
-            opened_position = self.repository.open_position(
-                    {
+            buy_payload = {
                         "code": code,
                         "name": row.get("name"),
                         "entry_date": market_date,
-                        "entry_time": row.get("entry_time") or row.get("confirm_time"),
+                        "entry_time": buy_quote["time"],
                         "entry_price": price,
+                        "fees": price * shares * costs.commission_rate,
                         "structural_stop": _number(row.get("structural_stop")),
                         "shares": shares,
                         "strategy_id": strategy_id,
@@ -163,10 +215,14 @@ class PaperTradingService:
                         "sector_names": sectors,
                         "source": "auto_rotation" if rotation else "auto_realtime",
                         "reason": (
-                            f"{row.get('entry_mode_text') or '分钟信号'}确认后下一分钟成交，"
+                            f"{row.get('entry_mode_text') or '分钟信号'}确认后有效报价模拟成交，"
                             f"模拟仓位{position_pct:.0f}%，信号强度{candidate_strength:.1f}分"
                         ),
                         "metadata": {
+                            "signal_id": signal_id,
+                            "signal_evidence": row.get("signal_evidence") or {},
+                            "strategy_execution": row.get("strategy_execution") or strategy.get("execution") or {},
+                            "strategy_version": row.get("strategy_version") or strategy.get("version") or "legacy",
                             "structure": row.get("structure") or {},
                             "protection_price_source": "盘后结构保护价" if row.get("structural_stop") else "账户风险底线",
                             "candidate_date": payload.get("candidate_date") or payload.get("trade_date"),
@@ -176,12 +232,33 @@ class PaperTradingService:
                             "is_leader_observation": bool(row.get("is_leader_observation")),
                             "entry_strength_score": round(candidate_strength, 2),
                             "screening_score": _number(row.get("screening_score")),
+                            "quote_source_time": buy_quote.get("time"),
+                            "quote_received_at": buy_quote.get("received_at"),
+                            "execution_price_basis": "observed_quote_plus_slippage",
+                            "reference_signal_price": row.get("entry_price"),
                             "success_probability": _number(row.get("success_probability")),
                             "rotation": rotation or {},
                         },
-                    },
-                    self.ACCOUNT_KEY,
-            )
+                    }
+            order_id = stable_id(signal_id, "paper_order", "buy")
+            if rotation_order:
+                rotation_order.setdefault("metadata", {})["signal_id"] = signal_id
+            ledger.event(order_id, "paper_order", {
+                "code": code, "market_date": market_date, "entry_time": buy_payload["entry_time"],
+                "price": price, "shares": shares, "fees": buy_payload["fees"],
+                "price_basis": "observed_quote_plus_slippage", "strategy_id": strategy_id,
+                "rotation": rotation or {},
+            }, signal_id=signal_id, account_key=self.ACCOUNT_KEY)
+            try:
+                opened_position = (self.repository.rotate_position(int(target["id"]), rotation_order, buy_payload, self.ACCOUNT_KEY)
+                                   if rotation_order else self.repository.open_position(buy_payload, self.ACCOUNT_KEY))
+            except ValueError as exc:
+                reject(str(exc))
+                continue
+            evidence = dict(row.get("signal_evidence") or {})
+            if evidence:
+                evidence["paper_execution_time"] = buy_payload["entry_time"]
+                ledger.evidence(signal_id, evidence)
             opened.append(opened_position)
             if rotation:
                 rotations.append(rotation)
@@ -256,13 +333,18 @@ class PaperTradingService:
         *,
         market_date: str,
         candidate_strength: float,
+        reference_time: str = "",
     ) -> Dict[str, Any]:
+        from core.portfolio.execution_quotes import quote_error
+
         sellable = [
             row
             for row in positions
             if str(row.get("entry_date") or "").replace("-", "") < market_date
             and int(row.get("shares") or 0) > 0
             and _number(row.get("last_price"), _number(row.get("entry_price"))) > 0
+            and not quote_error(row.get("execution_quote") or {}, market_date, reference_time=reference_time)
+            and self.repository.sellable_shares(int(row["id"]), market_date) == int(row["shares"])
         ]
         if not sellable:
             return {}
@@ -291,7 +373,7 @@ class PaperTradingService:
             str(start_date),
             str(end_date),
             include_sector_peers=True,
-            peer_count=4,
+            peer_count=8,
         )
         cache_dir = Path(CACHE_DIR)
         cached = {
@@ -370,8 +452,10 @@ class PaperTradingService:
             return "行情已过期"
         return ""
 
-    def import_backtest_run(self, run_id: str, *, reset: bool = True) -> Dict[str, Any]:
+    def import_backtest_run(self, run_id: str, *, reset: bool = True,
+                            account_key: str | None = None) -> Dict[str, Any]:
         run_id = str(run_id or "").strip()
+        account_key = str(account_key or self.ACCOUNT_KEY)
         if not run_id:
             raise ValueError("回测批次不能为空")
         result_dir = Path(OUTPUT_DIR) / "backtest_results"
@@ -379,14 +463,25 @@ class PaperTradingService:
         positions_path = result_dir / f"backtest_positions_{run_id}.csv"
         if not trades_path.exists() and not positions_path.exists():
             raise ValueError(f"未找到回测批次 {run_id}")
+        if reset and account_key == self.ACCOUNT_KEY:
+            with self.repository._connect() as conn:
+                occupied = conn.execute(
+                    "SELECT 1 FROM portfolio_trades WHERE account_key=? LIMIT 1",
+                    (account_key,),
+                ).fetchone() or conn.execute(
+                    "SELECT 1 FROM portfolio_positions WHERE account_key=? LIMIT 1",
+                    (account_key,),
+                ).fetchone()
+            if occupied:
+                raise ValueError("当前模拟账户已有成交或持仓；历史重建必须指定独立账户")
         self.repository.ensure_account(
-            self.ACCOUNT_KEY,
-            name="模拟交易账户",
+            account_key,
+            name="历史重建账户" if account_key != self.ACCOUNT_KEY else "模拟交易账户",
             initial_capital=self.initial_capital,
         )
         if reset:
             self.repository.reset_account(
-                self.ACCOUNT_KEY,
+                account_key,
                 initial_capital=self.initial_capital,
             )
 
@@ -395,16 +490,16 @@ class PaperTradingService:
             trades = pd.read_csv(trades_path, dtype={"stock_code": str})
             for row in trades.to_dict("records"):
                 try:
-                    self._import_trade(row, run_id, imported)
+                    self._import_trade(row, run_id, imported, account_key=account_key)
                 except (TypeError, ValueError):
                     imported["skipped"] += 1
         if positions_path.exists():
             positions = pd.read_csv(positions_path, dtype={"stock_code": str})
             for row in positions.to_dict("records"):
                 code = normalize_stock_code(row.get("stock_code"), add_suffix=False)
-                if not code or self.repository.get_open_position(code, self.ACCOUNT_KEY):
+                if not code or self.repository.get_open_position(code, account_key):
                     continue
-                if len(self.repository.list_positions(self.ACCOUNT_KEY)) >= self.max_positions:
+                if len(self.repository.list_positions(account_key)) >= self.max_positions:
                     imported["skipped"] += 1
                     continue
                 try:
@@ -421,7 +516,7 @@ class PaperTradingService:
                             "source": "historical_replay",
                             "metadata": {"run_id": run_id},
                         },
-                        self.ACCOUNT_KEY,
+                        account_key,
                     )
                     current = _number(row.get("current_price"), _number(row.get("entry_price")))
                     self.repository.update_position_market(
@@ -434,20 +529,27 @@ class PaperTradingService:
                     imported["open"] += 1
                 except (TypeError, ValueError):
                     imported["skipped"] += 1
-        return {**imported, "run_id": run_id, "account_key": self.ACCOUNT_KEY}
+        return {**imported, "run_id": run_id, "account_key": account_key}
 
     def _import_trade(
         self,
         row: Dict[str, Any],
         run_id: str,
         imported: Dict[str, int],
+        *, account_key: str | None = None,
     ) -> None:
+        account_key = str(account_key or self.ACCOUNT_KEY)
         action = str(row.get("action") or "").strip().lower()
         code = normalize_stock_code(row.get("stock_code"), add_suffix=False)
+        shares = int(_number(row.get("shares")))
+        entry_price = _number(row.get("entry_price"))
+        exit_price = _number(row.get("exit_price"))
+        position_size = _number(row.get("position_size"))
+        pnl = _number(row.get("pnl"))
         if action == "buy":
             if (
-                not self.repository.get_open_position(code, self.ACCOUNT_KEY)
-                and len(self.repository.list_positions(self.ACCOUNT_KEY)) >= self.max_positions
+                not self.repository.get_open_position(code, account_key)
+                and len(self.repository.list_positions(account_key)) >= self.max_positions
             ):
                 imported["skipped"] += 1
                 return
@@ -459,21 +561,24 @@ class PaperTradingService:
                     "entry_time": row.get("entry_time"),
                     "entry_price": row.get("entry_price"),
                     "shares": row.get("shares"),
+                    "fees": max(position_size - entry_price * shares, 0.0)
+                    if math.isfinite(position_size) and position_size > 0 else 0.0,
                     "strategy_id": row.get("strategy_id"),
                     "strategy_name": row.get("strategy_name"),
                     "sector_names": row.get("resonance_sectors"),
                     "source": "historical_replay",
                     "reason": row.get("entry_signal") or "分钟买点确认",
-                    "metadata": {"run_id": run_id},
+                    "metadata": {"run_id": run_id, "execution_price_basis": "historical_minute_estimate",
+                                 "cost_basis_source": "backtest_position_size" if position_size > 0 else "unknown"},
                 },
-                self.ACCOUNT_KEY,
+                account_key,
             )
             imported["buy"] += 1
             return
         if action != "sell":
             imported["skipped"] += 1
             return
-        position = self.repository.get_open_position(code, self.ACCOUNT_KEY)
+        position = self.repository.get_open_position(code, account_key)
         if not position:
             imported["skipped"] += 1
             return
@@ -484,9 +589,12 @@ class PaperTradingService:
                 "trade_time": row.get("exit_time") or "",
                 "price": row.get("exit_price"),
                 "shares": min(int(_number(row.get("shares"))), int(position.get("shares") or 0)),
+                "fees": max(exit_price * shares - position_size - pnl, 0.0)
+                if math.isfinite(position_size) and math.isfinite(pnl) and position_size > 0 else 0.0,
                 "reason": row.get("exit_reason") or "历史分钟回放退出",
                 "source": "historical_replay",
-                "metadata": {"run_id": run_id},
+                "metadata": {"run_id": run_id, "execution_price_basis": "historical_minute_estimate",
+                             "cost_basis_source": "backtest_position_size_and_pnl" if position_size > 0 else "unknown"},
             },
         )
         imported["sell"] += 1

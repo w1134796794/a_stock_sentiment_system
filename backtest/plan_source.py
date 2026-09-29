@@ -149,7 +149,7 @@ def _rows_from_screening(
             "综合评分": item.get("score"),
             "建议仓位": f"试仓 0%-{position_cap:g}%" if position_cap > 0 else "中性 20%-30%",
             "入场区间": f"{entry_modes_text}按分钟确认",
-            "竞价条件": "开盘仅用于信号分层，10:00前按一分钟行情确认",
+            "竞价条件": "开盘仅用于信号分层，按策略配置的截止时间逐分钟确认",
             "风险提示": "未确认或信号出现后无可成交分钟则不买入",
             "共振板块": item.get("resonance_sectors") or "",
             "所属板块": item.get("resonance_sectors") or "",
@@ -192,7 +192,7 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     score = row.get("综合评分") if row.get("综合评分") is not None else row.get("score")
     reason = str(row.get("筛选理由") or row.get("reason") or "")
     entry = str(row.get("入场区间") or "弱转强/强势延续/高开加速按分钟确认")
-    condition = str(row.get("竞价条件") or "开盘仅用于信号分层，10:00前按一分钟行情确认")
+    condition = str(row.get("竞价条件") or "开盘仅用于信号分层，按策略配置的截止时间逐分钟确认")
     cancel = str(row.get("风险提示") or "未确认或无可成交分钟则不买入")
     position = _position(row.get("建议仓位") or row.get("position"))
     factor_metrics = {
@@ -297,7 +297,7 @@ def _production_decision_rows(
             "综合评分": row.get("策略组合评分") or row.get("score") or 0.0,
             "建议仓位": row.get("建议仓位") or "",
             "入场区间": f"{row.get('明日入场模式') or '分钟条件'}按分钟确认",
-            "竞价条件": "开盘仅用于信号分层，10:00前按一分钟行情确认",
+            "竞价条件": "开盘仅用于信号分层，按策略配置的截止时间逐分钟确认",
             "风险提示": row.get("失效条件") or "未确认或无可成交分钟则不买入",
             "策略执行": row.get("strategy_execution") or {},
         })
@@ -364,11 +364,16 @@ def build_backtest_plan_dir(
     try:
         from core.portfolio.decision_pool_service import PRODUCTION_STRATEGIES
 
-        production_selection = set(selected_strategy_ids) == set(PRODUCTION_STRATEGIES)
+        production_selection = bool(selected_strategy_ids) and set(selected_strategy_ids).issubset(PRODUCTION_STRATEGIES)
     except Exception:
         production_selection = False
 
     for path in sorted(Path(snapshot_dir).glob("*.json")):
+        if len(path.stem) == 8 and path.stem.isdigit():
+            if start and path.stem < start:
+                continue
+            if end and path.stem > end:
+                continue
         payload = _load_json(path)
         if not payload:
             continue

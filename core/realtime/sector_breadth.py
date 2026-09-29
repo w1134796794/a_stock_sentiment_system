@@ -1,6 +1,7 @@
 """Realtime sector-index direction and constituent breadth confirmation."""
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from threading import RLock
 from time import monotonic
@@ -52,7 +53,10 @@ class RealtimeSectorBreadthProvider:
         for name in names:
             members.update(self._members(name, market_date))
         member_quotes = self._stock_quotes(sorted(members)[:80])
-        observed = [row for row in member_quotes.values() if row.get("change_pct") is not None]
+        observed = [
+            row for row in member_quotes.values()
+            if row.get("change_pct") is not None and not row.get("is_stale")
+        ]
         breadth = sum(_float(row.get("change_pct")) > 0 for row in observed) / len(observed) if observed else None
         average_change = sum(_float(row.get("change_pct")) for row in observed) / len(observed) if observed else None
 
@@ -64,6 +68,7 @@ class RealtimeSectorBreadthProvider:
             state = bool(breadth >= 0.55 and (average_change or 0.0) >= 0.0 and index_positive)
         completeness = (0.5 if breadth is not None else 0.0) + (0.5 if index_positive is not None else 0.0)
         detail = {
+            "observed_at": datetime.now().isoformat(timespec="seconds"),
             "sector_names": list(names),
             "member_count": len(members),
             "observed_members": len(observed),

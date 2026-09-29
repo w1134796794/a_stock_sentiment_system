@@ -4,9 +4,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List
 
+from backtest.exit_policy import normalize_exit_parameters, trailing_distance
+from backtest.trade_calendar import TradeCalendar
 from core.portfolio.protection_price import resolve_protection_price
 
-POLICY_VERSION = "context-exit-v1"
+POLICY_VERSION = "context-exit-v2"
 
 ACTION_LABELS = {
     "hold": "继续持有",
@@ -92,8 +94,18 @@ class ExitDecisionService:
         emergency_loss = max(2.0, _number(position.get("emergency_loss_pct"), 6.0))
         emergency_stop = entry * (1.0 - emergency_loss / 100.0)
 
+        execution = (position.get("metadata") or {}).get("strategy_execution") or {}
+        configured = normalize_exit_parameters(execution.get("exit") or {}) if execution else None
+        if configured:
+            emergency_stop = entry * (1.0 - configured["hard_stop_loss"])
+            if structural_stop_source == "账户风险底线":
+                structural_stop = emergency_stop
+
         policy = self._policy(position, market, sector)
         trailing_stop = high * (1.0 - policy["trail_pct"] / 100.0) if mfe_pct >= policy["activation_pct"] else 0.0
+        if configured:
+            distance = trailing_distance(mfe_pct / 100, configured)
+            trailing_stop = high * (1-distance) if configured["trailing_stop"] > 0 and mfe_pct / 100 >= configured["trailing_activation"] else 0
         protect_price = max(structural_stop, emergency_stop, trailing_stop)
 
         market_weak = self._market_weak(market)
@@ -114,13 +126,17 @@ class ExitDecisionService:
         if current <= emergency_stop:
             hard_reasons.append(f"触及极端风险底线{emergency_stop:.2f}")
         if trailing_stop > 0 and current <= trailing_stop:
-            stock_reasons.append(
+            (hard_reasons if configured else stock_reasons).append(
                 f"盈利后从高点回落{abs(drawdown_pct):.1f}%，跌破动态保护价{trailing_stop:.2f}"
             )
+        if configured and str(quote.get("time") or "") >= "14:55:00":
+            days = TradeCalendar().holding_days(str(position.get("entry_date") or ""), signal_date)
+            if days >= configured["time_stop_days"] and pnl_pct / 100 < configured["time_stop_profit_threshold"]:
+                hard_reasons.append(f"持仓{days}个交易日未达到策略收益要求，时间退出")
         if open_price > 0 and current < open_price and change_pct <= -2.0:
             stock_reasons.append("跌破开盘价且当日跌幅扩大")
         sector_change = _number(sector.get("index_change_pct"))
-        if sector.get("data_completeness", 1) and change_pct - sector_change <= -2.0:
+        if sector.get("data_completeness", 0) and sector.get("index_change_pct") is not None and change_pct - sector_change <= -2.0:
             stock_reasons.append("个股相对所属板块明显转弱")
 
         external_reasons: List[str] = []
@@ -141,6 +157,8 @@ class ExitDecisionService:
             "emergency_stop": round(emergency_stop, 4),
             "trailing_stop": round(trailing_stop, 4),
             "strategy_policy": policy,
+            "configured_exit": configured,
+            "strategy_version": (position.get("metadata") or {}).get("strategy_version") or "legacy-context-v1",
             "quote": quote,
             "market": market,
             "sector": sector,
@@ -204,9 +222,11 @@ class ExitDecisionService:
 
     @staticmethod
     def _can_sell(position: Dict[str, Any], signal_date: str) -> bool:
+        if "sellable_shares" in position:
+            return int(position["sellable_shares"]) > 0
         entry_date = str(position.get("entry_date") or "").replace("-", "")
         current = str(signal_date or "").replace("-", "")
-        return bool(not entry_date or not current or current > entry_date)
+        return bool(entry_date and current and current > entry_date)
 
     @staticmethod
     def _decision(

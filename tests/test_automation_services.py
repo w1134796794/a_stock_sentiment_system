@@ -228,6 +228,7 @@ def test_internal_scheduler_recovers_incomplete_daily_job(monkeypatch):
     scheduler = InternalScheduler()
     today = __import__("datetime").datetime.now().strftime("%Y%m%d")
     scheduler.calendar.is_trade_date = lambda trade_date: trade_date == today
+    scheduler.calendar.get_trade_dates = lambda start, end: [today]
     scheduler.daily_state.save({
         "status": "error",
         "job": "daily",

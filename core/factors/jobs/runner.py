@@ -26,6 +26,15 @@ class FactorJobRunner:
         "stock": StockFactorJob,
     }
 
+    @classmethod
+    def successful_job_keys(cls, results: Iterable[dict]) -> set[str]:
+        """Map persisted result names back to runner keys for stage checks."""
+        aliases = {job_cls.name: key for key, job_cls in cls.JOBS.items()}
+        return {
+            aliases.get(str(item.get("name")), str(item.get("name")))
+            for item in results if item.get("ok") is True
+        }
+
     def __init__(self, duckdb_path: Optional[Path] = None):
         if duckdb_path is None:
             from config.settings import FACTOR_DB_PATH

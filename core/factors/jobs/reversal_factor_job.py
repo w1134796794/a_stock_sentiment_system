@@ -54,6 +54,7 @@ def build_reversal_factors(daily: pd.DataFrame, trade_date: str) -> pd.DataFrame
             if not up[index]:
                 continue
             event = h.iloc[index]
+            atr = float(tr.iloc[max(0, index-13):index+1].mean())
             before = h.iloc[index-20:index]
             platform = float(before.high.max())
             # The platform and event body are known when the limit-up event closes.
@@ -75,6 +76,7 @@ def build_reversal_factors(daily: pd.DataFrame, trade_date: str) -> pd.DataFrame
             if not down[index]:
                 continue
             event = h.iloc[index]
+            atr = float(tr.iloc[max(0, index-13):index+1].mean())
             floor = float(event.low)
             target = float(event.open) if float(event.open-event.close) > atr*0.1 else float(event.pre_close)
             recovery = (float(today.close)-float(event.close))/max(float(event.pre_close-event.close), 0.01)

@@ -18,10 +18,9 @@ strategies:
     - {name: 涨停回踩结构完整, factor: stk_limit_pullback, op: '>=', value: 100, reason: 近期涨停回落至支撑附近且未有效破位}
     - {name: 基础流动性, factor: stk_liquidity_percentile, op: '>=', value: 35, reason: 成交流动性合格}
     ranking_factors:
-    - {factor: stk_limit_pullback, weight: 0.3}
-    - {factor: stk_pullback_contraction, weight: 0.3}
-    - {factor: stk_relative_strength_sector, weight: 0.2}
-    - {factor: stk_liquidity_percentile, weight: 0.2}
+    - {factor: stk_pullback_contraction, weight: 0.4}
+    - {factor: stk_relative_strength_sector, weight: 0.3}
+    - {factor: stk_liquidity_percentile, weight: 0.3}
     evidence_rules:
     - {name: 回踩结构, factor: stk_limit_pullback, op: '>=', value: 100}
     - {name: 回踩缩量, factor: stk_pullback_contraction, op: '>=', value: 50}
@@ -49,10 +48,9 @@ strategies:
     - {name: 跌停修复结构完整, factor: stk_limit_reversal, op: '>=', value: 100, reason: 近期跌停事件且未连续跌停或破位}
     - {name: 基础流动性, factor: stk_liquidity_percentile, op: '>=', value: 35, reason: 成交流动性合格}
     ranking_factors:
-    - {factor: stk_limit_reversal, weight: 0.4}
-    - {factor: stk_reversal_recovery, weight: 0.2}
-    - {factor: stk_relative_strength_sector, weight: 0.2}
-    - {factor: stk_liquidity_percentile, weight: 0.2}
+    - {factor: stk_reversal_recovery, weight: 0.4}
+    - {factor: stk_relative_strength_sector, weight: 0.3}
+    - {factor: stk_liquidity_percentile, weight: 0.3}
     evidence_rules:
     - {name: 跌停事件结构, factor: stk_limit_reversal, op: '>=', value: 100}
     - {name: 跌幅修复, factor: stk_reversal_recovery, op: '>=', value: 50}

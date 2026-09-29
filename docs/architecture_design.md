@@ -13,7 +13,7 @@
 ```
 a_stock_sentiment_system/
 ├── main.py                          # 主入口：SentimentSystem 类，编排全流程
-├── scheduler.py                     # 定时调度：每日 15:40 自动执行
+├── scheduler.py                     # 统一调度入口：默认每日 20:00 自动执行
 ├── run_backtest.py                  # 回测入口
 │
 ├── config/                          # 【配置层】
@@ -102,7 +102,7 @@ a_stock_sentiment_system/
 ```
                         ┌──────────────────────┐
                         │   scheduler.py        │
-                        │   每日 15:40 触发      │
+                        │   每日 20:00 触发      │
                         └──────────┬───────────┘
                                    │
                                    ▼

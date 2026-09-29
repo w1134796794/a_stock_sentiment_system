@@ -277,6 +277,12 @@ class TaskLease:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[SharedState] 任务锁释放失败 {self.task_name}: {exc}")
 
+    def is_owner(self) -> bool:
+        try:
+            return bool(self.backend.refresh_lock(f"task:{self.task_name}", self.token, self.ttl_seconds))
+        except Exception:
+            return False
+
 
 class TaskStateStore:
     """Shared metadata and incremental log storage for one task family."""

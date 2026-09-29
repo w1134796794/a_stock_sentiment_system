@@ -152,6 +152,14 @@ MENU_GROUPS: List[Dict[str, Any]] = [
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M8 6V4h8v2M3 11h18"/><path d="M9 15h6"/></svg>'),
             },
             {
+                "key": "strategy_evaluation",
+                "label": "策略评估",
+                "href": "/strategy-evaluation",
+                "prefix": "/strategy-evaluation",
+                "roles": ADMIN_ONLY,
+                "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 19h18M5 16l5-5 4 3 5-8"/><circle cx="19" cy="6" r="1"/></svg>'),
+            },
+            {
                 "key": "drawdown",
                 "label": "回撤分析",
                 "href": "/drawdown",
@@ -259,6 +267,7 @@ ADMIN_PAGE_PREFIXES = (
 
 # GET APIs that expose admin state, config, logs, or task state.
 ADMIN_GET_API_PREFIXES = (
+    "/api/operations",
     "/api/admin",
     "/api/fetch",
     "/api/run",
@@ -274,7 +283,7 @@ ADMIN_GET_API_PREFIXES = (
 
 # These capabilities remain administrator-only regardless of database settings.
 FORCED_ADMIN_KEYS = frozenset({
-    "users", "permissions", "fetch", "run", "screening_run", "strategies", "strategy_lab", "config", "factors", "logs"
+    "users", "permissions", "fetch", "run", "screening_run", "strategies", "strategy_lab", "strategy_evaluation", "config", "factors", "logs"
 })
 
 PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
@@ -292,6 +301,7 @@ PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "intraday": ("/intraday", "/api/intraday-strength"),
     "realtime": ("/realtime", "/api/realtime", "/api/v1/mobile/realtime"),
     "portfolio": ("/portfolio", "/api/portfolio", "/backtest", "/api/backtest"),
+    "strategy_evaluation": ("/strategy-evaluation", "/api/operations/experiments"),
     "drawdown": ("/drawdown",),
     "users": ("/admin/users", "/api/admin/users"),
     "permissions": ("/admin/permissions", "/api/admin/permissions"),

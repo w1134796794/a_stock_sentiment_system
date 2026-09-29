@@ -133,6 +133,7 @@ class ScreeningEngine:
         profile: str = "default",
         profile_config: Optional[Dict[str, Any]] = None,
         candidate_codes: Optional[Iterable[str]] = None,
+        candidate_frame: Optional[pd.DataFrame] = None,
         persist: bool = True,
     ) -> ScreeningResult:
         trade_date = str(trade_date)
@@ -153,7 +154,21 @@ class ScreeningEngine:
         result = ScreeningResult(trade_date=trade_date, profile=profile_name)
         result.weight_metadata = weight_metadata
         try:
-            candidates = self.load_candidates(trade_date, candidate_codes=candidate_codes)
+            candidates = (self.load_candidates(trade_date, candidate_codes=candidate_codes)
+                          if candidate_frame is None else candidate_frame.copy(deep=True))
+            if candidate_codes is not None:
+                candidates = candidates[candidates["code"].map(_normalize_code).isin({_normalize_code(c) for c in candidate_codes})]
+            if str(cfg.get("strategy_id") or profile_name) == "weak_to_strong":
+                from config.settings import WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS
+                from core.realtime.leader_pool_service import LeaderPoolService
+
+                root = self.output_dir.parent.parent if self.output_dir.parent.name == "combinations" else self.output_dir
+                eligible = LeaderPoolService(screening_dir=root, duckdb_path=self.duckdb_path).historical_leader_codes(
+                    trade_date, lookback=WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS, include_trade_date=False,
+                )
+                candidates = candidates[candidates["code"].map(_normalize_code).isin(eligible)]
+                result.weight_metadata["historical_leader_pool"] = {"lookback": WEAK_TO_STRONG_LEADER_LOOKBACK_DAYS,
+                                                                   "eligible": len(eligible), "as_of": trade_date}
         except Exception as e:  # noqa: BLE001
             result.ok = False
             result.message = f"读取指标数据失败: {e}"
@@ -164,7 +179,9 @@ class ScreeningEngine:
             result.after_priority_filter = 0
             result.final = []
             result.rejected = []
-            result.message = "未读取到个股指标数据，输出空筛选结果"
+            result.message = ("历史龙头前置池无匹配候选，未扩大股票池"
+                              if "historical_leader_pool" in result.weight_metadata
+                              else "未读取到个股指标数据，输出空筛选结果")
             if persist:
                 result.output_path = str(self.persist_result(result))
             return result
@@ -280,7 +297,7 @@ class ScreeningEngine:
             "mainline_leader", "first_board_launch", "weak_to_strong",
         }
         strategy_position_multiplier = (
-            market_state.strategy_position_multiplier(strategy_id)
+            market_state.strategy_position_multiplier("" if rules_only else strategy_id)
             if strategy_id in managed_strategies else 1.0
         )
         weight_metadata["emotion_phase"] = market_state.phase
@@ -912,7 +929,14 @@ class ScreeningEngine:
                 f"{self._market_state_snapshot.phase_label}仓位约束"
             )
         final: List[Dict[str, Any]] = []
-        metric_cols = list(dict.fromkeys(list((ranking_cfg.get("weights") or {}).keys()) + [
+        rule_factors = [
+            str(rule.get("factor"))
+            for section in ("hard_filters", "priority_filters", "evidence_rules", "veto_rules")
+            for rule in cfg.get(section) or []
+            if rule.get("factor")
+        ]
+        metric_cols = list(dict.fromkeys(list((ranking_cfg.get("weights") or {}).keys()) + rule_factors + [
+            "mkt_market_score",
             "stk_lhb_net_buy_score",
             "stk_lhb_institution_score",
             "stk_lhb_institution_consensus",
@@ -950,6 +974,7 @@ class ScreeningEngine:
             "sector_mainline_score",
             "sector_resonance_score",
             "lhb_present",
+            "lhb_source_available",
             "lhb_net_buy_ratio",
             "institution_net_buy_ratio",
             "appearance_days_5d",
@@ -966,7 +991,11 @@ class ScreeningEngine:
         ]
         for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
             code = str(row.get("code") or "")
-            metrics = {col: _to_float(row.get(col), 50.0) for col in metric_cols}
+            metrics = {
+                col: value if math.isfinite(value) else None
+                for col in metric_cols
+                for value in [_to_float(row.get(col), math.nan)]
+            }
             lhb_present = bool(_to_float(row.get("lhb_present"), 0.0))
             if not lhb_present:
                 metrics = {key: value for key, value in metrics.items() if not key.startswith("stk_lhb_")}

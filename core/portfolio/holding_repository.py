@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -48,6 +49,15 @@ class HoldingRepository:
             conn.commit()
         finally:
             conn.close()
+
+    @contextmanager
+    def _write(self, connection=None):
+        if connection is not None:
+            yield connection
+            return
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
 
     def ensure_schema(self) -> None:
         with self._connect() as conn:
@@ -149,6 +159,32 @@ class HoldingRepository:
                     ON portfolio_positions(account_key, code) WHERE status='open';
                 CREATE INDEX IF NOT EXISTS idx_trades_date
                     ON portfolio_trades(account_key, trade_date DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_trades_position_date
+                    ON portfolio_trades(position_id, trade_date, action);
+                CREATE TABLE IF NOT EXISTS portfolio_executions (
+                    event_key TEXT PRIMARY KEY,
+                    account_key TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS portfolio_replay_checkpoints (
+                    account_key TEXT PRIMARY KEY,
+                    last_completed_date TEXT NOT NULL DEFAULT '',
+                    config_version TEXT NOT NULL DEFAULT '',
+                    state_json TEXT NOT NULL DEFAULT '{}',
+                    account_trade_id INTEGER NOT NULL DEFAULT 0,
+                    blocked_date TEXT NOT NULL DEFAULT '',
+                    blocked_reason TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS portfolio_replay_days (
+                    account_key TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    config_version TEXT NOT NULL,
+                    fill_keys_json TEXT NOT NULL DEFAULT '[]',
+                    completed_at TEXT NOT NULL,
+                    PRIMARY KEY (account_key, trade_date)
+                );
                 CREATE INDEX IF NOT EXISTS idx_exit_signals_position
                     ON exit_signals(position_id, created_at DESC);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_position_snapshot_minute
@@ -162,6 +198,9 @@ class HoldingRepository:
                 "VALUES ('default', '默认账户', 0, 0, ?, ?)",
                 (now, now),
             )
+        from core.operations.ledger import TradingLedger
+
+        TradingLedger(self.db_path)
 
     def ensure_account(
         self,
@@ -212,6 +251,9 @@ class HoldingRepository:
                     position_ids,
                 )
             conn.execute("DELETE FROM portfolio_trades WHERE account_key=?", (account_key,))
+            conn.execute("DELETE FROM portfolio_executions WHERE account_key=?", (account_key,))
+            conn.execute("DELETE FROM portfolio_replay_days WHERE account_key=?", (account_key,))
+            conn.execute("DELETE FROM portfolio_replay_checkpoints WHERE account_key=?", (account_key,))
             conn.execute("DELETE FROM portfolio_positions WHERE account_key=?", (account_key,))
             if initial_capital is not None:
                 capital = max(float(initial_capital), 0.0)
@@ -237,6 +279,14 @@ class HoldingRepository:
                 "SELECT * FROM portfolio_accounts WHERE account_key=?", (account_key,)
             ).fetchone()
         return dict(row) if row else {}
+
+    def list_accounts(self) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT account_key, name, initial_capital, updated_at FROM portfolio_accounts "
+                "ORDER BY CASE WHEN account_key='default' THEN 0 ELSE 1 END, updated_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def list_positions(self, account_key: str = "default", *, status: str = "open") -> List[Dict[str, Any]]:
         sql = "SELECT * FROM portfolio_positions WHERE account_key=?"
@@ -266,13 +316,13 @@ class HoldingRepository:
             ).fetchone()
         return self._position_row(row) if row else {}
 
-    def open_position(self, payload: Dict[str, Any], account_key: str = "default") -> Dict[str, Any]:
+    def open_position(self, payload: Dict[str, Any], account_key: str = "default", *, _connection=None) -> Dict[str, Any]:
         code = normalize_stock_code(payload.get("code"), add_suffix=False)
         if not code:
             raise ValueError("股票代码不能为空")
         price = float(payload.get("entry_price") or payload.get("price") or 0)
         shares = int(payload.get("shares") or 0)
-        if price <= 0 or shares <= 0:
+        if not math.isfinite(price) or price <= 0 or shares <= 0:
             raise ValueError("买入价格和股数必须大于0")
         trade_date = str(payload.get("entry_date") or payload.get("trade_date") or "").replace("-", "")
         if len(trade_date) != 8 or not trade_date.isdigit():
@@ -286,20 +336,51 @@ class HoldingRepository:
         })
         metadata = dict(payload.get("metadata") or {})
         metadata.setdefault("protection_price_source", protection_source)
-        existing = self.get_open_position(code, account_key)
-        with self._connect() as conn:
+        if (payload.get("strategy_id") or str(payload.get("source") or "").startswith("auto_")) and not metadata.get("strategy_execution"):
+            from core.screening.strategy_profiles import StrategyProfileRepository, _execution_config
+
+            profile = StrategyProfileRepository().get_profile(str(payload.get("strategy_id") or "default")) or {}
+            metadata["strategy_execution"] = profile.get("execution") or _execution_config({}, str(payload.get("strategy_id") or "default"))
+            metadata["strategy_version"] = profile.get("version") or "default-exit-v1"
+        if protection_source == "账户风险底线" and metadata.get("strategy_execution"):
+            from backtest.exit_policy import normalize_exit_parameters
+
+            frozen_exit = normalize_exit_parameters(metadata["strategy_execution"].get("exit") or {})
+            emergency_loss_pct = frozen_exit["hard_stop_loss"] * 100
+            structural_stop = price * (1 - frozen_exit["hard_stop_loss"])
+        with self._write(_connection) as conn:
+            existing_row = conn.execute(
+                "SELECT * FROM portfolio_positions WHERE account_key=? AND code=? AND status='open'",
+                (account_key, code),
+            ).fetchone()
+            existing = self._position_row(existing_row) if existing_row else {}
+            if str(payload.get("source") or "").startswith("auto_"):
+                duplicate = conn.execute(
+                    "SELECT 1 FROM portfolio_trades WHERE account_key=? AND code=? AND trade_date=? AND action='buy'",
+                    (account_key, code, trade_date),
+                ).fetchone()
+                if existing or duplicate:
+                    raise ValueError("自动买入已执行或已有持仓")
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM portfolio_positions WHERE account_key=? AND status='open'", (account_key,),
+                ).fetchone()[0]
+                if count >= 3:
+                    raise ValueError("最多持仓3只")
             account = conn.execute(
                 "SELECT initial_capital, cash FROM portfolio_accounts WHERE account_key=?",
                 (account_key,),
             ).fetchone()
             tracked_cash = bool(account and float(account["initial_capital"] or 0) > 0)
-            buy_amount = price * shares + float(payload.get("fees") or 0)
+            fees = float(payload.get("fees") or 0)
+            if not math.isfinite(fees) or fees < 0:
+                raise ValueError("费用必须为非负有限数")
+            buy_amount = price * shares + fees
             if tracked_cash and float(account["cash"] or 0) + 1e-6 < buy_amount:
                 raise ValueError("模拟账户可用资金不足")
             if existing:
                 old_shares = int(existing["shares"])
                 total_shares = old_shares + shares
-                total_cost = float(existing["cost_amount"]) + price * shares
+                total_cost = float(existing["cost_amount"]) + buy_amount
                 entry_price = total_cost / total_shares
                 position_id = int(existing["id"])
                 conn.execute(
@@ -327,7 +408,7 @@ class HoldingRepository:
                         account_key, code, str(payload.get("name") or ""),
                         str(payload.get("strategy_id") or ""), str(payload.get("strategy_name") or ""),
                         str(payload.get("sector_names") or ""), trade_date,
-                        str(payload.get("entry_time") or ""), price, shares, price * shares,
+                        str(payload.get("entry_time") or ""), price, shares, buy_amount,
                         price, price, structural_stop,
                         emergency_loss_pct,
                         _json(metadata), now, now,
@@ -345,30 +426,54 @@ class HoldingRepository:
                     "UPDATE portfolio_accounts SET cash=cash-?, updated_at=? WHERE account_key=?",
                     (buy_amount, now, account_key),
                 )
-        return self.get_position(position_id)
+            return self._position_row(conn.execute("SELECT * FROM portfolio_positions WHERE id=?", (position_id,)).fetchone())
 
-    def sell_position(self, position_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
-        position = self.get_position(position_id)
-        if not position or position.get("status") != "open":
-            raise ValueError("持仓不存在或已关闭")
-        price = float(payload.get("price") or 0)
-        shares = int(payload.get("shares") or position.get("shares") or 0)
-        shares = min(shares, int(position.get("shares") or 0))
-        if price <= 0 or shares <= 0:
-            raise ValueError("卖出价格和股数必须大于0")
-        remaining = int(position["shares"]) - shares
-        allocated_cost = float(position["cost_amount"]) * shares / int(position["shares"])
-        fees = float(payload.get("fees") or 0)
-        pnl = price * shares - fees - allocated_cost
-        pnl_pct = pnl / allocated_cost * 100.0 if allocated_cost else 0.0
-        now = _now()
-        with self._connect() as conn:
+    def sellable_shares(self, position_id: int, trade_date: str, *, _connection=None) -> int:
+        with self._write(_connection) as conn:
+            position = conn.execute("SELECT * FROM portfolio_positions WHERE id=?", (position_id,)).fetchone()
+            if not position or str(position["entry_date"]) >= trade_date:
+                return 0
+            unsettled = conn.execute(
+                "SELECT COALESCE(SUM(shares), 0) FROM portfolio_trades "
+                "WHERE position_id=? AND action='buy' AND trade_date>=?",
+                (position_id, trade_date),
+            ).fetchone()[0]
+            return max(0, int(position["shares"]) - int(unsettled))
+
+    def sell_position(self, position_id: int, payload: Dict[str, Any], *, _connection=None) -> Dict[str, Any]:
+        with self._write(_connection) as conn:
+            event_key = str(payload.get("execution_key") or "")
+            if event_key and conn.execute("SELECT 1 FROM portfolio_executions WHERE event_key=?", (event_key,)).fetchone():
+                saved = conn.execute("SELECT * FROM portfolio_positions WHERE id=?", (position_id,)).fetchone()
+                return {**self._position_row(saved), "executed_shares": 0}
+            saved = conn.execute("SELECT * FROM portfolio_positions WHERE id=?", (position_id,)).fetchone()
+            position = self._position_row(saved) if saved else {}
+            if not position or position.get("status") != "open":
+                raise ValueError("持仓不存在或已关闭")
+            trade_date = str(payload.get("trade_date") or "").replace("-", "")
+            if len(trade_date) != 8 or not trade_date.isdigit():
+                raise ValueError("卖出日期必须为YYYYMMDD")
+            price = float(payload.get("price") or 0)
+            shares = int(payload["shares"]) if "shares" in payload else int(position.get("shares") or 0)
+            if not math.isfinite(price) or price <= 0 or shares <= 0:
+                raise ValueError("卖出价格和股数必须大于0")
+            if shares > self.sellable_shares(position_id, trade_date, _connection=conn):
+                raise ValueError("卖出股数超过T+1可卖数量")
+            remaining = int(position["shares"]) - shares
+            allocated_cost = float(position["cost_amount"]) * shares / int(position["shares"])
+            fees = float(payload.get("fees") or 0)
+            if not math.isfinite(fees) or fees < 0:
+                raise ValueError("费用必须为非负有限数")
+            pnl = price * shares - fees - allocated_cost
+            pnl_pct = pnl / allocated_cost * 100.0 if allocated_cost else 0.0
+            now = _now()
             self._insert_trade(
                 conn,
                 account_key=str(position["account_key"]),
                 position_id=int(position_id),
                 payload={
                     **payload,
+                    "trade_date": trade_date,
                     "code": position["code"],
                     "name": position["name"],
                     "price": price,
@@ -401,7 +506,20 @@ class HoldingRepository:
                     "UPDATE portfolio_accounts SET cash=cash+?, updated_at=? WHERE account_key=?",
                     (price * shares - fees, now, str(position["account_key"])),
                 )
-        return self.get_position(position_id)
+            if event_key:
+                conn.execute("INSERT INTO portfolio_executions VALUES (?, ?, ?, ?)",
+                             (event_key, position["account_key"], _json({"shares": shares}), now))
+            result = self._position_row(conn.execute("SELECT * FROM portfolio_positions WHERE id=?", (position_id,)).fetchone())
+            return {**result, "executed_shares": shares}
+
+    def rotate_position(self, position_id: int, sell: Dict[str, Any], buy: Dict[str, Any], account_key: str) -> Dict[str, Any]:
+        """Commit both legs or neither; a failed replacement never liquidates the old holding."""
+        with self._write() as conn:
+            owner = conn.execute("SELECT account_key FROM portfolio_positions WHERE id=?", (position_id,)).fetchone()
+            if not owner or owner[0] != account_key:
+                raise ValueError("换出持仓不属于当前账户")
+            self.sell_position(position_id, sell, _connection=conn)
+            return self.open_position(buy, account_key, _connection=conn)
 
     def update_position_market(
         self,
@@ -464,12 +582,13 @@ class HoldingRepository:
 
     def save_exit_signal(self, position_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         action = str(payload.get("action") or "hold")
-        with self._connect() as conn:
+        signal_date = str(payload.get("signal_date") or _now()[:10].replace("-", ""))
+        with self._write() as conn:
             previous = conn.execute(
                 "SELECT * FROM exit_signals WHERE position_id=? ORDER BY id DESC LIMIT 1",
                 (int(position_id),),
             ).fetchone()
-            changed = not previous or str(previous["action"]) != action
+            changed = not previous or str(previous["action"]) != action or str(previous["signal_date"]) != signal_date
             if not changed:
                 now = _now()
                 conn.execute(
@@ -515,6 +634,16 @@ class HoldingRepository:
         with self._connect() as conn:
             conn.execute("UPDATE exit_signals SET notified_at=? WHERE id=?", (_now(), int(signal_id)))
 
+    def pending_exit_signals(self, account_key: str, signal_date: str) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT s.* FROM exit_signals s JOIN portfolio_positions p ON p.id=s.position_id "
+                "WHERE p.account_key=? AND s.signal_date=? AND COALESCE(s.notified_at, '')='' "
+                "AND s.action IN ('reduce', 'sell', 'blocked') ORDER BY s.id LIMIT 100",
+                (account_key, signal_date),
+            ).fetchall()
+        return [self._signal_row(row) for row in rows]
+
     def list_exit_signals(
         self, account_key: str | None = None, *, limit: int = 100,
     ) -> List[Dict[str, Any]]:
@@ -549,7 +678,7 @@ class HoldingRepository:
         price = float(payload.get("price") or 0)
         shares = int(payload.get("shares") or 0)
         trade_date = str(payload.get("trade_date") or payload.get("entry_date") or datetime.now().strftime("%Y%m%d")).replace("-", "")
-        conn.execute(
+        trade = conn.execute(
             """INSERT INTO portfolio_trades (
                 account_key, position_id, trade_date, trade_time, code, name, action, price,
                 shares, amount, fees, realized_pnl, realized_pnl_pct, reason, strategy_id,
@@ -565,6 +694,25 @@ class HoldingRepository:
                 _json(payload.get("metadata")), _now(),
             ),
         )
+        from core.operations.ledger import stable_id
+
+        signal_id = str((payload.get("metadata") or {}).get("signal_id") or "")
+        event_payload = {
+            "trade_id": int(trade.lastrowid), "position_id": int(position_id),
+            "trade_date": trade_date,
+            "trade_time": str(payload.get("trade_time") or payload.get("entry_time") or ""),
+            "code": normalize_stock_code(payload.get("code"), add_suffix=False),
+            "action": str(payload.get("action") or "buy"), "price": price,
+            "shares": shares, "source": str(payload.get("source") or "manual"),
+        }
+        now = _now()
+        for kind in ("paper_fill" if event_payload["source"].startswith("auto_") else "manual_fill", "position_changed"):
+            conn.execute(
+                "INSERT OR IGNORE INTO trading_events "
+                "(event_id, signal_id, kind, account_key, occurred_at, payload_json) VALUES (?, ?, ?, ?, ?, ?)",
+                (stable_id("trade", trade.lastrowid, kind), signal_id, kind, account_key, now,
+                 _json(event_payload)),
+            )
 
     @staticmethod
     def _position_row(row: sqlite3.Row | None) -> Dict[str, Any]:

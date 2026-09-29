@@ -2,11 +2,31 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-
 EXIT_POLICIES = {"strategy", "fixed_stop", "atr_stop", "structure_stop", "staged_trailing", "oos_selected"}
+
+
+def normalize_exit_parameters(raw: Dict[str, Any], defaults: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    from core.screening.strategy_profiles import DEFAULT_EXIT
+
+    result = {**DEFAULT_EXIT, **(defaults or {})}
+    for key in DEFAULT_EXIT:
+        value = float(raw.get(key, result[key]))
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"退出参数无效: {key}")
+        result[key] = max(1, int(value)) if key == "time_stop_days" else value
+    return result
+
+
+def trailing_distance(peak_profit: float, config: Dict[str, Any]) -> float:
+    if peak_profit >= config["trailing_high_profit"]:
+        return config["trailing_stop"]
+    if peak_profit >= config["trailing_mid_profit"]:
+        return config["trailing_mid_stop"]
+    return config["trailing_early_stop"]
 
 
 class ExitPolicyRepository:
@@ -80,4 +100,5 @@ def _number(value: Any) -> float:
         return 0.0
 
 
-__all__ = ["EXIT_POLICIES", "ExitPolicyRepository", "resolve_exit_config"]
+__all__ = ["EXIT_POLICIES", "ExitPolicyRepository", "resolve_exit_config",
+           "normalize_exit_parameters", "trailing_distance"]

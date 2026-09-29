@@ -116,7 +116,9 @@ class InternalScheduler:
         return datetime.now(self.timezone)
 
     def _save_daily_state(self, payload: Dict[str, Any]) -> None:
-        previous = self.daily_state.load()
+        trade_date = str(payload.get("trade_date") or "")
+        store = TaskStateStore(f"automation_daily_{trade_date}") if trade_date else self.daily_state
+        previous = store.load() or self.daily_state.load()
         if (
             previous
             and str(previous.get("trade_date") or "")
@@ -124,6 +126,7 @@ class InternalScheduler:
         ):
             payload = {**previous, **payload}
         self.daily_state.save(payload)
+        store.save(payload)
         self.state.save(payload)
 
     def _save_auction_state(self, payload: Dict[str, Any]) -> None:
@@ -167,7 +170,7 @@ class InternalScheduler:
             return True
 
     def _recover_due_daily_job(self) -> bool:
-        if not self.catch_up_enabled or self._stop.is_set():
+        if self._stop.is_set():
             return False
         now = self._now()
         try:
@@ -177,12 +180,33 @@ class InternalScheduler:
             logger.error(f"[Automation] 每日任务时间格式无效: {self.daily_time}")
             return False
         trade_date = now.strftime("%Y%m%d")
-        if now < due or not self.calendar.is_trade_date(trade_date):
-            return False
         latest = self.daily_state.load()
         if not latest:
             legacy = self.state.load()
             latest = legacy if legacy.get("job") == "daily" else {}
+        today_due = now >= due and self.calendar.is_trade_date(trade_date)
+        if not self.catch_up_enabled:
+            if not today_due:
+                return False
+        else:
+            end = trade_date if today_due else self.calendar.prev(trade_date)
+            start = str(latest.get("trade_date") or end)
+            floor = (now - timedelta(days=14)).strftime("%Y%m%d")
+            start = max(min(start, end), floor)
+            selected = None
+            for date in self.calendar.get_trade_dates(start, end):
+                saved = TaskStateStore(f"automation_daily_{date}").load()
+                if not saved and str(latest.get("trade_date") or "") == date:
+                    saved = latest
+                if saved.get("status") == "done" and saved.get("pipeline_ok"):
+                    continue
+                if int(saved.get("attempt") or 0) >= self.max_daily_attempts:
+                    continue
+                selected = (date, saved)
+                break
+            if selected is None:
+                return False
+            trade_date, latest = selected
         completed = bool(
             str(latest.get("trade_date") or "") == trade_date
             and latest.get("status") == "done"
@@ -201,7 +225,7 @@ class InternalScheduler:
                     return False
             except ValueError:
                 pass
-        dispatched = self._dispatch_job("daily", self._daily_job)
+        dispatched = self._dispatch_job("daily", lambda date=trade_date: self._daily_job(date))
         if dispatched:
             logger.warning(
                 f"[Automation] 检测到 {trade_date} 每日流水线未完成，"
@@ -230,6 +254,15 @@ class InternalScheduler:
         if now < due or now > now.replace(hour=11, minute=30, second=0, microsecond=0):
             return False
         latest = self.auction_state.load()
+        if latest.get("market_date") == market_date and latest.get("next_retry_at"):
+            try:
+                retry_at = datetime.fromisoformat(latest["next_retry_at"])
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=self.timezone)
+                if now < retry_at:
+                    return False
+            except (TypeError, ValueError):
+                logger.warning("[Automation] 竞价重试时间无效，重新检查任务")
         if (
             str(latest.get("market_date") or "") == market_date
             and latest.get("status") in {"running", "done"}
@@ -237,16 +270,20 @@ class InternalScheduler:
             return False
         return self._dispatch_job("auction", self._auction_job)
 
-    def _daily_job(self) -> None:
-        trade_date = self._now().strftime("%Y%m%d")
+    def _daily_job(self, trade_date: str = "") -> None:
+        trade_date = trade_date or self._now().strftime("%Y%m%d")
         if not self.calendar.is_trade_date(trade_date):
             self._save_daily_state({"status": "skipped", "job": "daily", "trade_date": trade_date, "message": "非交易日，已跳过"})
             return
-        lease = TaskLease.acquire(f"automatic-daily-{trade_date}", 6 * 60 * 60)
+        lease = TaskLease.acquire(f"automatic-daily-{trade_date}", self.daily_timeout + 300)
         if lease is None:
             logger.info(f"[Automation] {trade_date} 每日任务已由其他进程执行")
             return
-        previous = self.daily_state.load()
+        previous = TaskStateStore(f"automation_daily_{trade_date}").load() or self.daily_state.load()
+        if (previous.get("trade_date") == trade_date
+                and previous.get("status") == "done" and previous.get("pipeline_ok")):
+            lease.release()
+            return
         attempt = (
             int(previous.get("attempt") or 0) + 1
             if str(previous.get("trade_date") or "") == trade_date else 1
@@ -441,19 +478,22 @@ class InternalScheduler:
             for row in payload.get("rows") or []:
                 name = str(row.get("category") or "数据不足")
                 groups[name] = groups.get(name, 0) + 1
-            NotificationService().send(
+            delivery = NotificationService().send(
                 "09:25 竞价预警",
                 AuctionAlertService.notification_content(payload),
                 event_key=f"auction:{market_date}", ttl_seconds=60 * 60 * 10,
             )
             self._save_auction_state({
-                "status": "done", "job": "auction", "market_date": market_date,
+                "status": "done" if delivery.get("all_delivered", delivery.get("ok")) else "error",
+                "next_retry_at": (self._now() + timedelta(minutes=1)).isoformat(timespec="seconds"),
+                "job": "auction", "market_date": market_date,
                 "candidate_date": candidate_date, "summary": groups,
                 "finished_at": self._now().isoformat(timespec="seconds"),
             })
         except Exception as exc:  # noqa: BLE001
             logger.exception(f"[Automation] {market_date} 竞价预警失败: {exc}")
-            self._save_auction_state({"status": "error", "job": "auction", "market_date": market_date, "message": str(exc)})
+            self._save_auction_state({"status": "error", "job": "auction", "market_date": market_date, "message": str(exc),
+                                      "next_retry_at": (self._now() + timedelta(minutes=1)).isoformat(timespec="seconds")})
         finally:
             lease.release()
 

@@ -18,6 +18,19 @@ def test_screening_compare_value_ops():
     assert ScreeningEngine.compare_value(55, "between", [50, 60]) is True
 
 
+def test_default_amount_overheat_only_penalizes_above_two(tmp_path):
+    import yaml
+
+    path = Path(__file__).resolve().parents[1] / "config" / "screening_profiles.yaml"
+    profiles = yaml.safe_load(path.read_text(encoding="utf-8"))["screening_profiles"]
+    engine = ScreeningEngine(duckdb_path=tmp_path / "none.duckdb", output_dir=tmp_path)
+    cfg = profiles["default"]
+    frame = pd.DataFrame({"amount_ratio": [1.6, 2.0, 2.1, 3.0]})
+    penalty = engine._ranking_penalty(frame, cfg, 50.0)
+    assert penalty.tolist() == pytest.approx([0.0, 0.0, 1.5, 15.0])
+    assert engine._penalty_reasons(frame.iloc[0], cfg, 50.0) == []
+
+
 def test_candidate_percentile_score_avoids_absolute_score_saturation(tmp_path):
     engine = ScreeningEngine(duckdb_path=tmp_path / "none.duckdb", output_dir=tmp_path)
     frame = pd.DataFrame({"tech_score": [98.0, 99.0, 100.0]})
@@ -178,6 +191,8 @@ def test_screening_engine_reads_gold_tables_and_writes_json(tmp_path):
     assert result.input_count == 2
     assert result.after_hard_filter > 0  # 弱市仍产出候选，市场分层只在交易执行时拦截
     assert result.final[0]["code"] == "000001"
+    assert result.final[0]["metrics"]["mkt_market_score"] == 20.0
+    assert result.final[0]["metrics"]["stk_behavior_repair"] is None
     assert result.final[0]["score"] > result.final[-1]["score"]
     assert result.final[0]["position_budget_pct"] <= 8.0
     assert "弱市试仓" in result.final[0]["position_budget_reason"]

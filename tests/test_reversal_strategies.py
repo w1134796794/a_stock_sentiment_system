@@ -88,6 +88,9 @@ def test_event_factor_is_causal_and_persists():
     assert frame.iloc[0].stk_limit_pullback == 100
     anchor = json.loads(frame.iloc[0].reversal_structures)["limit_pullback"]
     assert anchor["event_date"] == h.iloc[25].trade_date
+    tr = pd.concat([h.high - h.low, (h.high - h.pre_close).abs(),
+                    (h.low - h.pre_close).abs()], axis=1).max(axis=1)
+    assert anchor["atr"] == pytest.approx(tr.iloc[12:26].mean())
     future = h.iloc[-1:].assign(trade_date="20990101", close=100)
     pd.testing.assert_frame_equal(frame, build_reversal_factors(pd.concat([h, future]), date))
     with duckdb.connect() as con:

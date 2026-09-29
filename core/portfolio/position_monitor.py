@@ -57,9 +57,10 @@ class PositionMonitor:
             if not shared_token:
                 return {"ok": True, "skipped": True, "reason": "其他进程正在监控持仓"}
             positions = self.repository.list_positions(account_key)
-            if not positions:
-                return {"ok": True, "count": 0, "decisions": [], "message": "暂无持仓"}
             current_date = signal_date or datetime.now().strftime("%Y%m%d")
+            if not positions:
+                notified = self._retry_pending_exits(account_key, current_date, set())
+                return {"ok": True, "count": 0, "decisions": [], "notified": notified, "message": "暂无持仓"}
             quote_payload = self._quotes([row["code"] for row in positions])
             quote_map = {
                 normalize_stock_code(row.get("code"), add_suffix=False): dict(row)
@@ -71,6 +72,7 @@ class PositionMonitor:
             executed = 0
             now = datetime.now().isoformat(timespec="seconds")
             for position in positions:
+                position["sellable_shares"] = self.repository.sellable_shares(int(position["id"]), current_date)
                 quote = quote_map.get(str(position["code"]), {})
                 sector = self._sector_context(position, current_date)
                 decision = self.decisions.evaluate(
@@ -117,6 +119,28 @@ class PositionMonitor:
                         "signal_time": now[11:19],
                     },
                 )
+                from core.operations.ledger import TradingLedger, stable_id
+
+                if decision["action"] in {"reduce", "sell", "blocked"} and signal.get("changed"):
+                    exit_id = stable_id("exit", current_date, position.get("id"), decision["action"])
+                    ledger = TradingLedger(self.repository.db_path)
+                    evidence = {
+                        "signal_id": exit_id, "candidate_date": str(position.get("entry_date") or ""),
+                        "market_date": current_date, "code": position.get("code"),
+                        "status": decision["action"], "config_version": (position.get("metadata") or {}).get("strategy_version") or "",
+                        "quote_source_time": quote.get("time") or "",
+                        "quote_received_at": quote.get("received_at") or "",
+                        "sector_observed_at": sector.get("observed_at") or "",
+                        "trigger_reason": decision.get("reason") or "",
+                        "veto_reason": "" if decision.get("can_sell") else "T+1或行情条件限制",
+                        "paper_execution_time": "",
+                    }
+                    ledger.evidence(exit_id, evidence)
+                    ledger.event(
+                        stable_id(exit_id, "signal"), "exit_signal",
+                        {"position_id": position.get("id"), "decision": decision, **evidence},
+                        signal_id=exit_id, account_key=account_key,
+                    )
                 row = {
                     "position": position,
                     "quote": quote,
@@ -124,14 +148,16 @@ class PositionMonitor:
                     "signal_id": signal.get("id"),
                     "changed": bool(signal.get("changed")),
                 }
-                if row["changed"] and decision["action"] in {"reduce", "sell", "blocked"}:
+                if not signal.get("notified_at") and decision["action"] in {"reduce", "sell", "blocked"}:
                     sent = self._notify(position, decision, signal_id=int(signal.get("id") or 0), signal_date=current_date)
                     notified += sent
                 if auto_execute and bool(decision.get("can_sell")):
-                    sold = self._execute_paper_exit(position, decision, market_price, current_date, now[11:19])
+                    sold = self._execute_paper_exit(position, decision, market_price, current_date, str(quote.get("time") or now[11:19]),
+                                                    signal_id=int(signal.get("id") or 0), quote=quote)
                     row["executed_shares"] = sold
                     executed += int(sold > 0)
                 results.append(row)
+            notified += self._retry_pending_exits(account_key, current_date, {r["signal_id"] for r in results})
             return {
                 "ok": True,
                 "count": len(results),
@@ -161,7 +187,14 @@ class PositionMonitor:
         price: float,
         trade_date: str,
         trade_time: str,
+        *,
+        signal_id: int = 0,
+        quote: Dict[str, Any] | None = None,
     ) -> int:
+        from core.portfolio.execution_quotes import quote_error
+
+        if quote_error(quote or {}, trade_date):
+            return 0
         action = str(decision.get("action") or "")
         total = int(position.get("shares") or 0)
         if action == "sell":
@@ -170,9 +203,19 @@ class PositionMonitor:
             shares = int(total * 0.5 / 100) * 100
         else:
             return 0
-        if shares < 100 or price <= 0:
+        shares = min(shares, self.repository.sellable_shares(int(position["id"]), trade_date))
+        if shares <= 0 or price <= 0:
             return 0
-        self.repository.sell_position(
+        from core.operations.ledger import TradingLedger, stable_id
+
+        exit_id = stable_id("exit", trade_date, position.get("id"), action)
+        TradingLedger(self.repository.db_path).event(
+            stable_id(exit_id, "paper_order", "sell"), "paper_order",
+            {"code": position.get("code"), "trade_date": trade_date, "trade_time": trade_time,
+             "price": price, "shares": shares, "action": "sell"},
+            signal_id=exit_id, account_key=str(position.get("account_key") or "default"),
+        )
+        result = self.repository.sell_position(
             int(position["id"]),
             {
                 "trade_date": trade_date,
@@ -181,10 +224,17 @@ class PositionMonitor:
                 "shares": shares,
                 "reason": decision.get("reason") or decision.get("action_label") or "自动模拟退出",
                 "source": "auto_realtime_exit",
-                "metadata": {"decision": decision},
+                "execution_key": f"portfolio-exit:{position['id']}:{signal_id or trade_date}:{action}",
+                "metadata": {"decision": decision, "signal_id": exit_id},
             },
         )
-        return shares
+        if int(result.get("executed_shares") or 0):
+            ledger = TradingLedger(self.repository.db_path)
+            evidence = ledger.timeline(exit_id).get("evidence") or {}
+            if evidence:
+                evidence["paper_execution_time"] = trade_time
+                ledger.evidence(exit_id, evidence)
+        return int(result.get("executed_shares") or 0)
 
     def _quotes(self, codes: List[str]) -> Dict[str, Any]:
         service = self._ensure_quote_service()
@@ -237,11 +287,33 @@ class PositionMonitor:
                 "index_count": 0,
             }
 
+    def _retry_pending_exits(self, account_key: str, signal_date: str, attempted: set) -> int:
+        sent = 0
+        for signal in self.repository.pending_exit_signals(account_key, signal_date):
+            if signal["id"] in attempted:
+                continue
+            position = self.repository.get_position(signal["position_id"])
+            if not position:
+                continue
+            decision = {**signal, "reason": "补发历史退出提醒（非新的卖出指令）：" + str(signal.get("reason") or "")}
+            sent += self._notify(position, decision, signal_id=signal["id"], signal_date=signal_date)
+        return sent
+
     def _notify(self, position: Dict[str, Any], decision: Dict[str, Any], *, signal_id: int, signal_date: str) -> int:
         notifier = self._ensure_notifier()
         result = notifier.notify_exit_signal(position, decision, signal_date=signal_date)
         sent = int(result.get("sent") or 0)
-        if sent and signal_id:
+        if sent:
+            from core.operations.ledger import TradingLedger, stable_id
+
+            exit_id = stable_id("exit", signal_date, position.get("id"), decision.get("action"))
+            TradingLedger(self.repository.db_path).event(
+                stable_id(exit_id, "notification", "sell"), "notification",
+                {"sent": sent, "code": position.get("code"), "side": "sell",
+                 "action": decision.get("action"), "channel_results": result.get("results") or []},
+                signal_id=exit_id, account_key=str(position.get("account_key") or "default"),
+            )
+        if result.get("all_delivered", bool(sent)) and signal_id:
             self.repository.mark_signal_notified(signal_id)
         return sent
 

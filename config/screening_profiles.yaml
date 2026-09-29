@@ -53,7 +53,7 @@ screening_profiles:
           reason: "涨停但成交额相对5日偏弱，次日承接风险升高"
         - name: "成交额过热扣分"
           factor: amount_ratio
-          above: 1.5
+          above: 2.0
           ceiling: 3.0
           max_penalty: 15
           reason: "成交额相对5日过热，次日兑现压力升高"

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}策略评估 · 管理控制台{% endblock %}
+{% block page_title %}策略评估{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">五策略 · 信号漏斗 · 模拟账户净值</div>{% endblock %}
+{% block content %}
+<section class="ev-controls" aria-label="实验范围">
+  <label>实验<select id="ev-experiment"></select></label>
+  <label>开始日期<input id="ev-start" type="date"></label>
+  <label>结束日期<input id="ev-end" type="date"></label>
+  <label>训练日<input id="ev-train" type="number" min="1" value="60"></label>
+  <label>验证日<input id="ev-valid" type="number" min="1" value="20"></label>
+  <button id="ev-freeze" type="button" class="ev-secondary">冻结新实验</button>
+  <button id="ev-run" type="button" class="ev-primary">评估</button>
+</section>
+<div id="ev-status" class="ev-status" role="status"></div>
+<section class="ev-kpis" aria-label="账户评估">
+  <div><span>估值覆盖</span><strong id="ev-coverage">--</strong></div>
+  <div><span>账户净收益</span><strong id="ev-return">--</strong></div>
+  <div><span>最大回撤</span><strong id="ev-drawdown">--</strong></div>
+  <div><span>成交费用</span><strong id="ev-fees">--</strong></div>
+</section>
+<section class="ev-band" aria-label="账户净值">
+  <div class="ev-heading"><h2>账户净值</h2><span id="ev-curve-status"></span></div>
+  <canvas id="ev-curve" height="220" aria-label="按交易日计算的账户净值曲线"></canvas>
+</section>
+<section class="ev-band" aria-label="盘后因子IC">
+  <div class="ev-heading"><h2>盘后因子 Rank IC</h2><span id="ev-factor-version"></span></div>
+  <div class="ev-table-wrap"><table class="ev-table">
+    <thead><tr><th>策略</th><th>因子</th><th>Rank IC</th><th>ICIR</th><th>有效日</th><th>覆盖率</th></tr></thead>
+    <tbody id="ev-factors"><tr><td colspan="6">暂无已发布因子评估</td></tr></tbody>
+  </table></div>
+</section>
+<section class="ev-band" aria-label="策略漏斗">
+  <div class="ev-heading"><h2>策略漏斗</h2><span id="ev-fold-count"></span></div>
+  <div class="ev-table-wrap"><table class="ev-table">
+    <thead><tr><th>验证期</th><th>性质</th><th>策略</th><th>市场</th><th>候选</th><th>确认</th><th>模拟成交</th><th>无法成交</th><th>平仓</th><th>平仓均收益</th><th>前三胜率</th><th>成交样本 IC</th></tr></thead>
+    <tbody id="ev-rows"><tr><td colspan="12">暂无评估结果</td></tr></tbody>
+  </table></div>
+</section>
+<style>
+  .ev-controls{display:flex;flex-wrap:wrap;align-items:end;gap:.6rem;padding:.8rem 0 1rem;border-bottom:1px solid #263449}
+  .ev-controls label{font-size:.72rem;color:#94a3b8;min-width:110px}
+  .ev-controls input,.ev-controls select{display:block;width:100%;height:34px;margin-top:.25rem;padding:0 .5rem;background:#0b1527;border:1px solid #334155;border-radius:5px;color:#e2e8f0}
+  #ev-experiment{min-width:220px;max-width:280px}
+  .ev-controls button{height:34px;padding:0 .75rem;border:1px solid #475569;border-radius:5px;font-size:.78rem;font-weight:700}
+  .ev-secondary{color:#cbd5e1;background:#142035}.ev-primary{color:#fff;background:#059669;border-color:#059669!important}
+  .ev-controls button:disabled{opacity:.5;cursor:wait}.ev-status{min-height:2rem;padding:.55rem 0;color:#94a3b8;font-size:.78rem}
+  .ev-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid #263449;border-radius:6px;overflow:hidden;margin:.35rem 0 1rem}
+  .ev-kpis>div{padding:.8rem 1rem;border-right:1px solid #263449;background:#101a2c;min-width:0}.ev-kpis>div:last-child{border-right:0}
+  .ev-kpis span{display:block;color:#8291a8;font-size:.72rem}.ev-kpis strong{display:block;margin-top:.25rem;color:#e2e8f0;font-size:1.18rem;overflow-wrap:anywhere}
+  .ev-band{border-top:1px solid #263449;padding:1rem 0}.ev-heading{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:.7rem}
+  .ev-heading h2{font-size:.92rem;font-weight:700}.ev-heading span{color:#8291a8;font-size:.72rem}
+  #ev-curve{display:block;width:100%;height:220px;background:#101a2c;border:1px solid #263449;border-radius:6px}
+  .ev-table-wrap{overflow:auto;border:1px solid #263449;border-radius:6px}.ev-table{width:100%;min-width:980px;border-collapse:collapse;font-size:.75rem}
+  .ev-table th,.ev-table td{padding:.65rem .7rem;border-bottom:1px solid #263449;text-align:right;white-space:nowrap}
+  .ev-table th{color:#8291a8;background:#101a2c;font-weight:600}.ev-table td{color:#e2e8f0}.ev-table th:first-child,.ev-table td:first-child,.ev-table th:nth-child(2),.ev-table td:nth-child(2){text-align:left}
+  @media(max-width:700px){.ev-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ev-kpis>div:nth-child(2){border-right:0}.ev-controls label{flex:1 1 120px}#ev-experiment{max-width:none}}
+</style>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const number = value => value == null ? '--' : Number(value).toLocaleString('zh-CN', {maximumFractionDigits:2});
+  const percent = value => value == null ? '--' : `${Number(value).toFixed(2)}%`;
+  const status = (message, error=false) => { $('ev-status').textContent=message; $('ev-status').style.color=error?'#fb7185':'#94a3b8'; };
+  let current = null;
+  async function request(url, options={}) {
+    const response=await fetch(url,{headers:{'Content-Type':'application/json'},...options});
+    const data=await response.json();
+    if (!response.ok || data.ok===false) throw new Error(data.message || `请求失败 ${response.status}`);
+    return data;
+  }
+  function draw(rows) {
+    const canvas=$('ev-curve'), ctx=canvas.getContext('2d');
+    const width=canvas.clientWidth, height=220, ratio=window.devicePixelRatio||1;
+    canvas.width=Math.round(width*ratio); canvas.height=Math.round(height*ratio); ctx.scale(ratio,ratio);
+    ctx.clearRect(0,0,width,height);
+    const points=rows.map((row,index)=>({index,value:row.equity}));
+    const valid=points.filter(point=>point.value!=null);
+    ctx.strokeStyle='#263449';ctx.lineWidth=1;
+    for(let line=1;line<=3;line++){const y=line*height/4;ctx.beginPath();ctx.moveTo(20,y);ctx.lineTo(width-16,y);ctx.stroke();}
+    if(valid.length<2){ctx.fillStyle='#8291a8';ctx.font='13px sans-serif';ctx.fillText('暂无完整净值序列',24,34);return;}
+    const low=Math.min(...valid.map(p=>p.value)), high=Math.max(...valid.map(p=>p.value));
+    const span=Math.max(high-low,high*.002,1), x=p=>20+p.index/Math.max(points.length-1,1)*(width-36), y=p=>height-22-(p.value-low+span*.1)/(span*1.2)*(height-42);
+    ctx.strokeStyle='#34d399';ctx.lineWidth=2;ctx.beginPath();let previous=null;
+    for(const point of points){if(point.value==null){previous=null;continue;}if(previous==null)ctx.moveTo(x(point),y(point));else ctx.lineTo(x(point),y(point));previous=point;}
+    ctx.stroke();ctx.fillStyle='#94a3b8';ctx.font='11px sans-serif';ctx.fillText(number(high),24,18);ctx.fillText(number(low),24,height-8);
+  }
+  function render(report) {
+    current=report;const equity=report.equity||{}, summary=equity.summary||{}, rows=equity.rows||[];
+    $('ev-coverage').textContent=summary.days?`${summary.valued_days}/${summary.days}日`:'--';
+    $('ev-return').textContent=percent(summary.total_return_pct);
+    $('ev-drawdown').textContent=percent(summary.max_drawdown_pct);
+    $('ev-fees').textContent=summary.days?number(summary.fees):'--';
+    $('ev-curve-status').textContent=equity.status==='complete'?'收盘价估值':'估值缺失 · 不出收益结论';
+    draw(rows);
+    $('ev-fold-count').textContent=`${(report.folds||[]).length}个验证窗口`;
+    const names={mainline_leader:'主线龙头',weak_to_strong:'弱转强',first_board_launch:'首板启动',limit_pullback:'涨停回踩',limit_reversal:'跌停反包'};
+    const latest=(report.folds||[]).at(-1)||{};
+    const factorRows=Object.entries(latest.factor_ic||{}).flatMap(([strategy,source])=>(source.factors||[]).slice(0,3).map(factor=>({strategy,source,factor})));
+    $('ev-factor-version').textContent=factorRows.length?`训练截至 ${latest.train_end}`:'无可用因子版本';
+    $('ev-factors').innerHTML=factorRows.map(({strategy,source,factor})=>`<tr><td>${esc(names[strategy]||strategy)}</td><td>${esc(factor.factor)}${source.available_before_validation?'':' · 回填'}</td><td>${Number(factor.ic_mean||0).toFixed(3)}</td><td>${Number(factor.ic_ir||0).toFixed(2)}</td><td>${number(factor.daily_samples)}</td><td>${percent((factor.coverage||0)*100)}</td></tr>`).join('')||'<tr><td colspan="6">暂无已发布因子评估</td></tr>';
+    const html=(report.folds||[]).flatMap(fold=>(fold.metrics||[]).map(row=>`<tr><td>${esc(fold.validation_start)}–${esc(fold.validation_end)}</td><td>${fold.classification==='prospective_oos'?'前瞻样本外':'历史描述'}</td><td>${esc(names[row.strategy_id]||row.strategy_id)}</td><td>${esc(row.regime)}</td><td>${number(row.candidates)}</td><td>${number(row.confirmed)}</td><td>${number(row.paper_fills)}</td><td>${number((row.unfilled_signals||0)+(row.rejected_orders||0))}</td><td>${number(row.closed_trades)}</td><td>${percent(row.mean_closed_trade_return_pct)}</td><td>${percent(row.top3_win_rate_pct)}</td><td>${row.closed_trade_rank_ic==null?'--':Number(row.closed_trade_rank_ic).toFixed(3)}</td></tr>`)).join('');
+    $('ev-rows').innerHTML=html||'<tr><td colspan="12">暂无评估结果</td></tr>';
+    status(`${report.factor_and_configuration_unchanged?'配置版本一致':'配置版本已变更'} · ${report.warning||''}`);
+  }
+  async function load(id) {
+    try {const result=await request(`/api/operations/experiments/${encodeURIComponent(id)}`);render(result.report||{});}
+    catch(error){status(error.message,true);}
+  }
+  async function list(selectId) {
+    const data=await request('/api/operations/experiments');const rows=data.rows||[];
+    $('ev-experiment').innerHTML=rows.map(row=>`<option value="${esc(row.experiment_id)}">${esc(row.experiment_id.slice(0,16))} · ${esc(row.frozen_at.slice(0,10))}</option>`).join('');
+    const id=selectId||rows[0]?.experiment_id;if(id){$('ev-experiment').value=id;await load(id);}
+    else status('尚无冻结实验');
+  }
+  async function action(button, callback){button.disabled=true;try{await callback();}catch(error){status(error.message,true);}finally{button.disabled=false;}}
+  $('ev-freeze').addEventListener('click',()=>action($('ev-freeze'),async()=>{
+    const result=await request('/api/operations/experiments/freeze',{method:'POST',body:JSON.stringify({label:'production-five'})});
+    await list(result.experiment_id);status('实验已冻结');
+  }));
+  $('ev-run').addEventListener('click',()=>action($('ev-run'),async()=>{
+    const id=$('ev-experiment').value;if(!id)throw new Error('请先冻结实验');
+    const start=$('ev-start').value.replaceAll('-',''),end=$('ev-end').value.replaceAll('-','');
+    if(!start||!end||start>end)throw new Error('请选择有效日期范围');
+    status('正在评估...');const report=await request(`/api/operations/experiments/${encodeURIComponent(id)}/evaluate`,{
+      method:'POST',body:JSON.stringify({start,end,train_days:Number($('ev-train').value),validation_days:Number($('ev-valid').value)})
+    });render(report);
+  }));
+  $('ev-experiment').addEventListener('change',event=>load(event.target.value));
+  window.addEventListener('resize',()=>{if(current)draw(current.equity?.rows||[]);});
+  $('ev-end').value='{{ latest_trade_date[:4] }}-{{ latest_trade_date[4:6] }}-{{ latest_trade_date[6:8] }}';
+  list().catch(error=>status(error.message,true));
+})();
+</script>
+{% endblock %}

@@ -92,6 +92,7 @@ export type WorkbenchData = {
     vol_word?: string;
     vol_pct?: number | null;
     amount_text?: string;
+    amount_prev_date?: string;
   promotion?: {
     overall?: number | null;
     rate_1to2?: number | null;
