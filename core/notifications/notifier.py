@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -189,6 +190,10 @@ class NotificationService:
                 f"时间：{confirm_time}",
                 f"策略：{strategy}",
             ]
+            candidate_date = str(payload.get("candidate_date") or row.get("candidate_date")
+                                 or row.get("trade_date") or "").strip()
+            if candidate_date:
+                lines.append(f"候选日：{candidate_date}；行情日：{market_date}")
             if is_leader:
                 roles = row.get("leader_roles") or []
                 if isinstance(roles, str):
@@ -201,13 +206,55 @@ class NotificationService:
                 lines.append(f"龙头身份：{role_text}")
                 if lifecycle or leader_age:
                     lines.append(f"龙头阶段：{'，'.join(item for item in (lifecycle, leader_age) if item)}")
+                leader_rank = self._notification_number(row.get("pool_rank"))
+                leader_score = self._notification_number(row.get("leader_score"))
+                parts = []
+                if leader_rank is not None and leader_rank > 0:
+                    parts.append(f"池排名#{leader_rank:.0f}")
+                if leader_score is not None:
+                    parts.append(f"龙头评分{leader_score:.1f}")
+                if parts:
+                    lines.append("龙头位置：" + "，".join(parts))
+                source_rank = self._notification_number(row.get("source_rank"))
+                if source_rank is not None and source_rank > 0:
+                    lines.append(f"候选名次：#{source_rank:.0f}（仅作观察顺序）")
+                dimensions = (
+                    ("板块地位", "sector_status_score"),
+                    ("市场辨识度", "market_status_score"),
+                    ("身份持续性", "continuity_score"),
+                    ("资金认可", "capital_recognition_score"),
+                    ("接力安全", "safety_score"),
+                )
+                scores = [f"{label}{value:.0f}" for label, key in dimensions
+                          if (value := self._notification_number(row.get(key))) is not None]
+                if scores:
+                    lines.append("候选日评分：" + " / ".join(scores))
+                limit_progress = self._notification_number(row.get("limit_progress"))
+                limit_pct = self._notification_number(row.get("limit_pct"))
+                if limit_progress is not None and 0 <= limit_progress <= 1:
+                    board = f"{limit_pct:g}cm" if limit_pct is not None and limit_pct > 0 else ""
+                    lines.append(f"候选日涨停进度：{limit_progress * 100:.0f}%" + (f"（{board}）" if board else ""))
+                evidence = row.get("evidence") or {}
+                if isinstance(evidence, dict):
+                    passed = [str(label) for label, value in evidence.items() if value is True]
+                    if passed:
+                        lines.append("身份依据：" + "、".join(passed[:4]))
             if sectors:
-                lines.append(f"板块：{sectors}")
+                lines.append("关联板块：" + "、".join(
+                    part.strip() for part in sectors.replace("，", ",").split(",")[:5] if part.strip()
+                ))
+            open_gap = self._notification_number(row.get("open_gap_pct"))
+            if open_gap is not None:
+                lines.append(f"今日开盘：{open_gap:+.2f}%")
+            reason = str(row.get("reason") or "").strip()
+            if reason:
+                lines.append(f"盘中确认依据：{reason}")
             structure = row.get("structure") or {}
             if structure:
                 lines.append(f"事件日期：{structure.get('event_date', '')}")
-                lines.append(f"确认依据：{row.get('reason') or ''}")
-                lines.append(f"结构保护价：{float(structure.get('protection') or 0):.2f}")
+                protection = self._notification_number(structure.get("protection"))
+                if protection is not None and protection > 0:
+                    lines.append(f"结构保护价：{protection:.2f}")
                 lines.append("盘中结构确认，收盘形态仍需收盘后核验。")
             if cluster:
                 lines.append(f"风险主题簇：{cluster}")
@@ -242,6 +289,16 @@ class NotificationService:
                 if cluster_lock_key and cluster_lock_token:
                     self.backend.release_lock(cluster_lock_key, cluster_lock_token)
         return sent
+
+    @staticmethod
+    def _notification_number(value: Any) -> float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
 
     @staticmethod
     def _notification_priority(row: Dict[str, Any]) -> tuple[float, ...]:

@@ -119,6 +119,7 @@ def test_realtime_notification_sends_confirmed_leader_strength(monkeypatch):
         "profile": "leader_pool",
         "observation_source": "leader_pool",
         "strategy": {"id": "leader_pool", "name": "近期龙头池"},
+        "candidate_date": "20260706",
         "rows": [
             {
                 "code": "600001",
@@ -133,6 +134,19 @@ def test_realtime_notification_sends_confirmed_leader_strength(monkeypatch):
                 "lifecycle_state": "分歧龙头",
                 "leader_time_label": "上一交易日龙头",
                 "resonance_sectors": "机器人",
+                "pool_rank": 1,
+                "source_rank": 197,
+                "leader_score": 59.1,
+                "limit_pct": 10,
+                "limit_progress": 1.0,
+                "sector_status_score": 49.6,
+                "market_status_score": 60.2,
+                "continuity_score": 65,
+                "capital_recognition_score": 52.8,
+                "safety_score": 82.4,
+                "evidence": {"板块地位": False, "持续性": True},
+                "open_gap_pct": 2.6,
+                "reason": "站上分时均价并突破前高",
             },
             {"code": "600002", "name": "观察龙头", "status": "observe"},
         ],
@@ -144,7 +158,38 @@ def test_realtime_notification_sends_confirmed_leader_strength(monkeypatch):
     assert "龙头身份：板块龙头、情绪龙头" in calls[0][1]
     assert "龙头阶段：分歧龙头，上一交易日龙头" in calls[0][1]
     assert "行情：18.66，涨幅+3.25%" in calls[0][1]
+    assert "候选日：20260706；行情日：20260707" in calls[0][1]
+    assert "池排名#1，龙头评分59.1" in calls[0][1]
+    assert "候选名次：#197（仅作观察顺序）" in calls[0][1]
+    assert "候选日评分：板块地位50 / 市场辨识度60 / 身份持续性65 / 资金认可53 / 接力安全82" in calls[0][1]
+    assert "候选日涨停进度：100%（10cm）" in calls[0][1]
+    assert "身份依据：持续性" in calls[0][1]
+    assert "今日开盘：+2.60%" in calls[0][1]
+    assert "盘中确认依据：站上分时均价并突破前高" in calls[0][1]
+    assert "板块地位49.6" not in calls[0][1]
     assert calls[0][2]["event_key"] == "intraday:20260707:600001:weak_to_strong"
+
+
+def test_realtime_notification_omits_unavailable_leader_metrics(monkeypatch):
+    service = NotificationService()
+    messages = []
+    monkeypatch.setattr(service, "send", lambda title, content, **kwargs: (
+        messages.append(content) or {"ok": True, "sent": 1}
+    ))
+
+    service.notify_realtime_payload({
+        "market_date": "20260707", "profile": "leader_pool",
+        "rows": [{
+            "code": "600001", "name": "测试龙头", "status": "confirmed",
+            "pool_rank": 0, "leader_score": float("nan"),
+            "limit_progress": float("nan"), "structure": {"protection": 0},
+        }],
+    })
+
+    assert len(messages) == 1
+    assert "龙头位置：" not in messages[0]
+    assert "候选日涨停进度：" not in messages[0]
+    assert "结构保护价：0" not in messages[0]
 
 
 def test_notification_service_reports_channels_without_exposing_secrets(monkeypatch):
