@@ -8,18 +8,23 @@
 - AshareProvider：分钟线 / K 线兜底
 """
 import json
+from datetime import datetime
+from pathlib import Path
+import os
+import tempfile
 from typing import Dict, Iterable, List, Tuple
 
 import loguru
 import pandas as pd
 
 from core.data.data_manager_base import DataManagerBase
+from core.data.data_manager_suspension import SuspensionDataManager
 from core.utils.stock_code_utils import StockCodeUtils
 
 logger = loguru.logger
 
 
-class StockDataManager(DataManagerBase):
+class StockDataManager(SuspensionDataManager):
     """个股数据管理器"""
 
     def _get_realtime_quote_provider(self):
@@ -374,39 +379,79 @@ class StockDataManager(DataManagerBase):
             'total_mv': float(row.get('total_mv', 0)),
         }
 
-    def get_stock_tick(self, ts_code: str, trade_date: str) -> pd.DataFrame:
+    def get_minute_quality_report(self, ts_code: str, trade_date: str) -> Dict:
+        canonical = StockCodeUtils.standardize_code(ts_code, add_suffix=True)
+        return dict(getattr(self, "_minute_quality_reports", {}).get((canonical, str(trade_date)), {}))
+
+    def get_stock_tick(self, ts_code: str, trade_date: str, *,
+                       require_full_day: bool | None = None,
+                       force_refresh: bool = False) -> pd.DataFrame:
         """获取个股分时数据（1分钟线）。
 
         优先使用 eltdx：当日走实时分时，历史交易日走 ``get_history_minute``。
         eltdx 不可用时，用 AshareProvider 公共接口兜底。
         """
-        cache_file = self.stock_dir / "tick" / f"{ts_code}_{trade_date}.csv"
+        from core.data.minute_quality import SHANGHAI, inspect_minute_bars
 
-        if cache_file.exists():
+        canonical = StockCodeUtils.standardize_code(ts_code, add_suffix=True)
+        date = str(trade_date).replace("-", "")
+        now = datetime.now(SHANGHAI)
+        full_day = (date < now.strftime("%Y%m%d") or now.strftime("%H:%M") >= "15:01") if require_full_day is None else require_full_day
+        cache_file = self.stock_dir / "tick" / f"{canonical}_{date}.csv"
+        legacy = self.stock_dir / "tick" / f"{ts_code}_{date}.csv"
+        attempts = []
+
+        def inspect(frame, source):
+            report = inspect_minute_bars(frame, date, require_full_day=full_day, expected_code=canonical, now=now)
+            report.update({"ts_code": canonical, "code": canonical.split(".")[0], "source": source})
+            if not hasattr(self, "_minute_quality_reports"):
+                self._minute_quality_reports = {}
+            self._minute_quality_reports[(canonical, date)] = {**report, "attempts": list(attempts)}
+            return report
+
+        for path in dict.fromkeys((cache_file, legacy)):
+            if force_refresh or not path.exists():
+                continue
             try:
-                cached = pd.read_csv(cache_file)
-                # 仅当缓存是“完整分时序列”时采用；历史遗留的单根收盘快照(<=1行)忽略并重取，自动修复
-                if cached is not None and len(cached) > 1:
+                cached = pd.read_csv(path)
+                report = inspect(cached, "cache")
+                if report["valid"]:
                     return cached
+                attempts.append({"source": "cache", "reason": report["reason"]})
             except Exception as e:
-                logger.warning(f"读取缓存分时数据失败: {e}")
-
-        eltdx_provider = self._get_eltdx_provider()
-        if eltdx_provider is not None:
-            df = eltdx_provider.get_minute_bars(ts_code, trade_date)
-            if df is not None and not df.empty:
-                df.to_csv(cache_file, index=False)
-                logger.info(f"[get_stock_tick] eltdx 获取 {ts_code} {trade_date} 分时: {len(df)}条")
-                return df
-
-        ashare_provider = self._get_ashare_provider()
-        if ashare_provider is not None:
-            df = ashare_provider.get_minute_bars(ts_code, trade_date)
-            if df is not None and not df.empty:
-                df.to_csv(cache_file, index=False)
-                logger.info(f"[get_stock_tick] Ashare 获取 {ts_code} {trade_date} 分时: {len(df)}条")
-                return df
-
+                attempts.append({"source": "cache", "reason": f"缓存读取失败: {e}"})
+        if getattr(self, "allow_remote_minutes", getattr(self, "allow_remote_history", True)):
+            for source, getter in (("eltdx", self._get_eltdx_provider), ("Ashare", self._get_ashare_provider)):
+                try:
+                    provider = getter()
+                    if provider is None:
+                        attempts.append({"source": source, "reason": "历史源不可用或当前节点禁止连接"})
+                        continue
+                    frame = provider.get_minute_bars(canonical, date)
+                    report = inspect(frame, source)
+                    if not report["valid"]:
+                        attempts.append({"source": source, "reason": report["reason"]})
+                        continue
+                    # Never replace a useful cache with incomplete remote output.
+                    cache_file.parent.mkdir(parents=True, exist_ok=True)
+                    fd, temporary = tempfile.mkstemp(prefix=cache_file.stem, suffix=".tmp", dir=cache_file.parent)
+                    os.close(fd)
+                    try:
+                        frame.to_csv(temporary, index=False)
+                        Path(temporary).replace(cache_file)
+                    finally:
+                        Path(temporary).unlink(missing_ok=True)
+                    inspect(frame, source)
+                    return frame
+                except Exception as exc:
+                    attempts.append({"source": source, "reason": str(exc)})
+        else:
+            attempts.append({"source": "policy", "reason": "当前调用禁止远程补取历史分钟"})
+        report = self.get_minute_quality_report(canonical, date) or inspect(None, "missing")
+        report.update({"valid": False, "attempts": attempts,
+                       "reason": "；".join(f"{item['source']}: {item['reason']}" for item in attempts) or "分钟数据缺失"})
+        self._minute_quality_reports[(canonical, date)] = report
+        logger.warning(f"[get_stock_tick] {canonical} {date}: {report['reason']}")
         return pd.DataFrame()
 
     @staticmethod

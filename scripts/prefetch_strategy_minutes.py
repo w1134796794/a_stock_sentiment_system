@@ -23,6 +23,9 @@ from config.settings import CACHE_DIR, FACTOR_DB_PATH, TUSHARE_TOKEN
 from core.data import DataManager
 from core.factors.strategy_training import STRATEGY_TRAINING_SPECS, StrategyMinuteTrainingBuilder
 from core.utils.stock_code_utils import StockCodeUtils
+from core.utils.sector_names import normalize_sector_names
+from core.utils.stock_eligibility import factor_risk_projection, new_entry_exclusion
+from core.data.minute_quality import inspect_minute_bars, minute_failure
 
 
 Requirement = Tuple[str, str]
@@ -33,7 +36,7 @@ def _canonical(code: str) -> str:
 
 
 def _first_sector(value: Any) -> str:
-    return str(value or "").replace("，", ",").split(",", 1)[0].strip()
+    return next(iter(normalize_sector_names(value)), '')
 
 
 def _trade_date_map(connection: Any) -> Dict[str, str]:
@@ -65,15 +68,17 @@ def build_requirements(
     peer_count: int = 4,
 ) -> tuple[Set[Requirement], Set[Requirement], Dict[str, Any]]:
     import duckdb  # type: ignore
+    from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-    candidates = _strategy_candidates(profiles, start_date, end_date)
+    all_candidates = _strategy_candidates(profiles, start_date, end_date)
+    candidates = {key: row for key, row in all_candidates.items() if not new_entry_exclusion(row)}
     minutes: Set[Requirement] = set()
     auctions: Set[Requirement] = set()
     missing_entry_date = 0
     peer_requirements = 0
     by_date: Dict[str, list[Tuple[str, Mapping[str, Any]]]] = defaultdict(list)
 
-    connection = duckdb.connect(str(FACTOR_DB_PATH), read_only=True)
+    connection = duckdb_connect(str(FACTOR_DB_PATH), read_only=True)
     try:
         next_dates = _trade_date_map(connection)
         for (plan_date, code), row in candidates.items():
@@ -87,15 +92,18 @@ def build_requirements(
             by_date[str(plan_date)].append((str(code).zfill(6), row))
 
         if include_sector_peers:
+            risk_columns = factor_risk_projection(connection)
             for plan_date, rows in sorted(by_date.items()):
                 factor_rows = connection.execute(
-                    "SELECT code, ts_code, resonance_sectors, total_score "
+                    f"SELECT code, ts_code, resonance_sectors, total_score{risk_columns} "
                     "FROM factor_stock_wide WHERE trade_date=? "
                     "QUALIFY ROW_NUMBER() OVER (PARTITION BY code ORDER BY COALESCE(computed_at, '') DESC)=1",
                     [plan_date],
                 ).fetchdf()
                 if factor_rows.empty:
                     continue
+                eligible = [not new_entry_exclusion(row) for row in factor_rows.to_dict("records")]
+                factor_rows = factor_rows.loc[eligible].copy()
                 factor_rows["code"] = factor_rows["code"].astype(str).str.zfill(6)
                 factor_rows["resonance_sectors"] = factor_rows["resonance_sectors"].fillna("").astype(str)
                 factor_rows["total_score"] = pd.to_numeric(
@@ -104,14 +112,15 @@ def build_requirements(
                 entry_date = next_dates.get(plan_date, "")
                 for code, candidate in rows:
                     own = factor_rows[factor_rows["code"] == code]
-                    sector = _first_sector(candidate.get("resonance_sectors"))
-                    if not sector and not own.empty:
-                        sector = _first_sector(own.iloc[0].get("resonance_sectors"))
-                    if not sector:
+                    sectors = set(normalize_sector_names(candidate.get("resonance_sectors")))
+                    if not sectors and not own.empty:
+                        sectors = set(normalize_sector_names(own.iloc[0].get("resonance_sectors")))
+                    if not sectors:
                         continue
                     peers = factor_rows[
                         factor_rows["code"].ne(code)
-                        & factor_rows["resonance_sectors"].str.contains(sector, regex=False)
+                        & factor_rows["resonance_sectors"].map(
+                            lambda text: bool(sectors.intersection(normalize_sector_names(text))))
                     ].nlargest(max(int(peer_count), 3), "total_score")
                     for peer in peers.itertuples(index=False):
                         peer_code = peer.ts_code if pd.notna(peer.ts_code) and str(peer.ts_code) else peer.code
@@ -123,6 +132,7 @@ def build_requirements(
     audit = {
         "profiles": list(profiles),
         "candidate_rows": len(candidates),
+        "excluded_risk_candidates": len(all_candidates) - len(candidates),
         "minute_requirements": len(minutes),
         "auction_requirements": len(auctions),
         "peer_requirements_before_dedup": peer_requirements,
@@ -136,8 +146,8 @@ def _minute_cached(cache_dir: Path, trade_date: str, ts_code: str) -> bool:
     if not path.exists():
         return False
     try:
-        return sum(1 for _ in path.open("r", encoding="utf-8", errors="ignore")) > 2
-    except OSError:
+        return inspect_minute_bars(pd.read_csv(path), trade_date, expected_code=ts_code)["valid"]
+    except (OSError, ValueError, pd.errors.ParserError):
         return False
 
 
@@ -189,11 +199,11 @@ def main() -> None:
     fetched = 0
     failed = []
     for index, (trade_date, ts_code) in enumerate(pending, start=1):
-        frame = dm.get_stock_tick(ts_code, trade_date)
-        if frame is not None and len(frame) > 1:
+        frame = dm.get_stock_tick(ts_code, trade_date, require_full_day=True)
+        if inspect_minute_bars(frame, trade_date)["valid"]:
             fetched += 1
         else:
-            failed.append({"trade_date": trade_date, "ts_code": ts_code})
+            failed.append(minute_failure(dm, frame, trade_date, ts_code))
         if index % 100 == 0:
             print(f"[minute-prefetch] {index}/{len(pending)} fetched={fetched} failed={len(failed)}", flush=True)
         if args.sleep > 0:

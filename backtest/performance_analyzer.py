@@ -7,6 +7,7 @@ import numpy as np
 from typing import Dict, List
 from datetime import datetime
 import loguru
+from backtest.nav_metrics import daily_returns, sharpe_ratio as account_sharpe
 
 logger = loguru.logger
 
@@ -65,7 +66,7 @@ class PerformanceAnalyzer:
             }
 
         nav_df = pd.DataFrame(daily_nav)
-        nav_df['daily_return'] = nav_df['total_value'].pct_change()
+        nav_df['daily_return'] = daily_returns(nav_df['total_value'], initial)
 
         # 年化收益
         days = len(nav_df)
@@ -76,7 +77,7 @@ class PerformanceAnalyzer:
 
         # Sharpe比率
         excess_return = annualized_return - self.risk_free_rate
-        sharpe_ratio = excess_return / volatility if volatility > 0 else 0
+        sharpe_ratio = account_sharpe(nav_df['daily_return'], self.risk_free_rate)
 
         # Sortino比率（只考虑下行波动）
         downside_returns = nav_df['daily_return'][nav_df['daily_return'] < 0]
@@ -121,7 +122,7 @@ class PerformanceAnalyzer:
         nav_df = pd.DataFrame(daily_nav)
 
         # 最大回撤
-        nav_df['cummax'] = nav_df['total_value'].cummax()
+        nav_df['cummax'] = nav_df['total_value'].cummax().clip(lower=result.get('initial_capital', 100000))
         nav_df['drawdown'] = (nav_df['total_value'] - nav_df['cummax']) / nav_df['cummax']
         max_drawdown = nav_df['drawdown'].min()
 
@@ -150,11 +151,11 @@ class PerformanceAnalyzer:
         avg_recovery_time = np.mean(recovery_times) if recovery_times else 0
 
         # VaR (Value at Risk) - 95%置信度
-        daily_returns = nav_df['total_value'].pct_change().dropna()
-        var_95 = np.percentile(daily_returns, 5) if len(daily_returns) > 0 else 0
+        returns = daily_returns(nav_df['total_value'], result.get('initial_capital', 100000))
+        var_95 = np.percentile(returns, 5) if len(returns) > 0 else 0
 
         # CVaR (Conditional VaR)
-        cvar_95 = daily_returns[daily_returns <= var_95].mean() if len(daily_returns) > 0 else 0
+        cvar_95 = returns[returns <= var_95].mean() if len(returns) > 0 else 0
 
         return {
             'max_drawdown': max_drawdown,
@@ -375,6 +376,12 @@ class PerformanceAnalyzer:
         report.append("=" * 70)
         report.append("策略回测性能报告")
         report.append("=" * 70)
+        quality = backtest_result.get('data_quality') or {}
+        if quality.get('status') == 'incomplete':
+            report.append("【数据不完整：仅供剩余证据可用样本研究】")
+            report.append(f"  跳过候选: {quality.get('skipped_candidate_count', 0)} / {quality.get('candidate_samples', 0)}（股票×日期）")
+            report.append(f"  候选证据覆盖率: {quality.get('candidate_coverage_pct')}%")
+            report.append("  下列胜率、收益和回撤不是完整候选样本的结果。")
 
         # 收益指标
         returns = metrics['returns']

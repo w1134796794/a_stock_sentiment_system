@@ -73,7 +73,7 @@ freeze_position_cap: 0.20        # 冰点/退潮时的总仓位封顶
 
 # ---- 交易成本（回测）----
 commission_rate: 0.0003          # 佣金率
-stamp_duty_rate: 0.001           # 印花税（卖出）
+stamp_duty_rate: 0.0005          # 印花税（卖出，2023-08-28起减半；更早历史须显式配置）
 slippage: 0.002                  # 滑点
 min_holding_days: 1              # 最小持仓天数（T+1）
 exit_minute_data_policy: cache_or_fetch  # 优先按分钟顺序撮合；缺失时允许补取并缓存

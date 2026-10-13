@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from core.infrastructure.duckdb_access import connect as duckdb_connect
 import numpy as np
 import pandas as pd
 
@@ -32,7 +33,7 @@ from experiment_strategy_factors import (
 def _load_outcomes(
     db_path: Path, start: str, end: str, strategies: tuple[str, ...],
 ) -> dict[tuple[str, str, str], float]:
-    with duckdb.connect(str(db_path), read_only=True) as con:
+    with duckdb_connect(str(db_path), read_only=True) as con:
         frame = con.execute(
             f"""
             SELECT profile, trade_date, code, raw_forward_return

@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,13 +17,15 @@ def test_quote_service_force_refresh_uses_one_batch_call():
 
         def get_quote_snapshots(self, codes):
             self.calls.append(list(codes))
+            now = datetime.now()
             return {
                 code: {
                     "code": code,
                     "last_price": 10.0,
                     "pre_close": 9.8,
-                    "date": "20260813",
-                    "time": "09:35:03",
+                    "date": now.strftime("%Y%m%d"),
+                    "time": now.strftime("%H:%M:%S"),
+                    "received_at": now.isoformat(),
                 }
                 for code in codes
             }
@@ -69,6 +72,7 @@ class FakeQuoteDataManager:
 
     def get_quote_snapshots(self, codes):
         self.calls += 1
+        now = datetime.now()
         return {
             "000001": {
                 "code": "000001",
@@ -80,8 +84,9 @@ class FakeQuoteDataManager:
                 "low_price": 10.05,
                 "vol_hand": 12345,
                 "amount_yuan": 4567890,
-                "date": "20260615",
-                "time": "09:31:00",
+                "date": now.strftime("%Y%m%d"),
+                "time": now.strftime("%H:%M:%S"),
+                "received_at": now.isoformat(),
                 "source": "fake",
             }
         }

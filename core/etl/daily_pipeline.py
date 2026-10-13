@@ -168,6 +168,8 @@ class ETLDailyPipeline:
             logger.info(f"[盘后取数] {trade_date} 本地数据完整，跳过远端接口")
             return result
 
+        write_fetch_manifest(trade_date, web_data_dir=self.web_data_dir, sources={}, writes={},
+                             metadata={"state": "running", "force_refresh": refresh_requested})
         cache_reset: Dict[str, Any] = {}
         if refresh_requested:
             invalidator = getattr(self.dm, "invalidate_trade_date_cache", None)
@@ -206,6 +208,7 @@ class ETLDailyPipeline:
             sources=dataset.meta.get("source_fetch_status") or {},
             writes=persisted.get("writes") or {},
             metadata={
+                "state": "done",
                 "force_refresh": refresh_requested,
                 "auto_refresh_premature": auto_refresh,
                 "cache_reset": cache_reset,
@@ -259,18 +262,8 @@ class ETLDailyPipeline:
         result.silver_summary = status
         logger.info(f"[因子计算] 开始: {trade_date}")
         phase_started = time.monotonic()
-        factor_results = FactorJobRunner(self.duckdb_path).run(trade_date)
+        factor_results = FactorJobRunner(self.duckdb_path).run(trade_date, status_dir=self.web_data_dir / "factor_status")
         result.factor_results = [item.to_dict() for item in factor_results]
-        status_dir = self.web_data_dir / "factor_status"
-        status_dir.mkdir(parents=True, exist_ok=True)
-        status_path = status_dir / f"factors_{trade_date}.json"
-        pending_path = status_path.with_suffix(".json.tmp")
-        pending_path.write_text(json.dumps({
-            "trade_date": trade_date,
-            "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "jobs": result.factor_results,
-        }, ensure_ascii=False, default=str), encoding="utf-8")
-        pending_path.replace(status_path)
         failed = [item for item in result.factor_results if not item.get("ok")]
         if failed:
             result.warnings.append(f"因子任务失败: {[item.get('name') for item in failed]}")
@@ -291,6 +284,7 @@ class ETLDailyPipeline:
         profile: str = "default",
         strategy_ids: Optional[List[str]] = None,
         primary_strategy: str = "",
+        archive_cases: bool = True,
     ) -> ETLDailyResult:
         """Run screening and snapshots from local factor tables only."""
         from core.etl.stage_status import factor_status, require_stage
@@ -533,11 +527,40 @@ class ETLDailyPipeline:
             f"[选股策略][页面快照] 完成: {trade_date}, 耗时={time.monotonic() - phase_started:.1f}s"
         )
 
+        # This advisory archive only reads cached market evidence and never places orders.
+        if archive_cases:
+            self._archive_signal_cases(trade_date, result)
+
+        try:
+            from backtest.trade_calendar import TradeCalendar
+            from core.operations.preopen_evidence import freeze_preopen_inputs
+            frozen = freeze_preopen_inputs(
+                trade_date, TradeCalendar().next(trade_date), web_data_dir=self.web_data_dir,
+                db_path=self.duckdb_path, snapshot_dir=self.snapshot_dir,
+            )
+            logger.info(f"[PreopenEvidence] {trade_date}: {frozen}")
+        except Exception as exc:
+            result.warnings.append(f"开盘前证据冻结失败: {exc}")
+            logger.warning(f"[PreopenEvidence] {trade_date}: {exc}")
+
         logger.info(
             f"[选股策略] 完成: ok={result.ok}, "
             f"候选={len(result.screening.get('final') or [])}, snapshot={result.snapshot_paths.get('json', '')}"
         )
         return result
+
+    def _archive_signal_cases(self, trade_date: str, result: ETLDailyResult) -> None:
+        try:
+            from config.settings import HOLDING_DB_PATH
+            from core.signals.case_outcomes import run_postclose_cases
+            coverage = run_postclose_cases(
+                trade_date, dm=self.dm, db_path=self.duckdb_path,
+                web_data_dir=self.web_data_dir, ledger_path=HOLDING_DB_PATH,
+            )
+            logger.info(f"[选股策略][信号案例] {trade_date}: {coverage.get('progress', {})}")
+        except Exception as exc:  # noqa: BLE001
+            result.warnings.append(f"信号案例增量任务失败: {exc}")
+            logger.warning(f"[选股策略][信号案例] 失败: {exc}")
 
     def _refresh_factor_models(
         self,

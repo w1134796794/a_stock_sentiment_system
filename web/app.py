@@ -90,6 +90,10 @@ _POSITION_MONITOR = None
 _PAPER_TRADING_SERVICE = None
 _PAPER_REPLAY_STATE: Dict[str, Any] = {}
 _PAPER_REPLAY_LOCK = Lock()
+_RESEARCH_REPLAY_LOCK = Lock()
+_RESEARCH_REPLAY_JOB = {}
+_DAY_REPLAY_JOBS = None
+_DAY_REPLAY_LOCK = Lock()
 _REALTIME_ENTRY_SIGNAL_SERVICE = None
 _REALTIME_SERVICE_LOCK = Lock()
 _REALTIME_WORKER_LOCK = Lock()
@@ -210,10 +214,11 @@ def _screening_context_map(date: Any, codes: List[str]) -> Dict[str, Dict[str, A
         return {}
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
     except Exception:
         return {}
 
-    con = duckdb.connect(str(FACTOR_DB_PATH), read_only=True)
+    con = duckdb_connect(str(FACTOR_DB_PATH), read_only=True)
     try:
         exists = con.execute(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_stock_wide'"
@@ -544,11 +549,12 @@ def _factor_value_long_map(date: str, codes: List[str], entity_type: str = "stoc
         return {}
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
     except Exception:
         return {}
 
     try:
-        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+        with duckdb_connect(str(FACTOR_DB_PATH), read_only=True) as con:
             exists = con.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_value_long'"
             ).fetchone()[0]
@@ -1050,10 +1056,11 @@ def _factor_sector_rows(
     fetch_limit = max(int(limit) * 80, 1000)
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         if not Path(FACTOR_DB_PATH).exists():
             return []
-        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+        with duckdb_connect(str(FACTOR_DB_PATH), read_only=True) as con:
             exists = con.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_sector_wide'"
             ).fetchone()[0]
@@ -1091,10 +1098,11 @@ def _mainline_theme_rows(date: str, limit: int = 10, lookback: int = 10) -> List
     """主线主题不是当日热点复用：用近N日持续活跃 + 当日确认重新评分。"""
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         if not Path(FACTOR_DB_PATH).exists():
             return []
-        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+        with duckdb_connect(str(FACTOR_DB_PATH), read_only=True) as con:
             exists = con.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_sector_wide'"
             ).fetchone()[0]
@@ -1309,10 +1317,11 @@ def _build_limitup_section(date: str) -> Optional[Dict[str, Any]]:
 
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         if not Path(FACTOR_DB_PATH).exists():
             return None
-        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+        with duckdb_connect(str(FACTOR_DB_PATH), read_only=True) as con:
             limit_exists = con.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'limit_up_pool_silver'"
             ).fetchone()[0]
@@ -1757,6 +1766,9 @@ async def _app_lifespan(_app: FastAPI):
     from core.automation.internal_scheduler import AUTOMATION_SCHEDULER
 
     _get_holding_service()
+    _get_analog_runtime().start()
+    _ensure_preopen_inputs()
+    _refresh_realtime_defaults(watchlist_only=True)
     _start_realtime_refresh_worker()
     _start_eltdx_collector_worker()
     AUTOMATION_SCHEDULER.start()
@@ -1764,6 +1776,7 @@ async def _app_lifespan(_app: FastAPI):
         yield
     finally:
         AUTOMATION_SCHEDULER.stop()
+        _get_analog_runtime().stop()
         _stop_realtime_refresh_worker()
         _stop_eltdx_collector_worker()
 
@@ -2148,6 +2161,53 @@ def intraday_page(request: Request, date: Optional[str] = None) -> Any:
     )
 
 
+@app.get("/intraday/replay", response_class=HTMLResponse)
+def intraday_replay_page(request: Request) -> Any:
+    return templates.TemplateResponse(request, "intraday_replay.html", {"market_date": _realtime_market_date()})
+
+
+def _get_day_replay_jobs():
+    global _DAY_REPLAY_JOBS
+    with _DAY_REPLAY_LOCK:
+        if _DAY_REPLAY_JOBS is None:
+            from core.realtime.day_replay_jobs import DayReplayJobs
+            _DAY_REPLAY_JOBS = DayReplayJobs(WEB_DATA_DIR)
+    return _DAY_REPLAY_JOBS
+
+
+@app.post("/api/intraday-replay")
+def api_intraday_replay_start(payload: dict = Body(default={})) -> Any:
+    try:
+        return _get_day_replay_jobs().start(payload)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=409)
+
+
+@app.get("/api/intraday-replay")
+def api_intraday_replay_recent() -> Any:
+    return {"ok": True, "runs": _get_day_replay_jobs().recent()}
+
+
+@app.get("/api/intraday-replay/{run_id}")
+def api_intraday_replay_status(run_id: str, report: bool = False) -> Any:
+    try:
+        return {"ok": True, "data": _get_day_replay_jobs().get(run_id, report=report)}
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+    except FileNotFoundError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=404)
+
+
+@app.post("/api/intraday-replay/{run_id}/cancel")
+def api_intraday_replay_cancel(run_id: str) -> Any:
+    try:
+        return _get_day_replay_jobs().cancel(run_id)
+    except (ValueError, FileNotFoundError) as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+
+
 @app.get("/assistant", response_class=HTMLResponse)
 def assistant_page(request: Request, date: Optional[str] = None, capital: float = 100_000.0) -> Any:
     latest = date or _latest_date()
@@ -2201,7 +2261,10 @@ def portfolio_page(request: Request) -> Any:
 
 @app.get("/api/portfolio")
 def api_portfolio(account: str = "default") -> Any:
-    return JSONResponse({"ok": True, "data": _get_holding_service().dashboard(account)})
+    data = _get_holding_service().dashboard(account)
+    if account.startswith("history_"):
+        data["replay_data_quality"] = _get_paper_trading_service().rebuild_data_quality(account[len("history_"):])
+    return JSONResponse({"ok": True, "data": data})
 
 
 @app.get("/api/portfolio/accounts")
@@ -2258,6 +2321,8 @@ def api_portfolio_monitor(payload: dict = Body(default={})) -> Any:
 
 @app.post("/api/portfolio/replay")
 def api_portfolio_replay(payload: dict = Body(default={})) -> Any:
+    if (payload or {}).get("missing_evidence_policy", "strict") != "strict":
+        return JSONResponse({"ok": False, "message": "默认账户接力保持严格模式，不能跳过缺证据候选"}, status_code=422)
     start_date = str((payload or {}).get("start_date") or "").replace("-", "")
     end_date = str((payload or {}).get("end_date") or _latest_date()).replace("-", "")
     if start_date and (len(start_date) != 8 or not start_date.isdigit()):
@@ -2278,6 +2343,8 @@ def api_portfolio_replay(payload: dict = Body(default={})) -> Any:
         _PAPER_REPLAY_STATE.clear()
         _PAPER_REPLAY_STATE.update({
             "started_epoch": time.time(),
+            "updated_epoch": time.time(),
+            "account_key": "default",
             "start_date": start_date,
             "end_date": end_date,
             "mode": "incremental",
@@ -2300,18 +2367,22 @@ def _run_paper_replay(start_date: str, end_date: str) -> None:
     try:
         def update(progress: Dict[str, Any]) -> None:
             with _PAPER_REPLAY_LOCK:
-                _PAPER_REPLAY_STATE.update({"stage": progress.get("stage"), "progress": progress})
+                _PAPER_REPLAY_STATE.update({"stage": progress.get("stage"),
+                    "updated_epoch": time.time(),
+                    "progress": {**_PAPER_REPLAY_STATE.get("progress", {}), **progress}})
 
         result = IncrementalPaperReplay().run(start_date, end_date, progress=update)
         with _PAPER_REPLAY_LOCK:
-            _PAPER_REPLAY_STATE.update({"state": "done", "stage": "逐日补跑完成", "result": result})
+            _PAPER_REPLAY_STATE.update({"state": "done", "stage": "逐日补跑完成",
+                "finished_epoch": time.time(), "result": result})
     except ReplayBlocked as exc:
         with _PAPER_REPLAY_LOCK:
             _PAPER_REPLAY_STATE.update({"state": "blocked", "blocked_date": exc.trade_date,
-                                        "error": exc.reason})
+                                        "finished_epoch": time.time(),
+                                        "error": exc.reason, "evidence_failures": exc.details})
     except Exception as exc:  # noqa: BLE001
         with _PAPER_REPLAY_LOCK:
-            _PAPER_REPLAY_STATE.update({"state": "error", "error": str(exc)})
+            _PAPER_REPLAY_STATE.update({"state": "error", "error": str(exc), "finished_epoch": time.time()})
 
 
 @app.get("/api/portfolio/replay/checkpoint")
@@ -2331,6 +2402,11 @@ def api_portfolio_replay_checkpoint() -> Any:
 
 @app.post("/api/portfolio/rebuild")
 def api_portfolio_rebuild(payload: dict = Body(default={})) -> Any:
+    from backtest.evidence_policy import normalize_policy
+    try:
+        policy = normalize_policy((payload or {}).get("missing_evidence_policy"))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=422)
     start_date = str((payload or {}).get("start_date") or "").replace("-", "")
     end_date = str((payload or {}).get("end_date") or _latest_date()).replace("-", "")
     capital = float((payload or {}).get("initial_capital") or PAPER_INITIAL_CAPITAL)
@@ -2342,20 +2418,24 @@ def api_portfolio_rebuild(payload: dict = Body(default={})) -> Any:
             return JSONResponse({"ok": False, "message": "回放正在运行"}, status_code=409)
         _PAPER_REPLAY_STATE.clear()
         _PAPER_REPLAY_STATE.update({"mode": "rebuild", "state": "prefetching", "stage": "补齐分钟行情",
+                                    "missing_evidence_policy": policy,
+                                    "started_epoch": time.time(), "updated_epoch": time.time(),
+                                    "account_key": "独立历史账户（完成后生成）",
                                     "start_date": start_date, "end_date": end_date,
                                     "progress": {}, "imported": False})
-    Thread(target=_run_paper_rebuild, args=(start_date, end_date, capital),
+    Thread(target=_run_paper_rebuild, args=(start_date, end_date, capital, policy),
            name="paper-history-rebuild", daemon=True).start()
     return JSONResponse({"ok": True, "message": "历史重建将在独立账户运行，不覆盖当前模拟持仓"})
 
 
-def _run_paper_rebuild(start_date: str, end_date: str, capital: float) -> None:
+def _run_paper_rebuild(start_date: str, end_date: str, capital: float, missing_evidence_policy: str = "strict") -> None:
     from desktop.runner import BACKTEST_CONTROLLER
 
     def update_progress(progress: Dict[str, Any]) -> None:
         with _PAPER_REPLAY_LOCK:
             _PAPER_REPLAY_STATE["stage"] = str(progress.get("stage") or "补齐分钟行情")
             _PAPER_REPLAY_STATE["progress"] = dict(progress)
+            _PAPER_REPLAY_STATE["updated_epoch"] = time.time()
 
     try:
         prefetch = _get_paper_trading_service().prefetch_replay_minutes(
@@ -2363,12 +2443,22 @@ def _run_paper_rebuild(start_date: str, end_date: str, capital: float) -> None:
             end_date,
             progress=update_progress,
         )
+        if prefetch.get("minute_failed") and missing_evidence_policy == "strict":
+            failures = prefetch.get("evidence_failures") or prefetch.get("minute_failures_preview") or []
+            with _PAPER_REPLAY_LOCK:
+                _PAPER_REPLAY_STATE.update({"state": "blocked", "stage": "历史证据不完整",
+                    "finished_epoch": time.time(),
+                    "prefetch_result": prefetch, "evidence_failures": failures,
+                    "blocked_date": min((row["trade_date"] for row in failures), default=start_date),
+                    "error": "分钟证据未补齐，未启动历史重建"})
+            return
         with _PAPER_REPLAY_LOCK:
             _PAPER_REPLAY_STATE.update({
-                "state": "running",
-                "stage": "运行分钟回放",
+                "state": "prefetching",
+                "stage": "准备分钟回放",
                 "prefetch_result": prefetch,
                 "backtest_started_epoch": time.time(),
+                "updated_epoch": time.time(), "progress": {},
             })
         ok, message = BACKTEST_CONTROLLER.start(
             start_date,
@@ -2379,13 +2469,18 @@ def _run_paper_rebuild(start_date: str, end_date: str, capital: float) -> None:
             position_sizing_mode="fixed_risk",
             exit_policy_mode="strategy",
             account_profile="aggressive_three",
+            missing_evidence_policy=missing_evidence_policy,
+            prefetch_failures=prefetch.get("evidence_failures") or [],
         )
         if not ok:
             with _PAPER_REPLAY_LOCK:
-                _PAPER_REPLAY_STATE.update({"state": "error", "error": message})
+                _PAPER_REPLAY_STATE.update({"state": "error", "error": message, "finished_epoch": time.time()})
+        else:
+            with _PAPER_REPLAY_LOCK:
+                _PAPER_REPLAY_STATE.update({"state": "running", "stage": "运行分钟回放"})
     except Exception as exc:  # noqa: BLE001
         with _PAPER_REPLAY_LOCK:
-            _PAPER_REPLAY_STATE.update({"state": "error", "error": str(exc)})
+            _PAPER_REPLAY_STATE.update({"state": "error", "error": str(exc), "finished_epoch": time.time()})
 
 
 @app.get("/api/portfolio/replay/status")
@@ -2393,6 +2488,8 @@ def api_portfolio_replay_status(since: int = 0) -> Any:
     from desktop.runner import BACKTEST_CONTROLLER
 
     replay_state = str(_PAPER_REPLAY_STATE.get("state") or "")
+    if not _PAPER_REPLAY_STATE.get("mode"):
+        return JSONResponse({"state": "idle", "next": since, "logs": [], "paper_replay": {}})
     if _PAPER_REPLAY_STATE.get("mode") == "incremental":
         return JSONResponse({"state": replay_state or "idle", "next": since,
                              "logs": [], "paper_replay": dict(_PAPER_REPLAY_STATE)})
@@ -2403,32 +2500,69 @@ def api_portfolio_replay_status(since: int = 0) -> Any:
             "logs": [],
             "paper_replay": dict(_PAPER_REPLAY_STATE),
         })
-    if replay_state == "error":
+    if replay_state in {"error", "blocked"}:
         return JSONResponse({
-            "state": "error",
+            "state": replay_state,
             "error": _PAPER_REPLAY_STATE.get("error") or "历史回放失败",
             "next": since,
             "logs": [],
             "paper_replay": dict(_PAPER_REPLAY_STATE),
         })
     status = BACKTEST_CONTROLLER.status(since)
+    if status.get("state") == "blocked":
+        details = status.get("evidence_failures") or []
+        _PAPER_REPLAY_STATE.update({"state": "blocked", "stage": "证据不足，回放停止",
+            "evidence_failures": details, "data_quality": status.get("data_quality") or {},
+            "blocked_date": min((str(row.get("trade_date") or "") for row in details), default=""),
+            "finished_epoch": time.time(), "error": status.get("error") or "持仓证据不足，结果未导入账户"})
+        return JSONResponse({**status, "paper_replay": dict(_PAPER_REPLAY_STATE)})
+    if status.get("progress"):
+        with _PAPER_REPLAY_LOCK:
+            _PAPER_REPLAY_STATE.update({"progress": status["progress"],
+                "stage": status["progress"].get("stage") or "运行分钟回放",
+                "updated_epoch": status["progress"].get("updated_epoch") or time.time()})
+    if status.get("state") == "error":
+        _PAPER_REPLAY_STATE.update({"state": "error", "error": status.get("error") or "历史回放失败",
+                                   "finished_epoch": time.time()})
     if status.get("state") == "done" and _PAPER_REPLAY_STATE and not _PAPER_REPLAY_STATE.get("imported"):
-        run_id = _get_paper_trading_service().latest_run_id(
+        run_id = status.get("run_id") or _get_paper_trading_service().latest_run_id(
             newer_than=float(_PAPER_REPLAY_STATE.get("backtest_started_epoch") or 0) - 2,
         )
         if run_id:
             try:
+                allow_skips = _PAPER_REPLAY_STATE.get("missing_evidence_policy") == "skip_candidates"
+                service = _get_paper_trading_service()
+                quality = service.rebuild_data_quality(run_id) if allow_skips or hasattr(service, "rebuild_data_quality") else {}
+                if allow_skips and quality.get("policy") != "skip_candidates":
+                    raise ValueError("缺少本次重建的候选跳过审计报告，拒绝导入")
+                failures = (service.rebuild_evidence_failures(run_id, allow_candidate_skips=True)
+                            if allow_skips else service.rebuild_evidence_failures(run_id))
+                if failures:
+                    _PAPER_REPLAY_STATE.update({"state": "blocked", "stage": "回放证据不完整",
+                        "finished_epoch": time.time(),
+                        "blocked_date": min(str(row.get("trade_date") or "") for row in failures),
+                        "evidence_failures": failures, "run_id": run_id,
+                        "error": "入场或持仓退出证据不足，结果未导入模拟账户"})
+                    return JSONResponse({**status, "state": "blocked", "paper_replay": dict(_PAPER_REPLAY_STATE)})
                 imported = _get_paper_trading_service().import_backtest_run(
                     run_id, reset=True, account_key=f"history_{run_id}")
                 _PAPER_REPLAY_STATE.update({
                     "state": "done",
+                    "stage": "独立历史重建完成", "finished_epoch": time.time(),
                     "imported": True,
                     "run_id": run_id,
                     "import_result": imported,
+                    "data_quality": quality,
                 })
             except (OSError, TypeError, ValueError) as exc:
                 _PAPER_REPLAY_STATE["import_error"] = str(exc)
-    return JSONResponse({**status, "paper_replay": dict(_PAPER_REPLAY_STATE)})
+                _PAPER_REPLAY_STATE.update({"state": "error", "error": f"导入独立账户失败：{exc}",
+                                           "finished_epoch": time.time()})
+        else:
+            _PAPER_REPLAY_STATE.update({"state": "error", "error": "回放结束但未找到本次结果，未导入账户",
+                                       "finished_epoch": time.time()})
+    return JSONResponse({**status, "state": _PAPER_REPLAY_STATE.get("state") or status.get("state"),
+                         "paper_replay": dict(_PAPER_REPLAY_STATE)})
 
 
 def _default_realtime_codes(snapshot: Optional[Dict], limit: int = 8) -> List[str]:
@@ -2844,6 +2978,37 @@ def api_strategy_lab(date: Optional[str] = None, strategy_ids: Optional[str] = N
     return JSONResponse(payload)
 
 
+@app.get("/api/strategies/config/export")
+def api_strategy_config_export() -> Any:
+    from core.screening.config_transfer import StrategyConfigTransfer
+
+    bundle = StrategyConfigTransfer().export()
+    return JSONResponse(bundle, headers={"Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="strategy-config-{bundle["effective_version"]}.json"'})
+
+
+@app.post("/api/strategies/config/compare")
+def api_strategy_config_compare(payload: dict = Body(default={})) -> Any:
+    from core.screening.config_transfer import StrategyConfigTransfer
+
+    try:
+        result = StrategyConfigTransfer().compare(payload.get("bundle") or {})
+        return JSONResponse({"ok": True, "data": result})
+    except (ValueError, TypeError, KeyError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
+@app.post("/api/strategies/config/import")
+def api_strategy_config_import(payload: dict = Body(default={})) -> Any:
+    from core.screening.config_transfer import StrategyConfigTransfer
+
+    try:
+        result = StrategyConfigTransfer().apply(payload.get("bundle") or {}, str(payload.get("expected_version") or ""))
+        return JSONResponse({"ok": True, "data": result})
+    except (ValueError, TypeError, KeyError, OSError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
 @app.post("/api/strategies/{profile_id}")
 def api_save_strategy(profile_id: str, payload: dict = Body(default={})) -> Any:
     from core.screening.strategy_profiles import StrategyProfileRepository
@@ -2985,13 +3150,16 @@ def _split_codes(codes: Optional[str]) -> List[str]:
 
 
 def _get_realtime_quote_service(stale_after_seconds: int = 90):
+    from config.settings import ELTDX_POLL_INTERVAL_SECONDS, REALTIME_QUOTE_STALE_SECONDS
+
     global _REALTIME_QUOTE_SERVICE
     if _REALTIME_QUOTE_SERVICE is None:
         with _REALTIME_SERVICE_LOCK:
             if _REALTIME_QUOTE_SERVICE is None:
                 _REALTIME_QUOTE_SERVICE = RealtimeQuoteService(stale_after_seconds=stale_after_seconds)
-    _REALTIME_QUOTE_SERVICE.stale_after_seconds = max(float(stale_after_seconds), 1.0)
-    _REALTIME_QUOTE_SERVICE.ttl_seconds = max(_REALTIME_REFRESH_SECONDS * 5.0, 15.0)
+    _REALTIME_QUOTE_SERVICE.stale_after_seconds = min(max(float(stale_after_seconds), 1.0), REALTIME_QUOTE_STALE_SECONDS)
+    _REALTIME_QUOTE_SERVICE.ttl_seconds = min(ELTDX_POLL_INTERVAL_SECONDS, 3.0,
+                                            _REALTIME_QUOTE_SERVICE.stale_after_seconds / 2)
     return _REALTIME_QUOTE_SERVICE
 
 
@@ -3048,11 +3216,12 @@ def _get_paper_trading_service():
 def _get_realtime_entry_signal_service():
     global _REALTIME_ENTRY_SIGNAL_SERVICE
     if _REALTIME_ENTRY_SIGNAL_SERVICE is None:
+        quote_service = _get_realtime_quote_service()
         with _REALTIME_SERVICE_LOCK:
             if _REALTIME_ENTRY_SIGNAL_SERVICE is None:
                 from core.realtime.entry_signal_service import RealtimeEntrySignalService
 
-                _REALTIME_ENTRY_SIGNAL_SERVICE = RealtimeEntrySignalService()
+                _REALTIME_ENTRY_SIGNAL_SERVICE = RealtimeEntrySignalService(quote_service=quote_service)
     return _REALTIME_ENTRY_SIGNAL_SERVICE
 
 
@@ -3198,7 +3367,6 @@ def _build_realtime_overlay_payload(
     )
     snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
-    _apply_realtime_confirmation_history(payload)
     payload["session"] = _current_realtime_session()
     return payload
 
@@ -3228,7 +3396,6 @@ def _build_intraday_strength_payload(
     )
     snapshot = _load_snapshot(trade_date) if trade_date else None
     _enrich_stock_names(payload.get("rows") or [], snapshot, trade_date)
-    _apply_realtime_confirmation_history(payload)
     payload["session"] = _current_realtime_session()
     return payload
 
@@ -3289,9 +3456,24 @@ def _build_realtime_market_payload(
 
 def _build_realtime_health_payload(*, probe: bool = False) -> Dict[str, Any]:
     from config.settings import ELTDX_EMBEDDED_COLLECTOR_ENABLED
+    from core.realtime.quote_cache import RealtimeQuoteCache
+    from core.operations.health import realtime_readiness
+
+    market_date = _realtime_market_date()
+    candidate_date = _realtime_candidate_date(market_date)
+    collector = RealtimeQuoteCache().health()
+    postclose = (_postclose_gate_for_date(candidate_date, market_date, int(time.time() // 60))
+                 if candidate_date and market_date else {"ok": False, "reasons": ["候选日/行情日缺失"]})
+    readiness = realtime_readiness(postclose, collector, market_date)
+    session = _current_realtime_session()
 
     return {
         "ok": True,
+        "execution_ready": readiness["ready"] and session["is_open"],
+        "execution_health": readiness,
+        "market_date": market_date,
+        "candidate_date": candidate_date,
+        "collector": collector,
         "quotes": _get_realtime_quote_service().health(probe=probe),
         "sectors": _get_realtime_sector_service().health(probe=probe),
         "collector_runtime": {
@@ -3301,7 +3483,7 @@ def _build_realtime_health_payload(*, probe: bool = False) -> Dict[str, Any]:
             ),
             "instance_ready": _ELTDX_COLLECTOR is not None,
         },
-        "session": _current_realtime_session(),
+        "session": session,
     }
 
 
@@ -3391,7 +3573,31 @@ def _get_cached_realtime_payload(key: tuple, loader) -> Any:
 def _postclose_gate_for_date(trade_date: str, market_date: str, minute_bucket: int) -> dict:
     from core.operations.health import postclose_health
 
-    return postclose_health(trade_date, as_of_market_date=market_date)
+    result = postclose_health(trade_date, as_of_market_date=market_date)
+    if not result.get("evidence_bundle_id"):
+        result = {**result, "ok": False,
+                  "reasons": [*(result.get("reasons") or []), "缺少当日开盘前冻结证据，禁止盘中补建实时信号"]}
+    return result
+
+
+@lru_cache(maxsize=8)
+def _freeze_preopen_for_minute(candidate_date: str, market_date: str, minute_bucket: int):
+    from core.operations.preopen_evidence import freeze_preopen_inputs
+    result = freeze_preopen_inputs(candidate_date, market_date)
+    if not result.get("ok"):
+        logger.warning("Preopen evidence unavailable for %s/%s: %s", candidate_date, market_date, result)
+    return result
+
+
+def _ensure_preopen_inputs():
+    market_date = _realtime_market_date()
+    candidate_date = _realtime_candidate_date(market_date)
+    try:
+        result = _freeze_preopen_for_minute(candidate_date, market_date, int(time.time() // 60))
+        return result
+    except Exception as exc:
+        logger.warning("Preopen evidence capture failed: %s", exc)
+        return {"ok": False, "reason": str(exc)}
 
 
 @lru_cache(maxsize=1)
@@ -3403,18 +3609,23 @@ def _trading_ledger():
 
 def _prepare_signal_payload(payload: dict) -> dict:
     from core.operations.evidence import attach_evidence
-    from core.operations.health import gate_realtime_payload
+    from core.operations.health import gate_realtime_payload, realtime_readiness
     from core.realtime.quote_cache import RealtimeQuoteCache
 
+    candidate_date = str(payload.get("candidate_date") or payload.get("trade_date") or "")
+    market_date = str(payload.get("market_date") or "")
+    collector = RealtimeQuoteCache().health()
+    postclose = (_postclose_gate_for_date(candidate_date, market_date, int(time.time() // 60))
+                 if candidate_date and market_date else {"ok": False, "reasons": ["候选日/行情日缺失"]})
+    payload["execution_health"] = realtime_readiness(postclose, collector, market_date)
     confirmed = any(
         str(row.get("confirm_status") or row.get("status") or "") == "confirmed"
         for row in payload.get("rows") or []
     )
     if confirmed:
-        candidate_date = str(payload.get("candidate_date") or payload.get("trade_date") or "")
-        postclose = _postclose_gate_for_date(
-            candidate_date, str(payload.get("market_date") or ""), int(time.time() // 60),
-        )
+        for row in payload.get("rows") or []:
+            if str(row.get("confirm_status") or row.get("status") or "") == "confirmed":
+                row.setdefault("raw_trigger_reason", row.get("reason") or "")
         if not postclose["ok"]:
             for row in payload.get("rows") or []:
                 if str(row.get("confirm_status") or row.get("status") or "") == "confirmed":
@@ -3422,47 +3633,66 @@ def _prepare_signal_payload(payload: dict) -> dict:
                     row["status_text"] = row["signal_status_text"] = "数据待恢复"
                     row["health_gate_reason"] = "盘后证据未就绪：" + "；".join(postclose["reasons"])
                     row["reason"] = row["health_gate_reason"]
-        gate_realtime_payload(payload, collector=RealtimeQuoteCache().health())
+        gate_realtime_payload(payload, collector=collector)
+    # Archive only executable confirmations, never raw triggers vetoed by health.
+    _apply_realtime_confirmation_history(payload)
     return attach_evidence(payload)
 
 
-def _refresh_realtime_defaults() -> None:
-    if _data_generation_running() or not _current_realtime_session()["is_open"]:
+@lru_cache(maxsize=32)
+def _log_realtime_blockers(candidate_date: str, market_date: str, minute_bucket: int, reasons: tuple) -> None:
+    logger.warning("Realtime readiness blocked %s/%s: %s", candidate_date, market_date, "；".join(reasons))
+
+
+def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
+    if _data_generation_running():
         return
     market_date = _realtime_market_date()
     trade_date = _realtime_candidate_date(market_date)
+    _ensure_preopen_inputs()
     # Publish one deduplicated watchlist. The built-in collector sends it to
     # eltdx in one batch; Web only warms its shared read cache.
     try:
         from core.realtime.leader_pool_service import LeaderPoolService
 
-        leader_rows = LeaderPoolService().build_pool(
-            trade_date, lookback=10, limit=30,
-        ).get("rows") or []
-        candidate_rows = RealtimeOverlayService().candidate_rows(
-            trade_date, limit=20,
-        )
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        frozen = PreopenEvidenceStore().load(trade_date, market_date)
+        leader_rows = ((frozen["inputs"]["leader_pools"]["10"].get("rows") or [])[:30] if frozen else
+                       LeaderPoolService().build_pool(trade_date, lookback=10, limit=30).get("rows") or [])
+        candidate_rows = ((frozen["inputs"].get("candidates") or [])[:20] if frozen else
+                          RealtimeOverlayService().candidate_rows(trade_date, limit=20))
         watch_codes = list(dict.fromkeys(
             _normalize_stock_code(row.get("code") or row.get("stock_code") or "")
             for row in [*leader_rows, *candidate_rows]
             if row.get("code") or row.get("stock_code")
         ))
         watch_codes = [code for code in watch_codes if code]
-        if watch_codes:
+        if watch_codes or watchlist_only:
             from core.portfolio.holding_repository import HoldingRepository
             from core.realtime.watchlist_repository import RealtimeWatchlistRepository
 
-            holding_codes = [
-                row.get("code", "")
-                for row in HoldingRepository().list_positions(status="open")
-            ]
+            holding_rows = HoldingRepository().list_positions(status="open")
+            holding_codes = [row.get("code", "") for row in holding_rows]
             RealtimeWatchlistRepository().publish(
                 "web-candidates-leaders-holdings", [*watch_codes, *holding_codes],
+            )
+            from core.signals.sector_confirmation import sector_names_from_row
+            names = set().union(*(sector_names_from_row(row) for row in [*leader_rows, *candidate_rows, *holding_rows]))
+            sector_service = _get_realtime_sector_service()
+            mapping = ((frozen["inputs"].get("sector_codes") or {}) if frozen else
+                       sector_service.resolve_codes_by_names(names, source="ths"))
+            member_sets = ((frozen["inputs"].get("sector_members") or {}) if frozen else
+                           {name: sector_service.member_codes(code) for name, code in mapping.items()})
+            sector_codes = sorted({member for name in names for member in member_sets.get(name, [])})
+            RealtimeWatchlistRepository().publish(
+                "web-sector-constituents", sector_codes, minutes=False,
             )
             # This is a Redis MGET warm-up. It never initiates a market request.
             _get_realtime_quote_service().refresh_quotes([*watch_codes, *holding_codes])
     except Exception as exc:  # noqa: BLE001
         logger.warning("Realtime watchlist batch warmup failed: %s", exc)
+    if watchlist_only or not _current_realtime_session()["is_open"]:
+        return
     jobs = [
         (
             _intraday_strength_cache_key(
@@ -3491,6 +3721,13 @@ def _refresh_realtime_defaults() -> None:
                 from core.operations.ledger import stable_id
 
                 _prepare_signal_payload(payload)
+                readiness = payload["execution_health"]
+                if not readiness["ready"]:
+                    reasons = list(readiness["reasons"])
+                    protocol = readiness["collector"]["protocol"]
+                    if protocol["missing_fields"]:
+                        reasons.append("采集协议缺字段：" + ",".join(protocol["missing_fields"]) + "；" + protocol["action"])
+                    _log_realtime_blockers(trade_date, market_date, int(time.time() // 60), tuple(reasons))
                 ledger = _trading_ledger()
                 for row in payload.get("rows") or []:
                     status = str(row.get("confirm_status") or row.get("status") or "")
@@ -3501,12 +3738,33 @@ def _refresh_realtime_defaults() -> None:
                     if ledger.event(stable_id(signal_id, "signal", status, evidence["trigger_reason"]),
                                     "signal", evidence, signal_id=signal_id):
                         ledger.evidence(signal_id, evidence)
+                        logger.info("Realtime signal %s %s: %s", row.get("code"), status, row.get("reason"))
                 from core.notifications.notifier import NotificationService
+
+                try:
+                    _get_analog_runtime().attach(payload, enqueue=True)
+                except Exception as exc:
+                    logger.warning("Analog enqueue failed; original signal continues: %s", exc)
 
                 try:
                     NotificationService().notify_realtime_payload(payload)
                     for row in payload.get("rows") or []:
                         result = row.get("notification_result") or {}
+                        if row.get("notification_status") and row.get("signal_id"):
+                            outcome = {
+                                "code": row.get("code"), "side": "buy",
+                                "status": row["notification_status"],
+                                "sent": int(result.get("sent") or 0),
+                                "skip_reason": row.get("notification_skip_reason") or "",
+                                "all_delivered": bool(result.get("all_delivered")),
+                                "channels": [{key: channel.get(key) for key in (
+                                    "channel", "recipient", "ok", "deduplicated", "retry_pending",
+                                )} for channel in result.get("results") or []],
+                            }
+                            if ledger.event(stable_id(row["signal_id"], "notification_attempt", outcome),
+                                            "notification_attempt", outcome, signal_id=row["signal_id"]):
+                                logger.info("Realtime notification %s: %s %s", row.get("code"),
+                                            outcome["status"], outcome["skip_reason"])
                         if int(result.get("sent") or 0) and row.get("signal_id"):
                             signal_id = str(row["signal_id"])
                             ledger.event(stable_id(signal_id, "notification", "buy"), "notification",
@@ -4089,13 +4347,19 @@ def api_automation_status() -> Any:
 
 
 @app.get("/api/operations/health/{trade_date}")
-def api_operations_health(trade_date: str) -> Any:
-    from core.operations.health import postclose_health
+def api_operations_health(trade_date: str, market_date: Optional[str] = None) -> Any:
+    from core.operations.health import postclose_health, realtime_readiness
     from core.realtime.quote_cache import RealtimeQuoteCache
 
+    trade_date = str(trade_date).replace("-", "")[:8]
+    quote_date = str(market_date or _realtime_market_date()).replace("-", "")[:8]
+    collector = RealtimeQuoteCache().health()
+    live_postclose = _postclose_gate_for_date(trade_date, quote_date, int(time.time() // 60))
     return JSONResponse({
         "postclose": postclose_health(trade_date),
-        "realtime_collector": RealtimeQuoteCache().health(),
+        "live_postclose": live_postclose,
+        "execution_health": realtime_readiness(live_postclose, collector, quote_date),
+        "realtime_collector": collector,
     })
 
 
@@ -4107,10 +4371,12 @@ def api_operations_signal(signal_id: str) -> Any:
 
 
 @app.get("/api/operations/experiments")
-def api_operations_experiments() -> Any:
+def api_operations_experiments(kind: str = "strategy") -> Any:
     from core.operations.ledger import TradingLedger
 
-    return JSONResponse({"rows": TradingLedger().list_experiments()})
+    if kind not in {"strategy", "analog", "replay"}:
+        return JSONResponse({"ok": False, "message": "实验类型无效"}, status_code=400)
+    return JSONResponse({"rows": TradingLedger().list_experiments(kind=kind)})
 
 
 @app.get("/strategy-evaluation", response_class=HTMLResponse)
@@ -4126,6 +4392,68 @@ def api_operations_experiment_freeze(payload: dict = Body(default={})) -> Any:
 
     label = str((payload or {}).get("label") or "production-five").strip()[:80]
     return JSONResponse(StrategyExperimentLedger().freeze(label=label))
+
+
+@app.get("/api/operations/replay-research/status")
+def api_replay_research_status() -> Any:
+    with _RESEARCH_REPLAY_LOCK:
+        return JSONResponse(dict(_RESEARCH_REPLAY_JOB))
+
+
+@app.post("/api/operations/replay-research/start")
+def api_replay_research_start(payload: dict = Body(default={})) -> Any:
+    from core.operations.replay_research import ReplayResearch, ResearchSpec
+
+    try:
+        data = payload or {}
+        start = str(data.get("start") or "").replace("-", "")
+        end = str(data.get("end") or "").replace("-", "")
+        ident = str(data.get("experiment_id") or "")
+        spec = ResearchSpec(train_days=int(data.get("train_days", 30)),
+            validation_days=int(data.get("validation_days", 10)),
+            embargo_days=int(data.get("embargo_days", 5)),
+            missing_evidence_policy=str(data.get("missing_evidence_policy", "strict")),
+            suite=str(data.get("suite", "legacy")), optimization=data.get("optimization") or {})
+        capital = float(data.get("initial_capital", 1_000_000))
+        if ident:
+            ReplayResearch().verify(ident)
+        elif not (len(start) == len(end) == 8 and start.isdigit() and end.isdigit() and start <= end):
+            raise ValueError("请提供有效研究日期范围")
+    except (ValueError, TypeError, OSError) as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=422)
+    with _RESEARCH_REPLAY_LOCK:
+        if _RESEARCH_REPLAY_JOB.get("state") == "running":
+            return JSONResponse({"ok": False, "message": "研究对照正在运行"}, status_code=409)
+        _RESEARCH_REPLAY_JOB.clear()
+        _RESEARCH_REPLAY_JOB.update(state="running", stage="检查并冻结证据", experiment_id=ident,
+                                    started_at=time.time(), updated_at=time.time())
+    Thread(target=_run_replay_research, args=(start, end, ident, spec, capital),
+           daemon=True, name="independent-replay-research").start()
+    return JSONResponse({"ok": True, "message": "独立研究已启动，不更改模拟账户"})
+
+
+def _run_replay_research(start: str, end: str, ident: str, spec, capital: float) -> None:
+    from core.operations.replay_research import ReplayResearch
+
+    def update(row):
+        with _RESEARCH_REPLAY_LOCK:
+            _RESEARCH_REPLAY_JOB.update(stage=row.get("stage"), progress=row, updated_at=time.time())
+
+    try:
+        service = ReplayResearch()
+        if not ident:
+            manifest = service.prepare_current(start=start, end=end, spec=spec,
+                                              initial_capital=capital, progress=update)
+            ident = manifest["experiment_id"]
+        with _RESEARCH_REPLAY_LOCK:
+            _RESEARCH_REPLAY_JOB["experiment_id"] = ident
+        report = service.run(ident, progress=update)
+        with _RESEARCH_REPLAY_LOCK:
+            _RESEARCH_REPLAY_JOB.update(state=report["status"], updated_at=time.time())
+    except Exception as exc:
+        logger.exception("独立研究对照失败")
+        with _RESEARCH_REPLAY_LOCK:
+            _RESEARCH_REPLAY_JOB.update(state="failed", error=str(exc), updated_at=time.time())
 
 
 @app.post("/api/operations/experiments/{experiment_id}/evaluate")
@@ -4151,6 +4479,40 @@ def api_operations_experiment(experiment_id: str) -> Any:
 
     report = TradingLedger().experiment(experiment_id)
     return JSONResponse(report or {"ok": False, "message": "实验不存在"}, status_code=200 if report else 404)
+
+
+@app.get("/api/operations/experiments/{experiment_id}/analog-validation")
+def api_operations_analog_validation(experiment_id: str) -> Any:
+    report = _trading_ledger().experiment(experiment_id).get("report") or {}
+    if report.get("kind") not in {"analog_validation", "analog_account_comparison"}:
+        return JSONResponse({"ok": False, "message": "相似验证报告不存在"}, status_code=404)
+    return JSONResponse(report)
+
+
+@lru_cache(maxsize=1)
+def _get_analog_runtime():
+    from core.signals.analog_runtime import AnalogRuntime
+    return AnalogRuntime(_trading_ledger())
+
+
+@app.get("/api/signals/{signal_id}/analog-analysis")
+def api_signal_analog_analysis(signal_id: str) -> Any:
+    return JSONResponse(_trading_ledger().analog_analysis(signal_id=signal_id))
+
+
+@app.get("/api/signals/{signal_id}/similar-cases")
+def api_signal_similar_cases(signal_id: str, offset: int = 0, limit: int = 10) -> Any:
+    result = _trading_ledger().analog_analysis(signal_id=signal_id)
+    return JSONResponse(_trading_ledger().analog_matches(result.get("forecast_id") or "", offset=offset, limit=limit))
+
+
+@app.get("/api/v1/workbench/analog-analysis")
+def api_workbench_analog_analysis(date: str, code: str, offset: int = 0, limit: int = 10) -> Any:
+    from web.api.mobile.responses import mobile_payload
+    result = _trading_ledger().analog_analysis(market_date=date.replace("-", "")[:8], code=code.split(".")[0].zfill(6))
+    return JSONResponse(mobile_payload({"analysis": result, "cases": _trading_ledger().analog_matches(
+        result.get("forecast_id") or "", offset=offset, limit=limit)}, trade_date=date,
+        source_status=result.get("status") or "not_ready"))
 
 
 @app.get("/api/realtime/auction-alert")

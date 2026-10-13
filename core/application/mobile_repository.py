@@ -191,8 +191,9 @@ class MobileReadRepository:
 
     def _connect(self):
         import duckdb
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-        return duckdb.connect(str(self.factor_db_path), read_only=True)
+        return duckdb_connect(str(self.factor_db_path), read_only=True)
 
 
 __all__ = ["MobileReadRepository"]

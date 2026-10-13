@@ -183,6 +183,8 @@ class PaperTradingService:
                             "replacement_code": code,
                             "candidate_strength": candidate_strength,
                             "holding_strength": target_strength,
+                            "forecast_id": (target.get("metadata") or {}).get("forecast_id") or "",
+                            "analog_at_order": (target.get("metadata") or {}).get("analog_at_order") or {},
                         },
                     }
                 rotation = {
@@ -237,6 +239,8 @@ class PaperTradingService:
                             "execution_price_basis": "observed_quote_plus_slippage",
                             "reference_signal_price": row.get("entry_price"),
                             "success_probability": _number(row.get("success_probability")),
+                            "forecast_id": row.get("forecast_id") or "",
+                            "analog_at_order": row.get("analog_analysis") or {},
                             "rotation": rotation or {},
                         },
                     }
@@ -366,16 +370,58 @@ class PaperTradingService:
         from core.data import DataManager
         from core.factors.strategy_training import STRATEGY_TRAINING_SPECS
         from scripts.prefetch_strategy_minutes import _minute_cached, build_requirements
+        from core.data.minute_quality import inspect_minute_bars, minute_failure
+        from backtest.trade_calendar import TradeCalendar
 
         profiles = list(STRATEGY_TRAINING_SPECS)
+        calendar = TradeCalendar()
+        if not calendar.is_real:
+            raise ValueError("真实交易日历不可用，不能确定回放首日对应的候选日")
         minute_requirements, auction_requirements, audit = build_requirements(
             profiles,
-            str(start_date),
+            calendar.prev(str(start_date)),
             str(end_date),
             include_sector_peers=True,
             peer_count=8,
         )
+        minute_requirements = {item for item in minute_requirements if str(start_date) <= item[0] <= str(end_date)}
+        auction_requirements = {item for item in auction_requirements if str(start_date) <= item[0] <= str(end_date)}
+        audit.update({"minute_requirements": len(minute_requirements), "auction_requirements": len(auction_requirements)})
         cache_dir = Path(CACHE_DIR)
+        dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=True)
+        from core.data.data_manager_suspension import suspension_status
+        day_getter = getattr(dm, 'get_daily_suspensions', None)
+        # Holdings can persist on days with no entry candidates.
+        dates = (calendar.get_trade_dates(str(start_date), str(end_date))
+                 if hasattr(calendar, 'get_trade_dates') else
+                 sorted({date for date, _ in minute_requirements | auction_requirements}))
+        suspension_query_failures = []
+        if callable(day_getter):
+            for index, date in enumerate(dates):
+                if progress:
+                    progress({'stage': '补齐停复牌日证据', 'completed': index,
+                              'total': len(dates), 'unit': '日期', 'trade_date': date, 'code': ''})
+                day = day_getter(date)
+                if not day.get('ok'):
+                    suspension_query_failures.append({'trade_date': date, 'reason': day.get('reason')})
+        audit['suspension_query_failures'] = suspension_query_failures
+        suspended = []
+        status_requirements = sorted(minute_requirements | auction_requirements)
+        for index, (trade_date, ts_code) in enumerate(status_requirements):
+            if progress:
+                progress({'stage': '检查停复牌证据', 'completed': index,
+                    'total': len(status_requirements), 'unit': '股票日期',
+                    'trade_date': trade_date, 'code': ts_code})
+            status = suspension_status(dm, ts_code, trade_date)
+            if status.get('state') == 'full_day':
+                suspended.append({**status, 'ts_code': ts_code})
+        suspended_keys = {(row['trade_date'], row['ts_code']) for row in suspended}
+        minute_requirements -= suspended_keys
+        auction_requirements -= suspended_keys
+        audit['suspended_sessions'] = suspended
+        audit['suspended_count'] = len(suspended)
+        audit['tradable_minute_requirements'] = len(minute_requirements)
+        audit['tradable_auction_requirements'] = len(auction_requirements)
         cached = {
             requirement
             for requirement in minute_requirements
@@ -386,55 +432,84 @@ class PaperTradingService:
         completed = 0
         fetched = 0
         failed = []
+        peer_failed = []
         auction_fetched = 0
         auction_failed = []
 
-        def publish(stage: str) -> None:
+        def publish(stage: str, trade_date: str = "", ts_code: str = "") -> None:
             if progress:
                 progress({
                     "stage": stage,
                     "completed": completed,
                     "total": total,
+                    "unit": "证据项", "trade_date": trade_date, "code": ts_code,
                     "minute_cached": len(cached),
                     "minute_fetched": fetched,
                     "minute_failed": len(failed),
+                    "sector_peer_failed": len(peer_failed),
                     "auction_fetched": auction_fetched,
                     "auction_failed": len(auction_failed),
+                    "evidence_failures": failed,
+                    "optional_evidence_warnings": peer_failed + auction_failed,
                 })
 
         publish("准备分钟需求")
-        dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=True)
         for trade_date, ts_code in pending:
-            frame = dm.get_stock_tick(ts_code, trade_date)
-            if frame is not None and len(frame) > 1:
-                fetched += 1
+            publish("补齐分钟行情", trade_date, ts_code)
+            failure = None
+            try:
+                frame = dm.get_stock_tick(ts_code, trade_date, require_full_day=True)
+            except Exception as exc:
+                frame = None
+                failure = {"trade_date": trade_date, "ts_code": ts_code,
+                           "evidence": "minute_bars", "reason": str(exc)}
             else:
-                failed.append({"trade_date": trade_date, "ts_code": ts_code})
+                if not inspect_minute_bars(frame, trade_date)["valid"]:
+                    failure = minute_failure(dm, frame, trade_date, ts_code)
+            if failure:
+                # Auction requirements identify entry candidates; peers only
+                # supply aggregate breadth, checked at each confirmation time.
+                if (trade_date, ts_code) in auction_requirements:
+                    failed.append({**failure, "scope": "candidate"})
+                else:
+                    peer_failed.append({**failure, "scope": "sector_peer", "required": False})
+            if inspect_minute_bars(frame, trade_date)["valid"]:
+                fetched += 1
             completed += 1
-            if completed % 20 == 0 or completed == total:
-                publish("补齐分钟行情")
+            publish("补齐分钟行情", trade_date, ts_code)
 
         for trade_date, ts_code in sorted(auction_requirements):
-            payload = dm.get_auction_data(ts_code, trade_date)
+            publish("补齐集合竞价", trade_date, ts_code)
+            error = ""
+            try:
+                payload = dm.get_auction_data(ts_code, trade_date)
+            except Exception as exc:
+                payload, error = {}, str(exc)
             if payload:
                 auction_fetched += 1
             else:
-                auction_failed.append({"trade_date": trade_date, "ts_code": ts_code})
+                auction_failed.append({"trade_date": trade_date, "ts_code": ts_code,
+                                       "evidence": "auction", "required": False,
+                                       "reason": "可选集合竞价数据缺失；是否必需由当日入场规则检查" + (f"：{error}" if error else "")})
             completed += 1
-            if completed % 20 == 0 or completed == total:
-                publish("补齐集合竞价")
+            publish("补齐集合竞价", trade_date, ts_code)
 
         result = {
+            "ok": not failed,
             **audit,
             "minute_cached": len(cached),
             "minute_fetched": fetched,
             "minute_failed": len(failed),
+            "sector_peer_failed": len(peer_failed),
             "minute_failures_preview": failed[:20],
             "auction_fetched": auction_fetched,
             "auction_failed": len(auction_failed),
             "auction_failures_preview": auction_failed[:20],
+            "evidence_failures": failed,
+            "optional_evidence_warnings": peer_failed + auction_failed,
             "completed": completed,
             "total": total,
+            "unit": "证据项",
         }
         if progress:
             progress({"stage": "分钟证据准备完成", **result})
@@ -442,6 +517,10 @@ class PaperTradingService:
 
     @staticmethod
     def _skip_reason(row: Dict[str, Any], market_date: str) -> str:
+        from core.utils.stock_eligibility import new_entry_exclusion
+        exclusion = new_entry_exclusion(row)
+        if exclusion:
+            return exclusion
         if str(row.get("confirm_status") or row.get("status") or "") != "confirmed":
             return "尚未确认"
         if not market_date:
@@ -451,6 +530,59 @@ class PaperTradingService:
         if bool(row.get("is_stale")):
             return "行情已过期"
         return ""
+
+    def rebuild_data_quality(self, run_id: str) -> Dict[str, Any]:
+        import json
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", str(run_id)):
+            return {}
+        path = Path(OUTPUT_DIR) / "backtest_results" / f"backtest_data_quality_{run_id}.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return {}
+            trades_path = path.with_name(f'backtest_trades_{run_id}.csv')
+            if trades_path.exists():
+                columns = pd.read_csv(trades_path, nrows=0).columns
+                costs_verified = 'position_size' in columns
+                if costs_verified:
+                    amounts = pd.read_csv(trades_path, usecols=['position_size'])['position_size']
+                    costs_verified = pd.to_numeric(amounts, errors='coerce').gt(0).all()
+                data['costs_verified'] = bool(costs_verified)
+                if not costs_verified:
+                    data.update(status='incomplete', full_sample_metrics_valid=False,
+                                cost_warning='该历史批次缺少成交成本金额，账户手续费未验证；当前收益不是完整含费收益，请保留原批次并另建新账户重跑。')
+            return data
+        except (OSError, ValueError):
+            return {}
+
+    def rebuild_evidence_failures(self, run_id: str, *, allow_candidate_skips: bool = False) -> list[Dict[str, Any]]:
+        from backtest.evidence_policy import missing_entry_evidence
+        failures = []
+        quality = self.rebuild_data_quality(run_id)
+        failures.extend(quality.get("blocked_evidence") or [])
+        skipped = {(str(row.get("trade_date")), str(row.get("code")))
+                   for row in quality.get("skipped_candidates") or []
+                   if allow_candidate_skips and quality.get("policy") == "skip_candidates"
+                   and row.get("scope") == "candidate" and row.get("action") == "skipped"}
+        directory = Path(OUTPUT_DIR) / "backtest_results"
+        for kind in ("entry_attempts", "evidence_failures"):
+            path = directory / f"backtest_{kind}_{run_id}.csv"
+            if not path.exists():
+                continue
+            frame = pd.read_csv(path, dtype=str).fillna("")
+            for row in frame.to_dict("records"):
+                reason_code = str(row.get("reason_code") or "")
+                if kind == "entry_attempts":
+                    if not missing_entry_evidence(row):
+                        continue
+                    if (str(row.get("trade_date") or row.get("date")), str(row.get("stock_code"))) in skipped:
+                        continue
+                failures.append({"trade_date": row.get("trade_date") or row.get("date"),
+                    "code": row.get("code") or row.get("stock_code"),
+                    "evidence": row.get("evidence") or (row.get("data_status") if row.get("data_status") != "complete" else "") or reason_code or "entry_confirmation",
+                    "reason": row.get("reason") or reason_code})
+        return failures
 
     def import_backtest_run(self, run_id: str, *, reset: bool = True,
                             account_key: str | None = None) -> Dict[str, Any]:
@@ -463,6 +595,14 @@ class PaperTradingService:
         positions_path = result_dir / f"backtest_positions_{run_id}.csv"
         if not trades_path.exists() and not positions_path.exists():
             raise ValueError(f"未找到回测批次 {run_id}")
+        trades = pd.read_csv(trades_path, dtype={"stock_code": str}) if trades_path.exists() else pd.DataFrame()
+        costs_verified = trades.empty or (
+            'position_size' in trades.columns
+            and pd.to_numeric(trades['position_size'], errors='coerce').gt(0).all()
+        )
+        manifest_path = result_dir / f'backtest_manifest_{run_id}.json'
+        if not costs_verified and manifest_path.exists():
+            raise ValueError('成交文件缺少成本金额，无法可靠导入手续费；请用修复后的版本独立重建，原账户保持不变')
         if reset and account_key == self.ACCOUNT_KEY:
             with self.repository._connect() as conn:
                 occupied = conn.execute(
@@ -487,7 +627,6 @@ class PaperTradingService:
 
         imported = {"buy": 0, "sell": 0, "open": 0, "skipped": 0}
         if trades_path.exists():
-            trades = pd.read_csv(trades_path, dtype={"stock_code": str})
             for row in trades.to_dict("records"):
                 try:
                     self._import_trade(row, run_id, imported, account_key=account_key)
@@ -511,6 +650,7 @@ class PaperTradingService:
                             "entry_time": row.get("entry_time"),
                             "entry_price": row.get("entry_price"),
                             "shares": row.get("shares"),
+                            "fees": max(_number(row.get('cost_basis')) - _number(row.get('entry_price')) * _number(row.get('shares')), 0.0),
                             "strategy_id": row.get("strategy_id"),
                             "strategy_name": row.get("strategy_name"),
                             "source": "historical_replay",
@@ -529,7 +669,9 @@ class PaperTradingService:
                     imported["open"] += 1
                 except (TypeError, ValueError):
                     imported["skipped"] += 1
-        return {**imported, "run_id": run_id, "account_key": account_key}
+        return {**imported, "run_id": run_id, "account_key": account_key,
+                "costs_verified": bool(costs_verified),
+                "warnings": [] if costs_verified else ['旧成交文件成本未知，不可用于完整净收益评估']}
 
     def _import_trade(
         self,
@@ -541,7 +683,7 @@ class PaperTradingService:
         account_key = str(account_key or self.ACCOUNT_KEY)
         action = str(row.get("action") or "").strip().lower()
         code = normalize_stock_code(row.get("stock_code"), add_suffix=False)
-        shares = int(_number(row.get("shares")))
+        shares = _number(row.get("shares"))
         entry_price = _number(row.get("entry_price"))
         exit_price = _number(row.get("exit_price"))
         position_size = _number(row.get("position_size"))
@@ -582,13 +724,21 @@ class PaperTradingService:
         if not position:
             imported["skipped"] += 1
             return
-        self.repository.sell_position(
+        adjusted_full_exit = (
+            position_size > 0
+            and math.isclose(position_size, _number(position.get("cost_amount")), abs_tol=1e-4, rel_tol=0)
+            and not math.isclose(shares, _number(position.get("shares")), abs_tol=1e-8, rel_tol=0)
+        )
+        sell_method = self.repository.sell_replay_position if adjusted_full_exit else self.repository.sell_position
+        sell_method(
             int(position["id"]),
             {
                 "trade_date": row.get("date"),
                 "trade_time": row.get("exit_time") or "",
                 "price": row.get("exit_price"),
-                "shares": min(int(_number(row.get("shares"))), int(position.get("shares") or 0)),
+                "shares": shares if adjusted_full_exit else min(int(shares), int(position.get("shares") or 0)),
+                "cost_basis": position_size,
+                "expected_pnl": pnl,
                 "fees": max(exit_price * shares - position_size - pnl, 0.0)
                 if math.isfinite(position_size) and math.isfinite(pnl) and position_size > 0 else 0.0,
                 "reason": row.get("exit_reason") or "历史分钟回放退出",

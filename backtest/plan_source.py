@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 
 from core.screening.enhancements import enhancement_label, enhancement_slug, normalize_enhancements
+from core.utils.sector_names import normalize_sector_names
 
 DEFAULT_MAX_BACKTEST_RANK = 0
 ENTRY_MODE_LABELS = {
@@ -183,6 +184,9 @@ def _attach_market_context(rows: List[Dict[str, Any]], payload: Dict[str, Any]) 
 
 
 def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    from core.utils.stock_eligibility import new_entry_exclusion
+    if new_entry_exclusion(row):
+        return None
     code = _code6(row.get("股票代码") or row.get("code") or row.get("ts_code"))
     name = str(row.get("股票名称") or row.get("name") or "").strip()
     if not code or not name:
@@ -232,10 +236,10 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "理由": reason,
         "加入观察池": True,
         "热点共振": False,
-        "共振板块": row.get("共振板块") or row.get("所属板块") or "",
+        "共振板块": ','.join(normalize_sector_names(row.get("共振板块") or row.get("所属板块"))),
         "综合评分": score or 0,
         "优先级": row.get("优先级") or row.get("rank") or "",
-        "所属板块": row.get("所属板块") or row.get("共振板块") or "",
+        "所属板块": ','.join(normalize_sector_names(row.get("所属板块") or row.get("共振板块"))),
         "惩罚理由": row.get("惩罚理由") or "",
         "因子指标": json.dumps(factor_metrics, ensure_ascii=False, sort_keys=True),
         "原始指标": json.dumps(raw_context, ensure_ascii=False, sort_keys=True),
@@ -254,6 +258,8 @@ def _to_backtest_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             _to_number(row.get("market_total_position_cap_pct"), 100.0),
         ),
         "行动分组": str(row.get("行动分组") or row.get("action_group") or ""),
+        "入场门控来源": str(row.get("入场门控来源") or "legacy"),
+        "生产决策允许入场": row.get("生产决策允许入场", False),
     }
     for factor, value in factor_metrics.items():
         out[f"因子_{factor}"] = value
@@ -300,6 +306,8 @@ def _production_decision_rows(
             "竞价条件": "开盘仅用于信号分层，按策略配置的截止时间逐分钟确认",
             "风险提示": row.get("失效条件") or "未确认或无可成交分钟则不买入",
             "策略执行": row.get("strategy_execution") or {},
+            "入场门控来源": "production_decision_v1",
+            "生产决策允许入场": True,
         })
         rows.append(row)
     return rows
@@ -352,10 +360,15 @@ def build_backtest_plan_dir(
     suffix = f"_{lhb_scenario}" if lhb_scenario else f"_{enhancement_slug(enhancements)}{strategy_suffix}"
     plan_dir = output_dir / f"backtest_trade_plans{suffix}"
     if plan_dir.exists():
+        if plan_dir.resolve().parent != output_dir.resolve():
+            raise ValueError('回测计划目录必须位于输出目录内')
         shutil.rmtree(plan_dir)
     plan_dir.mkdir(parents=True, exist_ok=True)
 
     start = str(start_date or "")
+    if start:
+        from backtest.trade_calendar import TradeCalendar
+        start = TradeCalendar().prev(start)
     end = str(end_date or "")
     file_count = 0
     row_count = 0

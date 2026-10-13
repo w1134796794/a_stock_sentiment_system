@@ -258,6 +258,7 @@ class FactorLibraryTrainer:
         if not self.duckdb_path.exists():
             return pd.DataFrame()
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         from config.settings import DUCKDB_MEMORY_LIMIT, DUCKDB_TEMP_DIR, DUCKDB_THREADS
         from core.factors.strategy_training import STRATEGY_TRAINING_SPECS, StrategyMinuteTrainingBuilder
@@ -422,7 +423,7 @@ class FactorLibraryTrainer:
             str(start_date), str(end_date), *factor_params, str(end_date),
         ]
         Path(DUCKDB_TEMP_DIR).mkdir(parents=True, exist_ok=True)
-        con = duckdb.connect(str(self.duckdb_path), read_only=True)
+        con = duckdb_connect(str(self.duckdb_path), read_only=True)
         try:
             con.execute("SET memory_limit = ?", [str(DUCKDB_MEMORY_LIMIT)])
             con.execute("SET threads = ?", [max(1, int(DUCKDB_THREADS))])
@@ -1212,8 +1213,9 @@ class FactorLibraryTrainer:
         labels["label_version"] = "strategy_v1_real_minute_entry_oos"
         labels["computed_at"] = datetime.now().isoformat(timespec="seconds")
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-        con = duckdb.connect(str(self.duckdb_path))
+        con = duckdb_connect(str(self.duckdb_path))
         try:
             con.register("_signal_outcomes", labels)
             con.execute(

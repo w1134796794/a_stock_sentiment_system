@@ -4,15 +4,41 @@
 {% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">五策略 · 信号漏斗 · 模拟账户净值</div>{% endblock %}
 {% block content %}
 <section class="ev-controls" aria-label="实验范围">
+  <label>评估类型<select id="ev-kind"><option value="strategy">策略与因子</option><option value="analog">相似案例与账户对照</option><option value="replay">冻结回放对照</option></select></label>
   <label>实验<select id="ev-experiment"></select></label>
   <label>开始日期<input id="ev-start" type="date"></label>
   <label>结束日期<input id="ev-end" type="date"></label>
   <label>训练日<input id="ev-train" type="number" min="1" value="60"></label>
   <label>验证日<input id="ev-valid" type="number" min="1" value="20"></label>
+  <label id="ev-gap-label" hidden>隔离日<input id="ev-gap" type="number" min="0" value="5"></label>
+  <label id="ev-suite-label" hidden>对照方案<select id="ev-suite"><option value="confirmation_quality">确认质量 · 五阶段八组</option><option value="return_refinement">收益改进 · 三项假设五组</option><option value="in_sample_tuning">样本内调参 · 组合五组</option><option value="legacy">基础四组</option><option value="position_risk" disabled>仓位风险 · 已冻结三组</option></select></label>
+  <label id="ev-policy-label" hidden>缺失证据<select id="ev-policy"><option value="strict">严格停止</option><option value="skip_candidates">跳过候选，持仓仍停止</option></select></label>
   <button id="ev-freeze" type="button" class="ev-secondary">冻结新实验</button>
   <button id="ev-run" type="button" class="ev-primary">评估</button>
 </section>
 <div id="ev-status" class="ev-status" role="status"></div>
+<section id="ev-research" class="ev-band" hidden>
+  <div class="ev-heading"><h2>冻结回放对照</h2><span id="ev-research-version"></span></div>
+  <div id="ev-research-status" class="ev-status"></div>
+  <progress id="ev-research-progress" max="100" value="0" aria-label="当前研究阶段进度" hidden style="width:100%;height:12px;accent-color:#34d399"></progress>
+  <div class="ev-table-wrap"><table class="ev-table"><thead><tr><th>组别 / 改变变量</th><th>证据 / 天数</th><th>净收益</th><th>最大回撤</th><th>最差日</th><th>回撤持续</th><th>连续亏损</th><th>平仓 / 胜率</th><th>费用</th><th>验证平仓</th></tr></thead><tbody id="ev-research-arms"></tbody></table></div>
+  <div id="ev-sizing-tail" hidden><div class="ev-heading" style="margin-top:18px"><h2>尾部风险与仓位</h2><span>压力预算不是损失保证</span></div><div class="ev-table-wrap"><table class="ev-table"><thead><tr><th>组别</th><th>最差5%日均收益</th><th>跳空止损笔数</th><th>跳空止损损益</th><th>评估次数：轻 / 标准 / 优势 / 固定</th></tr></thead><tbody id="ev-sizing-tail-rows"></tbody></table></div></div>
+  <div id="ev-research-legend" style="display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12px;margin-top:12px"></div>
+  <canvas id="ev-research-curve" height="220" aria-label="独立研究账户净值" style="width:100%;height:220px;margin-top:8px"></canvas>
+  <div id="ev-pairs" hidden><div class="ev-heading" style="margin-top:18px"><h2>阶段对照</h2><span>探索性研究</span></div><div class="ev-table-wrap"><table class="ev-table"><thead><tr><th>实验 / 控制组</th><th>改变变量</th><th>收益差</th><th>回撤差</th><th>平仓 / 控制组</th><th>证据</th></tr></thead><tbody id="ev-pair-rows"></tbody></table></div></div>
+  <div class="ev-heading" style="margin-top:18px"><h2>滚动验证</h2><span>独立连续账户 · 历史研究</span></div>
+  <div class="ev-table-wrap"><table class="ev-table"><thead><tr><th>训练期</th><th>验证期</th><th>训练选择</th><th>样本状态</th><th>组别</th><th>验证收益</th><th>验证回撤</th><th>验证平仓</th></tr></thead><tbody id="ev-research-folds"></tbody></table></div>
+  <div class="ev-heading" style="margin-top:18px"><h2>策略与市场阶段</h2><span>按入场归属 · 含费平仓样本</span></div>
+  <div class="ev-table-wrap"><table class="ev-table"><thead><tr><th>验证期</th><th>组别</th><th>策略</th><th>市场阶段</th><th>候选</th><th>确认</th><th>成交</th><th>平仓</th><th>净损益</th><th>胜率</th></tr></thead><tbody id="ev-research-groups"></tbody></table></div>
+  <details style="margin-top:14px"><summary>缺失证据与版本</summary><div id="ev-research-evidence" class="ev-status"></div></details>
+</section>
+<section id="ev-analog" class="ev-band" hidden>
+  <div class="ev-heading"><h2>冻结相似评估</h2><span id="ev-analog-version"></span></div>
+  <div id="ev-analog-summary" class="ev-status"></div>
+  <canvas id="ev-analog-curve" height="220" aria-label="三个独立实验账户净值" hidden></canvas>
+  <div class="ev-table-wrap"><table class="ev-table"><thead><tr><th>验证区间 / 账户</th><th>性质</th><th>覆盖 / 交易日</th><th>Brier / 净收益</th><th>校准误差 / 回撤</th><th>回退 / 费用</th><th>换手</th><th>资金利用率</th></tr></thead><tbody id="ev-analog-rows"></tbody></table></div>
+  <details id="ev-actions" hidden><summary class="ev-status">信号行动比较</summary><div class="ev-table-wrap"><table class="ev-table"><thead><tr><th>账户</th><th>股票 / 时间</th><th>保持持仓</th><th>现金买入</th><th>换股</th><th>暂不行动</th><th>实验选择</th><th>否决原因</th></tr></thead><tbody id="ev-action-rows"></tbody></table></div></details>
+</section>
 <section class="ev-kpis" aria-label="账户评估">
   <div><span>估值覆盖</span><strong id="ev-coverage">--</strong></div>
   <div><span>账户净收益</span><strong id="ev-return">--</strong></div>
@@ -38,6 +64,7 @@
   </table></div>
 </section>
 <style>
+  [hidden]{display:none!important}
   .ev-controls{display:flex;flex-wrap:wrap;align-items:end;gap:.6rem;padding:.8rem 0 1rem;border-bottom:1px solid #263449}
   .ev-controls label{font-size:.72rem;color:#94a3b8;min-width:110px}
   .ev-controls input,.ev-controls select{display:block;width:100%;height:34px;margin-top:.25rem;padding:0 .5rem;background:#0b1527;border:1px solid #334155;border-radius:5px;color:#e2e8f0}
@@ -51,10 +78,11 @@
   .ev-band{border-top:1px solid #263449;padding:1rem 0}.ev-heading{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:.7rem}
   .ev-heading h2{font-size:.92rem;font-weight:700}.ev-heading span{color:#8291a8;font-size:.72rem}
   #ev-curve{display:block;width:100%;height:220px;background:#101a2c;border:1px solid #263449;border-radius:6px}
+  #ev-analog-curve{width:100%;height:220px;background:#101a2c;margin-bottom:12px}
   .ev-table-wrap{overflow:auto;border:1px solid #263449;border-radius:6px}.ev-table{width:100%;min-width:980px;border-collapse:collapse;font-size:.75rem}
   .ev-table th,.ev-table td{padding:.65rem .7rem;border-bottom:1px solid #263449;text-align:right;white-space:nowrap}
   .ev-table th{color:#8291a8;background:#101a2c;font-weight:600}.ev-table td{color:#e2e8f0}.ev-table th:first-child,.ev-table td:first-child,.ev-table th:nth-child(2),.ev-table td:nth-child(2){text-align:left}
-  @media(max-width:700px){.ev-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ev-kpis>div:nth-child(2){border-right:0}.ev-controls label{flex:1 1 120px}#ev-experiment{max-width:none}}
+  @media(max-width:700px){.ev-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ev-kpis>div:nth-child(2){border-right:0}.ev-controls label{flex:1 1 120px}#ev-experiment{min-width:0;max-width:none}}
 </style>
 <script>
 (() => {
@@ -63,7 +91,7 @@
   const number = value => value == null ? '--' : Number(value).toLocaleString('zh-CN', {maximumFractionDigits:2});
   const percent = value => value == null ? '--' : `${Number(value).toFixed(2)}%`;
   const status = (message, error=false) => { $('ev-status').textContent=message; $('ev-status').style.color=error?'#fb7185':'#94a3b8'; };
-  let current = null;
+  let current = null, researchTimer=null, researchRunning=false;
   async function request(url, options={}) {
     const response=await fetch(url,{headers:{'Content-Type':'application/json'},...options});
     const data=await response.json();
@@ -87,6 +115,28 @@
     ctx.stroke();ctx.fillStyle='#94a3b8';ctx.font='11px sans-serif';ctx.fillText(number(high),24,18);ctx.fillText(number(low),24,height-8);
   }
   function render(report) {
+    const analog=String(report.kind||'').startsWith('analog_');
+    const replay=report.kind==='replay_research';
+    $('ev-research').hidden=!replay;
+    $('ev-analog').hidden=!analog;
+    document.querySelectorAll('.ev-kpis, .ev-band:not(#ev-analog):not(#ev-research)').forEach(el=>el.hidden=analog||replay);
+    if(replay){renderResearch(report);return;}
+    if(analog){
+      current=report;
+      $('ev-analog-version').textContent=report.experiment_id||'';
+      $('ev-analog-summary').textContent=report.kind==='analog_account_contract'?'账户实验参数已冻结，等待离线回放':`状态 ${report.status||'--'} · ${report.classification||'历史验证'} · ${report.blocked_reason||'旁路研究，不更改生产交易规则'}`;
+      $('ev-analog-curve').hidden=!report.accounts;
+      if(report.accounts)drawAccounts(report.accounts);
+      const accountNames={original_rules:'原规则',analog_filter:'相似评估过滤',analog_rotation:'相似过滤 + 换股'};
+      const actionNames={hold:'保持持仓',cash_buy:'现金买入',rotate:'换股',no_action:'暂不行动'};
+      const reasons={prediction_cash_slots_or_theme_gate:'预测、资金、持仓数量或题材门禁未通过',no_reliable_sellable_same_horizon_holding:'缺少可卖且可靠的同区间持仓比较'};
+      const comparisons=Object.entries(report.accounts||{}).flatMap(([name,a])=>(a.comparisons||[]).slice(-25).map(c=>({name,c})));
+      $('ev-actions').hidden=!comparisons.length;
+      $('ev-action-rows').innerHTML=comparisons.map(({name,c})=>`<tr><td>${esc(accountNames[name]||name)}</td><td>${esc(c.code||'')} · ${esc(c.as_of||'')}</td>${['hold','cash_buy','rotate','no_action'].map(key=>`<td>${c.decisions?.find(d=>d.action===key)?.eligible?'可选':'不满足'}</td>`).join('')}<td>${esc(actionNames[c.recommended_research_action]||'--')}</td><td>${esc((c.decisions||[]).filter(d=>!d.eligible).map(d=>reasons[d.reason]||d.reason).join('；'))}</td></tr>`).join('');
+      $('ev-analog-rows').innerHTML=report.accounts?Object.entries(report.accounts).map(([name,a])=>{const s=a.summary||{};return `<tr><td>${esc(accountNames[name]||name)}</td><td>${esc(report.classification)}</td><td>${number(s.valued_days)}日 / ${number(s.fill_count)}笔</td><td>${percent(s.total_return_pct)}</td><td>${percent(s.max_drawdown_pct)}</td><td>${number(s.fees)}</td><td>${number(s.turnover)}</td><td>${percent(s.mean_cash_utilization==null?null:s.mean_cash_utilization*100)}</td></tr>`;}).join(''):(report.folds||[]).map(f=>{const m=f.metrics||{};return `<tr><td>${esc(f.test_dates?.[0]||'--')}～${esc(f.test_dates?.at(-1)||'--')}</td><td>${esc(f.classification||report.classification)}</td><td>${percent(m.prediction_coverage==null?null:m.prediction_coverage*100)}</td><td>${number(m.brier)}</td><td>${number(m.calibration_error)}</td><td>${percent(m.fallback_rate==null?null:m.fallback_rate*100)}</td><td>--</td><td>--</td></tr>`;}).join('');
+      status('冻结结果只读 · 历史验证不能替代前瞻实盘证据');
+      return;
+    }
     current=report;const equity=report.equity||{}, summary=equity.summary||{}, rows=equity.rows||[];
     $('ev-coverage').textContent=summary.days?`${summary.valued_days}/${summary.days}日`:'--';
     $('ev-return').textContent=percent(summary.total_return_pct);
@@ -104,23 +154,102 @@
     $('ev-rows').innerHTML=html||'<tr><td colspan="12">暂无评估结果</td></tr>';
     status(`${report.factor_and_configuration_unchanged?'配置版本一致':'配置版本已变更'} · ${report.warning||''}`);
   }
+  function renderResearch(report){
+    current=report;
+    const labels=Object.fromEntries(Object.entries(report.arms||{}).map(([key,value])=>[key,value.name]));
+    Object.entries(report.results||{}).forEach(([key,value])=>labels[key]=value.name||key);
+    $('ev-research-version').textContent=(report.data_hash||'').slice(0,12);
+    $('ev-research-status').textContent=`${report.start||''}～${report.end||''} · ${report.status==='complete'?'完整历史研究':report.status==='incomplete'?'数据不完整，仅供研究':'已冻结 / 运行中'}${report.spec?.suite==='in_sample_tuning'?' · 样本内拟合，历史盈利不代表未来收益':''}${report.unseen_validation_required?' · 已使用历史再研究，仍须未见样本验证':''} · 单笔风险 ${percent((report.spec?.fixed_risk_per_trade||0)*100)} · 不自动调整生产权重`;
+    const results=Object.entries(report.results||{});
+    const sizing=report.spec?.suite==='position_risk';
+    if(sizing)$('ev-suite').value='position_risk';
+    $('ev-sizing-tail').hidden=!sizing;
+    if(sizing){
+      const p=report.spec.optimization||{};
+      $('ev-research-status').textContent+=` · 分档风险 ${percent((p.low_risk||0)*100)} / ${percent((p.standard_risk||0)*100)} / ${percent((p.high_risk||0)*100)} · 样本不足不加仓`;
+      $('ev-sizing-tail-rows').innerHTML=results.map(([arm,r])=>{const t=r.tail_metrics||{},c=t.sizing_tier_counts||{};return `<tr><td>${esc(r.name)}</td><td>${percent(t.daily_expected_shortfall_95_pct)}</td><td>${number(t.gap_stop_count)}</td><td>${number(t.gap_stop_net_pnl)}</td><td>${arm==='baseline'?'34%账户模式':['low','standard','high','fixed'].map(k=>number(c[k]||0)).join(' / ')}</td></tr>`;}).join('');
+    }
+    $('ev-research-arms').innerHTML=results.map(([arm,r])=>{const s=r.summary||{};return `<tr><td>${esc(r.name)} · ${esc(r.changed_variable)}</td><td>${r.complete?'完整':'不完整'} / ${number(s.days)}日</td><td>${r.complete?'':'部分 '}${percent(s.return_pct)}</td><td>${percent(s.max_drawdown_pct)}</td><td>${percent(s.worst_day_pct)}</td><td>${number(s.drawdown_duration_days)}日</td><td>${number(s.max_consecutive_losses)}笔</td><td>${number(s.closed_trades)} / ${percent(s.win_rate_pct)}</td><td>${number(s.fees)}</td><td>${number(r.validation_closed)} · ${r.evidence_status==='historical_comparison_only'?'历史对照':'证据不足'}</td></tr>`;}).join('')||'<tr><td colspan="10">尚无运行结果</td></tr>';
+    drawResearch(report.results||{});
+    $('ev-pairs').hidden=!(report.paired_comparisons||[]).length;
+    $('ev-pair-rows').innerHTML=(report.paired_comparisons||[]).map(r=>`<tr><td>${esc(labels[r.arm]||r.arm)} / ${esc(labels[r.control]||r.control)}</td><td>${esc(r.changed_variable)}</td><td>${r.complete?number(r.return_delta_pp,2)+'个百分点':'--'}</td><td>${r.complete?number(r.drawdown_delta_pp,2)+'个百分点':'--'}</td><td>${number(r.closed_trades)} / ${number(r.control_closed_trades)}</td><td>${r.complete?'完整历史对照，未授权生产':'数据不完整'}</td></tr>`).join('');
+    $('ev-research-folds').innerHTML=(report.folds||[]).flatMap(f=>Object.entries(f.validation||{}).map(([arm,v])=>`<tr><td>${esc(f.train_start)}～${esc(f.train_end)}</td><td>${esc(f.validation_start)}～${esc(f.validation_end)}</td><td>${esc(labels[f.selected_arm]||'不选优')}</td><td>${f.selected_arm?'仅由训练期选择':f.selection_status==='no_positive_training_edge_or_insufficient_samples'?'无正期望证据或样本不足':'训练样本不足'}</td><td>${esc(labels[arm]||arm)}</td><td>${percent(v.account.return_pct)}</td><td>${percent(v.account.max_drawdown_pct)}</td><td>${number(v.account.closed_trades)}</td></tr>`)).join('')||'<tr><td colspan="8">尚无完整验证窗口</td></tr>';
+    const strategyNames={mainline_leader:'主线龙头',weak_to_strong:'弱转强',first_board_launch:'首板启动',limit_pullback:'涨停回踩',limit_reversal:'跌停反包'};
+    $('ev-research-groups').innerHTML=(report.folds||[]).flatMap(f=>Object.entries(f.validation||{}).flatMap(([arm,v])=>(v.groups||[]).map(r=>`<tr><td>${esc(f.validation_start)}～${esc(f.validation_end)}</td><td>${esc(labels[arm])}</td><td>${esc(strategyNames[r.strategy_id]||r.strategy_id)}</td><td>${esc(r.regime)}</td><td>${number(r.candidates)}</td><td>${number(r.confirmed)}</td><td>${number(r.filled)}</td><td>${number(r.closed)}</td><td>${number(r.net_pnl)}</td><td>${percent(r.win_rate_pct)}</td></tr>`))).join('')||'<tr><td colspan="10">暂无验证期交易样本</td></tr>';
+    const failures=results.flatMap(([arm,r])=>[...(r.blocked||[]),...(r.data_quality?.skipped_candidates||[])].map(x=>`${labels[arm]} · ${x.trade_date} · ${x.code||''} · ${x.evidence||''} · ${x.reason}`));
+    $('ev-research-evidence').textContent=[`数据 ${report.data_hash||'冻结中'}；配置 ${report.configuration_hash||'--'}；代码 ${report.implementation_hash||'--'}`,report.branch_selection||'',report.spec?.optimization?`冻结优化参数 ${JSON.stringify(report.spec.optimization)}`:'',report.amount_profile_data_end?`成交进度模型训练数据截至 ${report.amount_profile_data_end}`:'',report.amount_profile_warning||'',...failures].filter(Boolean).join('\n');
+    $('ev-research-evidence').style.whiteSpace='pre-wrap';
+    $('ev-research-evidence').style.overflowWrap='anywhere';
+    status('历史回填不等于前瞻样本外；原模拟账户和生产配置不变');
+  }
+  function drawResearch(results){
+    const canvas=$('ev-research-curve'),ctx=canvas.getContext('2d'),width=canvas.clientWidth,height=220,ratio=window.devicePixelRatio||1;
+    canvas.width=width*ratio;canvas.height=height*ratio;ctx.scale(ratio,ratio);ctx.clearRect(0,0,width,height);
+    const entries=Object.values(results),colors=['#34d399','#fbbf24','#60a5fa','#fb7185','#f97316','#a3e635','#22d3ee','#e879f9'];
+    $('ev-research-legend').innerHTML=entries.map((r,i)=>`<span><i aria-hidden="true" style="display:inline-block;width:12px;height:3px;background:${colors[i%colors.length]};vertical-align:middle;margin-right:5px"></i>${esc(r.name)}</span>`).join('');
+    const values=entries.flatMap(a=>(a.nav||[]).map(r=>r.total_value));if(values.length<2)return;
+    const dates=current?.dates||[...new Set(entries.flatMap(a=>(a.nav||[]).map(r=>r.date).filter(Boolean)))].sort();
+    const columns=dates.length||Math.max(...entries.map(a=>(a.nav||[]).length));
+    const low=Math.min(...values),high=Math.max(...values),span=Math.max(high-low,1);
+    entries.forEach((a,i)=>{ctx.strokeStyle=colors[i%colors.length];ctx.lineWidth=2;ctx.beginPath();(a.nav||[]).forEach((r,j)=>{const column=r.date?dates.indexOf(r.date):j,x=20+column/Math.max(columns-1,1)*(width-40),y=height-32-(r.total_value-low)/span*(height-85);if(!j)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.stroke();});
+    ctx.fillStyle='#94a3b8';ctx.font='11px sans-serif';ctx.fillText(number(high),20,58);ctx.fillText(dates[0]||'',20,height-8);ctx.fillText(dates.at(-1)||'',Math.max(20,width-80),height-8);
+  }
+  async function pollResearch(){
+    if($('ev-kind').value!=='replay')return;
+    try{
+      const job=await request('/api/operations/replay-research/status');
+      if(job.state==='running'){
+        researchRunning=true;
+        $('ev-freeze').disabled=true;$('ev-run').disabled=true;
+        $('ev-research').hidden=false;$('ev-research-progress').hidden=false;
+        const p=job.progress||{};$('ev-research-progress').value=p.total?Math.min(100,p.completed/p.total*100):0;
+        status(`${job.stage||'准备中'} · ${p.trade_date||''} · ${p.completed||0}/${p.total||0}（当前阶段）`);
+        if(job.experiment_id){await load(job.experiment_id);status(`${job.stage} · ${p.trade_date||''} · ${p.completed||0}/${p.total||0}（当前阶段）`);}
+        researchTimer=setTimeout(pollResearch,3000);
+      }else{
+        researchRunning=false;
+        $('ev-freeze').disabled=false;$('ev-run').disabled=false;$('ev-research-progress').hidden=true;
+        if(job.experiment_id)await list(job.experiment_id);
+        if(job.state==='failed')status(job.error||'研究任务失败',true);
+      }
+    }catch(error){status(error.message,true);$('ev-freeze').disabled=false;$('ev-run').disabled=false;}
+  }
+  function drawAccounts(accounts){
+    const canvas=$('ev-analog-curve'),ctx=canvas.getContext('2d'),width=canvas.clientWidth,height=220,ratio=window.devicePixelRatio||1;
+    canvas.width=width*ratio;canvas.height=height*ratio;ctx.scale(ratio,ratio);ctx.clearRect(0,0,width,height);
+    const colors=['#34d399','#fbbf24','#60a5fa'],names=['原规则','相似过滤','相似过滤 + 换股'];
+    const entries=Object.values(accounts),values=entries.flatMap(a=>(a.nav||[]).map(r=>r.equity));
+    if(values.length<2)return;
+    const low=Math.min(...values),high=Math.max(...values),span=Math.max(high-low,high*.002,1);
+    entries.forEach((a,i)=>{ctx.strokeStyle=colors[i];ctx.lineWidth=2;ctx.beginPath();(a.nav||[]).forEach((r,j)=>{const x=20+j/Math.max(a.nav.length-1,1)*(width-40),y=height-22-(r.equity-low+span*.1)/(span*1.2)*(height-60);if(!j)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.stroke();ctx.fillStyle=colors[i];ctx.font='11px sans-serif';ctx.fillText(names[i],20+i*Math.min(150,(width-40)/3),18);});
+  }
   async function load(id) {
     try {const result=await request(`/api/operations/experiments/${encodeURIComponent(id)}`);render(result.report||{});}
     catch(error){status(error.message,true);}
   }
   async function list(selectId) {
-    const data=await request('/api/operations/experiments');const rows=data.rows||[];
+    const data=await request(`/api/operations/experiments?kind=${$('ev-kind').value}`);const rows=data.rows||[];
     $('ev-experiment').innerHTML=rows.map(row=>`<option value="${esc(row.experiment_id)}">${esc(row.experiment_id.slice(0,16))} · ${esc(row.frozen_at.slice(0,10))}</option>`).join('');
     const id=selectId||rows[0]?.experiment_id;if(id){$('ev-experiment').value=id;await load(id);}
     else status('尚无冻结实验');
   }
-  async function action(button, callback){button.disabled=true;try{await callback();}catch(error){status(error.message,true);}finally{button.disabled=false;}}
+  async function action(button, callback){button.disabled=true;try{await callback();}catch(error){status(error.message,true);}finally{button.disabled=$('ev-kind').value==='replay'&&researchRunning;}}
   $('ev-freeze').addEventListener('click',()=>action($('ev-freeze'),async()=>{
+    if($('ev-kind').value==='replay'){
+      if($('ev-suite').value==='position_risk')throw new Error('缺少区间前模型输入，不能新建该对照');
+      const start=$('ev-start').value.replaceAll('-',''),end=$('ev-end').value.replaceAll('-','');
+      if(!start||!end||start>end)throw new Error('请选择研究日期范围');
+      await request('/api/operations/replay-research/start',{method:'POST',body:JSON.stringify({start,end,train_days:Number($('ev-train').value),validation_days:Number($('ev-valid').value),embargo_days:Number($('ev-gap').value),missing_evidence_policy:$('ev-policy').value,suite:$('ev-suite').value})});
+      await pollResearch();return;
+    }
     const result=await request('/api/operations/experiments/freeze',{method:'POST',body:JSON.stringify({label:'production-five'})});
     await list(result.experiment_id);status('实验已冻结');
   }));
   $('ev-run').addEventListener('click',()=>action($('ev-run'),async()=>{
     const id=$('ev-experiment').value;if(!id)throw new Error('请先冻结实验');
+    if($('ev-kind').value==='replay'){
+      await request('/api/operations/replay-research/start',{method:'POST',body:JSON.stringify({experiment_id:id})});await pollResearch();return;
+    }
     const start=$('ev-start').value.replaceAll('-',''),end=$('ev-end').value.replaceAll('-','');
     if(!start||!end||start>end)throw new Error('请选择有效日期范围');
     status('正在评估...');const report=await request(`/api/operations/experiments/${encodeURIComponent(id)}/evaluate`,{
@@ -128,7 +257,22 @@
     });render(report);
   }));
   $('ev-experiment').addEventListener('change',event=>load(event.target.value));
-  window.addEventListener('resize',()=>{if(current)draw(current.equity?.rows||[]);});
+  $('ev-kind').addEventListener('change',()=>{
+    const analog=$('ev-kind').value==='analog';
+    const replay=$('ev-kind').value==='replay';
+    $('ev-research').hidden=!replay;$('ev-analog').hidden=!analog;
+    document.querySelectorAll('.ev-kpis, .ev-band:not(#ev-analog):not(#ev-research)').forEach(el=>el.hidden=analog||replay);
+    clearTimeout(researchTimer);
+    $('ev-gap-label').hidden=!replay;$('ev-policy-label').hidden=!replay;
+    $('ev-suite-label').hidden=!replay;
+    $('ev-freeze').textContent=replay?'冻结并运行对照':'冻结新实验';$('ev-run').textContent=replay?'接力运行':'评估';
+    if(replay){$('ev-train').value=30;$('ev-valid').value=10;}
+    $('ev-freeze').disabled=analog;$('ev-run').disabled=analog;
+    $('ev-experiment').innerHTML='';
+    list().catch(error=>status(error.message,true));
+    if(replay)pollResearch();
+  });
+  window.addEventListener('resize',()=>{if(current?.kind==='replay_research')drawResearch(current.results||{});else if(current?.accounts)drawAccounts(current.accounts);else if(current)draw(current.equity?.rows||[]);});
   $('ev-end').value='{{ latest_trade_date[:4] }}-{{ latest_trade_date[4:6] }}-{{ latest_trade_date[6:8] }}';
   list().catch(error=>status(error.message,true));
 })();

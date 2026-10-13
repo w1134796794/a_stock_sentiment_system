@@ -23,6 +23,7 @@ def test_aggressive_account_uses_three_way_position_size():
 def test_historical_rotation_replaces_weaker_t1_holding(monkeypatch):
     engine = BacktestEngine.__new__(BacktestEngine)
     engine.config = SimpleNamespace(rotation_min_edge=6.0)
+    monkeypatch.setattr(engine, '_is_full_day_suspended', lambda *args, **kwargs: False)
     engine.current_positions = {
         "000001": {
             "stock_name": "旧持仓",
@@ -46,7 +47,7 @@ def test_historical_rotation_replaces_weaker_t1_holding(monkeypatch):
     monkeypatch.setattr(
         engine,
         "_execute_sell",
-        lambda code, price, date, reason: sold.append((code, price, date, reason)),
+        lambda code, price, date, reason, **kwargs: sold.append((code, price, date, reason)),
     )
     monkeypatch.setattr(
         engine,
@@ -69,6 +70,7 @@ def test_historical_rotation_replaces_weaker_t1_holding(monkeypatch):
 def test_historical_rotation_cannot_sell_same_day_position(monkeypatch):
     engine = BacktestEngine.__new__(BacktestEngine)
     engine.config = SimpleNamespace(rotation_min_edge=6.0)
+    monkeypatch.setattr(engine, '_is_full_day_suspended', lambda *args, **kwargs: False)
     engine.current_positions = {
         "000001": {
             "stock_name": "当日新仓",

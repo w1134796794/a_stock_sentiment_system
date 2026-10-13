@@ -79,8 +79,9 @@ class AgentEvidenceService:
             return {"ok": False, "reason": "因子仓库不存在"}
         try:
             import duckdb  # type: ignore
+            from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-            con = duckdb.connect(str(self.duckdb_path), read_only=True)
+            con = duckdb_connect(str(self.duckdb_path), read_only=True)
             try:
                 rows = con.execute(
                     "SELECT sector_code, sector_name, mainline_score, momentum_score, amount_score, "
@@ -100,8 +101,9 @@ class AgentEvidenceService:
             return {"ok": False, "reason": "候选或历史结果不存在", "rows": []}
         try:
             import duckdb  # type: ignore
+            from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-            con = duckdb.connect(str(self.duckdb_path), read_only=True)
+            con = duckdb_connect(str(self.duckdb_path), read_only=True)
             try:
                 current = con.execute(
                     "SELECT tech_score, liquidity_score, sector_resonance_score, amount_ratio, board_score "

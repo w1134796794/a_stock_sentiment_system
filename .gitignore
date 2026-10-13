@@ -39,6 +39,15 @@ htmlcov/
 /webdata/experiments/
 /webdata/operations/
 /webdata/settings/
+/webdata/factor_status/
+/webdata/intraday_replays/
+/webdata/portfolio_replay_diagnostics/
+/webdata/preopen_evidence/
+/webdata/replay_research/
+/webdata/signal_cases/
+
+# Accidental shell redirection artifact
+/=
 
 # Mutable runtime databases must stay outside Git. The application initializes
 # app/auth schemas when the files are absent.

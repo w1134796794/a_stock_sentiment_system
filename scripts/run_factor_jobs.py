@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config.settings import FACTOR_DB_PATH
-from core.factors.jobs.runner import run_factor_jobs
+from core.factors.jobs.runner import FactorJobRunner, run_factor_jobs
 from core.utils.date_utils import DateUtils
 
 
@@ -24,7 +24,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--date", default="", help="交易日 YYYYMMDD；缺省取最近交易日")
     parser.add_argument("--start", default="", help="批量开始交易日 YYYYMMDD")
     parser.add_argument("--end", default="", help="批量结束交易日 YYYYMMDD")
-    parser.add_argument("--jobs", default="market,sector,stock", help="逗号分隔: market,sector,stock")
+    parser.add_argument("--jobs", default=",".join(FactorJobRunner.JOBS), help="逗号分隔: market,lhb,signals,sector,stock")
     parser.add_argument("--duckdb-path", default=str(FACTOR_DB_PATH))
     return parser.parse_args()
 
@@ -37,8 +37,9 @@ def main() -> int:
         if not args.start or not args.end or args.start > args.end:
             raise SystemExit("批量模式必须同时提供有效的 --start 和 --end")
         import duckdb
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-        with duckdb.connect(str(args.duckdb_path), read_only=True) as con:
+        with duckdb_connect(str(args.duckdb_path), read_only=True) as con:
             dates = [
                 str(row[0]) for row in con.execute(
                     "SELECT DISTINCT CAST(trade_date AS VARCHAR) FROM stock_daily_silver "

@@ -82,6 +82,22 @@ def run_backtest_demo():
     logger.info("回测完成！")
 
 
+def save_replay_evidence_audit(quality: dict, output_dir: str, run_id: str) -> None:
+    import pandas as pd
+
+    path = Path(output_dir) / "backtest_results"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / f"backtest_data_quality_{run_id}.json").write_text(
+        json.dumps(quality, ensure_ascii=False, indent=2, default=str), encoding="utf-8",
+    )
+    pd.DataFrame(quality.get('skipped_candidates') or [], columns=[
+        'trade_date', 'code', 'evidence', 'reason', 'scope', 'action', 'strategy_id',
+    ]).to_csv(path / f"backtest_skipped_candidates_{run_id}.csv", index=False, encoding="utf-8-sig")
+    pd.DataFrame(quality.get('suspended_sessions') or [], columns=[
+        'trade_date', 'code', 'scope', 'action', 'reason', 'source', 'queried_at', 'valuation_basis',
+    ]).to_csv(path / f"backtest_suspended_sessions_{run_id}.csv", index=False, encoding="utf-8-sig")
+
+
 def save_backtest_results(
     result: dict,
     output_dir: str,
@@ -109,6 +125,7 @@ def save_backtest_results(
             'entry_price': t.entry_price,
             'exit_price': t.exit_price,
             'shares': t.shares,
+            'position_size': t.position_size,
             'pnl': t.pnl,
             'pnl_pct': t.pnl_pct,
             'holding_days': t.holding_days,
@@ -128,6 +145,12 @@ def save_backtest_results(
             'amount_ratio': getattr(t, 'amount_ratio', 0),
             'entry_signal': getattr(t, 'entry_signal', ''),
             'entry_time': getattr(t, 'entry_time', ''),
+            'exit_time': getattr(t, 'exit_time', ''),
+            'sizing_method': getattr(t, 'sizing_method', ''),
+            'sizing_rationale': getattr(t, 'sizing_rationale', ''),
+            'sizing_sample_size': getattr(t, 'sizing_sample_size', 0),
+            'cost_version': getattr(t, 'cost_version', ''),
+            'exit_rule_version': getattr(t, 'exit_rule_version', ''),
             'mfe_pct': getattr(t, 'mfe_pct', 0),
             'mae_pct': getattr(t, 'mae_pct', 0),
             'strategy_id': getattr(t, 'strategy_id', ''),
@@ -211,6 +234,11 @@ def save_backtest_results(
         pd.DataFrame(attempts).to_csv(attempts_file, index=False, encoding="utf-8-sig")
         logger.info(f"入场信号明细已保存: {attempts_file}")
 
+    failures_file = output_path / f"backtest_evidence_failures_{timestamp}.csv"
+    pd.DataFrame(result.get("exit_evidence_failures") or [], columns=[
+        "trade_date", "code", "evidence", "reason",
+    ]).to_csv(failures_file, index=False, encoding="utf-8-sig")
+
     from backtest.run_audit import build_entry_funnel, build_run_manifest
 
     funnel_rows = build_entry_funnel(
@@ -221,6 +249,9 @@ def save_backtest_results(
     logger.info(f"成交漏斗已保存: {funnel_file}")
 
     manifest = build_run_manifest(result, metadata)
+    quality = result.get('data_quality') or {}
+    manifest['data_quality'] = quality
+    save_replay_evidence_audit(quality, output_dir, timestamp)
     manifest_file = output_path / f"backtest_manifest_{timestamp}.json"
     manifest_file.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8",
@@ -266,6 +297,15 @@ def save_backtest_results(
     })
     if metadata:
         summary.update(metadata)
+    summary.update({
+        'data_quality_status': quality.get('status', 'not_checked'),
+        'data_quality_label': quality.get('label', ''),
+        'skipped_candidate_count': quality.get('skipped_candidate_count', 0),
+        'candidate_samples': quality.get('candidate_samples', 0),
+        'candidate_coverage_pct': quality.get('candidate_coverage_pct'),
+        'full_sample_metrics_valid': quality.get('full_sample_metrics_valid', False),
+        'metrics_scope': quality.get('metrics_scope', ''),
+    })
 
     summary_df = pd.DataFrame([summary])
     summary_file = output_path / f"backtest_summary_{timestamp}.csv"

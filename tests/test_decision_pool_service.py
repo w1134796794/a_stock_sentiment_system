@@ -38,6 +38,15 @@ def _row(code: str, name: str, *, grade: str = "B", status: str = "usable"):
     }
 
 
+def test_st_is_excluded_from_active_and_inactive_decision_rows():
+    profiles = {'mainline_leader': _profile('mainline_leader', '主线龙头')}
+    payloads = {'mainline_leader': {'final': [_row('000004', '*ST国华')]}}
+    for score in (75, 38):
+        result = DecisionPoolService().build(payloads, profiles, market_score=score)
+        assert result['rows'] == []
+        assert result['excluded_risk_stocks'][0]['code'] == '000004'
+
+
 def test_strong_market_deduplicates_three_production_strategies():
     profiles = {
         "mainline_leader": _profile("mainline_leader", "主线龙头"),

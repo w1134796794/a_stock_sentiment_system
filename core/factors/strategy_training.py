@@ -18,6 +18,15 @@ from backtest.minute_entry import (
     normalize_strategy_entry_modes,
 )
 from core.signals.minute_amount_profile import MinuteAmountProfileRepository
+from core.signals.sector_confirmation import (
+    MIN_SECTOR_SAMPLES,
+    SECTOR_CONFIRMATION_VERSION,
+    make_sector_sync_checker,
+    sector_names_from_row,
+    select_sector_peers,
+)
+from core.utils.sector_names import normalize_sector_names
+from core.utils.stock_eligibility import factor_risk_projection
 
 
 @dataclass(frozen=True)
@@ -76,15 +85,18 @@ class StrategyMinuteTrainingBuilder:
     ) -> pd.DataFrame:
         candidates = self._candidate_map(strategy_id)
         if frame.empty or not candidates:
-            self.audit = {"candidate_rows": len(candidates), "filled_rows": 0, "excluded": {"missing_candidates": len(frame)}}
+            self.audit = {"candidate_rows": len(candidates), "filled_rows": 0,
+                          "excluded": {"missing_candidates": len(frame)},
+                          "sector_confirmation_version": SECTOR_CONFIRMATION_VERSION}
             return frame.iloc[0:0].copy()
         keys = list(zip(frame["trade_date"].astype(str), frame["code"].astype(str).str.zfill(6)))
         selected = frame[[key in candidates for key in keys]].copy()
         exclusions: Counter[str] = Counter()
         output = []
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-        self._connection = duckdb.connect(str(self.duckdb_path), read_only=True)
+        self._connection = duckdb_connect(str(self.duckdb_path), read_only=True)
         try:
             for _, row in selected.iterrows():
                 key = (str(row["trade_date"]), str(row["code"]).zfill(6))
@@ -110,10 +122,12 @@ class StrategyMinuteTrainingBuilder:
             "excluded": dict(exclusions),
             "label_source": "next_minute_open_after_confirmed_signal",
             "horizon_days": int(horizon_days),
+            "sector_confirmation_version": SECTOR_CONFIRMATION_VERSION,
         }
         return pd.DataFrame(output).reset_index(drop=True) if output else selected.iloc[0:0].copy()
 
     def _candidate_map(self, strategy_id: str) -> Dict[tuple[str, str], Dict[str, Any]]:
+        from core.utils.stock_eligibility import new_entry_exclusion
         directory = self.screening_dir / str(strategy_id)
         rows: Dict[tuple[str, str], Dict[str, Any]] = {}
         for path in sorted(directory.glob("screening_*.json")):
@@ -123,7 +137,7 @@ class StrategyMinuteTrainingBuilder:
                 continue
             date = str(payload.get("trade_date") or path.stem[-8:])
             for row in payload.get("final") or []:
-                if not isinstance(row, Mapping):
+                if not isinstance(row, Mapping) or new_entry_exclusion(row):
                     continue
                 code = str(row.get("code") or "").split(".", 1)[0].zfill(6)
                 if code:
@@ -184,7 +198,7 @@ class StrategyMinuteTrainingBuilder:
             return None, "gap_not_supported"
         sector_sync = self._sector_sync_callback(
             str(row.get("trade_date") or ""), entry_date, code,
-            str(candidate.get("resonance_sectors") or row.get("primary_sector") or ""),
+            sector_names_from_row(candidate) or normalize_sector_names(row.get("primary_sector")),
         )
         if sector_sync is None:
             return None, "missing_sector_minutes"
@@ -235,6 +249,7 @@ class StrategyMinuteTrainingBuilder:
             "tradable_next_day": 1,
             "label_horizon_days": horizon_days,
             "label_source": "confirmed_minute_next_open",
+            "sector_confirmation_version": SECTOR_CONFIRMATION_VERSION,
         })
         result["stop_before_profit"] = self._stop_before_profit(future, entry_price)
         strong = mfe >= 0.08 and result["next_3d_excess_return"] > 0
@@ -269,32 +284,34 @@ class StrategyMinuteTrainingBuilder:
         self._cache_put(self._daily_cache, key, rows)
         return rows
 
-    def _sector_sync_callback(self, plan_date: str, entry_date: str, code: str, sectors: str):
-        sector = str(sectors).replace("，", ",").split(",", 1)[0].strip()
-        if not sector:
+    def _sector_sync_callback(self, plan_date: str, entry_date: str, code: str, sectors: Any):
+        if not normalize_sector_names(sectors):
             return None
         if self._connection is None:
             raise RuntimeError("strategy training DuckDB connection is not open")
-        peers = self._connection.execute(
-            "SELECT code, ts_code FROM factor_stock_wide WHERE trade_date=? AND code<>? "
-            "AND resonance_sectors LIKE ? ORDER BY total_score DESC LIMIT 8",
-            [plan_date, code, f"%{sector}%"],
-        ).fetchall()
-        frames = [self._load_tick(str(ts_code or self._ts_code(str(peer))), entry_date) for peer, ts_code in peers]
-        frames = [normalize_minute_bars(frame) for frame in frames if frame is not None and not frame.empty]
-        if len(frames) < 3:
+        risk_columns = factor_risk_projection(self._connection)
+        rows = self._connection.execute(
+            f"SELECT code, ts_code, resonance_sectors, total_score{risk_columns} "
+            "FROM factor_stock_wide WHERE trade_date=? ORDER BY total_score DESC",
+            [plan_date],
+        ).fetchdf()
+        peers = select_sector_peers(code, sectors, rows.to_dict("records"))[:8]
+        frames = {}
+        for peer in peers:
+            ts_code = peer.get("ts_code")
+            if pd.isna(ts_code) or not ts_code:
+                ts_code = self._ts_code(peer["code"])
+            frames[peer["code"]] = normalize_minute_bars(self._load_tick(str(ts_code), entry_date))
+        if sum(not frame.empty for frame in frames.values()) < MIN_SECTOR_SAMPLES:
             return None
-
-        def synced(time_text: str) -> Optional[bool]:
-            states = []
-            for frame in frames:
-                eligible = frame[frame["time"] <= str(time_text)]
-                if eligible.empty:
-                    continue
-                states.append(float(eligible.iloc[-1]["close"]) >= float(frame.iloc[0]["open"]))
-            return None if len(states) < 3 else sum(states) / len(states) >= 0.60
-
-        return synced
+        placeholders = ",".join("?" for _ in peers)
+        previous = self._connection.execute(
+            "SELECT code, close FROM stock_daily_silver WHERE trade_date=? "
+            f"AND code IN ({placeholders})", [plan_date, *(peer["code"] for peer in peers)],
+        ).fetchall()
+        return make_sector_sync_checker(
+            code, sectors, peers, frames, previous_closes=dict(previous), trade_date=entry_date,
+        )
 
     def _load_tick(self, ts_code: str, trade_date: str) -> pd.DataFrame:
         key = (str(ts_code), str(trade_date))

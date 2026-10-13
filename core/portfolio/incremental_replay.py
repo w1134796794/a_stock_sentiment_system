@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +13,6 @@ from typing import Any, Callable
 import pandas as pd
 
 from backtest.backtest_engine import BacktestConfig, BacktestEngine
-from backtest.minute_entry import normalize_minute_bars
 from backtest.plan_source import build_backtest_plan_dir
 from backtest.trade_calendar import TradeCalendar
 from config.settings import (
@@ -19,6 +20,7 @@ from config.settings import (
     PAPER_ROTATION_MIN_EDGE, SNAPSHOT_DIR, TUSHARE_TOKEN, WEB_DATA_DIR,
 )
 from core.data.data_manager_main import DataManager
+from core.data.minute_quality import inspect_minute_bars, minute_failure
 from core.portfolio.holding_repository import HoldingRepository
 from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
 from core.realtime.models import normalize_stock_code
@@ -26,10 +28,11 @@ from risk.risk_config import RiskConfig
 
 
 class ReplayBlocked(ValueError):
-    def __init__(self, trade_date: str, reason: str):
+    def __init__(self, trade_date: str, reason: str, details: list[dict] | None = None):
         super().__init__(reason)
         self.trade_date = trade_date
         self.reason = reason
+        self.details = details or []
 
 
 class IncrementalPaperReplay:
@@ -43,6 +46,8 @@ class IncrementalPaperReplay:
         self.calendar = calendar or TradeCalendar()
         self.dm = data_manager
         self._prefetch_dm = data_manager
+        self._evidence_failures: list[dict] = []
+        self._suspended_codes: set[str] = set()
         self.repository.ensure_account(account_key, name="模拟交易账户",
                                        initial_capital=PAPER_INITIAL_CAPITAL)
 
@@ -50,10 +55,21 @@ class IncrementalPaperReplay:
     def config_version() -> str:
         root = Path(__file__).resolve().parents[2]
         digest = hashlib.sha256()
+        from core.screening.strategy_profiles import StrategyProfileRepository
+
+        repository = StrategyProfileRepository().frozen()
+        digest.update(json.dumps({row["id"]: repository.resolve(row["id"])
+                                  for row in repository.list_profiles()},
+                                 ensure_ascii=False, sort_keys=True, default=str).encode())
         for relative in (
             "config/strategy_combinations.yaml", "config/risk_control.yaml",
             "backtest/backtest_engine.py", "backtest/minute_entry.py",
             "backtest/exit_policy.py", "backtest/plan_source.py",
+            "backtest/nav_metrics.py", "core/signals/sector_confirmation.py",
+            "core/data/minute_quality.py",
+            "core/data/data_manager_suspension.py",
+            "core/utils/sector_names.py",
+            "core/utils/stock_eligibility.py",
         ):
             path = root / relative
             digest.update(relative.encode())
@@ -77,6 +93,14 @@ class IncrementalPaperReplay:
             return {}
         result = dict(row)
         result["state"] = json.loads(result.pop("state_json") or "{}")
+        path = self._diagnostic_path()
+        if path.exists():
+            try:
+                diagnostic = json.loads(path.read_text(encoding="utf-8"))
+                if diagnostic.get("trade_date") == result.get("blocked_date"):
+                    result["evidence_failures"] = diagnostic.get("evidence_failures") or []
+            except (OSError, ValueError):
+                pass
         return result
 
     def _account_snapshot(self) -> tuple[dict[str, Any], list[dict[str, Any]], int, str]:
@@ -138,6 +162,10 @@ class IncrementalPaperReplay:
         config.exit_minute_data_policy = "cache_only"
         return config
 
+    def _diagnostic_path(self) -> Path:
+        key = hashlib.sha256(self.account_key.encode()).hexdigest()[:16]
+        return Path(WEB_DATA_DIR) / "portfolio_replay_diagnostics" / f"{key}.json"
+
     def _block(self, date: str, reason: str) -> None:
         now = datetime.now().isoformat(timespec="seconds")
         with self.repository._write() as conn:
@@ -148,7 +176,17 @@ class IncrementalPaperReplay:
                 "blocked_reason=excluded.blocked_reason, updated_at=excluded.updated_at",
                 (self.account_key, date, reason, now),
             )
-        raise ReplayBlocked(date, reason)
+        path = self._diagnostic_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        os.close(fd)
+        try:
+            Path(temporary).write_text(json.dumps({"trade_date": date, "reason": reason,
+                "evidence_failures": self._evidence_failures}, ensure_ascii=False), encoding="utf-8")
+            Path(temporary).replace(path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        raise ReplayBlocked(date, reason, self._evidence_failures)
 
     def _plan(self, prev_date: str) -> tuple[Path, list[str]]:
         snapshot = Path(SNAPSHOT_DIR) / f"{prev_date}.json"
@@ -172,28 +210,34 @@ class IncrementalPaperReplay:
         return plan_dir, [str(code).zfill(6) for code in frame.get("代码", [])]
 
     def _required_minutes(self, date: str, codes: list[str]) -> list[str]:
+        from core.data.data_manager_suspension import suspension_status
         missing = []
+        self._evidence_failures = []
+        self._suspended_codes = set()
         if self._prefetch_dm is None:
             self._prefetch_dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=True)
         dm = self._prefetch_dm
-        for code in sorted(set(codes)):
+        for index, code in enumerate(sorted(set(codes))):
             ts_code = normalize_stock_code(code, add_suffix=True)
+            if suspension_status(dm, ts_code, date).get('state') == 'full_day':
+                self._suspended_codes.add(code)
+                if getattr(self, '_minute_progress', None):
+                    self._minute_progress({'stage': '全天停牌，不要求分钟证据', 'trade_date': date,
+                        'code': code, 'stocks_completed': index + 1, 'stocks_total': len(set(codes))})
+                continue
+            if getattr(self, "_minute_progress", None):
+                self._minute_progress({"stage": "检查或补齐分钟证据", "trade_date": date,
+                                       "code": code, "stocks_completed": index,
+                                       "stocks_total": len(set(codes))})
             try:
-                raw = dm.get_stock_tick(ts_code, date)
-                if raw is not None and not raw.empty:
-                    date_column = next((name for name in ("trade_date", "date", "datetime")
-                                        if name in raw.columns), "")
-                    if date_column:
-                        observed = (raw[date_column].astype(str).str[:10]
-                                    .str.replace("-", "", regex=False).str[:8])
-                        if not observed.eq(date).all():
-                            missing.append(code)
-                            continue
-                bars = normalize_minute_bars(raw)
-                if len(bars) < 2 or str(bars.iloc[-1]["time"]) < "14:55:00":
+                raw = dm.get_stock_tick(ts_code, date, require_full_day=True)
+                if not inspect_minute_bars(raw, date, expected_code=ts_code)["valid"]:
                     missing.append(code)
-            except Exception:
+                    self._evidence_failures.append(minute_failure(dm, raw, date, ts_code))
+            except Exception as exc:
                 missing.append(code)
+                self._evidence_failures.append({"trade_date": date, "code": code,
+                    "ts_code": ts_code, "evidence": "minute_bars", "reason": str(exc)})
         return missing
 
     @staticmethod
@@ -369,6 +413,10 @@ class IncrementalPaperReplay:
             if any(str(row["trade_date"]) > completed for row in fresh):
                 self._block(first, "检查点之后存在手工/实时成交；其日期晚于待补跑日，不能穿越成交时间")
         dates = self.calendar.get_trade_dates(first, end_date)
+        self._minute_progress = progress
+        if progress:
+            progress({"stage": "准备逐日接力", "completed_days": 0,
+                      "total_days": len(dates), "unit": "交易日"})
         if not dates:
             return {"state": "done", "last_completed_date": completed,
                     "completed_days": 0, "next_trade_date": first, "fill_count": 0}
@@ -377,7 +425,11 @@ class IncrementalPaperReplay:
         fills = 0
         for date in dates:
             prev = self.calendar.prev(date)
+            self._evidence_failures = []
             try:
+                if progress:
+                    progress({"stage": "准备当日候选", "trade_date": date,
+                              "completed_days": count, "total_days": len(dates), "code": ""})
                 if self.config_version() != version:
                     self._block(date, "回放期间策略配置已变化，不能混用配置版本")
                 plan_dir, candidates = self._plan(prev)
@@ -390,13 +442,20 @@ class IncrementalPaperReplay:
                               "sector_peers": len(sector_peers)})
                 missing = self._required_minutes(date, required)
                 if missing:
+                    if progress:
+                        progress({"stage": "分钟证据不完整", "trade_date": date,
+                                  "evidence_failures": self._evidence_failures})
                     self._block(date, f"缺少 {date} 分钟证据：{', '.join(missing[:20])}")
                 missing_daily = [code for code in sorted(set(required))
-                                 if not engine._get_stock_daily_bar(code, date)]
+                                 if code not in self._suspended_codes and not engine._get_stock_daily_bar(code, date)]
                 if missing_daily:
+                    self._evidence_failures = [{"trade_date": date, "code": code,
+                        "evidence": "daily_valuation", "reason": "日线估值证据缺失"} for code in missing_daily]
                     self._block(date, f"缺少 {date} 日线估值证据：{', '.join(missing_daily[:20])}")
                 before = len(engine.trade_history)
                 attempts_before = len(engine.entry_attempts)
+                if progress:
+                    progress({"stage": "运行当日分钟回放", "trade_date": date, "code": ""})
                 engine.run_one_day(date, str(plan_dir))
                 insufficient = [row for row in engine.entry_attempts[attempts_before:]
                                 if row.get("status") == "data_insufficient"
@@ -405,6 +464,9 @@ class IncrementalPaperReplay:
                                     "missing_sector_confirmation",
                                 }]
                 if insufficient:
+                    self._evidence_failures = [{"trade_date": date,
+                        "code": row.get("stock_code"), "evidence": row.get("reason_code") or "entry_confirmation",
+                        "reason": row.get("reason") or row.get("reason_code")} for row in insufficient]
                     examples = "; ".join(
                         f"{row.get('stock_code')}: {row.get('reason') or row.get('reason_code')}"
                         for row in insufficient[:5]
@@ -416,7 +478,7 @@ class IncrementalPaperReplay:
                 fills += len(daily_fills)
                 if progress:
                     progress({"stage": "逐日提交完成", "trade_date": date,
-                              "completed_days": count, "fill_count": fills})
+                              "completed_days": count, "total_days": len(dates), "fill_count": fills})
             except ReplayBlocked as exc:
                 self._block(date, exc.reason)
             except Exception as exc:

@@ -73,9 +73,10 @@ class FactorStoreMaintenance:
         if not self.duckdb_path.exists():
             raise FileNotFoundError(self.duckdb_path)
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         result = FactorStoreMaintenanceResult(archive_before=date, dry_run=bool(dry_run))
-        with duckdb.connect(str(self.duckdb_path)) as con:
+        with duckdb_connect(str(self.duckdb_path)) as con:
             if not self._table_exists(con, "factor_value_long"):
                 return result
             result.active_rows_before = int(
@@ -127,9 +128,10 @@ class FactorStoreMaintenance:
     ) -> FactorStoreMaintenanceResult:
         """Deduplicate live rows and optionally keep only explain/sparse factors."""
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         result = FactorStoreMaintenanceResult(archive_before="live", dry_run=bool(dry_run))
-        with duckdb.connect(str(self.duckdb_path)) as con:
+        with duckdb_connect(str(self.duckdb_path)) as con:
             if not self._table_exists(con, "factor_value_long"):
                 return result
             result.active_rows_before = int(con.execute(

@@ -69,6 +69,17 @@ class RealtimeOverlayService:
         candidate_date = str(trade_date or self._latest_date() or "")
         market_date = str(market_date or candidate_date)
         resolved_profile = str(profile or "")
+        frozen = None
+        if candidate_date and market_date != candidate_date:
+            from core.operations.preopen_evidence import PreopenEvidenceStore
+            frozen = PreopenEvidenceStore(self.screening_dir.parent).load(candidate_date, market_date)
+        if frozen and candidates is None:
+            resolved_profile = resolved_profile or DECISION_POOL_PROFILE
+            candidates = frozen["inputs"]["candidates"]
+            if resolved_profile != DECISION_POOL_PROFILE:
+                by_profile = frozen["inputs"].get("candidates_by_profile") or {}
+                candidates = by_profile.get(resolved_profile, [row for row in candidates if resolved_profile in
+                              str(row.get("strategy_sources") or row.get("strategy_id") or "").split(",")])
         if (
             candidates is None
             and not resolved_profile
@@ -80,6 +91,12 @@ class RealtimeOverlayService:
         )
         rows = self._dedupe_candidates(rows)[: max(int(limit or 20), 1)]
         strategy = self._strategy_metadata(resolved_profile, rows)
+        if frozen:
+            frozen_profile = next((item for item in frozen["inputs"].get("profiles", [])
+                                   if item.get("id") == resolved_profile), None)
+            if frozen_profile:
+                strategy.update({"execution": frozen_profile.get("execution") or {},
+                                 "version": frozen_profile.get("version") or strategy["version"]})
         strategy_labels = self._strategy_label_map()
         codes = [r["code"] for r in rows if r.get("code")]
 
@@ -147,6 +164,7 @@ class RealtimeOverlayService:
             },
             "counts": counts,
             "rows": overlay_rows,
+            "evidence_bundle_id": frozen["bundle_id"] if frozen else "",
         }
         if persist:
             payload["output_path"] = str(self.persist(payload))
@@ -421,6 +439,11 @@ class RealtimeOverlayService:
             "success_probability": signal.get("success_probability"),
             "historical_samples": signal.get("historical_samples"),
             "historical_stats_basis": signal.get("historical_stats_basis") or "",
+            "historical_stats_label": signal.get("historical_stats_label") or "",
+            "historical_stats_status": signal.get("historical_stats_status") or "insufficient",
+            "historical_stats_versions": signal.get("historical_stats_versions") or {},
+            "probability_calibration_status": "uncalibrated",
+            "signal_feature_snapshot": signal.get("signal_feature_snapshot"),
             "average_mfe_pct": signal.get("average_mfe_pct"),
             "average_mae_pct": signal.get("average_mae_pct"),
             "data_completeness": signal.get("data_completeness"),

@@ -150,10 +150,11 @@ def main() -> int:
         raise SystemExit("Date range must be YYYYMMDD and start <= end")
 
     import duckdb
+    from core.infrastructure.duckdb_access import connect as duckdb_connect
 
     db_path = Path(args.duckdb_path)
     screening_dir = Path(args.screening_dir)
-    with duckdb.connect(str(db_path)) as con:
+    with duckdb_connect(str(db_path)) as con:
         dates = [
             row[0]
             for row in con.execute(

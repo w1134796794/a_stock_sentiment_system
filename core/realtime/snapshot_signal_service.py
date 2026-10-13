@@ -6,6 +6,7 @@ from threading import RLock
 from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
+from core.realtime.trading_session import shanghai_now
 
 from backtest.minute_entry import (
     ENTRY_ACCELERATION,
@@ -43,7 +44,7 @@ class SnapshotSignalService:
         self.deadline = deadline
         self.consecutive_ticks = max(int(consecutive_ticks), 2)
         self.max_snapshot_age_seconds = max(float(max_snapshot_age_seconds), 3.0)
-        self.clock = clock or datetime.now
+        self.clock = clock or shanghai_now
         self._pending: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         self._lock = RLock()
 
@@ -61,6 +62,7 @@ class SnapshotSignalService:
         is_leader: bool,
         limit_price: float,
         minute_decision: EntryDecision,
+        confirmation_deadline: str = "",
     ) -> Optional[EntryDecision]:
         ticks = self._normalize_ticks(snapshots, trade_date)
         if len(ticks) < self.consecutive_ticks:
@@ -77,6 +79,14 @@ class SnapshotSignalService:
             return minute_decision
 
         recent = ticks.tail(self.consecutive_ticks)
+        recent_times = pd.to_datetime(trade_date + " " + recent["time"], format="%Y%m%d %H:%M:%S", errors="coerce")
+        if recent_times.isna().any() or (recent_times.diff().dt.total_seconds().dropna() > self.max_snapshot_age_seconds).any():
+            with self._lock:
+                self._pending.pop((str(trade_date), str(code), str(mode)), None)
+            return EntryDecision(
+                "observing", MODE_LABELS.get(mode, ""), "实时快照存在采集空窗，等待连续新快照",
+                open_gap_pct=open_gap, data_status="snapshot_gap", data_completeness=0.0,
+            )
         if not bool(recent["quality_ok"].all()):
             return EntryDecision(
                 "observing", MODE_LABELS.get(mode, ""), "3秒快照质量校验未通过",
@@ -91,7 +101,7 @@ class SnapshotSignalService:
                 errors="coerce",
             )
         age_seconds = (
-            (self.clock() - observed_at.to_pydatetime()).total_seconds()
+            (shanghai_now(self.clock()) - shanghai_now(observed_at.to_pydatetime())).total_seconds()
             if not pd.isna(observed_at) else float("inf")
         )
         if age_seconds < -1.0 or age_seconds > self.max_snapshot_age_seconds:
@@ -100,10 +110,12 @@ class SnapshotSignalService:
                 open_gap_pct=open_gap, data_status="snapshot_stale",
                 data_completeness=0.0,
             )
+        deadline = confirmation_deadline or self.deadline
+        deadline = datetime.strptime(deadline, "%H:%M:%S" if len(deadline) == 8 else "%H:%M").strftime("%H:%M:%S")
         latest_time = str(latest["time"])
-        if latest_time > self.deadline:
+        if latest_time > deadline:
             return EntryDecision(
-                "cancelled", MODE_LABELS.get(mode, ""), "10:00前未完成3秒快照确认",
+                "cancelled", MODE_LABELS.get(mode, ""), f"{deadline[:5]}前未完成3秒快照确认",
                 open_gap_pct=open_gap,
             )
 
@@ -117,7 +129,8 @@ class SnapshotSignalService:
         current = float(latest["last_price"])
 
         if mode == ENTRY_WEAK:
-            if float(ticks["last_price"].min()) < opening_low * 0.999:
+            after_opening = ticks[ticks["time"] > str(first_five.iloc[-1]["time"])]
+            if not after_opening.empty and float(after_opening["last_price"].min()) < opening_low * 0.999:
                 return EntryDecision(
                     "cancelled", "弱转强", "3秒快照显示已跌破开盘前5分钟低点",
                     latest_time, open_gap_pct=open_gap,
@@ -153,6 +166,14 @@ class SnapshotSignalService:
         key = (str(trade_date), str(code), str(mode))
         with self._lock:
             pending = self._pending.get(key)
+            if pending:
+                between = ticks[ticks["time"] >= str(pending.get("time") or "")]
+                timeline = pd.to_datetime(trade_date + " " + between["time"], format="%Y%m%d %H:%M:%S", errors="coerce")
+                if timeline.empty or str(between.iloc[0]["time"]) != str(pending.get("time")) or (
+                    timeline.diff().dt.total_seconds().dropna() > self.max_snapshot_age_seconds
+                ).any():
+                    self._pending.pop(key, None)
+                    pending = None
             if not triggered:
                 self._pending.pop(key, None)
                 missing = []
@@ -211,7 +232,8 @@ class SnapshotSignalService:
         data = frame.copy()
         required = ("last_price", "delta_volume", "ask1")
         for column in required:
-            data[column] = pd.to_numeric(data.get(column, 0.0), errors="coerce").fillna(0.0)
+            values = data[column] if column in data else pd.Series(0.0, index=data.index)
+            data[column] = pd.to_numeric(values, errors="coerce").fillna(0.0)
         if "time" not in data.columns:
             return pd.DataFrame()
         if "date" not in data.columns:
@@ -226,7 +248,8 @@ class SnapshotSignalService:
         if "received_at" not in data.columns:
             data["received_at"] = ""
         data["time"] = data["time"].astype(str).str[-8:]
-        return data[(data["last_price"] > 0) & data["time"].between("09:30:00", "10:00:00")].sort_values("time").drop_duplicates("time", keep="last")
+        session = data["time"].between("09:30:00", "11:30:00") | data["time"].between("13:00:00", "15:00:00")
+        return data[(data["last_price"] > 0) & session].sort_values("time").drop_duplicates("time", keep="last")
 
     @staticmethod
     def _current_vwap(minutes: pd.DataFrame, ticks: pd.DataFrame) -> float:

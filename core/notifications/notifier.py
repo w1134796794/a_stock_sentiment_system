@@ -266,6 +266,10 @@ class NotificationService:
                 f"仓位：{position}",
                 "动作：可进入买入确认，请再次核对价格、可成交性和账户风控。",
             ])
+            from core.signals.analog_runtime import notification_summary
+            lines.append(notification_summary(row.get("analog_analysis") or {}))
+            if row.get("forecast_id") and (row.get("analog_analysis") or {}).get("status") != "estimated":
+                lines.append(f"评估版本：{row['forecast_id']}")
             if self.public_url:
                 lines.append(f"详情：{self.public_url}/intraday")
             try:
@@ -277,7 +281,17 @@ class NotificationService:
                 )
                 delivered = int(result.get("sent") or 0)
                 sent += delivered
-                row["notification_status"] = "已推送" if delivered else "已去重或渠道不可用"
+                if delivered:
+                    row["notification_status"] = "已推送" if result.get("ok") else "部分渠道已推送"
+                elif result.get("deduplicated"):
+                    row["notification_status"] = "已去重"
+                elif result.get("inflight"):
+                    row["notification_status"] = "推送处理中"
+                elif any(item.get("retry_pending") for item in result.get("results") or []):
+                    row["notification_status"] = "等待渠道重试"
+                else:
+                    row["notification_status"] = "推送失败"
+                    row["notification_skip_reason"] = str(result.get("message") or "通知渠道未确认成功")
                 row["notification_result"] = result
                 if cluster and delivered and code not in pushed_codes:
                     self.backend.set_json(

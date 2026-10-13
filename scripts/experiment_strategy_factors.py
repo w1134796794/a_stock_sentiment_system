@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import duckdb
+from core.infrastructure.duckdb_access import connect as duckdb_connect
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor, VotingRegressor
@@ -166,7 +167,7 @@ def _load_training_frame(
     db_path: Path, train_end: str, strategies: tuple[str, ...],
 ) -> pd.DataFrame:
     columns = ",".join(f'f."{name}"' for name in FEATURES)
-    with duckdb.connect(str(db_path), read_only=True) as con:
+    with duckdb_connect(str(db_path), read_only=True) as con:
         frame = con.execute(
             f"""
             SELECT o.profile, o.entry_signal, o.trade_date, o.code,

@@ -173,6 +173,10 @@ class InternalScheduler:
         if self._stop.is_set():
             return False
         now = self._now()
+        if (self.calendar.is_trade_date(now.strftime("%Y%m%d"))
+                and "09:15:00" <= now.strftime("%H:%M:%S") <= "15:05:00"):
+            # Never rewrite yesterday's live inputs or compete for DuckDB during trading.
+            return False
         try:
             hour, minute = (int(part) for part in self.daily_time.split(":"))
             due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)

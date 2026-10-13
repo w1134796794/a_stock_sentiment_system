@@ -18,12 +18,37 @@
     <label>账户<select id="portfolio-account"><option value="default">模拟交易账户</option></select></label>
     <label>首次开始日<input id="replay-start" value="" maxlength="8" placeholder="自动接力"></label>
     <label>结束日期<input id="replay-end" value="{{ latest_trade_date }}" maxlength="8" placeholder="YYYYMMDD"></label>
-    <button id="start-replay" class="pf-button" type="button">补跑至结束日</button>
-    <button id="start-rebuild" class="pf-button" type="button">独立历史重建</button>
+    <button id="start-replay" class="pf-button" type="button" title="接续默认模拟账户的下一交易日，保留持仓和手工成交">补跑至结束日</button>
+    <button id="start-rebuild" class="pf-button" type="button" title="按当前配置从起止日重算，生成独立账户，不覆盖默认账户">独立历史重建</button>
+    <label class="pf-replay-option" title="仅用于独立历史重建；默认账户接力仍严格检查全部证据"><input id="rebuild-skip-candidates" type="checkbox">跳过缺证据候选，持仓缺证据仍停止</label>
     <span id="replay-status">读取账户检查点中…</span>
   </div>
   {% endif %}
 </section>
+{% if is_admin %}
+<section id="replay-progress-panel" class="pf-replay-progress hidden" aria-label="回放运行进度" aria-busy="false">
+  <div class="pf-progress-head"><strong id="replay-run-state" role="status" aria-live="polite"></strong><span id="replay-percent" class="mono"></span></div>
+  <progress id="replay-progress-bar" max="100" aria-label="当前阶段完成进度"></progress>
+  <div class="pf-progress-meta"><span id="replay-stage"></span><span id="replay-count" class="mono"></span><span id="replay-current" class="mono"></span></div>
+  <div class="pf-progress-meta pf-progress-secondary"><span id="replay-target"></span><span id="replay-elapsed"></span><span id="replay-heartbeat"></span></div>
+  <div id="replay-run-error" class="hidden"></div>
+  <details id="replay-log-panel" class="hidden"><summary>最近运行日志</summary><pre id="replay-log"></pre></details>
+</section>
+{% endif %}
+<section id="replay-quality" class="pf-replay-quality hidden" aria-label="历史重建数据质量">
+  <div class="pf-progress-head"><strong id="replay-quality-label"></strong><span id="replay-quality-context"></span></div>
+  <div id="replay-quality-summary" class="pf-progress-meta mono"></div>
+  <p id="replay-quality-warning"></p>
+  <details id="replay-skips-panel"><summary>已跳过候选明细</summary><div class="pf-table-wrap"><table class="pf-table"><thead><tr><th>日期</th><th>股票代码</th><th>缺失证据</th><th>原因</th></tr></thead><tbody id="replay-skips-rows"></tbody></table></div></details>
+</section>
+<section id="replay-evidence" class="pf-evidence hidden" aria-label="回放缺失证据">
+  <h2>回放缺失证据 <span id="replay-evidence-count"></span></h2>
+  <div class="pf-table-wrap"><table class="pf-table"><thead><tr><th>日期</th><th>股票代码</th><th>证据项</th><th>具体原因</th></tr></thead><tbody id="replay-evidence-rows"></tbody></table></div>
+</section>
+<details id="replay-peer-warnings" class="pf-evidence hidden">
+  <summary>板块参考样本缺失 <span id="replay-peer-count"></span></summary>
+  <div class="pf-table-wrap"><table class="pf-table"><thead><tr><th>日期</th><th>股票代码</th><th>具体原因</th></tr></thead><tbody id="replay-peer-rows"></tbody></table></div>
+</details>
 <section class="pf-summary" aria-label="持仓概况">
   <div><strong id="kpi-assets" class="mono">0</strong><span>总资产</span></div>
   <div><strong id="kpi-cash" class="mono">0</strong><span>可用现金</span></div>
@@ -59,7 +84,7 @@
 <section id="panel-trades" class="pf-panel hidden">
   <div class="pf-table-wrap">
     <table class="pf-table">
-      <thead><tr><th>日期</th><th>交易时间</th><th>股票</th><th>动作</th><th>价格</th><th>股数</th><th>金额</th><th>已实现盈亏</th><th>策略/原因</th></tr></thead>
+      <thead><tr><th>日期</th><th>交易时间</th><th>股票</th><th>动作</th><th>价格</th><th>股数</th><th>金额</th><th>已实现盈亏</th><th>买入时评估</th><th>策略/原因</th></tr></thead>
       <tbody id="trades"></tbody>
     </table>
   </div>
@@ -113,6 +138,39 @@
   .pf-replay label { color:#73829a; }
   .pf-replay input,.pf-replay select { display:block; width:112px; margin-top:.2rem; color:#e2e8f0; background:#070d1b; border:1px solid #334155; border-radius:6px; padding:.42rem .55rem; }
   .pf-replay select { width:150px; }
+  .pf-replay .pf-replay-option { display:flex; align-items:center; gap:.4rem; max-width:100%; color:#94a3b8; overflow-wrap:anywhere; padding:.4rem 0; }
+  .pf-replay .pf-replay-option input { display:inline-block; width:14px; height:14px; margin:0; flex-shrink:0; accent-color:#34d399; }
+  .pf-replay-quality { border-top:1px solid #475569; border-bottom:1px solid #475569; margin-bottom:1rem; padding:.75rem 0; font-size:.78rem; }
+  .pf-replay-quality[data-incomplete="true"] .pf-progress-head { color:#fcd34d; }
+  #replay-quality-warning { color:#fcd34d; margin:.5rem 0; overflow-wrap:anywhere; }
+  #replay-quality-context { color:#94a3b8; font-size:.72rem; }
+  #replay-skips-panel { color:#94a3b8; }
+  #replay-skips-panel .pf-table-wrap { margin-top:.5rem; }
+  #replay-skips-panel td:last-child { white-space:normal; overflow-wrap:anywhere; }
+  #replay-status { overflow-wrap:anywhere; }
+  .pf-button:disabled { opacity:.45; cursor:not-allowed; }
+  .pf-replay-progress { border-top:1px solid #334155; border-bottom:1px solid #334155; padding:.85rem 0; margin-bottom:1rem; font-size:.78rem; }
+  .pf-progress-head,.pf-progress-meta { display:flex; flex-wrap:wrap; gap:.5rem 1.2rem; align-items:center; }
+  .pf-progress-head { justify-content:space-between; color:#6ee7b7; }
+  .pf-progress-meta { color:#cbd5e1; margin-top:.4rem; overflow-wrap:anywhere; }
+  .pf-progress-secondary { color:#8292a9; font-size:.72rem; }
+  #replay-progress-bar { display:block; width:100%; height:10px; margin:.65rem 0; accent-color:#34d399; border:0; border-radius:4px; overflow:hidden; }
+  #replay-progress-bar::-webkit-progress-bar { background:#263449; border-radius:4px; }
+  #replay-progress-bar::-webkit-progress-value { background:#34d399; border-radius:4px; }
+  #replay-progress-bar::-moz-progress-bar { background:#34d399; }
+  .pf-replay-progress[data-state="blocked"] #replay-progress-bar { accent-color:#fbbf24; }
+  .pf-replay-progress[data-state="blocked"] #replay-progress-bar::-webkit-progress-value { background:#fbbf24; }
+  .pf-replay-progress[data-state="error"] #replay-progress-bar { accent-color:#fb7185; }
+  .pf-replay-progress[data-state="error"] #replay-progress-bar::-webkit-progress-value { background:#fb7185; }
+  .pf-replay-progress[data-state="blocked"] .pf-progress-head { color:#fcd34d; }
+  .pf-replay-progress[data-state="error"] .pf-progress-head,#replay-run-error { color:#fda4af; }
+  #replay-run-error { margin-top:.5rem; overflow-wrap:anywhere; }
+  #replay-log-panel { margin-top:.6rem; color:#94a3b8; }
+  #replay-log { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:.7rem; margin-top:.4rem; }
+  .pf-evidence { margin:1rem 0; border-top:1px solid #475569; padding-top:.75rem; }
+  .pf-evidence h2 { font-size:.85rem; font-weight:700; color:#fda4af; margin-bottom:.5rem; }
+  .pf-evidence .pf-table { min-width:620px; }
+  .pf-evidence td:last-child { white-space:normal; overflow-wrap:anywhere; min-width:260px; }
   .pf-summary { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.75rem; margin-bottom:1rem; }
   .pf-summary>div { min-height:88px; border:1px solid #263449; border-radius:7px; background:#101a2c; padding:1rem; }
   .pf-summary strong { display:block; font-size:1.65rem; line-height:1.1; }
@@ -168,6 +226,12 @@
   let currentAccount = 'default';
   let replayCursor = 0;
   let replayTimer = null;
+  let replayBusy = false;
+  let replayLogs = [];
+  let replayPollPending = false;
+  let replayGeneration = 0;
+  let replaySubmitting = false;
+  let latestReplayQuality = null;
   let state = {positions:[], trades:[], exit_signals:[]};
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -178,6 +242,35 @@
   const actionText = {hold:'继续持有',watch:'风险观察',reduce:'建议减仓',sell:'建议卖出',blocked:'当前无法卖出',data_insufficient:'数据不足',sold:'已卖出'};
   const tradeText = {buy:'买入',sell:'卖出'};
   const strategyText = {mainline_leader:'主线龙头',weak_to_strong:'弱转强',first_board_launch:'首板启动'};
+  function renderReplayEvidence(rows=[]) {
+    const labels={minute_bars:'分钟行情',exit_minute_bars:'持仓退出分钟',auction:'集合竞价',daily_valuation:'日线估值',missing_sector:'板块分时确认',missing_sector_confirmation:'板块分时确认',missing_amount_profile:'历史同分钟量能',incomplete_opening_window:'开盘分钟窗口'};
+    $('replay-evidence').classList.toggle('hidden',!rows.length);
+    $('replay-evidence-count').textContent=rows.length?`${rows.length} 项`:'';
+    $('replay-evidence-rows').innerHTML=rows.map(row=>`<tr><td>${esc(row.trade_date)}</td><td>${esc(row.code||row.ts_code||'--')}</td><td>${esc(labels[row.evidence]||row.evidence||'入场确认')}</td><td>${esc(row.reason||'证据缺失')}</td></tr>`).join('');
+  }
+  function renderReplayQuality() {
+    const accountQuality=state.replay_data_quality;
+    const quality=accountQuality?.status?accountQuality:latestReplayQuality;
+    renderPeerWarnings(quality?.optional_evidence_warnings||[]);
+    const visible=quality&&['complete','incomplete'].includes(quality.status);
+    $('replay-quality').classList.toggle('hidden',!visible);if(!visible)return;
+    $('replay-quality').dataset.incomplete=String(quality.status==='incomplete');
+    $('replay-quality-label').textContent=quality.costs_verified===false?'成本未验证 · 仅供研究':quality.status==='incomplete'?'数据不完整 · 仅供研究':'历史重建 · 候选证据完整';
+    $('replay-quality-context').textContent=accountQuality?.status?`账户 ${currentAccount}`:'本次独立历史重建';
+    const coverage=quality.candidate_coverage_pct;
+    $('replay-quality-summary').textContent=`跳过 ${quality.skipped_candidate_count||0} / ${quality.candidate_samples||0} 个候选样本（股票 × 日期） · 候选证据覆盖 ${quality.covered_candidate_count||0}/${quality.candidate_samples||0} · ${coverage==null?'--':Number(coverage).toFixed(1)+'%'} · 已确认全天停牌候选 ${quality.suspended_candidate_count||0} 个（不计入缺失）`;
+    $('replay-quality-warning').textContent=quality.cost_warning||(quality.status==='incomplete'?'胜率、收益与回撤仅针对剩余证据可用样本，不能代表完整候选样本。':quality.coverage_denominator_scope||'');
+    const rows=quality.skipped_candidates||[];
+    $('replay-skips-panel').classList.toggle('hidden',!rows.length);
+    const labels={minute_bars:'分钟行情',missing_minutes:'分钟行情',missing_auction:'集合竞价',missing_sector:'板块分时确认',missing_sector_confirmation:'板块分时确认',missing_amount_profile:'历史同分钟量能'};
+    $('replay-skips-rows').innerHTML=rows.map(row=>`<tr><td>${esc(row.trade_date)}</td><td>${esc(row.code)}</td><td>${esc(labels[row.evidence]||row.evidence)}</td><td>${esc(row.reason)}</td></tr>`).join('');
+  }
+  function renderPeerWarnings(rows=[]) {
+    const peers=rows.filter(row=>row.scope==='sector_peer');
+    $('replay-peer-warnings').classList.toggle('hidden',!peers.length);
+    $('replay-peer-count').textContent=peers.length?`${peers.length} 项`:'';
+    $('replay-peer-rows').innerHTML=peers.map(row=>`<tr><td>${esc(row.trade_date)}</td><td>${esc(row.code||row.ts_code||'--')}</td><td>${esc(row.reason||'分钟证据缺失')}</td></tr>`).join('');
+  }
 
   async function api(url, options={}) {
     const response = await fetch(url,{headers:{'Content-Type':'application/json'},...options});
@@ -196,6 +289,7 @@
     catch(error){ message(error.message,true); }
   }
   function render() {
+    renderReplayQuality();
     const summary=state.summary||{}, positions=state.positions||[], signals=state.exit_signals||[], trades=state.trades||[];
     $('kpi-assets').textContent=money(summary.total_assets);
     $('kpi-cash').textContent=money(summary.cash);
@@ -226,26 +320,104 @@
   }
   function signalRow(s) { return `<tr><td class="mono">${esc(s.signal_date||'')} ${esc(s.signal_time||'')}</td><td>${esc(s.name||s.code)}<div class="mono text-slate-500">${esc(s.code||'')}</div></td><td>${esc(s.action_label||actionText[s.action]||s.action)}</td><td class="mono">${price(s.current_price)}</td><td class="mono ${pnlClass(s.pnl_pct)}">${pct(s.pnl_pct)}</td><td class="mono">${price(s.protect_price)}</td><td>${esc(s.reason||'--')}</td><td>${s.notified_at?'已推送':'未推送'}</td></tr>`; }
   function tradeTime(value) { const raw=String(value||'').trim(); if(!raw)return '--'; const match=raw.match(/(?:^|[T\s])(\d{2}:\d{2}(?::\d{2})?)/); return match?match[1]:raw; }
-  function tradeRow(t) { return `<tr><td class="mono">${esc(t.trade_date||'')}</td><td class="mono">${esc(tradeTime(t.trade_time))}</td><td>${esc(t.name||t.code)}<div class="mono text-slate-500">${esc(t.code||'')}</div></td><td>${esc(tradeText[t.action]||t.action)}</td><td class="mono">${price(t.price)}</td><td class="mono">${money(t.shares)}</td><td class="mono">${money(t.amount)}</td><td class="mono ${pnlClass(t.realized_pnl)}">${Number(t.realized_pnl||0)?`${Number(t.realized_pnl)>=0?'+':''}${money(t.realized_pnl)} / ${pct(t.realized_pnl_pct)}`:'--'}</td><td>${esc(strategyText[t.strategy_id]||t.strategy_id||'--')}<div class="text-slate-500">${esc(t.reason||'')}</div></td></tr>`; }
+  function tradeQuantity(t) {
+    if(t.metadata?.quantity_basis!=='historical_reference_adjusted')return money(t.shares);
+    return `${Number(t.shares).toLocaleString('zh-CN',{maximumFractionDigits:6})}<div class="text-slate-500" title="历史回放按除权参考价换算的理论数量，不代表券商实际登记股数">参考价调整数量</div>`;
+  }
+  function tradeRow(t) { const a=t.entry_analog||{}, forecast=a.status==='estimated'?`${a.ready_at_order?'下单时已知':'下单时未就绪 · 补充参考'}<br>净盈利频率 ${pct(a.probability*100)}<br>平均净收益 ${pct(a.expected_net_return*100)}`:'--'; return `<tr><td class="mono">${esc(t.trade_date||'')}</td><td class="mono">${esc(tradeTime(t.trade_time))}</td><td>${esc(t.name||t.code)}<div class="mono text-slate-500">${esc(t.code||'')}</div></td><td>${esc(tradeText[t.action]||t.action)}</td><td class="mono">${price(t.price)}</td><td class="mono">${tradeQuantity(t)}</td><td class="mono">${money(t.amount)}</td><td class="mono ${pnlClass(t.realized_pnl)}">${Number(t.realized_pnl||0)?`${Number(t.realized_pnl)>=0?'+':''}${money(t.realized_pnl)} / ${pct(t.realized_pnl_pct)}`:'--'}</td><td title="${esc(a.forecast_id||'')}">${forecast}<div class="text-slate-500">${esc(a.prediction_generated_at||'')}</div></td><td>${esc(strategyText[t.strategy_id]||t.strategy_id||'--')}<div class="text-slate-500">${esc(t.reason||'')}</div></td></tr>`; }
 
   document.querySelectorAll('.pf-tabs button').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('.pf-tabs button').forEach(item=>item.classList.toggle('active',item===button)); document.querySelectorAll('.pf-panel').forEach(panel=>panel.classList.add('hidden')); $(`panel-${button.dataset.tab}`).classList.remove('hidden');}));
   $('run-monitor').addEventListener('click',async()=>{try{$('run-monitor').disabled=true;const result=await api('/api/portfolio/monitor',{method:'POST',body:JSON.stringify({account:currentAccount})});message(`检查完成：${result.count||0}只持仓，推送${result.notified||0}条提醒${result.executed?`，自动退出${result.executed}只`:''}`);await load();}catch(error){message(error.message,true);}finally{$('run-monitor').disabled=false;}});
 
   {% if is_admin %}
   async function loadAccounts(){try{const result=await api('/api/portfolio/accounts');$('portfolio-account').innerHTML=(result.data||[]).map(row=>`<option value="${esc(row.account_key)}">${esc(row.name||row.account_key)} · ${esc(row.account_key)}</option>`).join('');if((result.data||[]).some(row=>row.account_key===currentAccount))$('portfolio-account').value=currentAccount;}catch(error){message(error.message,true);}}
-  $('portfolio-account').addEventListener('change',async event=>{currentAccount=event.target.value;await load();});
+  $('portfolio-account').addEventListener('change',async event=>{currentAccount=event.target.value;setReplayBusy(replayBusy);await load();});
   function today(){const d=new Date();return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;}
   document.querySelectorAll('.dialog-close').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
   $('add-position').addEventListener('click',()=>{ $('position-form').reset(); $('position-id').value=''; $('position-date').value=today(); $('position-emergency').value='6'; $('position-dialog-title').textContent='手工买入'; $('position-code').disabled=false; $('position-price').disabled=false; $('position-shares').disabled=false; $('position-dialog').showModal(); });
   function bindPositionActions(){document.querySelectorAll('.edit-position').forEach(button=>button.onclick=()=>{const p=(state.positions||[]).find(row=>String(row.id)===button.dataset.id);if(!p)return;$('position-id').value=p.id;$('position-code').value=p.code;$('position-name').value=p.name;$('position-date').value=p.entry_date;$('position-time').value=p.entry_time||'';$('position-price').value=p.entry_price;$('position-shares').value=p.shares;$('position-strategy').value=p.strategy_id||'';$('position-stop').value=p.structural_stop||'';$('position-sectors').value=p.sector_names||'';$('position-emergency').value=p.emergency_loss_pct||6;$('position-dialog-title').textContent='修改持仓设置';$('position-code').disabled=true;$('position-price').disabled=true;$('position-shares').disabled=true;$('position-dialog').showModal();});document.querySelectorAll('.sell-position').forEach(button=>button.onclick=()=>{const p=(state.positions||[]).find(row=>String(row.id)===button.dataset.id);if(!p)return;$('sell-position-id').value=p.id;$('sell-price').value=p.last_price||'';$('sell-shares').value=p.shares;$('sell-shares').max=p.shares;$('sell-date').value=today();$('sell-time').value='';$('sell-reason').value='';$('sell-dialog').showModal();});}
   $('save-position').addEventListener('click',async()=>{const id=$('position-id').value;const strategy=$('position-strategy').value;const body={name:$('position-name').value,strategy_id:strategy,strategy_name:strategyText[strategy]||'',sector_names:$('position-sectors').value,structural_stop:Number($('position-stop').value||0),emergency_loss_pct:Number($('position-emergency').value||6)};let url='/api/portfolio/positions',method='POST';if(id){url+=`/${id}`;method='PATCH';}else{Object.assign(body,{code:$('position-code').value,entry_date:$('position-date').value,entry_time:$('position-time').value,entry_price:Number($('position-price').value),shares:Number($('position-shares').value)});}try{await api(url,{method,body:JSON.stringify(body)});$('position-dialog').close();message('持仓已保存');await load();}catch(error){message(error.message,true);}});
   $('save-sell').addEventListener('click',async()=>{const id=$('sell-position-id').value;const body={price:Number($('sell-price').value),shares:Number($('sell-shares').value),trade_date:$('sell-date').value,trade_time:$('sell-time').value,reason:$('sell-reason').value};try{await api(`/api/portfolio/positions/${id}/sell`,{method:'POST',body:JSON.stringify(body)});$('sell-dialog').close();message('卖出成交已记录');await load();}catch(error){message(error.message,true);}});
-  async function replayCheckpoint(){try{const result=await api('/api/portfolio/replay/checkpoint');const row=result.data||{};$('replay-status').textContent=row.blocked_date?`停在 ${row.blocked_date}：${row.blocked_reason}`:row.last_completed_date?`已完成至 ${row.last_completed_date} · 下一日 ${row.next_trade_date}`:row.account_last_trade_date?`账户成交至 ${row.account_last_trade_date} · 只能从 ${row.next_trade_date} 接力；更早请用独立重建`:'尚无检查点；首次请填写开始日';}catch(error){$('replay-status').textContent=error.message;}}
-  async function pollReplay(){try{const result=await api(`/api/portfolio/replay/status?since=${replayCursor}`);replayCursor=result.next||replayCursor;const replay=result.paper_replay||{},progress=replay.progress||{};if(replay.mode==='incremental'){$('replay-status').textContent=result.state==='blocked'?`停在 ${replay.blocked_date}：${replay.error}`:result.state==='error'?`补跑失败：${replay.error}`:result.state==='done'?`已完成至 ${replay.result?.last_completed_date||'--'} · 新增成交${replay.result?.fill_count||0}笔`:`${replay.stage||'逐日补跑'} ${progress.trade_date||''} · 已完成${progress.completed_days||0}日`;}else{$('replay-status').textContent=result.state==='error'?`重建失败：${replay.error||result.error}`:replay.imported?`独立账户 ${replay.import_result?.account_key} 已重建，未覆盖当前账户`:`${replay.stage||'历史重建'} ${progress.completed||0}/${progress.total||0}`;}if(['done','blocked','error'].includes(result.state)){clearInterval(replayTimer);replayTimer=null;await loadAccounts();await load();}}catch(error){$('replay-status').textContent=error.message;}}
-  async function launchReplay(path,start,end){try{$('start-replay').disabled=true;$('start-rebuild').disabled=true;replayCursor=0;const result=await api(path,{method:'POST',body:JSON.stringify({start_date:start,end_date:end,initial_capital:{{ paper_initial_capital }}})});message(result.message);if(replayTimer)clearInterval(replayTimer);replayTimer=setInterval(pollReplay,2000);await pollReplay();}catch(error){message(error.message,true);}finally{$('start-replay').disabled=false;$('start-rebuild').disabled=false;}}
+  async function replayCheckpoint(){try{const result=await api('/api/portfolio/replay/checkpoint');const row=result.data||{};renderReplayEvidence(row.evidence_failures||[]);$('replay-status').textContent=row.config_version&&row.config_version!==result.config_version?'配置版本已变化，请使用独立历史重建':row.blocked_date?`停在 ${row.blocked_date}：${row.blocked_reason}`:row.last_completed_date?`已完成至 ${row.last_completed_date} · 下一日 ${row.next_trade_date}`:row.account_last_trade_date?`账户成交至 ${row.account_last_trade_date} · 只能从 ${row.next_trade_date} 接力；更早请用独立重建`:'尚无检查点；首次请填写开始日';}catch(error){$('replay-status').textContent=error.message;}}
+  function setReplayBusy(busy) {
+    replayBusy=busy;
+    const disabled=busy||replaySubmitting;
+    $('start-replay').disabled=disabled||currentAccount!=='default';
+    $('start-rebuild').disabled=disabled;
+    $('replay-start').disabled=disabled;
+    $('replay-end').disabled=disabled;
+    $('rebuild-skip-candidates').disabled=disabled;
+  }
+  function renderReplayProgress(result) {
+    const replay=result.paper_replay||{},p=replay.progress||{},runState=result.state||'idle';
+    if(!replay.mode)return;
+    if(replay.data_quality?.status){latestReplayQuality=replay.data_quality;renderReplayQuality();}
+    const busy=['running','prefetching'].includes(runState),incremental=replay.mode==='incremental';
+    setReplayBusy(busy);
+    const panel=$('replay-progress-panel');panel.classList.remove('hidden');panel.dataset.state=runState;panel.setAttribute('aria-busy',String(busy));
+    $('replay-run-state').textContent=({running:'正在运行',prefetching:'正在准备行情证据',done:'已完成',blocked:'已中止 · 缺少证据或检查未通过',error:'执行失败'})[runState]||runState;
+    const total=Number(incremental?p.total_days:p.total)||0;
+    const completed=Number(incremental?p.completed_days:p.completed)||0;
+    const percent=total>0?Math.min(100,Math.max(0,completed/total*100)):null;
+    const bar=$('replay-progress-bar');
+    if(percent!==null)bar.value=percent;else if(busy)bar.removeAttribute('value');else bar.value=runState==='done'?100:0;
+    $('replay-percent').textContent=percent!==null?`${percent.toFixed(1)}%${incremental?'':' · 当前阶段'}`:runState==='done'?'100%':busy?'准备中':'已停止';
+    $('replay-stage').textContent=replay.stage||'准备任务';
+    const evidenceStage=result.state==='prefetching'||Boolean(replay.prefetch_result)&&!replay.backtest_started_epoch;
+    $('replay-count').textContent=total>0?`${completed} / ${total} ${p.unit||(evidenceStage?'证据项':'交易日')}`:'';
+    $('replay-current').textContent=[p.trade_date,p.code?`股票 ${p.code}`:'',p.code&&p.stocks_total?`分钟证据 ${p.stocks_completed||0}/${p.stocks_total}`:''].filter(Boolean).join(' · ');
+    $('replay-target').textContent=`${incremental?'补跑账户 default':`独立账户 ${replay.import_result?.account_key||'待生成'}`} · ${replay.start_date||'检查点下一交易日'} → ${replay.end_date||'--'}`;
+    const elapsed=Math.max(0,Math.floor((Number(replay.finished_epoch)||Date.now()/1000)-(Number(replay.started_epoch)||Date.now()/1000)));
+    $('replay-elapsed').textContent=replay.started_epoch?`耗时 ${Math.floor(elapsed/60)}分${elapsed%60}秒`:'耗时 --';
+    const age=Math.max(0,Math.floor(Date.now()/1000-(Number(replay.updated_epoch)||Date.now()/1000)));
+    $('replay-heartbeat').textContent=busy?`状态已连接 · 最近进展 ${age}秒前${age>=60?' · 当前步骤仍未返回':''}`:'';
+    const error=replay.error||result.error||'';
+    $('replay-run-error').textContent=[replay.blocked_date?`停在 ${replay.blocked_date}`:'',error].filter(Boolean).join('：');
+    $('replay-run-error').classList.toggle('hidden',!error);
+    replayLogs=[...replayLogs,...(result.lines||result.logs||[])].slice(-20);
+    $('replay-log-panel').classList.toggle('hidden',!replayLogs.length);$('replay-log').textContent=replayLogs.join('\n');
+    $('replay-status').textContent=busy?`${incremental?'补跑':'独立重建'}运行中`:runState==='done'?incremental?`已完成至 ${replay.result?.last_completed_date||'--'} · 新增成交${replay.result?.fill_count||0}笔`:`独立账户 ${replay.import_result?.account_key||'--'} 已生成`:error;
+    renderReplayEvidence(replay.evidence_failures||p.evidence_failures||[]);
+    renderPeerWarnings(p.optional_evidence_warnings||replay.prefetch_result?.optional_evidence_warnings||replay.data_quality?.optional_evidence_warnings||[]);
+  }
+  async function pollReplay() {
+    if(replayTimer)clearTimeout(replayTimer);replayTimer=null;
+    if(replayPollPending){replayTimer=setTimeout(pollReplay,200);return;}
+    replayPollPending=true;
+    const generation=replayGeneration;
+    try {
+      const result=await api(`/api/portfolio/replay/status?since=${replayCursor}`);
+      if(generation!==replayGeneration)return;
+      replayCursor=result.next??replayCursor;renderReplayProgress(result);
+      if(['running','prefetching'].includes(result.state))replayTimer=setTimeout(pollReplay,2000);
+      else if(result.paper_replay?.mode){setReplayBusy(false);await loadAccounts();await load();}
+    }catch(error){
+      if(generation!==replayGeneration)return;
+      $('replay-status').textContent=`状态连接失败：${error.message}；正在重试`;
+      $('replay-heartbeat').textContent='状态连接中断，无法确认任务是否仍在运行';
+      replayTimer=setTimeout(pollReplay,4000);
+    }finally{replayPollPending=false;}
+  }
+  async function launchReplay(path,start,end) {
+    replayGeneration++;replaySubmitting=true;
+    if(path.endsWith('/rebuild')){latestReplayQuality=null;renderReplayQuality();}
+    setReplayBusy(true);replayCursor=0;replayLogs=[];
+    renderReplayProgress({state:'running',paper_replay:{mode:path.endsWith('/rebuild')?'rebuild':'incremental',stage:'提交启动请求',start_date:start,end_date:end,started_epoch:Date.now()/1000}});
+    try {
+      const body={start_date:start,end_date:end,initial_capital:{{ paper_initial_capital }}};
+      if(path.endsWith('/rebuild'))body.missing_evidence_policy=$('rebuild-skip-candidates').checked?'skip_candidates':'strict';
+      const result=await api(path,{method:'POST',body:JSON.stringify(body)});
+      replaySubmitting=false;message(result.message);await pollReplay();
+    }catch(error){
+      replaySubmitting=false;
+      message(error.message,true);
+      renderReplayProgress({state:'error',paper_replay:{mode:path.endsWith('/rebuild')?'rebuild':'incremental',stage:'启动请求未成功',error:error.message,start_date:start,end_date:end}});
+      await pollReplay();
+    }
+  }
   $('start-replay').addEventListener('click',()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if((start&&!/^\d{8}$/.test(start))||!/^\d{8}$/.test(end)){message('日期请填写YYYYMMDD；已有检查点时开始日可留空',true);return;}if(start&&start>end){message('开始日期不能晚于结束日期',true);return;}launchReplay('/api/portfolio/replay',start,end);});
-  $('start-rebuild').addEventListener('click',()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if(!/^\d{8}$/.test(start)||!/^\d{8}$/.test(end)||start>end){message('独立重建需填写完整起止日期',true);return;}if(window.confirm(`在独立账户重建 ${start} 至 ${end}？当前模拟持仓和手工成交不会被覆盖。`))launchReplay('/api/portfolio/rebuild',start,end);});
-  replayCheckpoint();
+  $('start-rebuild').addEventListener('click',()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if(!/^\d{8}$/.test(start)||!/^\d{8}$/.test(end)||start>end){message('独立重建需填写完整起止日期',true);return;}const policy=$('rebuild-skip-candidates').checked?'跳过缺证据候选；持仓缺证据仍停止。结果仅供不完整样本研究。':'严格检查候选与持仓证据。';if(window.confirm(`在独立账户重建 ${start} 至 ${end}？${policy}当前模拟持仓和手工成交不会被覆盖。`))launchReplay('/api/portfolio/rebuild',start,end);});
+  (async()=>{await replayCheckpoint();await pollReplay();})();
   loadAccounts();
   {% endif %}
   load();

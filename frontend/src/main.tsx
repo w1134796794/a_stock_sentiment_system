@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CandlestickSeries, ColorType, createChart, LineSeries } from "lightweight-charts";
+import type { UTCTimestamp } from "lightweight-charts";
 import {
   Activity,
   ArrowRight,
   BarChart3,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Flame,
   RefreshCw,
@@ -198,6 +201,64 @@ function PromotionTrendChart({ rows }: { rows: NonNullable<WorkbenchData["market
   return <div className="promotion-trend__chart" ref={host} />;
 }
 
+function AnalogPanel({ code, date }: { code: string; date: string }) {
+  const [data, setData] = useState<{ analysis: import('./types').AnalogAnalysis; cases: { rows: import('./types').AnalogCase[]; total: number } } | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [filter, setFilter] = useState('all');
+  const [error, setError] = useState(false);
+  useEffect(() => { setOffset(0); setData(null); }, [code, date]);
+  useEffect(() => {
+    let cancelled = false;
+    setError(false);
+    fetchData<NonNullable<typeof data>>(`/api/v1/workbench/analog-analysis?date=${encodeURIComponent(date)}&code=${encodeURIComponent(code)}&offset=${offset}&limit=10`, { ttlMs: 5_000 })
+      .then(value => { if (!cancelled) setData(value); })
+      .catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [code, date, offset]);
+  const a = data?.analysis;
+  const pct = (value: number | null | undefined) => value == null ? '--' : `${(value * 100).toFixed(1)}%`;
+  const rows = (data?.cases.rows || []).filter(r => filter === 'all' || (filter === 'win' ? r.success : !r.success));
+  return <section className="drawer-section analog-panel">
+    <h3>相似历史案例</h3>
+    {error ? <p>评估暂不可用</p> : !a ? <p>读取冻结评估...</p> : a.status !== 'estimated' ? <p>{a.status === 'not_ready' ? '尚无已完成的信号评估' : '同版本独立样本不足，暂不给出胜率'}<small>{a.reason}</small></p> : <>
+      <dl className="action-list">
+        <div><dt>净盈利频率</dt><dd>{pct(a.probability)} · 95%区间 {pct(a.probability_interval?.low)}～{pct(a.probability_interval?.high)}</dd></div>
+        <div><dt>预期净收益</dt><dd>{pct(a.expected_net_return)} · 盈亏比 {a.payoff_ratio?.toFixed(2) || '--'}</dd></div>
+        <div><dt>下行尾部</dt><dd>5%分位 {pct(a.return_distributions?.net_return?.p05)}</dd></div>
+        <div><dt>样本可靠度</dt><dd>{a.reliability?.raw_sample_count}例 / {a.reliability?.trading_days}交易日 / 有效样本 {a.reliability?.effective_sample_count.toFixed(1)}</dd></div>
+        <div><dt>样本区间</dt><dd>{a.sample_window?.start || '--'}～{a.sample_window?.end || '--'}</dd></div>
+        <div><dt>评估性质</dt><dd>{a.calibration_status === 'fitted' ? '已校准' : '未校准的历史频率'} · {a.fallback_level === 'similar_cases' ? '近似案例' : '分组基准回退'}</dd></div>
+      </dl>
+      <p className="analog-note">口径：独立交易扣除成本后平仓盈利。历史频率不是该股票的盈利保证。</p>
+      <div className="analog-modes" role="group" aria-label="案例盈亏筛选">{[['all', '全部'], ['win', '盈利'], ['loss', '亏损']].map(([key, label]) => <button type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} key={key}>{label}</button>)}</div>
+      <div className="analog-case-list">{rows.map(r => <details key={r.case_id}>
+        <summary>{r.code} · {r.market_date} <b className={r.success ? 'text-up' : 'text-down'}>{pct(r.net_return)}</b></summary>
+        <p>距离 {r.distance?.toFixed(2) || '--'} · 权重 {pct(r.weight)}</p>
+        <p>退出：{r.exit_reason || '未记录'} · 费用 {r.fees?.toFixed(2) || '--'}</p>
+        <p>{r.explanation?.largest_feature_differences?.map(d => `${METRIC_LABELS[d.feature] || d.feature} 差异${d.standardized_difference.toFixed(2)}`).join('；') || '分组参考'}</p>
+        {(r.normalized_path || []).length > 1 && <NormalizedCaseChart points={r.normalized_path!} />}
+      </details>)}</div>
+      {!rows.length && <p>本页没有符合筛选的案例</p>}
+      <div className="analog-pagination"><button type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 10))} aria-label="上一页" title="上一页"><ChevronLeft size={16} /></button><span>{data?.cases.total ? offset + 1 : 0}～{Math.min(offset + 10, data?.cases.total || 0)} / {data?.cases.total}</span><button type="button" disabled={offset + 10 >= (data?.cases.total || 0)} onClick={() => setOffset(offset + 10)} aria-label="下一页" title="下一页"><ChevronRight size={16} /></button></div>
+    </>}
+    {a?.forecast_id && <small className="analog-id">版本 {a.forecast_id} · {a.as_of || ''}</small>}
+  </section>;
+}
+
+function NormalizedCaseChart({ points }: { points: Array<{ day: number; value: number }> }) {
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!host.current) return;
+    const dayLabel = (time: unknown) => `第${Math.round((Number(time) - 946684800) / 86400)}日`;
+    const chart = createChart(host.current, { height: 130, autoSize: true, localization: { timeFormatter: dayLabel }, timeScale: { tickMarkFormatter: dayLabel }, layout: { background: { type: ColorType.Solid, color: '#0b1628' }, textColor: '#94a4b9' }, rightPriceScale: { borderColor: '#26364e' }, grid: { vertLines: { color: '#1c2b40' }, horzLines: { color: '#1c2b40' } } });
+    const series = chart.addSeries(LineSeries, { color: '#55cdb5', lineWidth: 2 });
+    series.setData(points.map(p => ({ time: (946684800 + p.day * 86400) as UTCTimestamp, value: p.value })));
+    chart.timeScale().fitContent();
+    return () => chart.remove();
+  }, [points]);
+  return <div><small>成交时点=100 · 第1/3/5交易日收盘价（未扣退出费用）</small><div className="analog-case-chart" ref={host} /></div>;
+}
+
 function DetailDrawer({ candidate, date, onClose }: { candidate: Candidate | null; date: string; onClose: () => void }) {
   const [stock, setStock] = useState<StockWorkspace | null>(null);
   const [loadingStock, setLoadingStock] = useState(false);
@@ -258,6 +319,7 @@ function DetailDrawer({ candidate, date, onClose }: { candidate: Candidate | nul
           </div>
         </section>
         {metrics.length > 0 && <section className="drawer-section"><h3>核心指标</h3><div className="metric-grid">{metrics.map(([key, value]) => <div key={key}><span>{METRIC_LABELS[key] || key}</span><b>{Number(value).toFixed(1)}</b></div>)}</div></section>}
+        <AnalogPanel key={`${candidate.code}-${date}`} code={candidate.code} date={date} />
         <a className="stock-link" href={`/stock/${candidate.code}?date=${date}`}>打开完整分时与日K <ExternalLink size={15} /></a>
       </aside>
     </div>
@@ -315,6 +377,7 @@ function Workbench() {
   const [expandedAvoid, setExpandedAvoid] = useState(false);
   const [query, setQuery] = useState("");
   const [groupFilter, setGroupFilter] = useState("全部");
+  const [strategyFilter, setStrategyFilter] = useState("");
 
   async function load(nextDate = date, force = false) {
     setLoading(true); setError("");
@@ -375,12 +438,24 @@ function Workbench() {
   const profitEffect = marketContext.profit_effect || {};
   const promotionTrend = marketContext.promotion_trend || {};
   const promotionItems = [
-    ["一进二", marketContext.promotion?.rate_1to2],
-    ["二进三", marketContext.promotion?.rate_2to3],
-    ["三进四", marketContext.promotion?.rate_3to4],
-    ["高位晋级（4板+）", marketContext.promotion?.rate_high],
+    ["一进二", marketContext.promotion?.rate_1to2, marketContext.promotion?.rate_1to2_success, marketContext.promotion?.rate_1to2_sample],
+    ["二进三", marketContext.promotion?.rate_2to3, marketContext.promotion?.rate_2to3_success, marketContext.promotion?.rate_2to3_sample],
+    ["三进四", marketContext.promotion?.rate_3to4, marketContext.promotion?.rate_3to4_success, marketContext.promotion?.rate_3to4_sample],
+    ["高位晋级（4板+）", marketContext.promotion?.rate_high, marketContext.promotion?.rate_high_success, marketContext.promotion?.rate_high_sample],
   ] as const;
   const normalizedQuery = query.trim().toLowerCase();
+  const strategyOptions = useMemo(() => {
+    const codesByStrategy = new Map<string, Set<string>>();
+    GROUPS.forEach(({ key }) => (data?.groups[key] || []).forEach((row) => {
+      (row.hit_strategies || []).forEach((name) => {
+        if (!name) return;
+        const codes = codesByStrategy.get(name) || new Set<string>();
+        codes.add(row.code);
+        codesByStrategy.set(name, codes);
+      });
+    }));
+    return Array.from(codesByStrategy, ([name, codes]) => ({ name, count: codes.size }));
+  }, [data]);
 
   if (loading && !data) return <div className="workspace-loading">正在读取今日决策池...</div>;
   if (error && !data) return <div className="workspace-error"><ShieldAlert size={20} />{error}<button onClick={() => void load()}>重试</button></div>;
@@ -433,7 +508,7 @@ function Workbench() {
 
     <section className="promotion-strip" aria-label="连板晋级梯队">
       <span className="promotion-strip__title">晋级梯队</span>
-      {promotionItems.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value == null ? "--" : `${Number(value).toFixed(1)}%`}</strong></div>)}
+      {promotionItems.map(([label, value, success, sample]) => <div key={label}><span>{label}</span><strong>{value == null ? "--" : `${Number(value).toFixed(1)}%`}<small title="晋级只数 / 昨日该档只数">{success == null ? "--" : success} / {sample == null ? "--" : sample}</small></strong></div>)}
     </section>
 
     <section className="promotion-trend" aria-label="连板晋级趋势">
@@ -464,16 +539,23 @@ function Workbench() {
         </div>
       </section>}
       <section className="decision-tools">
-        <label><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索股票、代码、策略或主线" /></label>
+        <label className="decision-search"><Search size={15} /><input aria-label="搜索候选股" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索股票、代码、策略或主线" /></label>
+        <label className="strategy-filter"><span>策略</span><select aria-label="按策略筛选" value={strategyFilter} onChange={(event) => setStrategyFilter(event.target.value)}>
+          <option value="">全部策略</option>
+          {strategyFilter && !strategyOptions.some(({ name }) => name === strategyFilter) && <option value={strategyFilter}>{strategyFilter}（0）</option>}
+          {strategyOptions.map(({ name, count }) => <option key={name} value={name}>{name}（{count}）</option>)}
+        </select></label>
         <div className="group-filter">{["全部", "重点确认", "盘中观察", "暂不参与"].map((item) => <button type="button" key={item} className={groupFilter === item ? "active" : ""} onClick={() => setGroupFilter(item)}>{item}</button>)}</div>
       </section>
       <section className="quick-links">{data.quick_links.map((link) => <a key={link.href} href={link.href}>{link.label}<ArrowRight size={14} /></a>)}</section>
       {GROUPS.map((group) => {
         if (groupFilter !== "全部" && groupFilter !== group.key) return null;
-        const rows = (data.groups[group.key] || []).filter((row) => !normalizedQuery || [row.name, row.code, row.mainline, ...(row.hit_strategies || [])].join(" ").toLowerCase().includes(normalizedQuery));
-        const collapsed = group.key === "暂不参与" && !expandedAvoid && groupFilter === "全部" && !normalizedQuery;
+        const rows = (data.groups[group.key] || []).filter((row) =>
+          (!strategyFilter || (row.hit_strategies || []).includes(strategyFilter)) &&
+          (!normalizedQuery || [row.name, row.code, row.mainline, ...(row.hit_strategies || [])].join(" ").toLowerCase().includes(normalizedQuery)));
+        const collapsed = group.key === "暂不参与" && !expandedAvoid && groupFilter === "全部" && !normalizedQuery && !strategyFilter;
         return <section className={`decision-section decision-section--${group.tone}`} key={group.key}>
-          <div className="decision-section__head"><div><h3>{group.key}<span>{rows.length}</span></h3><p>{group.description}</p></div>{group.key === "暂不参与" && rows.length > 0 && groupFilter === "全部" && !normalizedQuery && <button type="button" className="text-button" onClick={() => setExpandedAvoid(!expandedAvoid)}>{expandedAvoid ? "收起" : "展开"}<ChevronDown size={15} className={expandedAvoid ? "rotate" : ""} /></button>}</div>
+          <div className="decision-section__head"><div><h3>{group.key}<span>{rows.length}</span></h3><p>{group.description}</p></div>{group.key === "暂不参与" && rows.length > 0 && groupFilter === "全部" && !normalizedQuery && !strategyFilter && <button type="button" className="text-button" onClick={() => setExpandedAvoid(!expandedAvoid)}>{expandedAvoid ? "收起" : "展开"}<ChevronDown size={15} className={expandedAvoid ? "rotate" : ""} /></button>}</div>
           {!collapsed && rows.length > 0 && <div className="candidate-list">{rows.map((row) => <CandidateCard key={row.code} row={row} realtime={realtimeMap.get(row.code)} onOpen={() => void openCandidate(row)} onPrefetch={() => prefetchCandidate(row)} />)}</div>}
           {rows.length === 0 && <div className="empty-state">没有符合当前筛选条件的股票。</div>}
         </section>;

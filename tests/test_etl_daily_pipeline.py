@@ -53,7 +53,7 @@ class FakeETLDataManager:
 
 
 @pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
-def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path):
+def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path, monkeypatch):
     dm = FakeETLDataManager()
     pipeline = ETLDailyPipeline(
         dm,
@@ -74,3 +74,11 @@ def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path):
     assert (tmp_path / "snapshots" / "20260616.json").exists()
     assert (tmp_path / "webdata" / "screening" / "screening_20260616.json").exists()
     assert not (tmp_path / "kb.sqlite").exists()
+
+    archives = []
+    monkeypatch.setattr(pipeline, "_archive_signal_cases", lambda *args: archives.append(args))
+    research = pipeline.run_screening("20260616", "20260615", archive_cases=False)
+    assert research.ok
+    assert archives == []
+    pipeline.run_screening("20260616", "20260615")
+    assert len(archives) == 1

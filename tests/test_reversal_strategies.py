@@ -68,6 +68,20 @@ def test_minute_sessions_and_deadline_config():
         _execution_config({"confirmation_deadline": "12:00"})
 
 
+@pytest.mark.parametrize("mode", ["limit_pullback", "limit_reversal"])
+def test_changed_opening_reference_cancels_only_verified_old_structure(mode):
+    decision = evaluate(mode, prev_close=9.9, previous_session_close=10.0)
+    assert decision.status == "cancelled"
+    assert "9.90" in decision.reason and "10.00" in decision.reason
+    assert evaluate(mode, prev_close=9.9).status == "data_insufficient"
+    assert evaluate(mode, previous_session_close=9.8).status == "data_insufficient"
+    assert evaluate(mode, previous_session_close=10.0).filled
+
+
+def test_invalid_previous_session_close_cannot_bypass_structure_guard():
+    assert evaluate("limit_pullback", previous_session_close=float("nan")).status == "data_insufficient"
+
+
 def daily():
     dates = pd.bdate_range("2026-07-01", periods=30).strftime("%Y%m%d")
     rows = []
@@ -136,6 +150,7 @@ def test_structural_candidates_keep_anchors_and_overflow_observation():
     from core.screening.strategy_profiles import StrategyProfileRepository
 
     profile = StrategyProfileRepository().get_profile("limit_pullback")
+    profile["enabled"] = True
     candidates = [{"code": f"600{i:03d}", "name": f"候选{i}", "score": 80,
                    "resonance_sectors": f"主题{i}", "context": {"sector_resonance_score": 65},
                    "metrics": {"stk_limit_pullback": 100, "stk_pullback_contraction": 80},
@@ -148,6 +163,23 @@ def test_structural_candidates_keep_anchors_and_overflow_observation():
     for row in pool["rows"]:
         assert row["strategy_execution"]["structures"]["limit_pullback"]["support"] == 10
         assert row["strategy_execution"]["mode_deadlines"]["limit_pullback"] == "14:30:00"
+
+
+@pytest.mark.parametrize("strategy_id", ["limit_pullback", "limit_reversal"])
+def test_disabled_structural_strategy_cannot_enter_decision_pool(strategy_id):
+    from core.portfolio.decision_pool_service import DecisionPoolService
+    from core.screening.strategy_profiles import StrategyProfileRepository
+
+    profile = StrategyProfileRepository().get_profile(strategy_id)
+    profile["enabled"] = False
+    candidate = {"code": "600001", "name": "测试股份", "score": 99,
+                 "metrics": {"stk_limit_pullback": 100, "stk_limit_reversal": 100},
+                 "reversal_structures": {strategy_id: structure()}}
+    pool = DecisionPoolService().build({strategy_id: {"final": [candidate]}},
+                                     {strategy_id: profile}, market_score=75,
+                                     market_state={"phase": "active"})
+    assert strategy_id not in pool["active_strategy_ids"]
+    assert all(not row["execution_eligible"] for row in pool["rows"])
 
 
 def test_screening_reads_persisted_structures(tmp_path):

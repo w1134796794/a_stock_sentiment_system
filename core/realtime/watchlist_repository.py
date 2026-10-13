@@ -30,7 +30,7 @@ class RealtimeWatchlistRepository:
                 result.append(code)
         return result
 
-    def publish(self, source: str, codes: Iterable[str]) -> dict:
+    def publish(self, source: str, codes: Iterable[str], *, minutes: bool = True) -> dict:
         source = str(source or "default").strip()
         normalized = self.normalize(codes)
         index = self.backend.get_json(self.INDEX_KEY) or []
@@ -39,17 +39,20 @@ class RealtimeWatchlistRepository:
         payload = {
             "source": source,
             "codes": normalized,
+            "minutes": bool(minutes),
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         }
         self.backend.set_json(self._key(source), payload, self.ttl_seconds)
         self.backend.set_json(self.INDEX_KEY, index, self.ttl_seconds)
         return payload
 
-    def read_all(self) -> List[str]:
+    def read_all(self, *, minutes_only: bool = False) -> List[str]:
         sources = self.backend.get_json(self.INDEX_KEY) or []
         codes: List[str] = []
         for source in sources:
             payload = self.backend.get_json(self._key(str(source))) or {}
+            if minutes_only and payload.get("minutes") is False:
+                continue
             codes.extend(payload.get("codes") or [])
         return self.normalize(codes)
 

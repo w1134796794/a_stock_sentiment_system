@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from core.operations.evidence import attach_evidence
 from core.operations.equity import AccountEquityEvaluator
 from core.operations.experiments import StrategyExperimentLedger
@@ -41,9 +43,10 @@ def test_signal_evidence_and_event_ids_are_idempotent(tmp_path: Path) -> None:
 def test_intraday_gate_demotes_stale_confirmation() -> None:
     now = datetime(2026, 9, 25, 9, 46, tzinfo=ZoneInfo("Asia/Shanghai"))
     collector = {"storage": "redis", "trade_date": "20260925",
-                 "collector": {"ok": True, "lease_owned": True, "updated_at": "2026-09-25T09:45:59"}}
+                 "collector": {"ok": True, "lease_owned": True, "updated_at": "2026-09-25T09:45:59",
+                               "session_started_at": "2026-09-25T09:15:00"}}
     payload = {"market_date": "20260925", "counts": {"confirmed": 1}, "rows": [
-        {"confirm_status": "confirmed", "received_at": "2026-09-25T09:45:59",
+        {"confirm_status": "confirmed", "confirm_time": "09:45:59", "received_at": "2026-09-25T09:45:59",
          "sector_detail": {"observed_at": "2026-09-25T09:45:59", "data_completeness": 1.0,
                            "member_count": 10, "observed_members": 10}},
     ]}
@@ -59,9 +62,10 @@ def test_intraday_gate_demotes_stale_confirmation() -> None:
 def test_intraday_gate_requires_constituent_coverage() -> None:
     now = datetime(2026, 9, 25, 9, 46, tzinfo=ZoneInfo("Asia/Shanghai"))
     collector = {"storage": "redis", "trade_date": "20260925",
-                 "collector": {"ok": True, "lease_owned": True, "updated_at": "2026-09-25T09:45:59"}}
+                 "collector": {"ok": True, "lease_owned": True, "updated_at": "2026-09-25T09:45:59",
+                               "session_started_at": "2026-09-25T09:15:00"}}
     payload = {"market_date": "20260925", "rows": [
-        {"confirm_status": "confirmed", "received_at": "2026-09-25T09:45:59",
+        {"confirm_status": "confirmed", "confirm_time": "09:45:59", "received_at": "2026-09-25T09:45:59",
          "sector_detail": {"observed_at": "2026-09-25T09:45:59", "data_completeness": 1.0,
                            "member_count": 80, "observed_members": 4}},
     ]}
@@ -121,7 +125,8 @@ def test_postclose_requires_matching_dates_and_all_factor_jobs(tmp_path: Path, m
                                 snapshot_dir=tmp_path / "snapshots")["ok"]
 
 
-def test_postclose_rejects_artifacts_generated_after_market_open(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("generated_at", ["2026-09-25T09:30:00", "2026-09-25T01:30:00+00:00", "2026-09-25T09:25:00"])
+def test_postclose_rejects_artifacts_generated_after_market_open(tmp_path: Path, monkeypatch, generated_at) -> None:
     import core.operations.health as health
 
     date = "20260924"
@@ -140,7 +145,7 @@ def test_postclose_rejects_artifacts_generated_after_market_open(tmp_path: Path,
                  for name in ("market", "lhb", "signals", "sector", "stock")],
     }))
     pool_path = tmp_path / "screening" / "decision_pool" / f"decision_pool_{date}.json"
-    pool_path.write_text(json.dumps({"trade_date": date, "generated_at": "2026-09-25T09:30:00"}))
+    pool_path.write_text(json.dumps({"trade_date": date, "generated_at": generated_at}))
     (tmp_path / "snapshots" / f"{date}.json").write_text(json.dumps({
         "meta": {"date": date, "generated_at": "2026-09-24T20:20:00"},
     }))

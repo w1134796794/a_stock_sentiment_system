@@ -117,6 +117,14 @@ class DataPrep:
                 self._prefetch_all_daily(ds, trade_date)
             self._prefetch_stock_basic(ds)
             self._prefetch_daily_basic(ds, trade_date)
+            if hasattr(self.dm, 'get_daily_suspensions'):
+                try:
+                    status = self.dm.get_daily_suspensions(str(trade_date))
+                    ds.put_call(call_key('suspend_d', trade_date=str(trade_date)), status, 'suspend_d')
+                    self._record_source(ds, 'suspend_d', ok=status.get('ok', False),
+                                        rows=len(status.get('rows') or []), error=status.get('reason') or '')
+                except Exception as exc:
+                    self._record_source(ds, 'suspend_d', ok=False, error=str(exc))
             if prefetch_limit_up:
                 self._prefetch_limit_up(ds, trade_date, limit_up_history_days)
             if prefetch_limit_down:

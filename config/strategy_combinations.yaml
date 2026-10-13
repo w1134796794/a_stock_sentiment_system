@@ -3,7 +3,7 @@ strategies:
   limit_pullback:
     name: 涨停回踩
     description: 近期涨停后回到预先确定的支撑区，盘中承接并放量突破后确认。
-    enabled: true
+    enabled: false
     primary: false
     protected: true
     base_profile: default
@@ -33,7 +33,7 @@ strategies:
   limit_reversal:
     name: 跌停反包
     description: 近三个交易日跌停事件观察，盘中站稳预定反包目标后放量突破确认。
-    enabled: true
+    enabled: false
     primary: false
     protected: true
     base_profile: default

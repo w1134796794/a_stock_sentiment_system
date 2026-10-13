@@ -11,6 +11,7 @@ from core.realtime.entry_signal_service import classify_entry_mode, entry_mode_t
 from core.realtime.models import normalize_stock_code
 from core.signals.confidence_service import ConfidenceService
 from core.signals.leader_outcome import LeaderOutcomeTracker
+from core.utils.stock_eligibility import factor_risk_projection, new_entry_exclusion
 from core.utils.price_limit import (
     get_price_limit_pct_points,
     limit_progress,
@@ -117,6 +118,7 @@ class LeaderPoolService:
         by_code: Dict[str, Dict[str, Any]] = {}
         leader_history: Dict[str, List[Dict[str, Any]]] = {}
         candidate_counts: Dict[str, int] = {}
+        last_risk: Dict[str, str] = {}
 
         for date, data in history:
             daily_snapshots: List[Dict[str, Any]] = []
@@ -127,6 +129,9 @@ class LeaderPoolService:
                 if not code or code in seen_codes:
                     continue
                 seen_codes.add(code)
+                last_risk[code] = new_entry_exclusion(item)
+                if last_risk[code]:
+                    continue
                 bucket = by_code.setdefault(code, {
                     "code": code,
                     "name": item.get("name") or "",
@@ -254,7 +259,9 @@ class LeaderPoolService:
                 leader_history.setdefault(snapshot["code"], []).append(event)
                 by_code[snapshot["code"]]["leader_events"].append(event)
 
-        rows = [self._build_pool_row(raw, target, dates) for raw in by_code.values()]
+        last_risk.update(self._risk_exclusions(target))
+        rows = [self._build_pool_row(raw, target, dates) for raw in by_code.values()
+                if not last_risk.get(raw["code"])]
         rows = [row for row in rows if row is not None]
         rows.sort(
             key=lambda row: (
@@ -796,6 +803,28 @@ class LeaderPoolService:
             output.append(item)
         return output
 
+    def _risk_exclusions(self, date: str) -> Dict[str, str]:
+        # Include stocks no longer strong enough to enter today's universe.
+        if self.duckdb_path is None or not self.duckdb_path.exists():
+            return {}
+        import duckdb
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
+        from loguru import logger
+        con = None
+        try:
+            con = duckdb_connect(str(self.duckdb_path), read_only=True)
+            columns = factor_risk_projection(con)
+            frame = con.execute(f"SELECT code{columns} FROM factor_stock_wide "
+                                "WHERE CAST(trade_date AS VARCHAR)=?", [str(date)]).fetchdf()
+            return {normalize_stock_code(row.get("code"), add_suffix=False): reason
+                    for row in frame.to_dict("records") if (reason := new_entry_exclusion(row))}
+        except Exception as exc:
+            logger.warning(f"[{date}] 龙头池风险股票状态读取失败: {exc}")
+            return {}
+        finally:
+            if con is not None:
+                con.close()
+
     def _load_market_universe(self, date: str) -> List[Dict[str, Any]]:
         if str(date) in self._universe_cache:
             return self._universe_cache[str(date)]
@@ -803,8 +832,9 @@ class LeaderPoolService:
             return []
         try:
             import duckdb  # type: ignore
+            from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-            con = duckdb.connect(str(self.duckdb_path), read_only=True)
+            con = duckdb_connect(str(self.duckdb_path), read_only=True)
             try:
                 frame = con.execute(
                     "SELECT * FROM factor_stock_wide WHERE CAST(trade_date AS VARCHAR)=? "
@@ -959,7 +989,13 @@ class IntradayStrengthService:
                 limit=limit,
             )
 
-        pool = self.pool_service.build_pool(trade_date, lookback=lookback, limit=limit)
+        frozen = None
+        if trade_date and market_date and market_date != trade_date:
+            from core.operations.preopen_evidence import PreopenEvidenceStore, FrozenLeaderPool
+            root = self.screening_dir.parent if self.screening_dir else None
+            frozen = PreopenEvidenceStore(root).load(str(trade_date), str(market_date))
+        pool_service = FrozenLeaderPool(frozen) if frozen else self.pool_service
+        pool = pool_service.build_pool(trade_date, lookback=lookback, limit=limit)
         rows = pool.get("rows") or []
         quotes = self._quote_map(row.get("code") for row in rows)
         candidate_date = str(pool.get("trade_date") or trade_date or "")
@@ -988,6 +1024,7 @@ class IntradayStrengthService:
             "market_date": market_date,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "profile": self.LEADER_POOL_PROFILE,
+            "evidence_bundle_id": frozen["bundle_id"] if frozen else "",
             "strategy": {"id": self.LEADER_POOL_PROFILE, "name": "近期龙头池"},
             "observation_source": self.LEADER_POOL_PROFILE,
             "thresholds": {
@@ -1152,6 +1189,13 @@ class IntradayStrengthService:
             "success_probability": signal.get("success_probability"),
             "historical_samples": signal.get("historical_samples"),
             "historical_stats_basis": signal.get("historical_stats_basis") or "",
+            "historical_stats_label": signal.get("historical_stats_label") or "",
+            "historical_stats_status": signal.get("historical_stats_status") or "insufficient",
+            "historical_stats_versions": signal.get("historical_stats_versions") or {},
+            "probability_calibration_status": "uncalibrated",
+            "signal_feature_snapshot": signal.get("signal_feature_snapshot"),
+            "strategy_execution": signal.get("strategy_execution") or {},
+            "strategy_version": signal.get("strategy_version") or pool_row.get("strategy_version") or "",
             "average_mfe_pct": signal.get("average_mfe_pct"),
             "average_mae_pct": signal.get("average_mae_pct"),
             "data_completeness": signal.get("data_completeness"),

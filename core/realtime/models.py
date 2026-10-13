@@ -1,15 +1,17 @@
 """Realtime quote models and normalization helpers."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Dict, Iterable, Optional
+from zoneinfo import ZoneInfo
 
 from core.utils.stock_code_utils import StockCodeUtils
+from core.realtime.trading_session import shanghai_now
 
 
 def now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return shanghai_now().isoformat(timespec="seconds")
 
 
 def to_float(value: Any, default: float = 0.0) -> float:
@@ -91,7 +93,7 @@ class QuoteSnapshot:
     time: str = ""
     source_time_raw: Any = None
     source: str = ""
-    received_at: str = field(default_factory=now_iso)
+    received_at: str = ""
     stale_seconds: Optional[float] = None
     is_stale: bool = False
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -110,12 +112,7 @@ class QuoteSnapshot:
 
         date = str(pick(raw, ("date", "trade_date", "日期"), "") or "")
         time = str(pick(raw, ("time", "时间"), "") or "")
-        quote_dt = parse_quote_datetime(date, time)
-        stale_seconds = None
-        if quote_dt is not None:
-            stale_seconds = max(0.0, (datetime.now() - quote_dt).total_seconds())
-
-        return cls(
+        snapshot = cls(
             code=code,
             ts_code=ts_code,
             name=str(pick(raw, ("name", "股票名称", "名称"), "") or ""),
@@ -135,11 +132,31 @@ class QuoteSnapshot:
             time=time,
             source_time_raw=raw.get("source_time_raw"),
             source=str(raw.get("source") or ""),
-            received_at=str(raw.get("received_at") or now_iso()),
-            stale_seconds=stale_seconds,
-            is_stale=bool(stale_seconds is not None and stale_seconds > stale_after_seconds),
+            received_at=str(raw.get("received_at") or ""),
             raw=raw,
         )
+        return snapshot.with_freshness(stale_after_seconds=stale_after_seconds)
+
+    def with_freshness(self, *, stale_after_seconds: float, now: Optional[datetime] = None) -> QuoteSnapshot:
+        """Recheck source/receive ages without changing their original timestamps."""
+        zone = ZoneInfo("Asia/Shanghai")
+        current = now or datetime.now(zone)
+        current = current.replace(tzinfo=zone) if current.tzinfo is None else current.astimezone(zone)
+        stamps = []
+        source = parse_quote_datetime(self.date, self.time)
+        if source is not None:
+            stamps.append(source.replace(tzinfo=zone))
+        if self.received_at:
+            try:
+                received = datetime.fromisoformat(self.received_at.replace("Z", "+00:00"))
+                stamps.append(received.replace(tzinfo=zone) if received.tzinfo is None else received.astimezone(zone))
+            except (TypeError, ValueError):
+                return replace(self, stale_seconds=None, is_stale=True)
+        ages = [(current - stamp).total_seconds() for stamp in stamps]
+        age = max(ages) if ages else None
+        stale = (not ages or any(value < 0 for value in ages) or age > stale_after_seconds
+                 or bool(self.raw.get("is_stale")))
+        return replace(self, stale_seconds=age, is_stale=stale)
 
     def to_dict(self, *, include_raw: bool = False) -> Dict[str, Any]:
         data = {

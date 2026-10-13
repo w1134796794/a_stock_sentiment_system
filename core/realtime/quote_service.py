@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from threading import RLock
 from typing import Any, Dict, Iterable, List, Tuple
 
 from loguru import logger
@@ -27,6 +28,7 @@ class RealtimeQuoteService:
         self.ttl_seconds = max(float(ttl_seconds), 0.0)
         self.stale_after_seconds = max(float(stale_after_seconds), 1.0)
         self._cache: Dict[str, Tuple[float, QuoteSnapshot]] = {}
+        self._lock = RLock()
         self._last_error = ""
 
     def get_quote(self, code: str, *, include_raw: bool = False) -> Dict[str, Any]:
@@ -42,9 +44,14 @@ class RealtimeQuoteService:
         missing: List[str] = []
         now = time.monotonic()
         for code in normalized_codes:
-            cached = self._cache.get(code)
+            with self._lock:
+                cached = self._cache.get(code)
             if cached and now - cached[0] <= self.ttl_seconds:
-                quotes[code] = cached[1]
+                refreshed = cached[1].with_freshness(stale_after_seconds=self.stale_after_seconds)
+                if not refreshed.is_stale:
+                    quotes[code] = refreshed
+                else:
+                    missing.append(code)
             else:
                 missing.append(code)
 
@@ -52,7 +59,8 @@ class RealtimeQuoteService:
             fetched = self._fetch(missing)
             quotes.update(fetched)
 
-        rows = [quotes[c].to_dict(include_raw=include_raw) for c in normalized_codes if c in quotes]
+        rows = [quotes[c].with_freshness(stale_after_seconds=self.stale_after_seconds).to_dict(include_raw=include_raw)
+                for c in normalized_codes if c in quotes]
         return {
             "ok": bool(rows),
             "message": "" if rows else (self._last_error or "未获取到实时行情"),
@@ -69,7 +77,7 @@ class RealtimeQuoteService:
             return {"ok": False, "message": "codes 不能为空", "quotes": [], "count": 0}
         fetched = self._fetch(normalized_codes)
         rows = [
-            fetched[code].to_dict(include_raw=include_raw)
+            fetched[code].with_freshness(stale_after_seconds=self.stale_after_seconds).to_dict(include_raw=include_raw)
             for code in normalized_codes if code in fetched
         ]
         return {
@@ -123,7 +131,8 @@ class RealtimeQuoteService:
             item = QuoteSnapshot.from_raw(raw, stale_after_seconds=self.stale_after_seconds)
             if item.code and (item.last_price > 0 or item.pre_close > 0 or item.name):
                 fetched[item.code] = item
-                self._cache[item.code] = (now, item)
+                with self._lock:
+                    self._cache[item.code] = (now, item)
         self._last_error = "" if fetched else "实时行情源返回空结果"
         return fetched
 

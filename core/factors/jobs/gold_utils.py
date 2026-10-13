@@ -162,16 +162,21 @@ def write_replace_partition(
 
 def connect_duckdb(path: Path):
     import duckdb  # type: ignore
+    from core.infrastructure.duckdb_access import connect as duckdb_connect
     from config.settings import DUCKDB_MEMORY_LIMIT, DUCKDB_TEMP_DIR, DUCKDB_THREADS
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     Path(DUCKDB_TEMP_DIR).mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(path))
-    con.execute("SET memory_limit = ?", [str(DUCKDB_MEMORY_LIMIT)])
-    con.execute("SET threads = ?", [max(1, int(DUCKDB_THREADS))])
-    con.execute("SET temp_directory = ?", [str(DUCKDB_TEMP_DIR)])
-    con.execute("SET preserve_insertion_order = false")
+    con = duckdb_connect(str(path))
+    try:
+        con.execute("SET memory_limit = ?", [str(DUCKDB_MEMORY_LIMIT)])
+        con.execute("SET threads = ?", [max(1, int(DUCKDB_THREADS))])
+        con.execute("SET temp_directory = ?", [str(DUCKDB_TEMP_DIR)])
+        con.execute("SET preserve_insertion_order = false")
+    except BaseException:
+        con.close()
+        raise
     return con
 
 

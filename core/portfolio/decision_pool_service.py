@@ -5,6 +5,7 @@ import json
 import math
 from collections import Counter, defaultdict
 from datetime import datetime
+from core.realtime.trading_session import shanghai_now
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
@@ -17,6 +18,7 @@ from core.models.market_state import (
 )
 from core.portfolio.strategy_allocator import StrategyPortfolioAllocator
 from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
+from core.utils.stock_eligibility import new_entry_exclusion
 
 PRODUCTION_STRATEGIES = PRODUCTION_STRATEGY_IDS
 REGIME_STRATEGIES = {
@@ -161,6 +163,7 @@ class DecisionPoolService:
         hidden = [strategy_id for strategy_id in available if strategy_id not in applicable]
 
         raw_rows: List[Dict[str, Any]] = []
+        risk_excluded: List[Dict[str, Any]] = []
         members_by_code: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for strategy_id in applicable:
             payload = payloads.get(strategy_id) or {}
@@ -169,6 +172,11 @@ class DecisionPoolService:
             execution = dict(profile.get("execution") or {})
             for source in payload.get("final") or []:
                 if not isinstance(source, Mapping) or not _code(source):
+                    continue
+                exclusion = new_entry_exclusion(source)
+                if exclusion:
+                    risk_excluded.append({"code": _code(source), "strategy_id": strategy_id,
+                                          "reason": exclusion})
                     continue
                 row = dict(source)
                 row.update({
@@ -212,6 +220,11 @@ class DecisionPoolService:
             execution = dict(profile.get("execution") or {})
             for source in payload.get("final") or []:
                 if not isinstance(source, Mapping) or not _code(source):
+                    continue
+                exclusion = new_entry_exclusion(source)
+                if exclusion:
+                    risk_excluded.append({"code": _code(source), "strategy_id": strategy_id,
+                                          "reason": exclusion})
                     continue
                 row = dict(source)
                 row.update({
@@ -328,7 +341,7 @@ class DecisionPoolService:
         hidden_names = [str((profiles.get(key) or {}).get("name") or key) for key in hidden]
         return {
             "schema_version": 1,
-            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "generated_at": shanghai_now().isoformat(timespec="seconds"),
             "regime": regime,
             "regime_label": REGIME_LABELS[regime],
             "supplied_regime": supplied_regime,
@@ -350,6 +363,7 @@ class DecisionPoolService:
             "hidden_strategy_names": hidden_names,
             "raw_candidate_count": len(merged),
             "hidden_candidate_count": len(hidden_rows),
+            "excluded_risk_stocks": risk_excluded,
             "inactive_count": len(inactive),
             "crowding_summary": crowding_summary,
             "cluster_limits": crowding_policy,

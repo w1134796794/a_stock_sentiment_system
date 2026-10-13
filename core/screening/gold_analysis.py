@@ -51,11 +51,12 @@ def build_gold_analysis_summary(
 
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
     except Exception as e:  # pragma: no cover
         summary["messages"].append(f"duckdb 不可用: {e}")
         return summary
 
-    con = duckdb.connect(str(duckdb_path))
+    con = duckdb_connect(str(duckdb_path))
     try:
         market = _table_for_date(con, "factor_market_wide", trade_date)
         sectors = _table_for_date(con, "factor_sector_wide", trade_date)

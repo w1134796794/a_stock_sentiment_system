@@ -525,12 +525,21 @@ class BacktestController:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
+            "progress": getattr(self, "progress", {}),
+            "evidence_failures": getattr(self, "evidence_failures", []),
+            "data_quality": getattr(self, "data_quality", {}),
+            "run_id": getattr(self, "run_id", ""),
         })
 
     def _finish_lease(self) -> None:
         lease, self._lease = self._lease, None
         if lease is not None:
             lease.release()
+
+    def _update_progress(self, progress: Dict) -> None:
+        with self._lock:
+            self.progress = {**progress, "updated_epoch": time.time()}
+            self._publish_state()
 
     def start(self, start_date: Optional[str], end_date: Optional[str],
               initial_capital: object = None,
@@ -544,7 +553,9 @@ class BacktestController:
               position_sizing_mode: object = "fixed_risk",
               exit_policy_mode: object = "strategy",
               strategy_ids: object = None,
-              account_profile: object = "standard") -> Tuple[bool, str]:
+              account_profile: object = "standard",
+              missing_evidence_policy: object = None,
+              prefetch_failures: object = None) -> Tuple[bool, str]:
         from backtest.minute_entry import ENTRY_COMPARE, ENTRY_HYBRID, ENTRY_MODES
         from core.screening.enhancements import enhancement_label, normalize_enhancements
 
@@ -585,6 +596,17 @@ class BacktestController:
         mode = (str(mode or "range").strip().lower() or "range")
         if mode not in {"range", "daily"}:
             mode = "range"
+        policy = "legacy"
+        if missing_evidence_policy is not None:
+            from backtest.evidence_policy import normalize_policy
+            try:
+                policy = normalize_policy(missing_evidence_policy)
+            except ValueError as exc:
+                return False, str(exc)
+            if selected_account_profile != "aggressive_three" or mode != "range":
+                return False, "缺证据跳过策略仅用于独立历史重建"
+            if selected_entry_mode == "compare" or selected_sizing_mode == "compare":
+                return False, "独立历史重建不支持对照模式"
         if mode == "daily" and selected_entry_mode == ENTRY_COMPARE:
             selected_entry_mode = ENTRY_HYBRID
         if mode == "daily" and selected_sizing_mode == "compare":
@@ -613,6 +635,8 @@ class BacktestController:
                     return False, "已有回测任务在运行中，请等待完成。"
                 self.buffer.clear()
                 self.state = "running"
+                self.progress = {}
+                self.evidence_failures, self.data_quality, self.run_id = [], {}, ""
                 self.error = None
                 self.params = {
                     "mode": "daily",
@@ -660,6 +684,8 @@ class BacktestController:
                 return False, "已有回测任务在运行中，请等待完成。"
             self.buffer.clear()
             self.state = "running"
+            self.progress = {}
+            self.evidence_failures, self.data_quality, self.run_id = [], {}, ""
             self.error = None
             self.params = {"mode": "range", "start_date": start, "end_date": end,
                            "initial_capital": capital, "risk_control": risk_on,
@@ -669,10 +695,11 @@ class BacktestController:
             self.params["exit_policy_mode"] = selected_exit_policy
             self.params["strategy_ids"] = selected_strategy_ids
             self.params["account_profile"] = selected_account_profile
+            self.params["missing_evidence_policy"] = policy
             self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.finished_at = None
             self._thread = threading.Thread(
-                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_exit_policy, selected_strategy_ids, selected_account_profile),
+                target=self._worker, args=(start, end, capital, risk_on, max_rank, selected_enhancements, selected_entry_mode, selected_sizing_mode, selected_exit_policy, selected_strategy_ids, selected_account_profile, policy, prefetch_failures),
                 daemon=True, name="backtest-run"
             )
             self._publish_state()
@@ -693,6 +720,10 @@ class BacktestController:
             "error": self.error,
             "lines": lines,
             "next": nxt,
+            "progress": getattr(self, "progress", {}),
+            "evidence_failures": getattr(self, "evidence_failures", []),
+            "data_quality": getattr(self, "data_quality", {}),
+            "run_id": getattr(self, "run_id", ""),
         }
         if self._store.shared:
             remote = self._store.load()
@@ -708,7 +739,9 @@ class BacktestController:
                 position_sizing_mode: str = "fixed_risk",
                 exit_policy_mode: str = "strategy",
                 strategy_ids: Optional[List[str]] = None,
-                account_profile: str = "standard") -> None:
+                account_profile: str = "standard",
+                missing_evidence_policy: str = "legacy",
+                prefetch_failures: object = None) -> None:
         import loguru
 
         _ensure_file_sink()
@@ -721,6 +754,7 @@ class BacktestController:
         sys.stderr = _StreamTee(old_err, self.buffer)
         try:
             mode_txt = "开启风控闸门" if risk_control else "关闭风控闸门（无风控）"
+            self._update_progress({"stage": "准备历史交易计划"})
             from core.screening.enhancements import enhancement_label, normalize_enhancements
             selected_enhancements = normalize_enhancements(enhancements)
             combination_label = enhancement_label(selected_enhancements)
@@ -763,11 +797,17 @@ class BacktestController:
             config = BacktestConfig.from_risk_config(
                 RiskConfig.load(), initial_capital=capital, risk_control=risk_control,
             )
+            config.replay_missing_evidence_policy = missing_evidence_policy
+            config.replay_prefetch_failures = list(prefetch_failures or [])
             from risk.capital_presets import apply_capital_preset
             capital_preset = apply_capital_preset(config, capital)
             if account_profile == "aggressive_three":
                 from config.settings import PAPER_MAX_POSITIONS, PAPER_POSITION_PCT, PAPER_ROTATION_MIN_EDGE
 
+                # Paper rebuilds may fetch just missing entry/holding minutes;
+                # daily/factor reads remain local-only.
+                dm.allow_remote_minutes = True
+                config.exit_minute_data_policy = "cache_or_fetch"
                 config.max_positions = min(int(PAPER_MAX_POSITIONS), 3)
                 config.max_position_per_stock = float(PAPER_POSITION_PCT) / 100.0
                 config.max_total_position = 1.0
@@ -822,12 +862,14 @@ class BacktestController:
             else:
                 engine = BacktestEngine(dm, config)
                 result = engine.run_backtest(
-                    start_date=start, end_date=end, trade_plans_dir=str(trade_plans_dir))
+                    start_date=start, end_date=end, trade_plans_dir=str(trade_plans_dir),
+                    progress=self._update_progress)
 
             from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
 
             if (
-                set(selected_strategy_ids) == set(PRODUCTION_STRATEGY_IDS)
+                missing_evidence_policy == "legacy"
+                and set(selected_strategy_ids) == set(PRODUCTION_STRATEGY_IDS)
                 and entry_mode != "compare"
                 and position_sizing_mode != "compare"
             ):
@@ -842,6 +884,7 @@ class BacktestController:
                     strategy_ids=[],
                 )
                 if legacy_files > 0:
+                    self._update_progress({"stage": "运行精简链路对照"})
                     from backtest.architecture_comparison import run_architecture_comparison
 
                     self.buffer.append_line(
@@ -857,6 +900,7 @@ class BacktestController:
                         legacy_trade_plans_dir=Path(legacy_plan_dir),
                     )
 
+            self._update_progress({"stage": "生成并保存结果报表"})
             report = PerformanceAnalyzer().generate_performance_report(result)
             self.buffer.append_text("\n" + report + "\n")
 
@@ -873,7 +917,10 @@ class BacktestController:
                 "position_sizing_mode": position_sizing_mode,
                 "strategy_ids": selected_strategy_ids,
                 "account_profile": account_profile,
+                "missing_evidence_policy": missing_evidence_policy,
             })
+            self.run_id = run_id
+            self.data_quality = result.get("data_quality") or {}
             if entry_comparison is not None:
                 from backtest.entry_mode_comparison import save_entry_mode_comparison
 
@@ -895,7 +942,8 @@ class BacktestController:
                     architecture_comparison, Path(OUTPUT_DIR), run_id,
                 )
                 self.buffer.append_line(f"精简链路对照报表已保存：{comparison_path}")
-            if not selected_enhancements and entry_comparison is None:
+            if missing_evidence_policy == "legacy" and not selected_enhancements and entry_comparison is None:
+                self._update_progress({"stage": "运行龙虎榜对照回测"})
                 from backtest.lhb_comparison import run_lhb_comparison, save_lhb_comparison
 
                 self.buffer.append_line("开始龙虎榜四组对照回测：无龙虎榜 / 净买入 / 机构 / 龙虎榜＋板块共振")
@@ -910,12 +958,13 @@ class BacktestController:
                 )
                 comparison_path = save_lhb_comparison(comparison, Path(OUTPUT_DIR), run_id)
                 self.buffer.append_line(f"龙虎榜对照报表已保存：{comparison_path}")
-            state_path = self._save_rolling_state(
-                engine, "range", enhancements=selected_enhancements,
-                strategy_ids=selected_strategy_ids,
-            )
-
-            self.buffer.append_line(f"接力账户状态已同步到 {state_path}，后续可用单日接力继续。")
+            if missing_evidence_policy == "legacy":
+                self._update_progress({"stage": "保存回测账户状态"})
+                state_path = self._save_rolling_state(
+                    engine, "range", enhancements=selected_enhancements,
+                    strategy_ids=selected_strategy_ids,
+                )
+                self.buffer.append_line(f"接力账户状态已同步到 {state_path}，后续可用单日接力继续。")
             self.buffer.append_line("=== 回测完成，结果已保存，可在「模拟交易 / 回撤分析」查看 ===")
             self.state = "done"
             self._publish_state()
@@ -924,6 +973,15 @@ class BacktestController:
             self.buffer.append_line(f"!!! 回测失败: {exc!r}")
             self.buffer.append_text(traceback.format_exc())
             self.state = "error"
+            from backtest.evidence_policy import ReplayEvidenceBlocked
+            if isinstance(exc, ReplayEvidenceBlocked):
+                self.state = "blocked"
+                self.evidence_failures = exc.details
+                self.data_quality = exc.quality
+                from run_backtest import save_replay_evidence_audit
+                self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+                save_replay_evidence_audit(exc.quality, OUTPUT_DIR, self.run_id)
+                self._update_progress({"stage": "证据不足，回放停止", "trade_date": exc.trade_date})
             self._publish_state()
         finally:
             sys.stdout, sys.stderr = old_out, old_err

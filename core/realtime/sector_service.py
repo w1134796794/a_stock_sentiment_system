@@ -71,6 +71,7 @@ class RealtimeSectorService:
         source: str = "ths",
         limit: int = 20,
         include_raw: bool = False,
+        member_map: Optional[Dict[str, List[str]]] = None,
     ) -> Dict[str, Any]:
         del source
         self._ensure_metadata()
@@ -89,12 +90,13 @@ class RealtimeSectorService:
         pending: List[str] = []
         for code in code_list:
             cached = self._sector_cache.get(code)
-            if cached and now - cached[0] <= self.ttl_seconds:
+            if member_map is None and cached and now - cached[0] <= self.ttl_seconds:
                 result[code] = cached[1]
             else:
                 pending.append(code)
 
-        members_by_sector = {code: self._members(code) for code in pending}
+        members_by_sector = {code: (list(member_map.get(code, [])) if member_map is not None else self._members(code))
+                             for code in pending}
         all_members = list(dict.fromkeys(
             member for members in members_by_sector.values() for member in members
         ))
@@ -103,7 +105,8 @@ class RealtimeSectorService:
             item = self._aggregate(code, members, quote_map)
             if item is not None:
                 result[code] = item
-                self._sector_cache[code] = (now, item)
+                if member_map is None:
+                    self._sector_cache[code] = (now, item)
 
         rows = [result[code] for code in code_list if code in result]
         if auto_list:
@@ -216,8 +219,13 @@ class RealtimeSectorService:
                 ]
             break
         members = [member for member in dict.fromkeys(members) if member]
-        self._member_cache[code6] = members
+        if members:
+            self._member_cache[code6] = members
         return members
+
+    def member_codes(self, code: str) -> List[str]:
+        """Local THS constituents; no quote or network request."""
+        return list(self._members(code))
 
     def _ensure_quote_service(self):
         if self.quote_service is not None:

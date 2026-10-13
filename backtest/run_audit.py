@@ -135,6 +135,13 @@ def build_run_manifest(
     }
     return {
         **semantic_payload,
+        "execution_contract_version": "production_gate_chronological_fills_v2",
+        "effective_sizing_mode": (
+            "fixed_account_slots" if float(config_snapshot.get('account_position_pct') or 0) > 0
+            else config_snapshot.get('position_sizing_mode') or 'fixed_risk'
+        ),
+        "account_overrides_strategy_position_caps": bool(float(config_snapshot.get('account_position_pct') or 0) > 0),
+        "metric_convention": "initial_nav_included_daily_excess_sharpe_rf3pct_v1",
         "code_revision": _git_revision(root),
         "configuration_hash": stable_hash(semantic_payload),
         "candidate_count": int(result.get("entry_candidate_count") or 0),

@@ -61,9 +61,10 @@ def _list_lhb_dates_cached(db_path: str, _mtime_ns: int, _size: int) -> tuple[st
         return ()
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         values = set()
-        with duckdb.connect(str(path), read_only=True) as con:
+        with duckdb_connect(str(path), read_only=True) as con:
             for table in _TABLES:
                 if not _table_exists(con, table):
                     continue
@@ -91,8 +92,9 @@ def _build_lhb_view_cached(
 
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-        with duckdb.connect(str(path), read_only=True) as con:
+        with duckdb_connect(str(path), read_only=True) as con:
             daily = _read_date(con, "lhb_daily_silver", trade_date)
             institution = _read_date(con, "lhb_institution_silver", trade_date)
             hot_money = _read_date(con, "lhb_hot_money_silver", trade_date)

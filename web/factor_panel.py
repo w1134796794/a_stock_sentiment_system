@@ -247,6 +247,7 @@ def _latest_factor_data(
         from pathlib import Path
 
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         from config.settings import FACTOR_DB_PATH, SNAPSHOT_DIR
         from snapshot.reader import SnapshotReader
@@ -260,7 +261,7 @@ def _latest_factor_data(
         if not db_path.exists():
             return {"trade_date": latest or "", "snapshot_enabled_factors": enabled, "rows": []}
 
-        with duckdb.connect(str(db_path), read_only=True) as con:
+        with duckdb_connect(str(db_path), read_only=True) as con:
             exists = con.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'factor_value_long'"
             ).fetchone()[0]

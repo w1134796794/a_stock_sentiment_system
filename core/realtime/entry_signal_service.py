@@ -25,7 +25,9 @@ from core.realtime.models import normalize_stock_code
 from core.realtime.sector_breadth import RealtimeSectorBreadthProvider
 from core.signals.confidence_service import ConfidenceService, HistoricalSignalStatsRepository
 from core.signals.minute_amount_profile import MinuteAmountProfileRepository
+from core.signals.sector_confirmation import make_sector_sync_checker, sector_names_from_row
 from core.utils.price_limit import limit_up_price
+from core.utils.stock_eligibility import new_entry_exclusion
 
 MODE_LABELS = {
     **STRUCTURAL_LABELS,
@@ -76,8 +78,10 @@ class RealtimeEntrySignalService:
         sector_breadth_provider: Any = None,
         signal_stats_repository: Optional[HistoricalSignalStatsRepository] = None,
         snapshot_signal_service: Any = None,
+        quote_service: Any = None,
     ) -> None:
         self.dm = data_manager
+        self.quote_service = quote_service
         self.evaluator = evaluator or MinuteEntryEvaluator()
         self.minute_ttl_seconds = max(float(minute_ttl_seconds), 1.0)
         self.calendar = calendar or TradeCalendar()
@@ -101,7 +105,8 @@ class RealtimeEntrySignalService:
         market_date: str,
         execution: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Dict[str, Any]]:
-        source_rows = [dict(row or {}) for row in rows or []]
+        from core.utils.stock_eligibility import new_entry_exclusion
+        source_rows = [dict(row or {}) for row in rows or [] if not new_entry_exclusion(row or {})]
         market_date = str(market_date or "").replace("-", "")[:8]
         if not market_date:
             return {}
@@ -118,6 +123,11 @@ class RealtimeEntrySignalService:
             code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
             if not code:
                 continue
+            if self.quote_service is not None:
+                try:
+                    quotes[code] = dict(self.quote_service.get_quote(code) or {})
+                except Exception:
+                    quotes[code] = {}
             quote = dict(quotes.get(code) or {})
             frame = frames.get(code, pd.DataFrame())
             out[code] = self._evaluate_one(
@@ -217,6 +227,7 @@ class RealtimeEntrySignalService:
             bars=frame,
             open_gap=gap,
             prev_close=pre_close,
+            previous_session_close=_float(previous.get("close")),
             previous_amount=previous_amount,
             previous_volume=_float(previous.get("vol_hand"), _float(previous.get("vol"))),
             auction_amount=_float(auction.get("竞价成交额")),
@@ -253,6 +264,7 @@ class RealtimeEntrySignalService:
                     is_leader=self._is_leader(row),
                     limit_price=_float(limit_up_price(pre_close, code, name)),
                     minute_decision=decision,
+                    confirmation_deadline=resolve_entry_deadline(execution, mode, self.evaluator.deadline),
                 )
                 if snapshot_decision is not None:
                     decision = snapshot_decision
@@ -278,6 +290,7 @@ class RealtimeEntrySignalService:
             sector_detail=sector_detail,
             strategy_mode_allowed=strategy_mode_allowed,
             strength_detected=strength_detected,
+            stats_context=row,
         )
         if mode in STRUCTURAL_MODES:
             payload["structure"] = structures.get(mode, {})
@@ -287,6 +300,10 @@ class RealtimeEntrySignalService:
         deadline = resolve_entry_deadline(execution, mode, self.evaluator.deadline)
         if decision.confirm_time and decision.confirm_time > deadline:
             return self._payload(EntryDecision("cancelled", reason="超过策略确认截止时间"), mode, market_date)
+        if decision.confirm_time:
+            from core.signals.case_features import build_signal_case
+            snapshot = build_signal_case({**row, **quote, **payload}, {"market_date": market_date}, minutes=frame)
+            payload["signal_feature_snapshot"] = {"features": snapshot["features"], "quality": snapshot["quality"]}
         return payload
 
     @staticmethod
@@ -397,6 +414,7 @@ class RealtimeEntrySignalService:
         *, sector_detail: Optional[Dict[str, Any]] = None,
         strategy_mode_allowed: bool = True,
         strength_detected: bool = False,
+        stats_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if decision.status in {"filled", "confirmed"}:
             status = "confirmed"
@@ -411,7 +429,13 @@ class RealtimeEntrySignalService:
             status = "observe"
             status_text = "观察"
         signal_name = decision.signal or MODE_LABELS.get(mode, "")
-        stats = self.signal_stats.get(signal_name, as_of_date=market_date) if signal_name else {}
+        context = stats_context or {}
+        stats = self.signal_stats.get(
+            signal_name, as_of_date=market_date, strategy_id=str(context.get("strategy_id") or ""),
+            strategy_version=str(context.get("strategy_version") or ""),
+            exit_rule_version=str(context.get("exit_rule_version") or ""),
+            cost_version=str(context.get("cost_version") or ""),
+        ) if signal_name else {}
         sector_complete = float((sector_detail or {}).get("data_completeness") or 0.0)
         data_completeness = min(float(decision.data_completeness), sector_complete or float(decision.data_completeness))
         confidence = ConfidenceService.assess(
@@ -427,6 +451,15 @@ class RealtimeEntrySignalService:
             model_type=f"entry_{mode}",
             as_of_date=market_date,
         )
+        confidence["probability_basis"] = "entry_mode_history"
+        confidence["calibration_status"] = "uncalibrated"
+        confidence["baseline_probability"] = None
+        confidence["probability_lift"] = None
+        if not stats:
+            for field in ("candidate_probability", "baseline_probability", "probability_lift",
+                          "expected_return_pct", "expected_gross_return_pct", "stop_probability",
+                          "average_mfe_pct", "average_mae_pct", "probability_ci_low", "probability_ci_high"):
+                confidence[field] = None
         behavior = intraday_behavior_cycle(
             entry_mode=mode,
             signal_status=decision.status,
@@ -453,6 +486,7 @@ class RealtimeEntrySignalService:
             "amount_pace": decision.amount_pace or None,
             "sector_confirmed": bool(decision.sector_confirmed),
             "sector_detail": sector_detail or {},
+            "sector_confirmation_version": (sector_detail or {}).get("sector_confirmation_version", ""),
             "data_status": decision.data_status,
             "trigger_source": (
                 "eltdx_snapshot" if str(decision.data_status).startswith("snapshot_")
@@ -467,10 +501,14 @@ class RealtimeEntrySignalService:
             "confidence": confidence,
             "success_probability": confidence["candidate_probability"] if stats else None,
             "historical_samples": confidence["sample_size"] if stats else None,
-            "average_mfe_pct": confidence["average_mfe_pct"] if stats else None,
-            "average_mae_pct": confidence["average_mae_pct"] if stats else None,
+            "average_mfe_pct": confidence["average_mfe_pct"] if stats.get("average_mfe") is not None else None,
+            "average_mae_pct": confidence["average_mae_pct"] if stats.get("average_mae") is not None else None,
             "confidence_grade": confidence["confidence_grade"],
             "historical_stats_basis": signal_name or "",
+            "historical_stats_label": "入场模式历史统计" if signal_name else "",
+            "historical_stats_status": stats.get("sample_status", "insufficient"),
+            "historical_stats_versions": stats.get("versions") or {},
+            "probability_calibration_status": "uncalibrated",
             "behavior_state": behavior["dominant_state"],
             "behavior_state_label": behavior["dominant_label"],
             "behavior_state_probability": behavior["dominant_probability"],
@@ -500,6 +538,11 @@ class RealtimeEntrySignalService:
         return frame
 
     def _previous_daily_map(self, market_date: str) -> Dict[str, Dict[str, Any]]:
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        frozen = PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
+        if frozen:
+            return {normalize_stock_code(row.get("code") or row.get("ts_code") or "", add_suffix=False): row
+                    for row in frozen["inputs"].get("daily_rows", [])}
         with self._lock:
             cached = self._previous_cache.get(market_date)
             if cached is not None:
@@ -579,46 +622,31 @@ class RealtimeEntrySignalService:
                     known = [(time, value) for time, value in history[key] if time <= end and (end-time).total_seconds() <= 90]
                     return known[-1][1] if known else None
 
-                return at_minute, {**detail, "observed_at": observed}
+                return at_minute, {**detail, "observed_at": observed,
+                                   "sector_confirmation_source": "sector_index_breadth",
+                                   "sector_confirmation_version": "sector_index_breadth_v1"}
         except Exception:
             detail = {}
-        peers: List[str] = []
+        peer_rows = []
         for other in all_rows:
             other_code = normalize_stock_code(other.get("code") or other.get("stock_code") or "", add_suffix=False)
-            if not other_code or other_code == code:
+            quote = quotes.get(other_code) or {}
+            if new_entry_exclusion(other) or new_entry_exclusion(quote):
                 continue
-            if sectors.intersection(self._sectors(other)):
-                peers.append(other_code)
-
-        def checker(at_time: str) -> bool:
-            positive = observed = 0
-            for peer in peers:
-                frame = frames.get(peer, pd.DataFrame())
-                if frame.empty:
-                    continue
-                available = frame[frame["time"] <= str(at_time)]
-                if available.empty:
-                    continue
-                previous_close = _float((quotes.get(peer) or {}).get("pre_close"))
-                if previous_close <= 0 and "pre_close" in frame.columns:
-                    previous_close = _float(frame.iloc[0].get("pre_close"))
-                latest = _float(available.iloc[-1].get("close"))
-                if previous_close <= 0 or latest <= 0:
-                    continue
-                observed += 1
-                positive += int(latest >= previous_close)
-            return (positive / observed >= 0.5) if observed else None
-
-        return checker, (detail or {
-            "reason": "仅取得同候选板块样本" if peers else "板块指数与成分股实时数据不足",
-            "observed_members": len(peers),
-            "data_completeness": 0.5 if peers else 0.0,
-        })
+            peer_rows.append(other)
+        detail = {**detail, "reason": "仅取得同候选板块样本"}
+        checker = make_sector_sync_checker(
+            code, sectors, peer_rows, frames,
+            previous_closes={peer: quote.get("pre_close") for peer, quote in quotes.items()},
+            trade_date=market_date, evidence=detail,
+        )
+        if not detail["peer_codes"]:
+            detail["reason"] = "板块指数与成分股实时数据不足"
+        return checker, detail
 
     @staticmethod
     def _sectors(row: Dict[str, Any]) -> set[str]:
-        raw = str(row.get("resonance_sectors") or row.get("所属板块") or "")
-        return {part.strip() for part in raw.replace("；", ",").split(",") if part.strip()}
+        return sector_names_from_row(row)
 
     @staticmethod
     def _metric(row: Dict[str, Any], name: str, default: float = 0.0) -> float:

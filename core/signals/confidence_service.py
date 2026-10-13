@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -23,6 +24,13 @@ def _ratio(value: Any, default: float = 1.0) -> float:
     if number > 1.0:
         number /= 100.0
     return max(0.0, min(1.0, number))
+
+
+def _local_timestamp(value: Any):
+    stamp = pd.to_datetime(value, errors="coerce")
+    if pd.notna(stamp) and stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("Asia/Shanghai").tz_localize(None)
+    return stamp
 
 
 def market_regime(score: Any) -> str:
@@ -307,7 +315,7 @@ class ConfidenceService:
 
 
 class HistoricalSignalStatsRepository:
-    """Read de-duplicated closed trades as mode-specific out-of-sample evidence."""
+    """Mode statistics, not a calibrated forecast or proof of out-of-sample edge."""
 
     def __init__(self, results_dir: Optional[Path] = None) -> None:
         if results_dir is None:
@@ -316,42 +324,69 @@ class HistoricalSignalStatsRepository:
             results_dir = Path(OUTPUT_DIR) / "backtest_results"
         self.results_dir = Path(results_dir)
         self._cache: Optional[pd.DataFrame] = None
+        self._signature: tuple = ()
 
     def _load(self) -> pd.DataFrame:
-        if self._cache is not None:
-            return self._cache
         frames = []
         paths = sorted(
             self.results_dir.glob("backtest_trades_*.csv"),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )[:20]
+        signature = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in paths)
+        if self._cache is not None and signature == self._signature:
+            return self._cache
+        self._signature = signature
         for path in paths:
             try:
                 frame = pd.read_csv(path, dtype={"stock_code": str, "date": str, "entry_date": str})
             except Exception:
                 continue
-            if frame.empty or "action" not in frame.columns:
-                continue
-            frame = frame[frame["action"].astype(str).str.upper().str.startswith("SELL")].copy()
-            if frame.empty:
+            if frame.empty or not {"action", "stock_code", "date", "shares", "position_size", "pnl"}.issubset(frame.columns):
                 continue
             frame["_run"] = path.stem.removeprefix("backtest_trades_")
+            frame["_published_at"] = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
             frames.append(frame)
         if not frames:
             self._cache = pd.DataFrame()
             return self._cache
         data = pd.concat(frames, ignore_index=True)
         data["stock_code"] = data["stock_code"].astype(str).str.split(".").str[0].str.zfill(6)
-        data["entry_date"] = data.get("entry_date", data.get("date", "")).astype(str).str[:8]
-        data["entry_signal"] = data.get("entry_signal", "").fillna("").astype(str)
-        data = data.sort_values("_run", ascending=False).drop_duplicates(
-            ["entry_date", "stock_code", "entry_signal"], keep="first",
-        )
-        self._cache = data
-        return data
+        data["entry_date"] = data.get("entry_date", pd.Series("", index=data.index)).fillna("").astype(str).str[:8]
+        data = data[data["entry_date"].str.fullmatch(r"\d{8}")].copy()
+        for column in ("entry_signal", "strategy_id", "strategy_version", "exit_rule_version", "cost_version"):
+            data[column] = data.get(column, pd.Series("", index=data.index)).fillna("").astype(str)
+        episodes = []
+        keys = ["_run", "entry_date", "stock_code", "entry_signal", "strategy_id",
+                "strategy_version", "exit_rule_version", "cost_version"]
+        for _, rows in data.groupby(keys, dropna=False):
+            buys = rows[rows["action"].str.upper().eq("BUY")]
+            sells = rows[rows["action"].str.upper().str.startswith("SELL")]
+            if buys.empty or sells.empty or "shares" not in rows:
+                continue
+            if pd.to_numeric(buys["shares"], errors="coerce").sum() != pd.to_numeric(sells["shares"], errors="coerce").sum():
+                continue
+            cost = pd.to_numeric(buys["position_size"], errors="coerce").sum(min_count=1)
+            profit = pd.to_numeric(sells["pnl"], errors="coerce").sum(min_count=1)
+            if not math.isfinite(cost) or cost <= 0 or not math.isfinite(profit):
+                continue
+            record = sells.iloc[-1].to_dict()
+            # Missing exit time uses session end, never the start of that day.
+            dates = sells["date"].astype(str).str[:8]
+            times = sells.get("exit_time", pd.Series("15:00:00", index=sells.index)).fillna("15:00:00").replace("", "15:00:00")
+            ended = (dates + " " + times).map(_local_timestamp)
+            available = sells.get("result_available_at", sells["_published_at"]).map(_local_timestamp)
+            if ended.isna().any() or available.isna().any():
+                continue
+            record.update(pnl_pct=float(profit / cost), _ended_at=ended.max(),
+                          _available_at=max(ended.max(), available.max()))
+            episodes.append(record)
+        self._cache = pd.DataFrame(episodes)
+        return self._cache
 
-    def get(self, signal: str, *, as_of_date: str = "") -> Dict[str, Any]:
+    def get(self, signal: str, *, as_of_date: str = "", as_of_time: str = "",
+            strategy_id: str = "", strategy_version: str = "",
+            exit_rule_version: str = "", cost_version: str = "") -> Dict[str, Any]:
         data = self._load()
         if data.empty:
             return {}
@@ -361,21 +396,37 @@ class HistoricalSignalStatsRepository:
             "高开加速": {"高开加速"},
         }
         selected = data[data["entry_signal"].isin(aliases.get(signal, {signal}))].copy()
-        if as_of_date:
-            selected = selected[selected["entry_date"] < str(as_of_date)]
+        cutoff = _local_timestamp(as_of_time or as_of_date)
+        if pd.isna(cutoff):
+            return {}
+        selected = selected[(selected["_ended_at"] < cutoff) & (selected["_available_at"] < cutoff)]
+        versions = {"strategy_id": strategy_id, "strategy_version": strategy_version,
+                    "exit_rule_version": exit_rule_version, "cost_version": cost_version}
+        for field, value in versions.items():
+            selected = selected[selected[field].ne("")]
+            if value:
+                selected = selected[selected[field].eq(value)]
         if selected.empty:
             return {}
+        if len(selected[list(versions)].drop_duplicates()) != 1:
+            return {}  # Caller must select a compatible family, not pool versions.
+        selected = selected.sort_values("_run", ascending=False).drop_duplicates(
+            ["entry_date", "stock_code", "entry_signal"], keep="first")
         pnl = pd.to_numeric(selected.get("pnl_pct"), errors="coerce")
         stop = selected.get("stop_loss_triggered", pd.Series(False, index=selected.index)).astype(str).str.lower().isin({"true", "1", "yes"})
-        mfe = pd.to_numeric(selected.get("mfe_pct", pd.Series(0.0, index=selected.index)), errors="coerce")
-        mae = pd.to_numeric(selected.get("mae_pct", pd.Series(0.0, index=selected.index)), errors="coerce")
+        mfe = pd.to_numeric(selected.get("mfe_pct", pd.Series(float("nan"), index=selected.index)), errors="coerce")
+        mae = pd.to_numeric(selected.get("mae_pct", pd.Series(float("nan"), index=selected.index)), errors="coerce")
         return {
+            "basis": "entry_mode_history",
+            "calibration_status": "uncalibrated",
+            "sample_status": "sufficient" if len(selected) >= 20 else "insufficient",
+            "versions": selected.iloc[0][list(versions)].to_dict(),
             "sample_size": int(len(selected)),
             "success_probability": float((pnl > 0).mean()),
             "expected_return": float(pnl.mean()),
             "stop_probability": float(stop.mean()),
-            "average_mfe": float(mfe.mean()),
-            "average_mae": float(mae.mean()),
+            "average_mfe": float(mfe.mean()) if mfe.notna().any() else None,
+            "average_mae": float(mae.mean()) if mae.notna().any() else None,
         }
 
 

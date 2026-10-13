@@ -30,6 +30,13 @@ def test_limitup_overlay_reads_configured_external_cache(tmp_path, monkeypatch):
     assert overlay["promotion"]["overall"] == 100.0
     assert overlay["promotion"]["rate_1to2"] == 100.0
     assert overlay["promotion"]["rate_2to3"] == 100.0
+    assert overlay["promotion"]["rate_1to2_success"] == 1
+    assert overlay["promotion"]["rate_1to2_sample"] == 1
+    assert overlay["promotion"]["rate_2to3_success"] == 1
+    assert overlay["promotion"]["rate_2to3_sample"] == 1
+    assert overlay["promotion"]["rate_3to4"] is None
+    assert overlay["promotion"]["rate_3to4_success"] == 0
+    assert overlay["promotion"]["rate_3to4_sample"] == 0
 
 
 def test_limitup_overlay_keeps_high_promotion_separate_from_three_to_four(tmp_path, monkeypatch):
@@ -56,3 +63,36 @@ def test_limitup_overlay_keeps_high_promotion_separate_from_three_to_four(tmp_pa
 
     assert overlay["promotion"]["rate_3to4"] == 50.0
     assert overlay["promotion"]["rate_high"] == 100.0
+    assert overlay["promotion"]["rate_3to4_success"] == 1
+    assert overlay["promotion"]["rate_3to4_sample"] == 2
+    assert overlay["promotion"]["rate_high_success"] == 2
+    assert overlay["promotion"]["rate_high_sample"] == 2
+
+
+def test_promotion_counts_distinguish_zero_missing_and_duplicate_stocks(tmp_path, monkeypatch):
+    summary = tmp_path / "summary"
+    summary.mkdir()
+    path = summary / "limit_up_stocks.csv"
+    rows = [
+        {"trade_date": "20260930", "代码": "600001", "连板数": 1},
+        {"trade_date": "20260930", "代码": "600001", "连板数": 1},
+        {"trade_date": "20260930", "代码": "600002", "连板数": 2},
+        {"trade_date": "20261008", "代码": "600001", "连板数": 2},
+        {"trade_date": "20261008", "代码": "600001", "连板数": 2},
+    ]
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    monkeypatch.setattr(status, "CACHE_DIR", tmp_path)
+    promotion = status._limitup_cache_overlay("20261008")["promotion"]
+    assert promotion["previous_date"] == "20260930"
+    assert promotion["rate_1to2_success"] == promotion["rate_1to2_sample"] == 1
+    assert promotion["rate_2to3"] == promotion["rate_2to3_success"] == 0
+    assert promotion["rate_2to3_sample"] == 1
+    assert promotion["overall_success"] == 1
+    assert promotion["overall_sample"] == 2
+    missing = status._limitup_cache_overlay("20260930")["promotion"]
+    assert missing["rate_1to2"] is None
+    assert missing["rate_1to2_success"] is None
+    assert missing["rate_1to2_sample"] is None

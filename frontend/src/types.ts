@@ -34,6 +34,31 @@ export type Candidate = {
   };
 };
 
+export type AnalogAnalysis = {
+  status: string;
+  reason?: string;
+  forecast_id?: string;
+  as_of?: string;
+  classification?: string;
+  calibration_status?: string;
+  fallback_level?: string;
+  probability?: number | null;
+  probability_interval?: { low: number; high: number };
+  expected_net_return?: number | null;
+  payoff_ratio?: number | null;
+  sample_window?: { start: string; end: string };
+  reliability?: { raw_sample_count: number; effective_sample_count: number; trading_days: number };
+  return_distributions?: { net_return?: { p05: number; p25: number; p50: number; p75: number; p95: number } };
+};
+export type AnalogCase = {
+  case_id: string; code: string; market_date: string; net_return: number; success: boolean;
+  distance: number | null; weight: number;
+  normalized_path?: Array<{ day: number; value: number }>;
+  explanation?: { different_categories?: string[]; largest_feature_differences?: Array<{ feature: string; standardized_difference: number }> };
+  exit_reason?: string;
+  fees?: number;
+};
+
 export type RealtimeRow = {
   code: string;
   name: string;
@@ -99,6 +124,14 @@ export type WorkbenchData = {
     rate_2to3?: number | null;
     rate_3to4?: number | null;
     rate_high?: number | null;
+    rate_1to2_success?: number | null;
+    rate_1to2_sample?: number | null;
+    rate_2to3_success?: number | null;
+    rate_2to3_sample?: number | null;
+    rate_3to4_success?: number | null;
+    rate_3to4_sample?: number | null;
+    rate_high_success?: number | null;
+    rate_high_sample?: number | null;
   };
   promotion_trend?: {
     score?: number | null;

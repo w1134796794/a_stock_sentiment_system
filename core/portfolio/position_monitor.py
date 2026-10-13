@@ -121,6 +121,22 @@ class PositionMonitor:
                 )
                 from core.operations.ledger import TradingLedger, stable_id
 
+                # Freeze shadow holding features, without changing exit decisions.
+                try:
+                    from core.portfolio.signal_comparison import ComparisonConfig, freeze_holding_state
+                    from core.portfolio.execution_quotes import quote_error
+                    if not quote_error(quote, current_date):
+                        from backtest.trade_calendar import TradeCalendar
+                        calendar = TradeCalendar()
+                        age = len(calendar.get_trade_dates(str(position.get("entry_date") or ""), current_date)) - 1
+                        observed_now = datetime.now().isoformat(timespec="seconds")
+                        state = freeze_holding_state(position, as_of=observed_now, holding_days=max(age, 0),
+                            quote=quote, market=market, sector=sector, config=ComparisonConfig())
+                        TradingLedger(self.repository.db_path).event(stable_id("holding_state", account_key, position["id"], now[:16]),
+                            "holding_state", state, account_key=account_key)
+                except Exception as exc:
+                    logger.debug(f"[PositionMonitor] 旁路持仓状态未生成: {type(exc).__name__}")
+
                 if decision["action"] in {"reduce", "sell", "blocked"} and signal.get("changed"):
                     exit_id = stable_id("exit", current_date, position.get("id"), decision["action"])
                     ledger = TradingLedger(self.repository.db_path)
@@ -225,7 +241,9 @@ class PositionMonitor:
                 "reason": decision.get("reason") or decision.get("action_label") or "自动模拟退出",
                 "source": "auto_realtime_exit",
                 "execution_key": f"portfolio-exit:{position['id']}:{signal_id or trade_date}:{action}",
-                "metadata": {"decision": decision, "signal_id": exit_id},
+                "metadata": {"decision": decision, "signal_id": exit_id,
+                             "forecast_id": (position.get("metadata") or {}).get("forecast_id") or "",
+                             "analog_at_order": (position.get("metadata") or {}).get("analog_at_order") or {}},
             },
         )
         if int(result.get("executed_shares") or 0):
@@ -268,7 +286,13 @@ class PositionMonitor:
             falling_ratio = sum(value < 0 for value in changes) / len(changes) if changes else 0.0
             score = max(0.0, min(100.0, 50.0 + average * 10.0 - max(falling_ratio - 0.5, 0) * 30.0)) if changes else 50.0
             weak = bool(changes and (average <= -1.0 or falling_ratio >= 0.7))
+            from core.signals.case_features import event_time
+            from core.portfolio.execution_quotes import quote_error
+            today = datetime.now().strftime("%Y%m%d")
+            observed = [event_time(today, row.get("received_at") or row.get("time")) for row in rows]
+            observed_at = max(observed) if observed and all(observed) and not any(quote_error(row, today) for row in rows) else ""
             return {
+                "observed_at": observed_at,
                 "market_score": round(score, 1),
                 "index_change_pct": round(average, 2),
                 "regime": "转弱" if weak else "正常",

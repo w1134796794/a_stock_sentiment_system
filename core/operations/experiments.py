@@ -91,6 +91,48 @@ class StrategyExperimentLedger:
         self.ledger.save_experiment(experiment_id, frozen_at, config_hash, factor_hash, report)
         return report
 
+    def freeze_analog(self, *, label="analog", config=None, candidates=None):
+        from dataclasses import asdict
+        from core.signals.similarity_validation import SimilarityValidator
+        validator = SimilarityValidator([], config=config, candidates=candidates)
+        experiment_id = stable_id("analog_contract", label, validator.frozen_at, validator.contract_version)
+        report = {"experiment_id": experiment_id, "kind": "analog_contract", "label": label,
+                  "frozen_at": validator.frozen_at, "contract_version": validator.contract_version,
+                  "implementation_version": validator.implementation_version, "config": asdict(validator.config),
+                  "candidates": [asdict(c) for c in validator.candidates], "status": "frozen_waiting_for_validation"}
+        self.ledger.save_experiment(experiment_id, validator.frozen_at, validator.contract_version,
+                                   validator.implementation_version, report)
+        return report
+
+    def evaluate_analog(self, contract_id, *, repository, start, end, research=False, account_key=None):
+        from backtest.trade_calendar import TradeCalendar
+        from core.signals.similar_case_service import SimilarityConfig
+        from core.signals.similarity_validation import SimilarityValidator, ValidationConfig
+        contract = self.ledger.experiment(contract_id).get("report") or {}
+        if contract.get("kind") != "analog_contract":
+            raise ValueError("Freeze an analog contract first")
+        calendar = TradeCalendar()
+        if not calendar.is_real:
+            raise ValueError("Analog validation requires a real trading calendar")
+        records = repository.export_records(start=start, end=end, limit=None)
+        validator = SimilarityValidator(records, config=ValidationConfig(**contract["config"]),
+            candidates=[SimilarityConfig(**c) for c in contract["candidates"]],
+            frozen_at=contract["frozen_at"], ledger=self.ledger)
+        if validator.contract_version != contract["contract_version"]:
+            raise ValueError("Implementation changed since freeze; create a new contract, do not reuse old OOS authorization")
+        account = None
+        if account_key:
+            account = {"status": "baseline_only", "account_key": account_key,
+                "existing_rules": AccountEquityEvaluator(self.ledger).evaluate(account_key=account_key, start=start, end=end,
+                    experiment_id=stable_id("analog_equity_reference", contract_id, start, end, account_key)),
+                "analog_filtered": None, "reason": "Filtered account replay remains a separate Phase 6 experiment."}
+        result = validator.run(calendar.get_trade_dates(start, end), as_of=datetime.now().isoformat(),
+                               research=research, account_comparison=account)
+        result[0]["contract_id"] = contract_id
+        self.ledger.save_experiment(result[0]["experiment_id"], validator.frozen_at, validator.contract_version,
+                                   result[0]["data_version"], result[0])
+        return result
+
     def evaluate(self, experiment_id: str, *, start: str, end: str,
                  train_days: int = 60, validation_days: int = 20,
                  initial_capital: float = 1_000_000.0,
@@ -99,6 +141,10 @@ class StrategyExperimentLedger:
         frozen = self.ledger.experiment(experiment_id)
         if not frozen:
             raise ValueError("实验不存在，请先冻结配置")
+        if str(frozen["report"].get("kind") or "").startswith("analog_"):
+            raise ValueError("相似评估实验请使用 analog-evaluate，不使用账户策略评估入口")
+        if frozen["report"].get("kind") == "replay_research":
+            raise ValueError("冻结回放对照请使用独立研究入口，不使用已有账户统计入口")
         if train_days < 1 or validation_days < 1 or start > end:
             raise ValueError("训练/验证窗口或日期范围无效")
         report = dict(frozen["report"])

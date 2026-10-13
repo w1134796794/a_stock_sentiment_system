@@ -4,6 +4,7 @@
 {% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">候选 <span id="page-candidate-date">{{ candidate_date or '--' }}</span> · 行情 <span id="page-market-date">{{ market_date or '--' }}</span> · 只看买点、失效和行动</div>{% endblock %}
 
 {% block header_extra %}
+  {% if is_admin %}<a href="/intraday/replay" class="text-sm text-emerald-300 border border-slate-700 rounded-md px-3 py-1.5">诊断回放</a>{% endif %}
   {% if dates %}
   <label class="text-sm text-slate-400">候选日</label>
   <select id="date-select" class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">

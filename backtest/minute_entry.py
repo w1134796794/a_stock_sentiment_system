@@ -76,6 +76,9 @@ class EntryDecision:
     false_break_count: int = 0
     pullback_quality: float = 0.0
     active_buy_ratio: float = 0.0
+    breakout_level: float = 0.0
+    initial_confirm_time: str = ""
+    confirmation_policy: str = "legacy"
 
     @property
     def filled(self) -> bool:
@@ -172,6 +175,7 @@ class MinuteEntryEvaluator:
         max_amount_pace: float = 3.0,
         min_auction_volume_ratio: float = 0.008,
         min_auction_amount: float = 5_000_000,
+        confirmation_policy=None,
     ) -> None:
         self.deadline = deadline
         self.weak_min_gap = weak_min_gap
@@ -181,6 +185,8 @@ class MinuteEntryEvaluator:
         self.max_amount_pace = max_amount_pace
         self.min_auction_volume_ratio = min_auction_volume_ratio
         self.min_auction_amount = min_auction_amount
+        from backtest.confirmation_quality import ConfirmationPolicy
+        self.confirmation_policy = confirmation_policy or ConfirmationPolicy()
 
     def evaluate_strategy(self, *, execution: dict, mode: str, **kwargs):
         """Evaluate each allowed structure and the opening mode independently."""
@@ -215,6 +221,7 @@ class MinuteEntryEvaluator:
         bars: pd.DataFrame,
         open_gap: float,
         prev_close: float,
+        previous_session_close: float = 0.0,
         previous_amount: float = 0.0,
         previous_volume: float = 0.0,
         auction_amount: float = 0.0,
@@ -237,6 +244,7 @@ class MinuteEntryEvaluator:
             local.deadline = parsed.strftime("%H:%M:%S")
             return local.evaluate(
                 mode=mode, bars=bars, open_gap=open_gap, prev_close=prev_close,
+                previous_session_close=previous_session_close,
                 previous_amount=previous_amount, previous_volume=previous_volume,
                 auction_amount=auction_amount, auction_volume=auction_volume,
                 plan_amount_ratio=plan_amount_ratio, limit_price=limit_price,
@@ -255,6 +263,7 @@ class MinuteEntryEvaluator:
                 self, mode=mode, data=data, structure=structure or {},
                 deadline=self.deadline, gap=open_gap,
                 prev_close=prev_close, limit_price=limit_price, sector_sync=sector_sync, live=live,
+                previous_session_close=previous_session_close,
             )
         opening_rows = data[data["time"] <= "09:35:00"]
         first_five = opening_rows.head(5)
@@ -318,6 +327,7 @@ class MinuteEntryEvaluator:
         opening_low = float(first_five["low"].min())
         opening_high = float(first_five["high"].max())
         sector_observed = False
+        quality_denial = None
         for index, row in scan.iterrows():
             if float(row["low"]) < opening_low * 0.999:
                 return EntryDecision("cancelled", "弱转强", "跌破开盘前5分钟低点", str(row["time"]), open_gap_pct=gap)
@@ -337,14 +347,20 @@ class MinuteEntryEvaluator:
                 and self.min_amount_pace <= pace <= self.max_amount_pace
             )
             if confirmed and (not live or index >= len(data) - 2):
-                return self._next_minute_fill(
+                decision = self._next_minute_fill(
                     data, index, "弱转强", "收复昨收、站上VWAP并突破前5分钟高点",
                     gap, pace, sector_ok, limit_price, live=live,
                     profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
                     false_break_count=false_breaks, pullback_quality=pullback_quality,
                     active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
                     data_completeness=1.0,
+                    breakout_level=opening_high, protection_price=opening_low * 0.999,
+                    sector_sync=sector_sync,
                 )
+                if decision.status in {"quality_rejected", "quality_pending"}:
+                    quality_denial = decision
+                    continue
+                return decision
         if not sector_observed:
             return EntryDecision(
                 "data_insufficient", "弱转强", "缺少真实板块指数或成分股宽度，保持观察",
@@ -356,6 +372,8 @@ class MinuteEntryEvaluator:
                 "data_insufficient", "弱转强", "缺少历史同分钟成交进度模型，保持观察",
                 open_gap_pct=gap, data_status="missing_amount_profile", data_completeness=0.65,
             )
+        if quality_denial is not None:
+            return quality_denial
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "弱转强", "弱转强条件尚未全部满足", open_gap_pct=gap)
         return EntryDecision("cancelled", "弱转强", f"{self.deadline[:5]}前未完成弱转强确认", open_gap_pct=gap)
@@ -378,6 +396,7 @@ class MinuteEntryEvaluator:
         opening_high = float(first_five["high"].max())
         touched_vwap = False
         sector_observed = False
+        quality_denial = None
         for index, row in scan.iterrows():
             vwap = float(row["vwap"])
             touched_vwap = touched_vwap or float(row["low"]) <= vwap * 1.002
@@ -408,14 +427,19 @@ class MinuteEntryEvaluator:
                 if confirmed and (not live or index >= len(data) - 2):
                     if not sector_observed:
                         reason += "（缺少板块确认）"
-                    return self._next_minute_fill(
+                    decision = self._next_minute_fill(
                         data, index, signal, reason,
                         gap, pace, sector_ok, limit_price, live=live,
                         profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
                         false_break_count=false_breaks, pullback_quality=pullback_quality,
                         active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
                         data_completeness=0.75 if not sector_observed else 1.0,
+                        breakout_level=opening_high, sector_sync=sector_sync,
                     )
+                    if decision.status in {"quality_rejected", "quality_pending"}:
+                        quality_denial = decision
+                        continue
+                    return decision
         if not sector_observed:
             return EntryDecision(
                 "data_insufficient", "强势延续", "缺少真实板块指数或成分股宽度，保持观察",
@@ -427,6 +451,8 @@ class MinuteEntryEvaluator:
                 "data_insufficient", "强势延续", "缺少历史同分钟成交进度模型，保持观察",
                 open_gap_pct=gap, data_status="missing_amount_profile", data_completeness=0.65,
             )
+        if quality_denial is not None:
+            return quality_denial
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "强势延续", "强势延续条件尚未全部满足", open_gap_pct=gap)
         signal = "强势延续" if auction_available else "开盘强势确认"
@@ -445,6 +471,7 @@ class MinuteEntryEvaluator:
                 return EntryDecision("signal_unfilled", "高开加速", "接近涨停开盘，暂无可成交证据", "09:30:00", open_gap_pct=gap)
         opening_high = float(first_five["high"].max())
         sector_observed = False
+        quality_denial = None
         for index, row in scan.iterrows():
             sector_state = sector_sync(str(row["time"])) if sector_sync else None
             sector_observed = sector_observed or sector_state is not None
@@ -457,16 +484,23 @@ class MinuteEntryEvaluator:
                 reason = "龙头高开后继续突破"
                 if not sector_observed:
                     reason += "（缺少板块确认）"
-                return self._next_minute_fill(
+                decision = self._next_minute_fill(
                     data, index, "高开加速", reason, gap, 0.0,
                     sector_ok, limit_price, unfilled_when_locked=True, live=live,
                     data_completeness=0.75 if not sector_observed else 1.0,
+                    breakout_level=opening_high, sector_sync=sector_sync,
                 )
+                if decision.status in {"quality_rejected", "quality_pending"}:
+                    quality_denial = decision
+                    continue
+                return decision
         if not sector_observed:
             return EntryDecision(
                 "data_insufficient", "高开加速", "缺少真实板块指数或成分股宽度，保持观察",
                 open_gap_pct=gap, data_status="missing_sector", data_completeness=0.60,
             )
+        if quality_denial is not None:
+            return quality_denial
         if live and str(data.iloc[-1]["time"]) <= self.deadline:
             return EntryDecision("observing", "高开加速", "高开加速条件尚未全部满足", open_gap_pct=gap)
         return EntryDecision("cancelled", "高开加速", f"{self.deadline[:5]}前未出现龙头加速确认", open_gap_pct=gap)
@@ -481,7 +515,25 @@ class MinuteEntryEvaluator:
         pullback_quality: float = 0.0,
         active_buy_ratio: float = 0.0,
         data_completeness: float = 1.0,
+        breakout_level: float = 0.0,
+        protection_price: float = 0.0,
+        sector_sync=None,
     ) -> EntryDecision:
+        from backtest.confirmation_quality import confirmation_index
+        initial_time = str(data.loc[index, "time"])
+        index, quality_status, quality_reason = confirmation_index(
+            data, index, level=breakout_level, protection=protection_price,
+            deadline=self.deadline, policy=self.confirmation_policy, sector_sync=sector_sync,
+        )
+        if quality_status != "ready":
+            return EntryDecision(quality_status, signal, quality_reason, str(data.loc[index, "time"]),
+                                 open_gap_pct=gap, breakout_level=breakout_level,
+                                 initial_confirm_time=initial_time,
+                                 confirmation_policy=self.confirmation_policy.mode)
+        if quality_reason:
+            reason += "；" + quality_reason
+        quality_meta = dict(breakout_level=breakout_level, initial_confirm_time=initial_time,
+                            confirmation_policy=self.confirmation_policy.mode)
         following = data[data.index > index]
         if following.empty:
             if live:
@@ -489,12 +541,13 @@ class MinuteEntryEvaluator:
                     "confirmed", signal, f"{reason}，等待下一分钟成交确认",
                     str(data.loc[index, "time"]), open_gap_pct=gap,
                     amount_pace=pace, sector_confirmed=sector_ok,
+                    **quality_meta,
                 )
-            return EntryDecision("signal_unfilled", signal, f"{reason}，但缺少下一分钟成交", str(data.loc[index, "time"]), open_gap_pct=gap)
+            return EntryDecision("signal_unfilled", signal, f"{reason}，但缺少下一分钟成交", str(data.loc[index, "time"]), open_gap_pct=gap, **quality_meta)
         next_row = following.iloc[0]
         elapsed = (datetime.strptime(str(next_row["time"]), "%H:%M:%S") - datetime.strptime(str(data.loc[index, "time"]), "%H:%M:%S")).total_seconds()
         if elapsed != 60 or str(next_row["time"]) > self.deadline:
-            return EntryDecision("signal_unfilled", signal, "下一分钟缺失或超过执行截止时间", str(data.loc[index, "time"]), open_gap_pct=gap)
+            return EntryDecision("signal_unfilled", signal, "下一分钟缺失或超过执行截止时间", str(data.loc[index, "time"]), open_gap_pct=gap, **quality_meta)
         price = float(next_row.get("open") or next_row.get("close") or 0.0)
         volume = float(next_row.get("volume") or 0.0)
         locked = limit_price > 0 and price >= limit_price * 0.998
@@ -503,6 +556,7 @@ class MinuteEntryEvaluator:
                 "signal_unfilled", signal, f"{reason}，下一分钟无可成交量或仍封涨停",
                 str(data.loc[index, "time"]), str(next_row.get("time") or ""),
                 0.0, gap, pace, sector_ok,
+                **quality_meta,
             )
         return EntryDecision(
             "filled", signal, reason, str(data.loc[index, "time"]),
@@ -510,6 +564,7 @@ class MinuteEntryEvaluator:
             profile_samples=profile_samples, hold_minutes=hold_minutes,
             false_break_count=false_break_count, pullback_quality=pullback_quality,
             active_buy_ratio=active_buy_ratio, data_completeness=data_completeness,
+            **quality_meta,
         )
 
     @staticmethod

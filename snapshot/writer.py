@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime
+from core.realtime.trading_session import shanghai_now
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -140,7 +141,7 @@ def _build_factor_table(data_dict: Dict) -> List[Dict[str, Any]]:
 
 def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
     """把报表 ``data_dict`` 规整成前端快照（纯 JSON 可序列化）。"""
-    date = str(data_dict.get("date") or datetime.now().strftime("%Y%m%d"))
+    date = str(data_dict.get("date") or shanghai_now().strftime("%Y%m%d"))
 
     market = _safe(lambda: _extract_market(data_dict), {})
     trade_plans = _safe(lambda: _extract_trade_plans(data_dict), {"columns": [], "rows": []})
@@ -226,7 +227,7 @@ def build_snapshot(data_dict: Dict) -> Dict[str, Any]:
     snapshot = {
         "meta": {
             "date": date,
-            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "generated_at": shanghai_now().isoformat(timespec="seconds"),
             "schema_version": SCHEMA_VERSION,
             "engine": str(data_dict.get("engine") or "legacy"),
             # Phase 2：因子 profile + 启用因子清单（复盘归因留痕）
@@ -398,6 +399,7 @@ class SnapshotWriter:
             return False
         try:
             import duckdb  # type: ignore
+            from core.infrastructure.duckdb_access import connect as duckdb_connect
             import pandas as pd
         except Exception:  # pragma: no cover
             logger.debug("[Snapshot] 未安装 duckdb，跳过因子大表落盘")
@@ -410,7 +412,7 @@ class SnapshotWriter:
             df[col] = df[col].apply(lambda v: json.dumps(v, ensure_ascii=False)
                                     if isinstance(v, (dict, list)) else v)
 
-        con = duckdb.connect(str(self.factor_db_path))
+        con = duckdb_connect(str(self.factor_db_path))
         try:
             con.register("df_new", df)
             exists = con.execute(
@@ -429,8 +431,10 @@ class SnapshotWriter:
             con.execute("INSERT INTO factors BY NAME SELECT * FROM df_new")
             return True
         finally:
-            con.unregister("df_new")
-            con.close()
+            try:
+                con.unregister("df_new")
+            finally:
+                con.close()
 
 
 def _s(v: Any) -> Optional[str]:

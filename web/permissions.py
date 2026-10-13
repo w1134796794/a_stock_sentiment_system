@@ -254,6 +254,7 @@ PUBLIC_PREFIXES = ("/static/",)
 
 # Page-like paths and docs that must be admin only even for GET.
 ADMIN_PAGE_PREFIXES = (
+    "/intraday/replay",
     "/admin",
     "/fetch",
     "/run",
@@ -267,6 +268,7 @@ ADMIN_PAGE_PREFIXES = (
 
 # GET APIs that expose admin state, config, logs, or task state.
 ADMIN_GET_API_PREFIXES = (
+    "/api/intraday-replay",
     "/api/operations",
     "/api/admin",
     "/api/fetch",
@@ -288,7 +290,7 @@ FORCED_ADMIN_KEYS = frozenset({
 
 PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "overview": ("/", "/api/overview", "/api/v1/mobile/bootstrap", "/api/v1/mobile/dashboard"),
-    "workbench": ("/workspace", "/api/v1/workbench"),
+    "workbench": ("/workspace", "/api/v1/workbench", "/api/signals"),
     "strategy": (
         "/data/strategy", "/report", "/assistant",
         "/api/etl/screening", "/api/etl/analysis", "/api/agent", "/api/assistant",
@@ -298,7 +300,7 @@ PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "limitup": ("/data/limitup", "/api/v1/mobile/limitup"),
     "lhb": ("/data/lhb", "/api/v1/mobile/lhb"),
     "dragon": ("/dragon", "/api/leader-pool", "/api/v1/mobile/leaders"),
-    "intraday": ("/intraday", "/api/intraday-strength"),
+    "intraday": ("/intraday", "/api/intraday-strength", "/api/intraday-replay"),
     "realtime": ("/realtime", "/api/realtime", "/api/v1/mobile/realtime"),
     "portfolio": ("/portfolio", "/api/portfolio", "/backtest", "/api/backtest"),
     "strategy_evaluation": ("/strategy-evaluation", "/api/operations/experiments"),

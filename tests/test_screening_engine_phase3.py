@@ -11,6 +11,18 @@ from core.screening.screening_engine import ScreeningEngine
 DUCKDB_MISSING = importlib.util.find_spec("duckdb") is None
 
 
+def test_global_st_gate_applies_without_any_strategy_risk_filter(tmp_path):
+    engine = ScreeningEngine(duckdb_path=tmp_path / 'none.duckdb', output_dir=tmp_path)
+    result = engine.run('20260713', profile_config={'strategy_weight_source': 'manual',
+        'ranking': {'weights': {'tech_score': 1.0}}},
+        candidate_frame=pd.DataFrame([{'code': '000004', 'name': '*ST国华', 'tech_score': 100}]),
+        persist=False)
+    assert result.ok
+    assert result.final == []
+    assert result.rejected[0]['stage'] == 'stock_risk_gate'
+    assert result.weight_metadata['excluded_risk_stocks'] == 1
+
+
 def test_screening_compare_value_ops():
     assert ScreeningEngine.compare_value(60, ">=", 50) is True
     assert ScreeningEngine.compare_value(40, "<", 50) is True

@@ -24,8 +24,9 @@ class AccountEquityEvaluator:
         if not self.price_db_path.exists():
             return [], []
         import duckdb
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-        con = duckdb.connect(str(self.price_db_path), read_only=True)
+        con = duckdb_connect(str(self.price_db_path), read_only=True)
         try:
             calendar = [_date(row[0]) for row in con.execute(
                 "SELECT DISTINCT trade_date FROM index_daily_silver "

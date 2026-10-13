@@ -4,6 +4,21 @@
 {% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">组合已有因子，不重新取数或计算</div>{% endblock %}
 
 {% block content %}
+<section class="config-transfer" aria-label="策略配置同步">
+  <div><strong>生效配置</strong><span id="config-version">读取版本中</span></div>
+  <div class="flex flex-wrap gap-2">
+    <a href="/api/strategies/config/export" class="secondary-command" title="导出当前生效策略配置"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-download" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg>导出配置</a>
+    <button id="compare-config" type="button" class="secondary-command"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-upload" aria-hidden="true"><path d="M12 3v12"></path><path d="m17 8-5-5-5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg>导入比较</button>
+    <input id="config-file" type="file" accept=".json,application/json" hidden>
+  </div>
+</section>
+<dialog id="config-dialog" class="config-dialog">
+  <div class="flex items-center justify-between gap-3"><h2 class="section-title">配置版本对比</h2><button id="close-config" class="icon-command" title="关闭" aria-label="关闭配置对比" type="button">×</button></div>
+  <p id="config-summary"></p>
+  <div id="config-diff" class="config-diff"></div>
+  <div class="flex justify-end gap-2 mt-4"><button id="apply-config" class="primary-command" type="button" disabled>确认导入</button></div>
+  <p id="config-message" role="status"></p>
+</dialog>
 <div class="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)] gap-4 min-h-[76vh]">
   <aside class="border border-slate-800 bg-slate-900/45 rounded-lg overflow-hidden">
     <div class="flex items-center justify-between px-3 py-3 border-b border-slate-800">
@@ -125,6 +140,17 @@
 </div>
 
 <style>
+  .config-transfer { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:.75rem; margin-bottom:1rem; font-size:.8rem; }
+  .config-transfer span { display:inline-block; margin-left:.75rem; color:#94a3b8; overflow-wrap:anywhere; }
+  .config-transfer .secondary-command { display:inline-flex; align-items:center; gap:.4rem; }
+  .config-dialog { width:min(960px,calc(100vw - 24px)); max-height:85vh; border:1px solid #475569; border-radius:8px; background:#0b1220; color:#e2e8f0; padding:1rem; }
+  .config-dialog::backdrop { background:rgba(0,0,0,.65); }
+  .config-dialog p { font-size:.75rem; color:#94a3b8; margin:.75rem 0; overflow-wrap:anywhere; }
+  .config-diff { max-height:52vh; overflow:auto; }
+  .config-diff table { width:100%; table-layout:fixed; font-size:.72rem; }
+  .config-diff th,.config-diff td { padding:.55rem; border-bottom:1px solid #334155; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+  .config-diff th { color:#94a3b8; }
+  .config-diff h3 { margin:.75rem 0; font-size:.85rem; }
   .section-title { font-size:.9rem; font-weight:800; color:#e2e8f0; margin-bottom:.65rem; }
   .field { display:block; min-width:0; }
   .field > span,.field-label { display:block; font-size:.72rem; color:#94a3b8; margin-bottom:.3rem; }
@@ -390,6 +416,7 @@
       loadProfile(saved);
       const savedDeadline = String(saved.execution?.confirmation_deadline || '').slice(0, 5);
       byId('editor-status').textContent = `已保存，确认截止时间 ${savedDeadline || '--'}；配置文件：${data.storage_path || '运行期策略配置'}`;
+      await loadConfigVersion();
     } catch (error) {
       byId('editor-status').textContent = `保存失败：${error?.message || '网络或服务异常'}`;
     } finally {
@@ -415,7 +442,51 @@
     }
     profiles = data.profiles || [];
     loadProfile(profiles.find(item => item.id === selectId) || profiles[0]);
+    await loadConfigVersion();
   }
+
+  let importedBundle = null;
+  let comparedVersion = '';
+  async function configApi(path, payload) {
+    const response = await fetch('/api/strategies/config/' + path, payload ? {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload),
+    } : {cache:'no-store'});
+    const result = await responsePayload(response);
+    if (!response.ok || result.ok === false) throw new Error(result.error || result.message || '配置接口失败');
+    return result;
+  }
+  async function loadConfigVersion() {
+    try { const bundle=await configApi('export'); byId('config-version').textContent=`${bundle.effective_version} · ${bundle.source_path}`; }
+    catch(error) { byId('config-version').textContent=error.message; }
+  }
+  byId('compare-config').addEventListener('click',()=>byId('config-file').click());
+  byId('close-config').addEventListener('click',()=>byId('config-dialog').close());
+  byId('config-file').addEventListener('change',async event=>{
+    const file=event.target.files[0]; if(!file)return;
+    importedBundle=null; comparedVersion=''; byId('apply-config').disabled=true;
+    byId('config-message').textContent=''; byId('config-diff').innerHTML='';
+    byId('config-summary').textContent='正在检查配置包'; byId('config-dialog').showModal();
+    try {
+      if(file.size>2*1024*1024)throw new Error('配置包不能超过2MB');
+      const bundle=JSON.parse(await file.text());
+      const {data}=await configApi('compare',{bundle});
+      importedBundle=bundle; comparedVersion=data.current_version;
+      byId('config-summary').textContent=`当前 ${data.current_version} → 导入后 ${data.result_version}；${data.changed_count} 个策略变化。保留本地独有策略 ${data.retained_local_ids.length} 个。`;
+      byId('config-diff').innerHTML=data.strategies.map(row=>`<h3>${esc(row.name)} · ${esc(row.local_version||'新增')} → ${esc(row.incoming_version||'--')}${row.status==='same'?' · 相同':''}</h3>${row.changes.length?`<table><thead><tr><th>字段</th><th>当前</th><th>导入后</th></tr></thead><tbody>${row.changes.map(change=>`<tr><td>${esc(change.field)}</td><td>${esc(JSON.stringify(change.local)??'--')}</td><td>${esc(JSON.stringify(change.incoming)??'--')}</td></tr>`).join('')}</tbody></table>`:''}`).join('');
+      byId('apply-config').disabled=data.changed_count===0;
+    } catch(error) { byId('config-message').textContent=error.message; }
+    finally { event.target.value=''; }
+  });
+  byId('apply-config').addEventListener('click',async()=>{
+    if(!importedBundle||!comparedVersion||!confirm('确认导入比较中的策略配置？旧配置将备份，已有持仓和成交不会修改。'))return;
+    byId('apply-config').disabled=true;
+    try {
+      const {data}=await configApi('import',{bundle:importedBundle,expected_version:comparedVersion});
+      importedBundle=null; comparedVersion='';
+      byId('config-message').textContent=`已导入 ${data.effective_version}；备份 ${data.backup_path}`;
+      await refreshProfiles(current?.id);
+    } catch(error) { byId('config-message').textContent=error.message+'；请重新选择文件比较'; }
+  });
 
   document.querySelectorAll('[data-add-filter]').forEach(button => button.addEventListener('click', () => {
     const kind = button.dataset.addFilter;
@@ -439,6 +510,7 @@
 
   setOptions();
   loadProfile(profiles[0] || emptyProfile(), profiles.length === 0);
+  loadConfigVersion();
 })();
 </script>
 {% endblock %}

@@ -8,7 +8,7 @@ STRUCTURAL_LABELS = {"limit_pullback": "涨停回踩转强", "limit_reversal": "
 
 
 def evaluate_structure(evaluator, *, mode, data, structure, deadline, gap,
-                       prev_close, limit_price, sector_sync, live):
+                       prev_close, limit_price, sector_sync, live, previous_session_close=0.0):
     from backtest.minute_entry import EntryDecision
 
     label = STRUCTURAL_LABELS[mode]
@@ -32,10 +32,18 @@ def evaluate_structure(evaluator, *, mode, data, structure, deadline, gap,
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             return result("data_insufficient", "支撑区上下界缺失或无效")
+    if previous_session_close and (
+            not math.isfinite(previous_session_close) or previous_session_close <= 0
+            or abs(previous_session_close/reference-1) > 0.005):
+        return result("data_insufficient", "上一交易日实际收盘与结构基准不一致，请重新计算候选")
     if abs(prev_close/reference-1) > 0.005:
+        if previous_session_close > 0:
+            return result("cancelled", f"当日昨收参考{prev_close:.2f}与上一交易日实际收盘"
+                          f"{previous_session_close:.2f}不同，旧价格结构失效，不参与")
         return result("data_insufficient", "昨收与结构基准不一致，请重新计算候选")
     touched = None
     sector_missing = False
+    quality_denial = None
     for index, row in data.iterrows():
         time = str(row["time"])
         if time > deadline:
@@ -79,13 +87,20 @@ def evaluate_structure(evaluator, *, mode, data, structure, deadline, gap,
                 return result("signal_unfilled", "确认后下一分钟缺失，不能假定成交", time)
         decision = evaluator._next_minute_fill(data, index, label, reason, gap,
                                               float(row.volume/prior.volume.mean()), True,
-                                              limit_price, unfilled_when_locked=True, live=live)
+                                              limit_price, unfilled_when_locked=True, live=live,
+                                              breakout_level=max(anchor, float(prior.high.max())),
+                                              protection_price=protection, sector_sync=sector_sync)
+        if decision.status in {"quality_rejected", "quality_pending"}:
+            quality_denial = decision
+            continue
         if decision.filled and (decision.entry_price <= protection or decision.entry_price > anchor+atr
                                 or decision.entry_time > deadline):
             return result("signal_unfilled", "下一分钟价格超出结构买入范围或截止时间", time)
         return decision
     if sector_missing:
         return result("data_insufficient", "结构已出现，板块实时证据不足，继续观察")
+    if quality_denial is not None:
+        return quality_denial
     if live and (data.empty or str(data.iloc[-1].time) < deadline):
         return result("observing", "等待回踩承接后放量突破" if mode == "limit_pullback" else "等待反包目标站稳后放量突破")
     return result("cancelled", "超过策略确认截止时间，未形成结构买点")

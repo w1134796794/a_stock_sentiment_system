@@ -1,7 +1,7 @@
 """Language-neutral realtime quote contract shared by collector and Web."""
 from __future__ import annotations
 
-from datetime import datetime
+from core.realtime.trading_session import shanghai_now
 from typing import Any, Dict, Iterable, List
 
 from core.infrastructure.shared_state import get_shared_state_backend
@@ -37,11 +37,14 @@ class RealtimeQuoteCache:
         *,
         source: str,
         collector_id: str,
+        snapshot_codes: Iterable[str] | None = None,
     ) -> Dict[str, Any]:
-        now = datetime.now()
+        now = shanghai_now()
         values: Dict[str, Dict[str, Any]] = {}
         snapshot_rows: List[Dict[str, Any]] = []
+        recorded_codes = set(snapshot_codes) if snapshot_codes is not None else None
         trade_dates = set()
+        rejected_codes: List[str] = []
         prepared: List[tuple[QuoteSnapshot, Dict[str, Any]]] = []
         for raw in rows or []:
             payload = dict(raw or {})
@@ -49,6 +52,8 @@ class RealtimeQuoteCache:
             payload.setdefault("received_at", now.isoformat(timespec="milliseconds"))
             item = QuoteSnapshot.from_raw(payload, stale_after_seconds=self.stale_after_seconds)
             if not item.code or item.last_price <= 0:
+                if item.code:
+                    rejected_codes.append(item.code)
                 continue
             normalized = item.to_dict(include_raw=False)
             normalized["collector_id"] = collector_id
@@ -82,7 +87,8 @@ class RealtimeQuoteCache:
                 ),
             })
             values[key] = normalized
-            snapshot_rows.append(normalized)
+            if recorded_codes is None or item.code in recorded_codes:
+                snapshot_rows.append(normalized)
         self.backend.set_many_json(values, self.ttl_seconds)
         trade_date = max(trade_dates) if trade_dates else now.strftime("%Y%m%d")
         self.snapshots.append_batch(trade_date, snapshot_rows)
@@ -96,7 +102,7 @@ class RealtimeQuoteCache:
             "storage": self.storage,
         }
         self.backend.set_json(self.META_KEY, meta, self.ttl_seconds)
-        return {"ok": True, "count": len(values), **meta}
+        return {"ok": True, "count": len(values), "rejected_codes": rejected_codes, **meta}
 
     def read_batch(self, codes: Iterable[str]) -> Dict[str, Dict[str, Any]]:
         code_list = []

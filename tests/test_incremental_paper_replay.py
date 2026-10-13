@@ -61,6 +61,7 @@ class Engine:
 
 
 def service(tmp_path: Path, monkeypatch) -> IncrementalPaperReplay:
+    monkeypatch.setattr("core.portfolio.incremental_replay.WEB_DATA_DIR", tmp_path)
     repository = HoldingRepository(tmp_path / "portfolio.sqlite")
     replay = IncrementalPaperReplay(repository, calendar=Calendar())
     monkeypatch.setattr(replay, "config_version", lambda: "test-v1")
@@ -69,15 +70,36 @@ def service(tmp_path: Path, monkeypatch) -> IncrementalPaperReplay:
     return replay
 
 
+def test_minute_failure_has_date_stock_gaps_and_survives_restart(tmp_path, monkeypatch):
+    replay = service(tmp_path, monkeypatch)
+    class PartialMinutes:
+        def get_stock_tick(self, code, date, **kwargs):
+            return pd.DataFrame({"trade_date": [date, date], "time": ["09:31", "15:00"],
+                                 "close": [10, 10], "volume": [100, 100]})
+    replay._prefetch_dm = PartialMinutes()
+    with pytest.raises(ReplayBlocked) as exc:
+        replay.run("20260901", "20260901")
+    assert exc.value.details[0]["code"] == "000001"
+    assert exc.value.details[0]["trade_date"] == "20260901"
+    assert exc.value.details[0]["missing_count"] > 200
+    restarted = IncrementalPaperReplay(replay.repository, calendar=Calendar())
+    assert restarted.checkpoint()["evidence_failures"] == exc.value.details
+
+
 def test_commits_each_day_and_stops_before_missing_evidence(tmp_path, monkeypatch):
     replay = service(tmp_path, monkeypatch)
     monkeypatch.setattr(replay, "_required_minutes",
                         lambda date, codes: ["000001"] if date == "20260902" else [])
 
+    updates = []
     with pytest.raises(ReplayBlocked) as exc:
-        replay.run("20260901", "20260903")
+        replay.run("20260901", "20260903", progress=updates.append)
 
     assert exc.value.trade_date == "20260902"
+    assert updates[0]["total_days"] == 3
+    submitted = [row for row in updates if row["stage"] == "逐日提交完成"]
+    assert submitted[-1]["completed_days"] == 1
+    assert submitted[-1]["total_days"] == 3
     checkpoint = replay.checkpoint()
     assert checkpoint["last_completed_date"] == "20260901"
     assert checkpoint["blocked_date"] == "20260902"

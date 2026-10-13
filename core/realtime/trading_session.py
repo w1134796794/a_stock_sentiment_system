@@ -18,7 +18,7 @@ def _trade_calendar() -> TradeCalendar:
     return TradeCalendar()
 
 
-def _shanghai_now(now: Optional[datetime]) -> datetime:
+def shanghai_now(now: Optional[datetime] = None) -> datetime:
     if now is None:
         return datetime.now(SHANGHAI_TZ)
     if now.tzinfo is None:
@@ -41,7 +41,7 @@ def realtime_session_status(
     calendar: Optional[TradeCalendar] = None,
 ) -> Dict[str, Any]:
     """Return whether automatic realtime refresh is currently allowed."""
-    current = _shanghai_now(now)
+    current = shanghai_now(now)
     cal = calendar or _trade_calendar()
     trade_date = current.strftime("%Y%m%d")
     is_trade_date = bool(cal.is_trade_date(trade_date))
@@ -88,4 +88,4 @@ def realtime_session_status(
     }
 
 
-__all__ = ["realtime_session_status"]
+__all__ = ["realtime_session_status", "shanghai_now", "SHANGHAI_TZ"]

@@ -160,12 +160,20 @@ class StrategyProfileRepository:
         )
 
     def _base_profiles(self) -> Dict[str, Dict[str, Any]]:
-        if not self.base_profile_path.exists():
-            return {}
-        payload = yaml.safe_load(self.base_profile_path.read_text(encoding="utf-8")) or {}
-        return payload.get("screening_profiles") or {}
+        if hasattr(self, "_frozen_bases"):
+            return deepcopy(self._frozen_bases)
+        payload = {}
+        if self.base_profile_path.exists():
+            payload = yaml.safe_load(self.base_profile_path.read_text(encoding="utf-8")) or {}
+        profiles = deepcopy(payload.get("screening_profiles") or {})
+        # Imported bases are frozen alongside combinations, not inherited from
+        # a possibly different deployment's source defaults.
+        profiles.update(deepcopy(self._payload().get("base_profiles") or {}))
+        return profiles
 
     def _payload(self) -> Dict[str, Any]:
+        if hasattr(self, "_frozen_payload"):
+            return deepcopy(self._frozen_payload)
         source = self.path
         if not source.exists() and not self._path_explicit and self.default_path.exists():
             source = self.default_path
@@ -181,6 +189,15 @@ class StrategyProfileRepository:
                 if key in (defaults.get("strategies") or {}):
                     payload["strategies"].setdefault(key, deepcopy(defaults["strategies"][key]))
         return payload
+
+    def frozen(self) -> "StrategyProfileRepository":
+        """Read a consistent configuration once for hashing/exporting all profiles."""
+        with _LOCK:
+            repository = type(self)(self.path, self.base_profile_path)
+            repository.default_path = self.default_path
+            repository._frozen_payload = self._payload()
+            repository._frozen_bases = self._base_profiles()
+        return repository
 
     def list_profiles(
         self, *, enabled_only: bool = False, scope: str = "",

@@ -148,8 +148,9 @@ class SilverWarehouse:
         if self.duckdb_path is None:
             return
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-        with duckdb.connect(str(self.duckdb_path)) as con:
+        with duckdb_connect(str(self.duckdb_path)) as con:
             con.register("_etl_df", df)
             try:
                 con.execute("BEGIN TRANSACTION")
@@ -235,13 +236,14 @@ class SilverWarehouse:
         """Write parquet without pandas.to_parquet to avoid pyarrow extension re-registration in long-lived apps."""
         try:
             import duckdb  # type: ignore
+            from core.infrastructure.duckdb_access import connect as duckdb_connect
         except ImportError:
             df.to_parquet(path, index=False)
             return
 
         tmp_path = path.with_name(f"{path.stem}.{uuid.uuid4().hex}.tmp{path.suffix}")
         try:
-            with duckdb.connect(":memory:") as con:
+            with duckdb_connect(":memory:") as con:
                 con.register("_etl_df", df)
                 con.execute("COPY (SELECT * FROM _etl_df) TO ? (FORMAT PARQUET)", [str(tmp_path)])
                 con.unregister("_etl_df")

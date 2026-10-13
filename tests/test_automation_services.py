@@ -271,6 +271,8 @@ def test_internal_scheduler_recovers_incomplete_daily_job(monkeypatch):
     monkeypatch.setenv("AUTOMATION_DAILY_CATCH_UP", "true")
     monkeypatch.setenv("AUTOMATION_DAILY_TIME", "00:00")
     scheduler = InternalScheduler()
+    outside_session = scheduler._now().replace(hour=20, minute=30)
+    monkeypatch.setattr(scheduler, "_now", lambda: outside_session)
     today = __import__("datetime").datetime.now().strftime("%Y%m%d")
     scheduler.calendar.is_trade_date = lambda trade_date: trade_date == today
     scheduler.calendar.get_trade_dates = lambda start, end: [today]
@@ -290,6 +292,19 @@ def test_internal_scheduler_recovers_incomplete_daily_job(monkeypatch):
 
     assert scheduler._recover_due_daily_job() is True
     assert dispatched[0][0] == "daily"
+
+
+def test_internal_scheduler_does_not_rewrite_previous_day_inputs_during_session(monkeypatch):
+    monkeypatch.setenv("AUTOMATION_DAILY_CATCH_UP", "true")
+    monkeypatch.setenv("AUTOMATION_DAILY_TIME", "00:00")
+    scheduler = InternalScheduler()
+    during_session = scheduler._now().replace(hour=9, minute=41)
+    monkeypatch.setattr(scheduler, "_now", lambda: during_session)
+    scheduler.calendar.is_trade_date = lambda _date: True
+    dispatched = []
+    monkeypatch.setattr(scheduler, "_dispatch_job", lambda *args: dispatched.append(args) or True)
+    assert scheduler._recover_due_daily_job() is False
+    assert dispatched == []
 
 
 def test_internal_scheduler_waits_until_daily_retry_is_due(monkeypatch):

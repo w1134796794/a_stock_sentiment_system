@@ -25,6 +25,7 @@ from core.portfolio.holding_repository import HoldingRepository
 from core.realtime.minute_cache import RealtimeMinuteCache
 from core.realtime.quote_cache import RealtimeQuoteCache
 from core.realtime.watchlist_repository import RealtimeWatchlistRepository
+from core.realtime.trading_session import shanghai_now
 
 
 class EltdxQuoteCollector:
@@ -39,6 +40,7 @@ class EltdxQuoteCollector:
         fixed_codes=(),
         minute_interval_seconds: int | None = None,
         require_shared: bool = False,
+        clock=None,
     ) -> None:
         self.fixed_codes = RealtimeWatchlistRepository.normalize(fixed_codes)
         self.watchlists = RealtimeWatchlistRepository()
@@ -59,11 +61,14 @@ class EltdxQuoteCollector:
         self._consecutive_failures = 0
         self._stop = False
         self._cycles = 0
+        self.clock = lambda: shanghai_now(clock() if clock else None)
+        self._session_started_at = self.clock().isoformat(timespec="milliseconds")
+        self._last_success_at: datetime | None = None
 
     def stop(self, *_args) -> None:
         self._stop = True
 
-    def targets(self) -> list[str]:
+    def targets(self, *, minutes_only: bool = False) -> list[str]:
         holding_codes = []
         try:
             holding_codes = [
@@ -73,7 +78,7 @@ class EltdxQuoteCollector:
         except Exception as exc:  # noqa: BLE001
             logger.debug("读取持仓观察列表失败: {}", exc)
         return RealtimeWatchlistRepository.normalize(
-            [*self.fixed_codes, *self.watchlists.read_all(), *holding_codes]
+            [*self.fixed_codes, *self.watchlists.read_all(minutes_only=minutes_only), *holding_codes]
         )
 
     def collect_once(self) -> dict:
@@ -116,7 +121,8 @@ class EltdxQuoteCollector:
 
         try:
             result = self.quote_cache.write_batch(
-                rows_by_code.values(), source="eltdx_batch", collector_id=ELTDX_COLLECTOR_ID
+                rows_by_code.values(), source="eltdx_batch", collector_id=ELTDX_COLLECTOR_ID,
+                snapshot_codes=self.targets(minutes_only=True),
             )
         except Exception as exc:  # noqa: BLE001
             self._consecutive_failures += 1
@@ -132,23 +138,36 @@ class EltdxQuoteCollector:
             return result
 
         self._consecutive_failures = 0 if result.get("ok") else self._consecutive_failures + 1
+        if result.get("ok"):
+            received = self.clock()
+            if (self._last_success_at is None or self._last_success_at.date() != received.date()
+                    or (received - self._last_success_at).total_seconds() > 24):
+                self._session_started_at = received.isoformat(timespec="milliseconds")
+            self._last_success_at = received
         result["requested_count"] = len(codes)
         result["missing_count"] = max(len(codes) - int(result.get("count") or 0), 0)
+        rejected = set(result.get("rejected_codes") or [])
+        result["missing_codes"] = [code for code in codes if code not in rows_by_code or code in rejected]
+        result["source_diagnostics"] = getattr(self.provider, "last_quote_diagnostics", {})
         result["consecutive_failures"] = self._consecutive_failures
         self._record_health(result)
 
         now = time.monotonic()
         if result.get("ok") and now - self._last_minute_sync >= self.minute_interval_seconds:
             self._last_minute_sync = now
-            self._schedule_minute_sync(codes)
+            self._schedule_minute_sync(self.targets(minutes_only=True))
         return result
 
     def _record_health(self, result: dict) -> None:
         payload = {
+            "protocol_version": 2,
+            "capabilities": ["lease_proof", "continuous_session", "constituent_snapshots"],
             "collector_id": ELTDX_COLLECTOR_ID,
             "source": "eltdx_batch",
             "lease_owned": bool(getattr(self, "_lease_owned", False)),
-            "updated_at": datetime.now().isoformat(timespec="milliseconds"),
+            "updated_at": self.clock().isoformat(timespec="milliseconds"),
+            "session_started_at": self._session_started_at,
+            "last_success_at": self._last_success_at.isoformat(timespec="milliseconds") if self._last_success_at else "",
             **result,
         }
         try:
@@ -159,7 +178,7 @@ class EltdxQuoteCollector:
             logger.warning("采集器健康状态写入实时缓存失败: {}", exc)
 
     def _sync_minutes(self, codes: list[str]) -> None:
-        trade_date = datetime.now().strftime("%Y%m%d")
+        trade_date = self.clock().strftime("%Y%m%d")
         written = 0
         failures = 0
         for code in codes:
@@ -239,7 +258,7 @@ class EltdxQuoteCollector:
             time.sleep(min(0.5, max(deadline - time.monotonic(), 0.0)))
 
     def _is_collection_session(self) -> bool:
-        now = datetime.now()
+        now = self.clock()
         trade_date = now.strftime("%Y%m%d")
         if not self.calendar.is_trade_date(trade_date):
             return False

@@ -43,9 +43,10 @@ class LeaderOutcomeTracker:
         if not records or not self.duckdb_path.exists():
             return 0
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         frame = pd.DataFrame(records)
-        con = duckdb.connect(str(self.duckdb_path))
+        con = duckdb_connect(str(self.duckdb_path))
         try:
             self._ensure_table(con)
             con.register("_leader_signals", frame)
@@ -63,8 +64,9 @@ class LeaderOutcomeTracker:
         if not self.duckdb_path.exists():
             return 0
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-        con = duckdb.connect(str(self.duckdb_path))
+        con = duckdb_connect(str(self.duckdb_path))
         try:
             tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
             if "signal_outcome_wide" not in tables:
@@ -129,8 +131,9 @@ class LeaderOutcomeTracker:
             return {}
         try:
             import duckdb  # type: ignore
+            from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-            con = duckdb.connect(str(self.duckdb_path), read_only=True)
+            con = duckdb_connect(str(self.duckdb_path), read_only=True)
             try:
                 exists = con.execute(
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='leader_signal_history'"

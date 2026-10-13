@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from loguru import logger
+from core.infrastructure.atomic_json import atomic_write_json
+from core.realtime.trading_session import shanghai_now
 
 from core.factors.jobs.gold_utils import FactorJobResult, connect_duckdb, release_process_memory
 from core.factors.jobs.market_factor_job import MarketFactorJob
@@ -42,12 +44,15 @@ class FactorJobRunner:
             duckdb_path = FACTOR_DB_PATH
         self.duckdb_path = Path(duckdb_path)
 
-    def run(self, trade_date: str, *, jobs: Optional[Iterable[str]] = None) -> List[FactorJobResult]:
+    def run(self, trade_date: str, *, jobs: Optional[Iterable[str]] = None,
+            status_dir: Optional[Path] = None) -> List[FactorJobResult]:
         selected = list(jobs or ("market", "lhb", "signals", "sector", "stock"))
+        directory = Path(status_dir or self.duckdb_path.parent / "factor_status")
         results: List[FactorJobResult] = []
         connect_started = time.monotonic()
         logger.info(f"[Phase2] 打开因子仓库: {self.duckdb_path}")
         with connect_duckdb(self.duckdb_path) as con:
+            self._write_status(directory, trade_date, selected, results, state="running")
             logger.info(f"[Phase2] 因子仓库已打开, 耗时={time.monotonic() - connect_started:.1f}s")
             for job_name in selected:
                 job_cls = self.JOBS.get(str(job_name))
@@ -72,7 +77,19 @@ class FactorJobRunner:
                 )
                 del job
                 release_process_memory()
+            self._write_status(directory, trade_date, selected, results, state="done")
         return results
+
+    @classmethod
+    def _write_status(cls, directory: Path, trade_date: str, selected: list,
+                      results: List[FactorJobResult], *, state: str) -> None:
+        records = [result.to_dict() for result in results]
+        passed = cls.successful_job_keys(records)
+        payload = {"trade_date": str(trade_date), "generated_at": shanghai_now().isoformat(timespec="seconds"),
+                   "state": state, "selected_jobs": selected, "jobs": records,
+                   "complete": state == "done" and passed == set(cls.JOBS) and all(item["ok"] for item in records)}
+        path = directory / f"factors_{trade_date}.json"
+        atomic_write_json(path, payload, default=str)
 
 
 def run_factor_jobs(

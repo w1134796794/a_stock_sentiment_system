@@ -21,6 +21,15 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
     candidate_date = str(payload.get("candidate_date") or payload.get("trade_date") or "")
     market_date = str(payload.get("market_date") or "")
     fetched_at = _fetch_time(candidate_date)
+    bundle_id = str(payload.get("evidence_bundle_id") or "")
+    frozen = None
+    if candidate_date and market_date:
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        frozen = PreopenEvidenceStore().load(candidate_date, market_date)
+        if frozen:
+            fetched_at = str(frozen["inputs"]["artifacts"]["fetch"].get("fetched_at") or "")
+            bundle_id = frozen["bundle_id"]
+    frozen_config = None
     for row in payload.get("rows") or []:
         if not isinstance(row, dict):
             continue
@@ -50,6 +59,7 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
             "screening_rank": row.get("screening_rank"),
             "action_group": row.get("action_group") or "",
             "source_data_fetched_at": fetched_at,
+            "evidence_bundle_id": bundle_id,
             "quote_source_time": row.get("quote_source_time") or row.get("time") or "",
             "quote_received_at": row.get("received_at") or row.get("quote_time") or "",
             "minute_closed_at": minute_closed_at,
@@ -59,8 +69,37 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
             "sector_coverage": round(sector_coverage, 4) if sector_coverage is not None else None,
             "sector_data_completeness": sector.get("data_completeness"),
             "status": row.get("confirm_status") or row.get("status") or "",
-            "trigger_reason": row.get("reason") or "",
+            "trigger_reason": row.get("raw_trigger_reason") or row.get("reason") or "",
             "veto_reason": row.get("notification_skip_reason") or row.get("health_gate_reason") or "",
             "paper_execution_time": "",
         }
+        if confirm_time and row["signal_evidence"]["status"] in {"confirmed", "unfilled"}:
+            from core.signals.case_features import build_signal_case
+
+            if frozen_config is None:
+                from dataclasses import asdict
+                from backtest.backtest_engine import BacktestConfig
+                from risk.risk_config import RiskConfig
+                risk = RiskConfig.from_dict(frozen["inputs"]["risk_config"]) if frozen else RiskConfig.load()
+                frozen_config = asdict(BacktestConfig.from_risk_config(risk))
+            policy = str(frozen_config.get("exit_policy_mode") or "strategy")
+            if policy == "oos_selected":
+                from backtest.exit_policy import ExitPolicyRepository
+                resolved_policy = ExitPolicyRepository().resolve(str(row.get("strategy_id") or "default"), market_date)
+                policy = str(resolved_policy.get("policy") or "strategy")
+            else:
+                resolved_policy = {"policy": policy}
+            version = stable_id("signal_execution_v1", row.get("strategy_version") or "",
+                                row.get("strategy_execution") or {}, frozen_config, resolved_policy)
+            case = build_signal_case({**row, "strategy_version": version},
+                                     {**payload, "source_available_at": fetched_at, "pit_verified": True})
+            case["strategy_config_version"] = row.get("strategy_version") or ""
+            case["backtest_config"] = frozen_config
+            case["resolved_exit_policy"] = resolved_policy
+            snapshot = row.get("signal_feature_snapshot")
+            if snapshot:
+                case["features"] = snapshot["features"]
+                case["quality"] = snapshot["quality"]
+            row["case_id"] = case["case_id"]
+            row["signal_evidence"]["signal_case"] = case
     return payload

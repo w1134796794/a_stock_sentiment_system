@@ -440,6 +440,43 @@ class HoldingRepository:
             ).fetchone()[0]
             return max(0, int(position["shares"]) - int(unsettled))
 
+    def sell_replay_position(self, position_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Import a full historical exit, including theoretical reference-price adjustments."""
+        with self._write() as conn:
+            saved = conn.execute("SELECT * FROM portfolio_positions WHERE id=?", (position_id,)).fetchone()
+            position = self._position_row(saved) if saved else {}
+            if not position or position.get("status") != "open":
+                raise ValueError("Historical position is missing or closed")
+            date = str(payload.get("trade_date") or "")
+            if len(date) != 8 or not date.isdigit() or date <= str(position["entry_date"]):
+                raise ValueError("Historical exit must satisfy T+1")
+            price, shares, fees, cost = [float(payload.get(key) or 0) for key in
+                                         ("price", "shares", "fees", "cost_basis")]
+            if not all(math.isfinite(value) for value in (price, shares, fees, cost)) or min(price, shares, cost) <= 0 or fees < 0:
+                raise ValueError("Invalid historical exit amounts")
+            if not math.isclose(cost, float(position["cost_amount"]), rel_tol=0, abs_tol=1e-4):
+                raise ValueError("Historical full-exit cost does not match the imported holding")
+            proceeds = price * shares - fees
+            pnl = proceeds - cost
+            if not math.isclose(pnl, float(payload["expected_pnl"]), rel_tol=0, abs_tol=1e-4):
+                raise ValueError("Historical exit cash and PnL disagree")
+            metadata = dict(payload.get("metadata") or {})
+            metadata["quantity_basis"] = "historical_reference_adjusted"
+            metadata["original_entry_shares"] = position["shares"]
+            metadata["reference_adjusted_exit_shares"] = shares
+            self._insert_trade(conn, account_key=position["account_key"], position_id=position_id,
+                payload={**payload, "metadata": metadata, "source": "historical_replay",
+                         "code": position["code"], "name": position["name"], "action": "sell",
+                         "strategy_id": position.get("strategy_id"), "realized_pnl": pnl,
+                         "realized_pnl_pct": pnl / cost * 100})
+            conn.execute("UPDATE portfolio_positions SET shares=0, cost_amount=0, last_price=?, "
+                         "status='closed', latest_action='sold', latest_reason=?, updated_at=?, closed_at=? WHERE id=?",
+                         (price, payload.get("reason") or "Historical exit", _now(), _now(), position_id))
+            conn.execute("UPDATE portfolio_accounts SET cash=cash+?, updated_at=? WHERE account_key=?",
+                         (proceeds, _now(), position["account_key"]))
+            return {**self._position_row(conn.execute("SELECT * FROM portfolio_positions WHERE id=?", (position_id,)).fetchone()),
+                    "executed_shares": shares}
+
     def sell_position(self, position_id: int, payload: Dict[str, Any], *, _connection=None) -> Dict[str, Any]:
         with self._write(_connection) as conn:
             event_key = str(payload.get("execution_key") or "")
@@ -676,7 +713,9 @@ class HoldingRepository:
         payload: Dict[str, Any],
     ) -> None:
         price = float(payload.get("price") or 0)
-        shares = int(payload.get("shares") or 0)
+        adjusted = (payload.get("action") == "sell" and
+                    (payload.get("metadata") or {}).get("quantity_basis") == "historical_reference_adjusted")
+        shares = float(payload.get("shares") or 0) if adjusted and payload.get("source") == "historical_replay" else int(payload.get("shares") or 0)
         trade_date = str(payload.get("trade_date") or payload.get("entry_date") or datetime.now().strftime("%Y%m%d")).replace("-", "")
         trade = conn.execute(
             """INSERT INTO portfolio_trades (

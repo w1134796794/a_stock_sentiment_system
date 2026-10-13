@@ -176,8 +176,9 @@ class StrategyDiagnosticsService:
             return {"coverage_pct": 0.0 if factors else 100.0, "required": len(factors), "missing": factors}
         try:
             import duckdb  # type: ignore
+            from core.infrastructure.duckdb_access import connect as duckdb_connect
 
-            con = duckdb.connect(str(self.duckdb_path), read_only=True)
+            con = duckdb_connect(str(self.duckdb_path), read_only=True)
             try:
                 stock_columns = {
                     str(row[0])

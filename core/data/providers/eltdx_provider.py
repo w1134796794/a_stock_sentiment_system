@@ -8,12 +8,15 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
+import re
+from time import monotonic
 from typing import Any, Optional
 
 import pandas as pd
 from loguru import logger
 
 from core.utils.stock_code_utils import StockCodeUtils
+from core.realtime.trading_session import shanghai_now
 
 
 class EltdxProvider:
@@ -22,6 +25,8 @@ class EltdxProvider:
     def __init__(self, timeout: float = 3.0, host: Optional[str] = None):
         self.timeout = timeout
         self.host = host
+        self._unavailable_snapshots: dict[str, tuple[float, str]] = {}
+        self.last_quote_diagnostics: dict = {}
 
     @staticmethod
     def available() -> bool:
@@ -111,12 +116,35 @@ class EltdxProvider:
             return {}
         tdx_codes = [self._to_tdx_code(c) for c in codes]
         out: dict = {}
+        failures = {}
         try:
             with self._client() as client:
-                received_at = datetime.now()
                 for i in range(0, len(tdx_codes), 80):
-                    chunk = tdx_codes[i:i + 80]
-                    snaps = client.quotes.get_snapshots(chunk) or []
+                    chunk = []
+                    for code in tdx_codes[i:i + 80]:
+                        unavailable = self._unavailable_snapshots.get(code)
+                        if unavailable and monotonic() < unavailable[0]:
+                            failures[code] = unavailable[1]
+                        else:
+                            chunk.append(code)
+                    snaps = []
+                    while chunk:
+                        try:
+                            snaps = client.quotes.get_snapshots(chunk) or []
+                            break
+                        except Exception as exc:
+                            # eltdx names the missing record; isolate only that exact requested symbol.
+                            match = re.fullmatch(r"snapshot record marker not found: ((?:sz|sh|bj)\d{6})", str(exc))
+                            if not match or match[1] not in chunk:
+                                failures.update({code: str(exc) for code in chunk})
+                                logger.debug("[EltdxProvider] snapshot chunk unavailable: {}", exc)
+                                break
+                            code = match[1]
+                            failures[code] = str(exc)
+                            self._unavailable_snapshots[code] = (monotonic() + 300, str(exc))
+                            chunk.remove(code)
+                            logger.warning("[EltdxProvider] temporarily isolate missing snapshot {}: {}", code, exc)
+                    received_at = shanghai_now()
                     for s in snaps:
                         code6 = str(getattr(s, "code", "") or "").split(".")[0].zfill(6)
                         if not code6 or code6 == "000000":
@@ -124,7 +152,12 @@ class EltdxProvider:
                         out[code6] = self._normalize_quote_snapshot(s, received_at)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] batch quote snapshots unavailable ({len(codes)} codes): {e}")
-            return {}
+            failures.update({code: str(e) for code in tdx_codes if code[-6:] not in out})
+        self.last_quote_diagnostics = {
+            "requested_count": len(codes), "returned_count": len(out),
+            "missing_codes": [code for code in codes if StockCodeUtils.standardize_code(code, add_suffix=False) not in out],
+            "failures": failures,
+        }
         return out
 
     @classmethod
@@ -228,7 +261,7 @@ class EltdxProvider:
 
     @classmethod
     def _is_today(cls, trade_date: str) -> bool:
-        return cls._parse_trade_date(trade_date) == datetime.now().date()
+        return cls._parse_trade_date(trade_date) == shanghai_now().date()
 
     @staticmethod
     def _normalize_period(period: str) -> str:

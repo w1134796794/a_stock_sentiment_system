@@ -20,12 +20,12 @@ def build_reversal_factors(daily: pd.DataFrame, trade_date: str) -> pd.DataFrame
     data = daily.copy()
     data["trade_date"] = data["trade_date"].astype(str)
     data = data[data["trade_date"] <= trade_date]
+    for col in ("open", "high", "low", "close", "pre_close", "vol_hand"):
+        data[col] = pd.to_numeric(data[col], errors="coerce")
     for code, history in data.groupby("code", sort=False):
         h = history.sort_values("trade_date").drop_duplicates("trade_date").tail(80).reset_index(drop=True)
         if len(h) < 21 or str(h.iloc[-1]["trade_date"]) != trade_date:
             continue
-        for col in ("open", "high", "low", "close", "pre_close", "vol_hand"):
-            h[col] = pd.to_numeric(h[col], errors="coerce")
         if h[["open", "high", "low", "close", "pre_close", "vol_hand"]].isna().any().any():
             continue
         if (h[["open", "high", "low", "close", "pre_close"]] <= 0).any().any():
@@ -44,8 +44,8 @@ def build_reversal_factors(daily: pd.DataFrame, trade_date: str) -> pd.DataFrame
         if not math.isfinite(atr) or atr <= 0:
             continue
         up, down = {}, {}
-        for index in range(max(0, len(h)-16), len(h)):
-            r = h.iloc[index]
+        start = max(0, len(h)-16)
+        for index, r in enumerate(h.iloc[start:].itertuples(index=False), start=start):
             up[index] = abs(float(r.close)-float(limit_up_price(r.pre_close, code, name))) < 0.0051
             down[index] = float(r.low) <= float(limit_down_price(r.pre_close, code, name))+0.0051
         structures = {}

@@ -58,8 +58,12 @@ def load_stock_memberships(code: Any, cache_dir: Path = CACHE_DIR) -> list[dict[
     files = list(folder.glob(f"{code6}.*.csv"))
     if not files:
         return []
+    return _read_membership_file(files[0])
+
+
+def _read_membership_file(file: Path) -> list[dict[str, str]]:
     try:
-        frame = pd.read_csv(files[0])
+        frame = pd.read_csv(file)
     except Exception:
         return []
     result: list[dict[str, str]] = []
@@ -78,7 +82,14 @@ def load_stock_memberships(code: Any, cache_dir: Path = CACHE_DIR) -> list[dict[
 
 
 def load_membership_map(codes: list[Any], cache_dir: Path = CACHE_DIR) -> dict[str, list[dict[str, str]]]:
-    return {_code6(code): load_stock_memberships(code, cache_dir) for code in codes}
+    folder = Path(cache_dir) / "sector" / "stock_sectors"
+    files = {}
+    for file in folder.glob("*.csv"):
+        pieces = file.name.split(".")
+        if len(pieces) >= 3:
+            files.setdefault(pieces[0], file)
+    return {_code6(code): _read_membership_file(files[_code6(code)]) if _code6(code) in files else []
+            for code in codes}
 
 
 def _prior_first_board_sector_counts(con, trade_date: str, days: int = 5) -> dict[str, int]:

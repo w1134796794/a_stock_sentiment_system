@@ -1,7 +1,6 @@
 """Realtime sector-index direction and constituent breadth confirmation."""
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from threading import RLock
 from time import monotonic
@@ -9,6 +8,7 @@ from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 from backtest.trade_calendar import TradeCalendar
 from core.realtime.models import normalize_stock_code
+from core.realtime.trading_session import shanghai_now
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -60,18 +60,35 @@ class RealtimeSectorBreadthProvider:
         breadth = sum(_float(row.get("change_pct")) > 0 for row in observed) / len(observed) if observed else None
         average_change = sum(_float(row.get("change_pct")) for row in observed) / len(observed) if observed else None
 
-        index_changes = self._sector_changes(names)
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        frozen = PreopenEvidenceStore().load(self.calendar.prev(str(market_date)), str(market_date))
+        if frozen:
+            constituent_map = frozen["inputs"].get("sector_members") or {}
+            index_quotes = self._stock_quotes(sorted(members))
+            index_changes = []
+            for name in names:
+                codes = constituent_map.get(name, [])
+                usable = [index_quotes[code] for code in codes if code in index_quotes
+                          and not index_quotes[code].get("is_stale")
+                          and index_quotes[code].get("change_pct") is not None]
+                if codes and len(usable) / len(codes) >= 0.6:
+                    index_changes.append(sum(_float(row["change_pct"]) for row in usable) / len(usable))
+            self._last_sector_quote_detail = {"source": "ths_frozen_constituents", "usable_count": len(index_changes)}
+        else:
+            index_changes = self._sector_changes(names)
         index_positive = (sum(index_changes) / len(index_changes) >= 0) if index_changes else None
-        if breadth is None or index_positive is None:
+        coverage = len(observed) / min(len(members), 80) if members else 0.0
+        if coverage < 0.6 or breadth is None or index_positive is None:
             state: Optional[bool] = None
         else:
             state = bool(breadth >= 0.55 and (average_change or 0.0) >= 0.0 and index_positive)
-        completeness = (0.5 if breadth is not None else 0.0) + (0.5 if index_positive is not None else 0.0)
+        completeness = (0.5 if breadth is not None and coverage >= 0.6 else 0.0) + (0.5 if index_positive is not None else 0.0)
         detail = {
-            "observed_at": datetime.now().isoformat(timespec="seconds"),
+            "observed_at": shanghai_now().isoformat(timespec="seconds"),
             "sector_names": list(names),
             "member_count": len(members),
             "observed_members": len(observed),
+            "coverage": round(coverage, 4),
             "breadth": round(breadth, 4) if breadth is not None else None,
             "average_change_pct": round(average_change, 4) if average_change is not None else None,
             "index_change_pct": round(sum(index_changes) / len(index_changes), 4) if index_changes else None,
@@ -89,26 +106,18 @@ class RealtimeSectorBreadthProvider:
         except Exception:
             previous = str(market_date)
         key = (previous, sector_name)
-        if key in self._member_cache:
-            return self._member_cache[key]
-        if not self.duckdb_path.exists():
-            return set()
-        try:
-            import duckdb  # type: ignore
-
-            con = duckdb.connect(str(self.duckdb_path), read_only=True)
-            try:
-                rows = con.execute(
-                    "SELECT code FROM factor_stock_wide "
-                    "WHERE CAST(trade_date AS VARCHAR)=? AND resonance_sectors LIKE ?",
-                    [previous, f"%{sector_name}%"],
-                ).fetchall()
-            finally:
-                con.close()
-            members = {normalize_stock_code(row[0], add_suffix=False) for row in rows if row and row[0]}
-        except Exception:
-            members = set()
-        self._member_cache[key] = members
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        frozen = PreopenEvidenceStore().load(previous, market_date)
+        if frozen:
+            members = set((frozen["inputs"].get("sector_members") or {}).get(sector_name, []))
+        else:
+            if key in self._member_cache:
+                return self._member_cache[key]
+            service = self._ensure_sector_service()
+            mapping = service.resolve_codes_by_names([sector_name], source="ths") if service else {}
+            members = set(service.member_codes(mapping[sector_name])) if mapping.get(sector_name) else set()
+        if members:
+            self._member_cache[key] = members
         return members
 
     def _stock_quotes(self, codes: Iterable[str]) -> Dict[str, Dict[str, Any]]:
@@ -138,9 +147,11 @@ class RealtimeSectorBreadthProvider:
                 attempts.append({"source": "ths", "resolved": 0, "usable": 0})
             else:
                 payload = service.get_sector_quotes(
-                    mapping.values(), source="ths", limit=len(mapping),
+                    mapping.values(), source="ths", limit=len(mapping), include_raw=True,
                 )
                 rows = payload.get("sectors") or []
+                rows = [row for row in rows if row.get("source") != "ths_constituent_aggregation"
+                        or _float((row.get("raw") or {}).get("coverage")) >= 0.6]
                 usable_codes = {
                     str(row.get("code") or "").split(".")[0]
                     for row in rows if row.get("change_pct") is not None

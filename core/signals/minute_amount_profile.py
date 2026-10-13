@@ -1,9 +1,10 @@
 """Historical intraday amount curves grouped by stock liquidity."""
 from __future__ import annotations
 
+import hashlib
 import json
-import math
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -29,7 +30,7 @@ class MinuteAmountProfileRepository:
 
     @property
     def available(self) -> bool:
-        return bool((self.load().get("profiles") or {}))
+        return bool(self.load().get("profiles") or {})
 
     def expected_fraction(self, previous_amount: float, time_text: str) -> Tuple[Optional[float], int]:
         payload = self.load()
@@ -88,6 +89,46 @@ class MinuteAmountProfileTrainer:
                 continue
             totals.append(total)
             samples.append((total, day[["time", "fraction"]]))
+        return self._save_samples(samples, totals)
+
+    def train_historical(self, *, start_date: str, end_date: str, codes=None) -> Dict[str, Any]:
+        from backtest.minute_entry import normalize_minute_bars
+        from core.data.minute_quality import inspect_minute_bars
+
+        if not start_date <= end_date or end_date > datetime.now().strftime("%Y%m%d"):
+            raise ValueError("Historical profile dates are invalid")
+        samples, totals, sources = [], [], []
+        allowed = {str(code).split(".")[0].zfill(6) for code in codes} if codes is not None else None
+        for path in sorted(self.cache_dir.glob("*.csv")):
+            canonical, separator, date = path.stem.rpartition("_")
+            if not separator or len(date) != 8 or not date.isdigit() or not start_date <= date <= end_date:
+                continue
+            if allowed is not None and canonical.split(".")[0].zfill(6) not in allowed:
+                continue
+            raw = path.read_bytes()
+            try:
+                frame = pd.read_csv(BytesIO(raw))
+                if not inspect_minute_bars(frame, date, expected_code=canonical)["valid"]:
+                    continue
+                day = normalize_minute_bars(frame)
+            except (ValueError, TypeError, KeyError):
+                continue
+            total = float(day["amount"].sum())
+            if total <= 0:
+                continue
+            day["fraction"] = day["amount"].cumsum() / total
+            samples.append((total, day[["time", "fraction"]]))
+            totals.append(total)
+            sources.append({"file": path.name, "date": date, "sha256": hashlib.sha256(raw).hexdigest()})
+        if len(samples) < 60:
+            return {"ok": False, "message": "Historical full-minute samples fewer than 60", "sample_days": len(samples)}
+        return self._save_samples(samples, totals, historical_training={
+            "method": "prior_complete_minute_amount_curves_v1",
+            "start": min(row["date"] for row in sources), "end": max(row["date"] for row in sources),
+            "requested_start": start_date, "requested_end": end_date, "sources": sources,
+        })
+
+    def _save_samples(self, samples, totals, *, historical_training=None) -> Dict[str, Any]:
         if len(samples) < 20:
             return {"ok": False, "message": "分钟样本不足20个交易股票日", "sample_days": len(samples)}
         low, high = pd.Series(totals).quantile([0.33, 0.67]).tolist()
@@ -113,6 +154,8 @@ class MinuteAmountProfileTrainer:
             "amount_thresholds": [float(low), float(high)],
             "profiles": profiles,
         }
+        if historical_training is not None:
+            payload["historical_training"] = historical_training
         self.repository.path.parent.mkdir(parents=True, exist_ok=True)
         self.repository.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         self.repository._payload = payload
@@ -127,4 +170,31 @@ class MinuteAmountProfileTrainer:
         return self.train()
 
 
-__all__ = ["MinuteAmountProfileRepository", "MinuteAmountProfileTrainer"]
+def validate_historical_profile(payload: dict, cache_dir: Path, replay_start: str) -> None:
+    from core.data.minute_quality import inspect_minute_bars
+
+    training = payload.get("historical_training") or {}
+    sources = training.get("sources") or []
+    if (training.get("method") != "prior_complete_minute_amount_curves_v1" or len(sources) < 60
+            or payload.get("sample_days") != len(sources) or not payload.get("profiles")
+            or str(training.get("requested_end") or "") >= replay_start):
+        raise ValueError("Missing historical amount-profile provenance")
+    dates, files = [], set()
+    for source in sources:
+        name, date = str(source.get("file") or ""), str(source.get("date") or "")
+        if (Path(name).name != name or not name.endswith(f"_{date}.csv") or len(date) != 8
+                or not date.isdigit() or date >= replay_start or name in files):
+            raise ValueError("Future, duplicate or invalid historical profile source")
+        raw = (Path(cache_dir) / name).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != source.get("sha256"):
+            raise ValueError("Historical profile source changed; retrain before freezing")
+        canonical = name.removesuffix(f"_{date}.csv")
+        if not inspect_minute_bars(pd.read_csv(BytesIO(raw)), date, expected_code=canonical)["valid"]:
+            raise ValueError("Historical profile source is incomplete")
+        dates.append(date)
+        files.add(name)
+    if training.get("start") != min(dates) or training.get("end") != max(dates):
+        raise ValueError("Historical profile training window does not match sources")
+
+
+__all__ = ["MinuteAmountProfileRepository", "MinuteAmountProfileTrainer", "validate_historical_profile"]

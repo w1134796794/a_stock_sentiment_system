@@ -129,6 +129,46 @@ def test_eltdx_provider_uses_one_connection_and_normalizes_source_fields():
     assert row["source"] == "eltdx_batch"
 
 
+def test_missing_single_symbol_does_not_discard_other_constituent_quotes():
+    client = FakeClient()
+    calls = []
+    def snapshots(codes):
+        calls.append(list(codes))
+        if "sz000004" in codes:
+            raise ValueError("snapshot record marker not found: sz000004")
+        return FakeQuotes().get_snapshots(codes)
+    client.quotes.get_snapshots = snapshots
+    provider = EltdxProvider()
+    provider._client = lambda: client
+    result = provider.get_quote_snapshots(["000001", "000004"])
+    assert set(result) == {"000001"}
+    assert calls == [["sz000001", "sz000004"], ["sz000001"]]
+    assert provider.last_quote_diagnostics["missing_codes"] == ["000004"]
+    calls.clear()
+    result = provider.get_quote_snapshots(["000001", "000004"])
+    assert set(result) == {"000001"}
+    assert calls == [["sz000001"]]
+    assert "sz000004" in provider.last_quote_diagnostics["failures"]
+
+
+def test_chunk_failure_preserves_received_quotes_and_missing_is_explicit():
+    client = FakeClient()
+    calls = []
+    def snapshots(codes):
+        calls.append(list(codes))
+        if len(calls) == 2:
+            raise TimeoutError("node timeout")
+        return FakeQuotes().get_snapshots(codes)
+    client.quotes.get_snapshots = snapshots
+    provider = EltdxProvider()
+    provider._client = lambda: client
+    codes = [f"{code:06d}" for code in range(1, 82)]
+    result = provider.get_quote_snapshots(codes)
+    assert set(result) == {"000001"}
+    assert provider.last_quote_diagnostics["missing_codes"] == codes[1:]
+    assert provider.last_quote_diagnostics["failures"]["sz000081"] == "node timeout"
+
+
 def test_minute_sync_does_not_block_snapshot_loop():
     collector = EltdxQuoteCollector()
     started = Event()

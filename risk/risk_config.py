@@ -104,7 +104,7 @@ class RiskConfig:
 
     # ---- 交易成本（回测）----
     commission_rate: float = 0.0003
-    stamp_duty_rate: float = 0.001
+    stamp_duty_rate: float = 0.0005
     slippage: float = 0.002
     min_holding_days: int = 1                 # T+1
     exit_minute_data_policy: str = "cache_or_fetch"  # cache_only / cache_or_fetch / daily_only

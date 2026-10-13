@@ -297,13 +297,14 @@ class StrategyPortfolioAllocator:
         as_of_date = max((date[:8] for date in dates if len(date) >= 8), default="99999999")
         try:
             import duckdb  # type: ignore
+            from core.infrastructure.duckdb_access import connect as duckdb_connect
             from config.settings import FACTOR_DB_PATH
 
             path = Path(FACTOR_DB_PATH)
             if not path.exists():
                 return pd.DataFrame()
             placeholders = ",".join("?" for _ in codes)
-            con = duckdb.connect(str(path), read_only=True)
+            con = duckdb_connect(str(path), read_only=True)
             try:
                 frame = con.execute(
                     "SELECT trade_date, code, close FROM stock_daily_silver "

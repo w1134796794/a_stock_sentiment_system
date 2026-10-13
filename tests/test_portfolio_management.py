@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pandas as pd
+
 from core.infrastructure.shared_state import MemoryStateBackend
 from core.notifications.notifier import NotificationService
 from core.portfolio.exit_decision_service import ExitDecisionService
@@ -553,15 +555,19 @@ def test_replay_prefetches_missing_minute_and_auction_data(tmp_path, monkeypatch
         def __init__(self, *args, **kwargs):
             assert kwargs["allow_remote_history"] is True
 
-        def get_stock_tick(self, ts_code, trade_date):
+        def get_stock_tick(self, ts_code, trade_date, **kwargs):
             calls["minute"].append((trade_date, ts_code))
-            return [1, 2]
+            times = [f"{minute // 60:02d}:{minute % 60:02d}:00"
+                     for start in (570, 780) for minute in range(start + 1, start + 121)]
+            return pd.DataFrame({"trade_date": trade_date, "time": times, "close": 10, "volume": 100})
 
         def get_auction_data(self, ts_code, trade_date):
             calls["auction"].append((trade_date, ts_code))
             return {"open": 10.0}
 
     monkeypatch.setattr(settings, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr("backtest.trade_calendar.TradeCalendar", lambda: type("Calendar", (), {
+        "is_real": True, "prev": lambda self, date: "20260529"})())
     monkeypatch.setattr(data_module, "DataManager", FakeDataManager)
     monkeypatch.setattr(prefetch_module, "_minute_cached", lambda *args: False)
     monkeypatch.setattr(

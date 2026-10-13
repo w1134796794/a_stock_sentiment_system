@@ -174,12 +174,23 @@ class ScreeningEngine:
             result.message = f"读取指标数据失败: {e}"
             return result
         result.input_count = int(len(candidates))
+        from core.utils.stock_eligibility import new_entry_exclusion
+        risk_rejected = []
+        if not candidates.empty:
+            exclusions = candidates.apply(new_entry_exclusion, axis=1)
+            for index, row in candidates[exclusions.ne("")].iterrows():
+                risk_rejected.append({"code": str(row.get("code") or ""),
+                    "name": str(row.get("name") or ""), "stage": "stock_risk_gate",
+                    "factor": "stock_eligibility", "value": None, "reason": exclusions.loc[index]})
+            candidates = candidates[exclusions.eq("")].copy()
+        result.rejected = risk_rejected[:200]
+        result.weight_metadata["excluded_risk_stocks"] = len(risk_rejected)
         if candidates.empty:
             result.after_hard_filter = 0
             result.after_priority_filter = 0
             result.final = []
-            result.rejected = []
-            result.message = ("历史龙头前置池无匹配候选，未扩大股票池"
+            result.message = ("候选均为ST或退市整理风险股票，已排除"
+                              if risk_rejected else "历史龙头前置池无匹配候选，未扩大股票池"
                               if "historical_leader_pool" in result.weight_metadata
                               else "未读取到个股指标数据，输出空筛选结果")
             if persist:
@@ -405,7 +416,7 @@ class ScreeningEngine:
                 "original_status": str(self._model_drift.get("status") or "unknown"),
             }
         reasons: Dict[str, List[str]] = {str(row.code): [] for row in working.itertuples()}
-        rejected: List[Dict[str, Any]] = []
+        rejected: List[Dict[str, Any]] = list(risk_rejected)
 
         working = self._apply_hard_filters(working, cfg, neutral_score, reasons, rejected, result)
         working = self._apply_exclusion_filters(working, cfg, neutral_score, rejected, result)
@@ -568,6 +579,7 @@ class ScreeningEngine:
             return pd.DataFrame()
 
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         stock_wide = pd.DataFrame()
         market_wide = pd.DataFrame()
@@ -576,7 +588,7 @@ class ScreeningEngine:
         for attempt in range(4):
             con = None
             try:
-                con = duckdb.connect(str(self.duckdb_path))
+                con = duckdb_connect(str(self.duckdb_path))
                 stock_wide = self._read_table(con, "factor_stock_wide", trade_date)
                 reversal = self._read_table(con, "factor_reversal_stock_wide", trade_date)
                 if not stock_wide.empty and not reversal.empty:

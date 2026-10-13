@@ -53,6 +53,24 @@ class HoldingService:
         initial_capital = _number(account.get("initial_capital"))
         total_assets = cash + market_value
         total_pnl = total_assets - initial_capital
+        trades = self.repository.list_trades(account_key, limit=500)
+        from core.operations.ledger import TradingLedger
+        import json
+        ledger = TradingLedger(self.repository.db_path)
+        trade_ids = [trade["id"] for trade in trades]
+        with ledger._connect() as conn:
+            estimates = conn.execute("SELECT t.id, f.payload_json FROM portfolio_trades t "
+                "JOIN signal_case_forecasts f ON f.forecast_id=json_extract(t.metadata_json, '$.forecast_id') "
+                "WHERE t.account_key=? AND t.id IN (" + ",".join("?" for _ in trade_ids) + ")",
+                (account_key, *trade_ids)).fetchall() if trade_ids else []
+        forecasts = {row[0]: json.loads(row[1]) for row in estimates}
+        for trade in trades:
+            forecast = forecasts.get(trade.get("id"))
+            if forecast:
+                trade["entry_analog"] = {key: forecast.get(key) for key in
+                    ("forecast_id", "status", "probability", "expected_net_return", "classification", "as_of")}
+                trade["entry_analog"]["ready_at_order"] = ((trade.get("metadata") or {}).get("analog_at_order") or {}).get("status") == "estimated"
+                trade["entry_analog"]["prediction_generated_at"] = forecast.get("prediction_generated_at")
         return {
             "account": account,
             "summary": {
@@ -70,7 +88,7 @@ class HoldingService:
             },
             "positions": positions,
             "exit_signals": exit_signals,
-            "trades": self.repository.list_trades(account_key, limit=500),
+            "trades": trades,
             "policy": {
                 "initial_capital": PAPER_INITIAL_CAPITAL,
                 "max_positions": PAPER_MAX_POSITIONS,

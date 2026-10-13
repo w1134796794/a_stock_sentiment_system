@@ -413,6 +413,9 @@ def _limitup_cache_overlay(date: str) -> Dict[str, Any]:
         "rate_3to4": None,
         "rate_high": None,
     }
+    for key in tuple(promotion):
+        promotion[f"{key}_success"] = None
+        promotion[f"{key}_sample"] = None
     try:
         by_date: Dict[str, List[Dict[str, Any]]] = {}
         with path.open("r", encoding="utf-8-sig", newline="") as f:
@@ -425,25 +428,27 @@ def _limitup_cache_overlay(date: str) -> Dict[str, Any]:
             prev_rows = by_date[prev_dates[-1]]
             prev_board = {code(r): board(r) for r in prev_rows if code(r)}
 
-            def rate(prev_level: int | None = None, high: bool = False) -> float | None:
+            def rate(prev_level: int | None = None, high: bool = False) -> tuple[float | None, int, int]:
                 base = [
                     (c, b) for c, b in prev_board.items()
                     if (high and b >= 4) or (prev_level is not None and b == prev_level)
                 ]
-                if not base:
-                    return None
                 promoted = sum(1 for c, b in base if current_board.get(c, 0) >= b + 1)
-                return round(promoted / len(base) * 100, 2)
+                return (round(promoted / len(base) * 100, 2) if base else None, promoted, len(base))
 
             base_all = list(prev_board.items())
             promoted_all = sum(1 for c, b in base_all if current_board.get(c, 0) >= b + 1)
-            promotion = {
-                "overall": round(promoted_all / len(base_all) * 100, 2) if base_all else None,
-                "rate_1to2": rate(1),
-                "rate_2to3": rate(2),
-                "rate_3to4": rate(3),
-                "rate_high": rate(high=True),
-            }
+            promotion.update(
+                overall=round(promoted_all / len(base_all) * 100, 2) if base_all else None,
+                overall_success=promoted_all,
+                overall_sample=len(base_all),
+                previous_date=prev_dates[-1],
+            )
+            for key, level in (("rate_1to2", 1), ("rate_2to3", 2), ("rate_3to4", 3), ("rate_high", None)):
+                value, promoted, sample = rate(level, high=level is None)
+                promotion[key] = value
+                promotion[f"{key}_success"] = promoted
+                promotion[f"{key}_sample"] = sample
     except Exception:
         pass
 
@@ -483,9 +488,10 @@ def _etl_market_overlay_cached(
         return {}
     try:
         import duckdb  # type: ignore
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         out: Dict[str, Any] = {}
-        with duckdb.connect(str(FACTOR_DB_PATH), read_only=True) as con:
+        with duckdb_connect(str(FACTOR_DB_PATH), read_only=True) as con:
             if _table_exists(con, "factor_market_wide"):
                 market_df = con.execute(
                     """

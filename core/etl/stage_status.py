@@ -5,6 +5,8 @@ import json
 from datetime import datetime, time
 from pathlib import Path
 from typing import Any, Dict, Iterable
+from core.infrastructure.atomic_json import atomic_write_json
+from core.realtime.trading_session import shanghai_now
 
 CORE_SILVER_TABLES = (
     "stock_daily_silver",
@@ -97,11 +99,12 @@ def _date_count(db_path: Path, table: str, trade_date: str) -> int:
         return 0
     try:
         import duckdb
+        from core.infrastructure.duckdb_access import connect as duckdb_connect
 
         # DuckDB requires every in-process connection to the same file to use
         # identical configuration. Silver writes are read-write, so status
         # checks must not open a concurrent read_only connection.
-        with duckdb.connect(str(db_path)) as con:
+        with duckdb_connect(str(db_path)) as con:
             exists = con.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
                 [str(table)],
@@ -164,7 +167,8 @@ def fetch_status(trade_date: str, *, db_path: Path, web_data_dir: Path) -> Dict[
     write_complete = bool(writes and not write_missing)
     premature_fetch = _premature_manifest(date, manifest)
     legacy_complete = bool(ready and not manifest_path.exists())
-    ready_for_factors = bool(ready and (write_complete or legacy_complete))
+    manifest_state = (manifest.get("metadata") or {}).get("state", "done")
+    ready_for_factors = bool(ready and (write_complete or legacy_complete) and manifest_state == "done")
     return {
         "stage": "fetch",
         "trade_date": date,
@@ -188,6 +192,7 @@ def fetch_status(trade_date: str, *, db_path: Path, web_data_dir: Path) -> Dict[
         ),
         "premature_fetch": premature_fetch,
         "legacy_complete": legacy_complete,
+        "state": manifest_state,
         "message": (
             "检测到盘前/盘中生成的当日缓存，请在盘后强制刷新"
             if premature_fetch else (
@@ -223,22 +228,13 @@ def write_fetch_manifest(
     metadata: Dict[str, Any] | None = None,
 ) -> Path:
     path = Path(web_data_dir) / "fetch_status" / f"fetch_{trade_date}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
+    return atomic_write_json(path, {
                 "trade_date": str(trade_date),
-                "fetched_at": datetime.now().isoformat(timespec="seconds"),
+                "fetched_at": shanghai_now().isoformat(timespec="seconds"),
                 "sources": sources or {},
                 "writes": writes or {},
                 "metadata": metadata or {},
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    return path
+            }, indent=2)
 
 
 def require_stage(status: Dict[str, Any]) -> None:

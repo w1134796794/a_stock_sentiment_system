@@ -74,6 +74,30 @@ def test_leader_pool_from_screening_json(tmp_path: Path):
     assert all(row["code"] != "000001" for row in result["rows"])
 
 
+def test_leader_history_cannot_keep_current_st_stock(tmp_path):
+    for date, name in [('20260710', '正常股份'), ('20260713', '*ST正常')]:
+        (tmp_path / f'screening_{date}.json').write_text(json.dumps({
+            'trade_date': date, 'final': [_leader_item(name=name)]}), encoding='utf-8')
+    service = LeaderPoolService(screening_dir=tmp_path)
+    assert service.build_pool('20260710')['rows']
+    assert service.build_pool('20260713')['rows'] == []
+
+
+def test_current_st_status_excludes_old_leader_even_outside_strong_universe(tmp_path, monkeypatch):
+    import duckdb
+    path = tmp_path / 'factor.duckdb'
+    con = duckdb.connect(str(path))
+    con.execute('CREATE TABLE factor_stock_wide(code VARCHAR, name VARCHAR, trade_date VARCHAR)')
+    con.execute("INSERT INTO factor_stock_wide VALUES ('002281', '*ST正常', '20260713')")
+    con.close()
+    service = LeaderPoolService(screening_dir=tmp_path, duckdb_path=path)
+    monkeypatch.setattr(service, '_recent_dates', lambda *a: ['20260710', '20260713'])
+    monkeypatch.setattr(service, '_load_screening', lambda date: {
+        'final': [_leader_item()] if date == '20260710' else []})
+    monkeypatch.setattr(service, '_load_market_universe', lambda date: [])
+    assert service.build_pool('20260713')['rows'] == []
+
+
 def test_historical_leader_codes_excludes_current_trade_date(tmp_path: Path):
     screening_dir = tmp_path / "screening"
     screening_dir.mkdir()

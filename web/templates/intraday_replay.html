@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}当天诊断回放{% endblock %}
+{% block page_title %}当天诊断回放{% endblock %}
+{% block header_extra %}<a href="/intraday" class="text-sm text-emerald-300">返回盘中转强</a>{% endblock %}
+{% block content %}
+<form id="replay-form" class="dr-controls">
+  <label>行情日<input id="dr-date" type="text" pattern="[0-9]{8}" maxlength="8" value="{{ market_date }}" required></label>
+  <label>候选范围<select id="dr-profile"><option value="leader_pool">近期龙头池</option><option value="decision_pool">生产决策池</option></select></label>
+  <label>龙头回看<select id="dr-lookback"><option value="5">近5日</option><option value="10" selected>近10日</option><option value="20">近20日</option></select></label>
+  <label>回放至<input id="dr-until" type="time" value="15:01" min="09:30" max="15:01" required></label>
+  <label class="dr-codes">股票代码<input id="dr-codes" placeholder="全部候选，或 002614,603949"></label>
+  <label class="dr-check"><input id="dr-fetch" type="checkbox">补取缺失行情</label>
+  <button id="dr-start" type="submit">开始回放</button>
+  <button id="dr-cancel" type="button" disabled>取消</button>
+</form>
+<div class="dr-selects">
+  <label>已保存回放<select id="dr-runs"><option value="">选择报告</option></select></label>
+  <label>对照基准<select id="dr-baseline"><option value="">不对照</option></select></label>
+  <a id="dr-download" class="hidden text-emerald-300" target="_blank" rel="noopener">查看报告 JSON</a>
+</div>
+<section class="dr-status" aria-live="polite">
+  <div class="dr-status-line"><strong id="dr-state">未开始</strong><span id="dr-progress-text"></span></div>
+  <progress id="dr-progress" max="100" value="0"></progress>
+  <div id="dr-current" class="text-sm text-slate-400"></div>
+  <div id="dr-error" class="text-sm text-rose-300"></div>
+</section>
+<div id="dr-summary" class="dr-summary"></div>
+<section id="dr-evidence" class="dr-section hidden"><h2>证据与运行边界</h2><div id="dr-limits" class="text-sm text-amber-300"></div><div id="dr-failures"></div></section>
+<section id="dr-comparison" class="dr-section hidden"><h2>与基准对照</h2><div id="dr-changes"></div></section>
+<section class="dr-section"><h2>逐股诊断</h2><div id="dr-stocks"><div class="text-sm text-slate-500 py-6">暂无回放报告</div></div></section>
+<style>
+  .dr-controls,.dr-selects {display:flex;flex-wrap:wrap;align-items:end;gap:12px;padding:16px 0;border-bottom:1px solid #334155}
+  .dr-controls label,.dr-selects label {display:grid;gap:5px;font-size:12px;color:#94a3b8;min-width:0}
+  .dr-controls input:not([type=checkbox]),.dr-controls select,.dr-selects select {background:#0c1728;color:#e2e8f0;border:1px solid #334155;border-radius:4px;height:36px;padding:6px 10px;width:150px;max-width:100%}
+  .dr-controls .dr-codes {flex:1;min-width:220px}.dr-codes input {width:100%!important}
+  .dr-controls .dr-check {display:flex;align-items:center;gap:8px;height:36px;color:#cbd5e1}
+  .dr-controls button {height:36px;padding:6px 14px;border:1px solid #475569;border-radius:4px;color:#e2e8f0;background:#172236;font-size:13px}
+  #dr-start {background:#047857;border-color:#059669} .dr-controls button:disabled {opacity:.45;cursor:not-allowed}
+  .dr-selects select {width:310px}.dr-status {padding:18px 0}.dr-status-line {display:flex;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:13px}
+  #dr-progress {display:block;width:100%;height:8px;accent-color:#10b981;margin-bottom:10px}
+  .dr-summary {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border-bottom:1px solid #334155}
+  .dr-summary>div {padding:14px 10px;font-size:12px;color:#94a3b8}.dr-summary strong {display:block;font-size:19px;color:#e2e8f0;margin-top:4px}
+  .dr-section {padding:18px 0;border-bottom:1px solid #334155;min-width:0}.dr-section h2 {font-size:14px;font-weight:700;margin-bottom:12px}
+  .dr-section details {padding:12px 0;border-bottom:1px solid #233148}.dr-section summary {cursor:pointer;display:flex;flex-wrap:wrap;gap:12px;font-size:13px;color:#e2e8f0}
+  .dr-section table {border-collapse:collapse;width:100%;font-size:12px;min-width:650px}.dr-section th,.dr-section td {text-align:left;padding:9px 10px;border-bottom:1px solid #233148;vertical-align:top;white-space:normal;overflow-wrap:anywhere}
+  .dr-section th {color:#94a3b8}.dr-table {overflow:auto;margin-top:12px}#dr-limits p {margin:6px 0;overflow-wrap:anywhere}
+  .dr-version {font-size:12px;color:#94a3b8;overflow-wrap:anywhere;padding-top:8px}
+  @media(max-width:640px){.dr-controls label:not(.dr-check){flex:1 1 140px}.dr-controls input:not([type=checkbox]),.dr-controls select{width:100%}.dr-selects label{width:100%}.dr-selects select{width:100%}.dr-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+<script src="/static/intraday-replay.js"></script>
+{% endblock %}
