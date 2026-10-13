@@ -1,14 +1,13 @@
 """Bounded, persistent diagnostic jobs separate from paper/live state."""
 from __future__ import annotations
 
-import json
 import re
 import time
 import uuid
 from pathlib import Path
 from threading import Lock, Thread
 
-from core.infrastructure.atomic_json import atomic_write_json
+from core.infrastructure.atomic_json import atomic_read_json, atomic_write_json
 from core.infrastructure.file_mutex import file_mutex
 from core.realtime.day_replay import DayReplayLoader, clean, compare_reports, replay_request, replay_saved_inputs
 
@@ -35,7 +34,7 @@ class DayReplayJobs:
         if baseline:
             if not self.path(baseline, "inputs.json").exists():
                 raise ValueError("基准报告不存在或尚未完成")
-            captured = json.loads(self.path(baseline, "inputs.json").read_text(encoding="utf-8"))
+            captured = atomic_read_json(self.path(baseline, "inputs.json"))
             if captured["request"] != {k:v for k,v in request.items() if k != "fetch_missing"}:
                 raise ValueError("对照必须保持基准日期、范围、股票与结束时间一致")
         with self.lock:
@@ -52,14 +51,18 @@ class DayReplayJobs:
 
     def _run(self, status):
         run_id = status["run_id"]
+        last_saved = None
         def save():
+            nonlocal last_saved
             status["updated_epoch"] = time.time()
             atomic_write_json(self.path(run_id), clean(status))
+            last_saved = time.monotonic()
         def progress(value):
             if self.path(run_id, "cancel.json").exists():
                 raise ReplayCancelled()
             status.update(state="running", progress=value)
-            save()
+            if last_saved is None or time.monotonic() - last_saved >= 0.25:
+                save()
         try:
             with file_mutex(self.root / "execution.lock", timeout=0):
                 progress({"stage": "加载候选日输入", "completed": 0, "total": 0})
@@ -67,8 +70,8 @@ class DayReplayJobs:
                     raise ReplayCancelled()
                 baseline = status.get("baseline_id")
                 if baseline:
-                    original = json.loads(self.path(baseline, "report.json").read_text(encoding="utf-8"))
-                    report = replay_saved_inputs(json.loads(self.path(baseline, "inputs.json").read_text(encoding="utf-8")), progress)
+                    original = atomic_read_json(self.path(baseline, "report.json"))
+                    report = replay_saved_inputs(atomic_read_json(self.path(baseline, "inputs.json")), progress)
                     report["comparison"] = compare_reports(original, report)
                     report["recorded_runtime"] = original.get("recorded_runtime", {})
                     report["limitations"].extend(original.get("limitations", [])[4:])
@@ -95,7 +98,7 @@ class DayReplayJobs:
         path = self.path(run_id, "report.json" if report else "status.json")
         if not path.exists():
             raise FileNotFoundError("回放记录不存在或报告尚未完成")
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = atomic_read_json(path)
         if not report and value.get("state") in {"running", "queued"} and time.time() - value.get("updated_epoch", 0) > 1800:
             value.update(state="interrupted", error="任务超过30分钟未更新，可能服务已重启；请重新运行")
         return value

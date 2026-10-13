@@ -132,6 +132,30 @@ def test_job_is_persistent_isolated_and_can_be_read_after_new_manager(tmp_path):
     with pytest.raises(ValueError): jobs.get("../status")
 
 
+def test_progress_writes_are_throttled_but_terminal_progress_is_saved(tmp_path, monkeypatch):
+    import core.realtime.day_replay_jobs as module
+    writes = []
+    original = module.atomic_write_json
+    def recording_write(path, payload, **kwargs):
+        if path.name == "status.json":
+            writes.append(dict(payload))
+        return original(path, payload, **kwargs)
+    monkeypatch.setattr(module, "atomic_write_json", recording_write)
+    monkeypatch.setattr(module.time, "monotonic", lambda: 100.0)
+    class Loader:
+        def run(self, request, progress):
+            for i in range(1000):
+                progress({"stage":"检查证据", "completed":i+1, "total":1000})
+            return {"stocks":[], "classification":"minute_rule_diagnostic"}
+    jobs = DayReplayJobs(tmp_path, loader_factory=Loader)
+    result = jobs.start({"market_date":"20261013"})
+    jobs.thread.join(timeout=5)
+    assert not jobs.thread.is_alive()
+    assert len(writes) == 3  # queued, first progress, terminal; never per stock.
+    status = jobs.get(result["run_id"])
+    assert status["state"] == "done" and status["progress"]["completed"] == 1000
+
+
 def test_loader_fetch_uses_existing_minute_api_and_only_selected_day(tmp_path, monkeypatch):
     import core.realtime.overlay_service as overlays
     import scripts.diagnose_intraday_signal as diagnostics
