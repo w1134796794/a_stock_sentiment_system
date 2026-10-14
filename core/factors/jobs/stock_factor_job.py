@@ -264,6 +264,8 @@ def _stock_sector_scores(
         if sector_type not in {"N", "I", "概念", "行业"}:
             continue
         sector_code = str(row.get("code") or row.get("ts_code") or "").split(".")[0]
+        if len(sector_code) != 6 or not sector_code.isdigit() or not sector_code.startswith("8"):
+            continue
         values = sector_scores.get(sector_code)
         if not values:
             continue

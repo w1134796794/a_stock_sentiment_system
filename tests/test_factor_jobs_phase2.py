@@ -173,6 +173,32 @@ def test_stock_sector_scores_exclude_security_attributes_from_mainline(tmp_path)
     assert "国家大基金持股" not in scores["resonance_sectors"]
 
 
+@pytest.mark.parametrize("cached", [False, True])
+def test_stock_sector_scores_do_not_promote_700_classifications_even_if_stronger(tmp_path, cached):
+    rows = [
+        {"ts_code":"700580.TI", "name":"互动媒体与服务Ⅳ(A股)", "type":"I"},
+        {"ts_code":"700417.TI", "name":"互动媒体与服务Ⅲ(A股)", "type":"I"},
+        {"ts_code":"881164.TI", "name":"文化传媒", "type":"I"},
+        {"ts_code":"886060.TI", "name":"短剧游戏", "type":"N"},
+    ]
+    if cached:
+        directory = tmp_path / "sector" / "stock_sectors"
+        directory.mkdir(parents=True)
+        pd.DataFrame(rows).to_csv(directory / "603533.SH.csv", index=False)
+    factor_scores = {row["ts_code"].split(".")[0]: {
+        "sector_name":row["name"], "mainline_score":100 if row["ts_code"].startswith("700") else 80,
+        "momentum_score":80, "amount_score":80, "amount_ratio_score":80, "persistence_score":80,
+    } for row in rows}
+    result = _stock_sector_scores("603533", factor_scores, tmp_path, memberships=None if cached else rows)
+    assert result["primary_sector_code"] == "881164"
+    assert result["resonance_sectors"] == "文化传媒,短剧游戏"
+    assert result["matched_sector_codes"] == "881164,886060"
+    assert result["sector_mainline_score"] == 80
+    only_classifications = _stock_sector_scores("603533",factor_scores,tmp_path,memberships=rows[:2])
+    assert only_classifications["primary_sector_code"] == ""
+    assert only_classifications["resonance_sectors"] == ""
+
+
 @pytest.mark.skipif(DUCKDB_MISSING, reason="duckdb is not installed in this Python environment")
 def test_phase2_factor_jobs_write_gold_tables(tmp_path):
     duckdb = _duckdb()
