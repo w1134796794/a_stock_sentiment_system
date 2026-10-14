@@ -17,6 +17,13 @@
     const list=values||[];
     return list.slice(0,8).join(', ') + (list.length>8?` 等 ${list.length} 项`:'');
   }
+  function sectorPath(detail) {
+    if (detail?.assessed === false) return '尚未检查';
+    return {red_breadth:'红盘广度',open_rising_3m:'开盘走强'}[detail?.confirmation_path] || '--';
+  }
+  function percent(value) {
+    return value === null || value === undefined ? '--' : `${Number(value).toFixed(2)}%`;
+  }
   async function refreshRuns() {
     const value = await api('/api/intraday-replay');
     savedRuns = value.runs;
@@ -38,7 +45,7 @@
     $('dr-failures').innerHTML += `<details><summary>原始运行证据 ${recorded.length} 条</summary>${recorded.length ? table(['股票','原始确认时间','门禁否决','接收时间','通知状态'],recorded.map(row=>[row.stock_code||row.code,row.evidence?.confirm_time,row.evidence?.health_gate_reason||row.evidence?.veto_reason,row.evidence?.quote_received_at,row.evidence?.notification_status])) : '<p class="text-sm text-slate-400 mt-2">没有本地原始运行记录；需要对应服务器日志或证据库。</p>'}</details>`;
     $('dr-comparison').classList.toggle('hidden',!r.comparison);
     if (r.comparison) $('dr-changes').innerHTML = `<p class="text-sm text-amber-300">${esc(r.comparison.reason)}</p>` + table(['股票','原确认时间','本次确认时间','原状态 / 原因','本次状态 / 原因'],r.comparison.changes.map(c=>[c.code,c.before.first_confirm_time||'--',c.after.first_confirm_time||'--',`${signalLabels[c.before.status]||c.before.status} / ${c.before.reason}`,`${signalLabels[c.after.status]||c.after.status} / ${c.after.reason}`]));
-    $('dr-stocks').innerHTML = r.stocks.map(s=>`<details><summary><b>${esc(s.name)} ${esc(s.code)}</b><span>${esc(signalLabels[s.status]||s.status)}</span><span>首次确认 ${esc(s.first_confirm_time||'--')} · 观测 ${esc(s.first_evaluated_at||'--')}</span></summary><p class="text-sm text-slate-400 mt-2">${esc(s.reason)}</p>${s.price_evidence?`<p class="text-sm text-amber-300 mt-2">仅价格条件首次出现 ${esc(s.price_evidence.first_price_trigger||'--')} · 跌破开盘低点 ${esc(s.price_evidence.first_opening_low_break||'--')} · 成交额${s.price_evidence.amount_estimated?'含估算':'为源数据'}</p>`:''}${table(['观测时间','分钟状态','触发 / 否决原因','确认 / 成交时点','板块覆盖','数据状态'],s.transitions.map(t=>[t.evaluated_at,signalLabels[t.signal_status]||t.signal_status,t.reason,`${t.confirm_time||'--'} / ${t.entry_time||'--'}`,t.sector_detail?.assessed===false?'尚未检查':`${((t.sector_detail?.coverage||0)*100).toFixed(1)}%`,t.data_status]))}</details>`).join('');
+    $('dr-stocks').innerHTML = r.stocks.map(s=>`<details><summary><b>${esc(s.name)} ${esc(s.code)}</b><span>${esc(signalLabels[s.status]||s.status)}</span><span>首次确认 ${esc(s.first_confirm_time||'--')} · 观测 ${esc(s.first_evaluated_at||'--')}</span></summary><p class="text-sm text-slate-400 mt-2">${esc(s.reason)}</p>${s.price_evidence?`<p class="text-sm text-amber-300 mt-2">仅价格条件首次出现 ${esc(s.price_evidence.first_price_trigger||'--')} · 跌破开盘低点 ${esc(s.price_evidence.first_opening_low_break||'--')} · 成交额${s.price_evidence.amount_estimated?'含估算':'为源数据'}</p>`:''}${table(['观测时间','分钟状态','触发 / 否决原因','确认 / 成交时点','板块覆盖','板块路径','相对开盘 / 3分钟','趋势覆盖','数据状态'],s.transitions.map(t=>[t.evaluated_at,signalLabels[t.signal_status]||t.signal_status,t.reason,`${t.confirm_time||'--'} / ${t.entry_time||'--'}`,t.sector_detail?.assessed===false?'尚未检查':`${((t.sector_detail?.coverage||0)*100).toFixed(1)}%`,sectorPath(t.sector_detail),`${percent(t.sector_detail?.open_gain_pct)} / ${percent(t.sector_detail?.three_minute_change_pct)}`,percent(t.sector_detail?.trend_coverage===undefined?null:t.sector_detail.trend_coverage*100),t.data_status]))}</details>`).join('');
     $('dr-download').classList.remove('hidden');
     $('dr-download').href = `/api/intraday-replay/${encodeURIComponent(r.run_id)}?report=true`;
   }

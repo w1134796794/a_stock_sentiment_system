@@ -73,7 +73,7 @@ def replay_request(payload, *, now=None):
 
 
 class _ReplayEntryService(RealtimeEntrySignalService):
-    def __init__(self, previous, auctions, members, frames, profiles):
+    def __init__(self, previous, auctions, members, frames, profiles, opening_prices=None):
         # Explicit adapters isolate the shared rule evaluator from live providers/stores.
         super().__init__(amount_profile_repository=profiles,
                          signal_stats_repository=SimpleNamespace(get=lambda *a, **kw: {}),
@@ -82,6 +82,7 @@ class _ReplayEntryService(RealtimeEntrySignalService):
         self.auctions = auctions
         self.members = members
         self.frames = frames
+        self.opening_prices = opening_prices or {}
         self.sector_minutes = {}
 
     def _auction(self, code, market_date):
@@ -94,17 +95,17 @@ class _ReplayEntryService(RealtimeEntrySignalService):
         names = tuple(sorted(self._sectors(row)))
         codes = sorted({c for name in names for c in self.members.get(name, [])})
         detail = {"sector_names": list(names), "member_count": len(codes), "coverage": 0.0,
-                  "data_completeness": 0.0, "sector_confirmation_version": "minute_constituents_diagnostic_v1",
+                  "data_completeness": 0.0, "sector_confirmation_version": "minute_constituents_diagnostic_v2",
                   "sector_confirmation_source": "historical_constituent_minutes",
                   "assessed": False, "reason": "其他入场条件先行判断，尚未检查板块"}
 
-        def changes(at_time, selected):
+        def changes(at_time, selected, *, opening=False):
             result = {}
             for member in selected:
                 if member == code:  # A stock cannot confirm its own sector synchrony.
                     continue
                 data = self.frames.get(member, pd.DataFrame())
-                prior = float(self.previous.get(member, {}).get("close") or 0)
+                prior = float(self.opening_prices.get(member) or 0) if opening else float(self.previous.get(member, {}).get("close") or 0)
                 if data.empty or prior <= 0:
                     continue
                 known = data[data["time"] == at_time]
@@ -130,13 +131,20 @@ class _ReplayEntryService(RealtimeEntrySignalService):
             breadth = sum(v > 0 for v in observed.values()) / len(observed) if observed else None
             average = sum(observed.values()) / len(observed) if observed else None
             complete = coverage >= .6 and len(observed) >= 2 and bool(index_changes)
-            state = bool(breadth >= .55 and average >= 0 and sum(index_changes) >= 0) if complete else None
+            from core.signals.sector_sync import assess_sector_sync, TREND_WINDOW_MINUTES
+            minute = str(at_time)[:8]
+            prior_minute = (datetime.strptime(minute, "%H:%M:%S") - timedelta(minutes=TREND_WINDOW_MINUTES)).strftime("%H:%M:%S")
+            opening = changes(minute, eligible, opening=True)
+            earlier = changes(prior_minute, eligible, opening=True)
+            state, sync_detail = assess_sector_sync(complete=complete, breadth=breadth,
+                average_change=average, index_positive=sum(index_changes) >= 0 if index_changes else None,
+                opening_changes=opening, earlier_changes=earlier, expected_members=len(eligible))
             detail.update({"coverage": round(coverage, 4), "observed_members": len(observed),
                            "assessed": True,
                            "breadth": breadth, "average_change_pct": average,
                            "data_completeness": 1.0 if complete else 0.0,
                            "observed_minute": str(at_time),
-                           "reason": "成分股分钟同步" if state else ("板块同步不足" if state is False else "板块分钟覆盖不足")})
+                           **sync_detail})
             absent_minutes = [member for member in eligible if self.frames.get(member, pd.DataFrame()).empty]
             absent_closes = [member for member in eligible if not float(self.previous.get(member, {}).get("close") or 0)]
             detail.update({"missing_minute_codes": absent_minutes, "missing_previous_close_codes": absent_closes,
@@ -156,9 +164,11 @@ class _ReplayEntryService(RealtimeEntrySignalService):
 
 
 def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=None,
-                   members=None, sector_codes=None, profiles=None, input_basis="research", bundle_id="", progress=None):
+                   members=None, sector_codes=None, opening_prices=None, opening_price_source="",
+                   profiles=None, input_basis="research", bundle_id="", progress=None):
     """Run the actual entry service against growing prefixes, with no live effects."""
     from core.signals.minute_amount_profile import MinuteAmountProfileRepository
+    from core.signals.sector_sync import SECTOR_SYNC_VERSION
     from core.realtime.sector_service import RealtimeSectorService
     supplied_names = {name for name, values in (members or {}).items() if values}
     members = RealtimeSectorService.confirmation_members({
@@ -167,7 +177,7 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
     date, until = request["market_date"], request["until"]
     profiles = profiles or MinuteAmountProfileRepository()
     normalized = {code: normalize_minute_bars(frame) for code, frame in frames.items()}
-    service = _ReplayEntryService(previous, auctions or {}, members or {}, normalized, profiles)
+    service = _ReplayEntryService(previous, auctions or {}, members or {}, normalized, profiles, opening_prices)
     stocks, failures = [], []
     for index, source in enumerate(rows):
         row = dict(source)
@@ -191,7 +201,7 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
         else:
             from scripts.diagnose_intraday_signal import price_diagnostic
             stock["price_evidence"] = price_diagnostic(available, {"pre_close": prior["close"],
-                "open": float(available.iloc[0]["open"])},
+                "open": (opening_prices or {}).get(code) or float(available.iloc[0]["open"])},
                 str((RealtimeEntrySignalService._row_execution(row) or {}).get("confirmation_deadline") or "10:00:00"))
             last_key = None
             for count in range(1, len(available) + 1):
@@ -200,7 +210,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                 evaluated_at = (datetime.strptime(source_time, "%H:%M:%S") + timedelta(minutes=1)).strftime("%H:%M:%S")
                 # Derived bar values are replay context, never quotes with invented receive timestamps.
                 quote = {"date": date, "time": evaluated_at, "pre_close": prior["close"],
-                         "open_price": float(available.iloc[0]["open"]), "last_price": float(prefix.iloc[-1]["close"]),
+                         "open_price": (opening_prices or {}).get(code) or float(available.iloc[0]["open"]),
+                         "last_price": float(prefix.iloc[-1]["close"]),
                          "source": "historical_minute_context", "is_stale": False}
                 signal = service._evaluate_one(row, quote, prefix, {}, {}, prior, date, rows, {})
                 if signal.get("signal_status") == "confirmed" and not stock["first_confirm_time"]:
@@ -233,13 +244,15 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
               "input_basis": input_basis, "rows": rows, "previous": previous,
               "auctions": auctions or {}, "members": members or {}, "bundle_id": bundle_id,
               "sector_codes": {name: sector_codes[name] for name in members},
+              "opening_prices": opening_prices or {}, "opening_price_source": opening_price_source,
               "amount_profile": profiles.load(),
               "minutes": {c: json.loads(f.to_json(orient="records")) for c, f in sorted(frames.items())}}
     root = Path(__file__).resolve().parents[2]
     files = ["core/realtime/day_replay.py", "core/realtime/entry_signal_service.py", "backtest/minute_entry.py",
              "backtest/confirmation_quality.py", "backtest/reversal_entry.py", "core/data/minute_quality.py",
              "core/realtime/models.py", "core/signals/minute_amount_profile.py", "core/utils/stock_eligibility.py",
-             "scripts/diagnose_intraday_signal.py", "core/realtime/sector_service.py", "core/realtime/sector_evidence.py"]
+             "scripts/diagnose_intraday_signal.py", "core/realtime/sector_service.py", "core/realtime/sector_evidence.py",
+             "core/signals/sector_sync.py", "core/realtime/sector_breadth.py"]
     versions = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
     return clean({"classification": "minute_rule_diagnostic", "market_date": date, "candidate_date": candidate_date,
                   "until": until, "profile": request["profile"], "generated_at": shanghai_now().isoformat(),
@@ -250,13 +263,16 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                   "complete": bool(rows) and not failures, "failures": failures, "stocks": stocks,
                   "counts": dict(Counter(stock["status"] for stock in stocks)),
                   "confirmed_stocks": sum(bool(s["first_confirm_time"]) for s in stocks),
-                  "sector_confirmation_policy": "ths_8_exact_v1",
+                  "sector_confirmation_policy": SECTOR_SYNC_VERSION,
+                  "opening_price_source": opening_price_source,
                   "excluded_sector_names": excluded_sector_names,
                   "limitations": ["分钟回放不重建历史 3 秒快照、租约、接收时间及采集空窗。",
                                   "补齐后的分钟不能证明当时及时到达；规则触发不代表实时门禁通过或微信送达。",
                                   "板块使用冻结成分股的分钟观测，不冒充当时的批量快照。",
                                   "当前代码与保存的输入用于代码回归，不是策略收益或真实成交回测。",
-                                  "板块确认仅使用绑定到同花顺8开头代码的成分；700分类及无代码绑定的旧成分不参与。"]})
+                                  "板块确认仅使用绑定到同花顺8开头代码的成分；700分类及无代码绑定的旧成分不参与。",
+                                  "开盘走强要求真实开盘价、同组成分股与3分钟前的分钟；日线仅取开盘字段，不取当日收盘或最高价。",
+                                  "盘后取得的当日开盘字段只用于规则诊断，不证明盘中及时到达。"]})
 
 
 class DayReplayLoader:
@@ -269,6 +285,40 @@ class DayReplayLoader:
         self.dm = data_manager
         self.calendar = calendar or TradeCalendar()
         self.minute_cache = minute_cache
+
+    def _opening_evidence(self, date, codes, *, fetch_missing):
+        from core.signals.sector_sync import finite_number
+        path = self.cache / "stock" / "all_daily" / f"{date}.csv"
+        frame, source = pd.DataFrame(), ""
+        if path.exists():
+            frame = pd.read_csv(path, dtype={"code":str, "ts_code":str})
+            source = "stock_daily_open_cache"
+        if frame.empty and self.database.exists():
+            from core.infrastructure.duckdb_access import connect
+            try:
+                with connect(self.database, read_only=True) as con:
+                    frame = con.execute("SELECT code, trade_date, open FROM stock_daily_silver "
+                        "WHERE CAST(trade_date AS VARCHAR)=?", [date]).fetchdf()
+                source = "stock_daily_silver_open"
+            except Exception:
+                pass
+        if frame.empty and fetch_missing and callable(getattr(self.dm, "get_all_stocks_daily", None)):
+            try:
+                frame = self.dm.get_all_stocks_daily(date)
+                source = "tushare_daily_open_posthoc"
+            except Exception:
+                pass
+        if frame is None or frame.empty or not {"open","trade_date"}.issubset(frame.columns):
+            return {}, "missing_real_session_open"
+        wanted = set(codes)
+        values = {}
+        for row in frame.to_dict("records"):
+            code = normalize_stock_code(row.get("code") or row.get("ts_code"), add_suffix=False)
+            opening = finite_number(row.get("open"))
+            if (code in wanted and opening is not None and opening > 0
+                    and str(row["trade_date"]).replace("-", "")[:8] == date):
+                values[code] = opening
+        return values, source
 
     def run(self, request, progress=None):
         date = request["market_date"]
@@ -325,6 +375,7 @@ class DayReplayLoader:
             from core.data.data_manager_main import DataManager
             from config.settings import TUSHARE_TOKEN
             self.dm = DataManager(TUSHARE_TOKEN, self.cache)
+        opening_prices, opening_price_source = self._opening_evidence(date, codes, fetch_missing=request["fetch_missing"])
         for index, code in enumerate(codes):
             ts_code = normalize_stock_code(code, add_suffix=True)
             path = self.cache / "stock" / "tick" / f"{ts_code}_{date}.csv"
@@ -370,6 +421,7 @@ class DayReplayLoader:
         report = replay_minutes(request=request, candidate_date=candidate, rows=rows, frames=frames,
                                 previous=previous, auctions=auctions, members=members,
                                 sector_codes=sector_codes,
+                                opening_prices=opening_prices, opening_price_source=opening_price_source,
                                 input_basis="preopen_frozen" if frozen else "research_candidates_not_frozen",
                                 bundle_id=frozen["bundle_id"] if frozen else "", progress=progress)
         from scripts.diagnose_intraday_signal import runtime_evidence
@@ -396,6 +448,8 @@ def replay_saved_inputs(inputs, progress=None):
                           frames={c: pd.DataFrame(rows) for c, rows in inputs["minutes"].items()},
                           previous=inputs["previous"], auctions=inputs["auctions"], members=inputs["members"],
                           sector_codes=inputs.get("sector_codes") or {},
+                          opening_prices=inputs.get("opening_prices") or {},
+                          opening_price_source=inputs.get("opening_price_source") or "",
                           profiles=profiles, input_basis=inputs["input_basis"], bundle_id=inputs["bundle_id"], progress=progress)
 
 

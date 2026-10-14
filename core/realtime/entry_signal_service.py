@@ -624,7 +624,8 @@ class RealtimeEntrySignalService:
 
                 return at_minute, {**detail, "observed_at": observed,
                                    "sector_confirmation_source": "sector_index_breadth",
-                                   "sector_confirmation_version": "sector_index_breadth_v1"}
+                                   "sector_confirmation_version": "sector_index_breadth_v2" if detail.get("sector_sync_policy_version")
+                                   else "sector_index_breadth_v1"}
         except Exception:
             detail = {}
         # Candidate peers must also belong to a verified THS trading board.

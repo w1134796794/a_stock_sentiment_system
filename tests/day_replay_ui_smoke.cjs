@@ -13,7 +13,7 @@ const report={run_id:id,market_date:'20261009',candidate_date:'20261008',until:'
   failures:[{date:'20261009',code:'002614',evidence:'sector_minutes',reason:'缺少板块观测证据'}],
   comparison:{comparable:true,reason:'同输入代码回归',changes:[{code:'002614',before:{status:'observe',reason:'旧代码阻断'},after:{status:'confirmed',reason:'规则通过',first_confirm_time:'09:46:00'}}]},
   stocks:[{code:'002614',name:'奥佳华',status:'observe',first_confirm_time:'09:46:00',first_evaluated_at:'09:47:00',reason:'<img src=x onerror=alert(1)> 仅分钟诊断',
-    transitions:[{evaluated_at:'09:47:00',signal_status:'confirmed',confirm_time:'09:46:00',entry_time:'',reason:'满足分钟确认条件',data_status:'minute_fallback',sector_detail:{coverage:.75}}]}]};
+    transitions:[{evaluated_at:'09:47:00',signal_status:'confirmed',confirm_time:'09:46:00',entry_time:'',reason:'满足分钟确认条件',data_status:'minute_fallback',sector_detail:{coverage:.75,confirmation_path:'open_rising_3m',open_gain_pct:.6,three_minute_change_pct:.2,trend_coverage:.75}}]}]};
 (async()=>{
   const server=http.createServer((req,res)=>{
     let file;
@@ -49,9 +49,12 @@ const report={run_id:id,market_date:'20261009',candidate_date:'20261008',until:'
       await page.locator('#dr-stocks summary').click();
       assert.equal(await page.locator('#dr-stocks img').count(),0);
       assert.match(await page.locator('#dr-stocks').innerText(),/09:46:00/);
+      assert.match(await page.locator('#dr-stocks').innerText(),/开盘走强/);
+      assert.match(await page.locator('#dr-stocks').innerText(),/0\.60% \/ 0\.20%/);
       assert.match(await page.locator('#dr-limits').innerText(),/实时推送验证：未验证/);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
       await page.screenshot({path:path.join(output,`day-replay-${width}.png`),fullPage:true});
+      await page.locator('#dr-stocks').screenshot({path:path.join(output,`day-replay-sector-${width}.png`)});
       await page.evaluate(()=>document.getElementById('main-scroll').scrollTop=0);
       await page.screenshot({path:path.join(output,`day-replay-controls-${width}.png`)});
       await page.locator('#dr-baseline').selectOption(id);

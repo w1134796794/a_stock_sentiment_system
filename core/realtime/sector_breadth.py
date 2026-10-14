@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import timedelta
 from threading import RLock
 from time import monotonic
 from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 from backtest.trade_calendar import TradeCalendar
-from core.realtime.models import normalize_stock_code
+from core.realtime.models import normalize_stock_code, parse_quote_datetime
 from core.realtime.sector_service import RealtimeSectorService
 from core.realtime.trading_session import shanghai_now
+from core.signals.sector_sync import assess_sector_sync, finite_number, TREND_WINDOW_MINUTES
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -38,6 +40,7 @@ class RealtimeSectorBreadthProvider:
         self._member_cache: Dict[Tuple[str, str], Set[str]] = {}
         self._result_cache: Dict[Tuple[str, Tuple[str, ...]], Tuple[float, Optional[bool], Dict[str, Any]]] = {}
         self._last_sector_quote_detail: Dict[str, Any] = {}
+        self._opening_history = {}
         self._lock = RLock()
 
     def evaluate(self, sectors: Iterable[str], market_date: str) -> Tuple[Optional[bool], Dict[str, Any]]:
@@ -77,13 +80,15 @@ class RealtimeSectorBreadthProvider:
             self._last_sector_quote_detail = {"source": "ths_frozen_constituents", "usable_count": len(index_changes)}
         else:
             index_changes = self._sector_changes(names)
+            index_quotes = self._stock_quotes(sorted(members))
         index_positive = (sum(index_changes) / len(index_changes) >= 0) if index_changes else None
         coverage = len(observed) / min(len(members), 80) if members else 0.0
-        if coverage < 0.6 or breadth is None or index_positive is None:
-            state: Optional[bool] = None
-        else:
-            state = bool(breadth >= 0.55 and (average_change or 0.0) >= 0.0 and index_positive)
-        completeness = (0.5 if breadth is not None and coverage >= 0.6 else 0.0) + (0.5 if index_positive is not None else 0.0)
+        opening, earlier = self._opening_curve(key, index_quotes)
+        state, sync_detail = assess_sector_sync(
+            complete=coverage >= 0.6 and len(observed) >= 2 and index_positive is not None,
+            breadth=breadth, average_change=average_change, index_positive=index_positive,
+            opening_changes=opening, earlier_changes=earlier, expected_members=len(members))
+        completeness = 1.0 if state is not None else (0.5 if breadth is not None and coverage >= 0.6 else 0.0)
         detail = {
             "observed_at": shanghai_now().isoformat(timespec="seconds"),
             "sector_names": list(names),
@@ -95,12 +100,43 @@ class RealtimeSectorBreadthProvider:
             "average_change_pct": round(average_change, 4) if average_change is not None else None,
             "index_change_pct": round(sum(index_changes) / len(index_changes), 4) if index_changes else None,
             "data_completeness": completeness,
-            "reason": self._reason(state, breadth, index_positive),
+            **sync_detail,
             "sector_quote_detail": dict(self._last_sector_quote_detail),
         }
         with self._lock:
             self._result_cache[key] = (now, state, detail)
         return state, detail
+
+    def _opening_curve(self, key, quotes):
+        current = shanghai_now()
+        values = {}
+        stamps = []
+        for code, row in quotes.items():
+            opening, price = finite_number(row.get("open_price")), finite_number(row.get("last_price"))
+            stamp = parse_quote_datetime(row.get("date"), row.get("time")) if row.get("time") else None
+            if (row.get("is_stale") or opening is None or price is None or opening <= 0 or price <= 0
+                    or stamp is None or stamp.strftime("%Y%m%d") != key[0]):
+                continue
+            stamp = stamp.replace(tzinfo=current.tzinfo)
+            if not 0 <= (current - stamp).total_seconds() <= 90 or not "09:30" <= stamp.strftime("%H:%M") <= "15:00":
+                continue
+            values[code] = (opening, (price / opening - 1) * 100)
+            stamps.append(stamp)
+        if not stamps:
+            return {}, {}
+        observed = min(stamps)
+        target = observed - timedelta(minutes=TREND_WINDOW_MINUTES)
+        with self._lock:
+            self._opening_history = {k: v for k, v in self._opening_history.items() if k[0] == key[0]}
+            history = self._opening_history.setdefault(key, [])
+            if not history or observed > history[-1][0]:
+                history.append((observed, values))
+            history[:] = [(stamp, rows) for stamp, rows in history if (observed - stamp).total_seconds() <= 300]
+            known = [(stamp, rows) for stamp, rows in history if 0 <= (target - stamp).total_seconds() <= 30]
+            before = known[-1][1] if known else {}
+        earlier = {code: value for code, (opening, value) in before.items()
+                   if code in values and values[code][0] == opening}
+        return {code: value for code, (_, value) in values.items()}, earlier
 
     def _members(self, sector_name: str, market_date: str) -> Set[str]:
         try:
