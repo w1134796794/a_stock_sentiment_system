@@ -96,7 +96,7 @@ class _ReplayEntryService(RealtimeEntrySignalService):
         detail = {"sector_names": list(names), "member_count": len(codes), "coverage": 0.0,
                   "data_completeness": 0.0, "sector_confirmation_version": "minute_constituents_diagnostic_v1",
                   "sector_confirmation_source": "historical_constituent_minutes",
-                  "reason": "缺少冻结的同花顺成分股分钟证据"}
+                  "assessed": False, "reason": "其他入场条件先行判断，尚未检查板块"}
 
         def changes(at_time, selected):
             result = {}
@@ -132,19 +132,38 @@ class _ReplayEntryService(RealtimeEntrySignalService):
             complete = coverage >= .6 and len(observed) >= 2 and bool(index_changes)
             state = bool(breadth >= .55 and average >= 0 and sum(index_changes) >= 0) if complete else None
             detail.update({"coverage": round(coverage, 4), "observed_members": len(observed),
+                           "assessed": True,
                            "breadth": breadth, "average_change_pct": average,
                            "data_completeness": 1.0 if complete else 0.0,
                            "observed_minute": str(at_time),
                            "reason": "成分股分钟同步" if state else ("板块同步不足" if state is False else "板块分钟覆盖不足")})
+            absent_minutes = [member for member in eligible if self.frames.get(member, pd.DataFrame()).empty]
+            absent_closes = [member for member in eligible if not float(self.previous.get(member, {}).get("close") or 0)]
+            detail.update({"missing_minute_codes": absent_minutes, "missing_previous_close_codes": absent_closes,
+                           "unresolved_sector_names": [name for name in names if not self.members.get(name)]})
+            if state is None:
+                issues = []
+                if not codes:
+                    issues.append("同花顺板块名单未解析")
+                if absent_minutes:
+                    issues.append(f"缺成分股分钟 {len(absent_minutes)} 只")
+                if absent_closes:
+                    issues.append(f"缺成分股昨收 {len(absent_closes)} 只")
+                detail["reason"] = "；".join(issues) or "该时点板块分钟覆盖不足"
             self.sector_minutes[key] = state, dict(detail)
             return state
         return checker, detail
 
 
 def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=None,
-                   members=None, profiles=None, input_basis="research", bundle_id="", progress=None):
+                   members=None, sector_codes=None, profiles=None, input_basis="research", bundle_id="", progress=None):
     """Run the actual entry service against growing prefixes, with no live effects."""
     from core.signals.minute_amount_profile import MinuteAmountProfileRepository
+    from core.realtime.sector_service import RealtimeSectorService
+    supplied_names = {name for name, values in (members or {}).items() if values}
+    members = RealtimeSectorService.confirmation_members({
+        "sector_codes": sector_codes or {}, "sector_members": members or {}})
+    excluded_sector_names = sorted(supplied_names - set(members))
     date, until = request["market_date"], request["until"]
     profiles = profiles or MinuteAmountProfileRepository()
     normalized = {code: normalize_minute_bars(frame) for code, frame in frames.items()}
@@ -197,9 +216,14 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                               "code": code, "minute": evaluated_at, "minutes_completed": count,
                               "minutes_total": len(available)})
             stock.update({"status": signal["signal_status"], "reason": signal["reason"], "last_signal": clean(signal)})
-            if (signal.get("sector_detail") or {}).get("data_completeness", 0) < 1:
+            sector_detail = signal.get("sector_detail") or {}
+            if (sector_detail.get("assessed") or signal.get("data_status") == "missing_sector") and sector_detail.get("data_completeness", 0) < 1:
                 failures.append({"date": date, "code": code, "evidence": "sector_minutes",
-                                 "reason": (signal.get("sector_detail") or {}).get("reason") or "板块分钟证据不足"})
+                                 "reason": sector_detail.get("reason") or "板块分钟证据不足",
+                                 "coverage": sector_detail.get("coverage", 0),
+                                 "missing_minute_codes": sector_detail.get("missing_minute_codes", []),
+                                 "missing_previous_close_codes": sector_detail.get("missing_previous_close_codes", []),
+                                 "unresolved_sector_names": sector_detail.get("unresolved_sector_names", [])})
             if str(signal.get("data_status") or "").startswith("missing_") and signal.get("data_status") != "missing_sector":
                 failures.append({"date": date, "code": code, "evidence": signal["data_status"], "reason": signal["reason"]})
         stocks.append(stock)
@@ -208,13 +232,14 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
     inputs = {"request": {k:v for k,v in request.items() if k != "fetch_missing"}, "candidate_date": candidate_date,
               "input_basis": input_basis, "rows": rows, "previous": previous,
               "auctions": auctions or {}, "members": members or {}, "bundle_id": bundle_id,
+              "sector_codes": {name: sector_codes[name] for name in members},
               "amount_profile": profiles.load(),
               "minutes": {c: json.loads(f.to_json(orient="records")) for c, f in sorted(frames.items())}}
     root = Path(__file__).resolve().parents[2]
     files = ["core/realtime/day_replay.py", "core/realtime/entry_signal_service.py", "backtest/minute_entry.py",
              "backtest/confirmation_quality.py", "backtest/reversal_entry.py", "core/data/minute_quality.py",
              "core/realtime/models.py", "core/signals/minute_amount_profile.py", "core/utils/stock_eligibility.py",
-             "scripts/diagnose_intraday_signal.py"]
+             "scripts/diagnose_intraday_signal.py", "core/realtime/sector_service.py", "core/realtime/sector_evidence.py"]
     versions = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
     return clean({"classification": "minute_rule_diagnostic", "market_date": date, "candidate_date": candidate_date,
                   "until": until, "profile": request["profile"], "generated_at": shanghai_now().isoformat(),
@@ -225,10 +250,13 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                   "complete": bool(rows) and not failures, "failures": failures, "stocks": stocks,
                   "counts": dict(Counter(stock["status"] for stock in stocks)),
                   "confirmed_stocks": sum(bool(s["first_confirm_time"]) for s in stocks),
+                  "sector_confirmation_policy": "ths_8_exact_v1",
+                  "excluded_sector_names": excluded_sector_names,
                   "limitations": ["分钟回放不重建历史 3 秒快照、租约、接收时间及采集空窗。",
                                   "补齐后的分钟不能证明当时及时到达；规则触发不代表实时门禁通过或微信送达。",
                                   "板块使用冻结成分股的分钟观测，不冒充当时的批量快照。",
-                                  "当前代码与保存的输入用于代码回归，不是策略收益或真实成交回测。"]})
+                                  "当前代码与保存的输入用于代码回归，不是策略收益或真实成交回测。",
+                                  "板块确认仅使用绑定到同花顺8开头代码的成分；700分类及无代码绑定的旧成分不参与。"]})
 
 
 class DayReplayLoader:
@@ -275,13 +303,21 @@ class DayReplayLoader:
         for record in [*daily.to_dict("records"), *(inputs.get("daily_rows") or [])]:
             previous[normalize_stock_code(record.get("code") or record.get("ts_code"), add_suffix=False)] = clean(record)
         names = set().union(*(RealtimeEntrySignalService._sectors(r) for r in rows))
-        members = {name: [normalize_stock_code(c, add_suffix=False) for c in (inputs.get("sector_members") or {}).get(name, [])]
+        from core.realtime.sector_service import RealtimeSectorService
+        verified_members = RealtimeSectorService.confirmation_members(inputs)
+        sector_codes = inputs.get("sector_codes") or {}
+        members = {name: [normalize_stock_code(c, add_suffix=False) for c in verified_members.get(name, [])]
                    for name in names}
         if not frozen:
-            from core.realtime.sector_service import RealtimeSectorService
-            service = RealtimeSectorService(cache_dir=self.cache)
-            mapping = service.resolve_codes_by_names(names, source="ths")
-            members = {name: service.member_codes(mapping[name]) if name in mapping else [] for name in names}
+            if request["fetch_missing"] and self.dm is None:
+                from core.data.data_manager_main import DataManager
+                from config.settings import TUSHARE_TOKEN
+                self.dm = DataManager(TUSHARE_TOKEN, self.cache)
+            from core.realtime.sector_evidence import prepare_sector_cache
+            prepared = prepare_sector_cache(names, cache_dir=self.cache, data_manager=self.dm,
+                                            allow_remote=request["fetch_missing"], as_of_date=candidate)
+            members = {name: prepared["sector_members"].get(name, []) for name in names}
+            sector_codes = prepared["sector_codes"]
         codes = sorted({normalize_stock_code(r.get("code"), add_suffix=False) for r in rows}
                        | {c for group in members.values() for c in group})
         frames, auctions, minute_sources = {}, {}, {}
@@ -333,6 +369,7 @@ class DayReplayLoader:
                     pass
         report = replay_minutes(request=request, candidate_date=candidate, rows=rows, frames=frames,
                                 previous=previous, auctions=auctions, members=members,
+                                sector_codes=sector_codes,
                                 input_basis="preopen_frozen" if frozen else "research_candidates_not_frozen",
                                 bundle_id=frozen["bundle_id"] if frozen else "", progress=progress)
         from scripts.diagnose_intraday_signal import runtime_evidence
@@ -358,6 +395,7 @@ def replay_saved_inputs(inputs, progress=None):
                           candidate_date=inputs["candidate_date"], rows=inputs["rows"],
                           frames={c: pd.DataFrame(rows) for c, rows in inputs["minutes"].items()},
                           previous=inputs["previous"], auctions=inputs["auctions"], members=inputs["members"],
+                          sector_codes=inputs.get("sector_codes") or {},
                           profiles=profiles, input_basis=inputs["input_basis"], bundle_id=inputs["bundle_id"], progress=progress)
 
 

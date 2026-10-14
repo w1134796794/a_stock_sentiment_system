@@ -627,16 +627,29 @@ class RealtimeEntrySignalService:
                                    "sector_confirmation_version": "sector_index_breadth_v1"}
         except Exception:
             detail = {}
+        # Candidate peers must also belong to a verified THS trading board.
+        verified_sectors = set()
+        verified_members = set()
+        for name in sectors:
+            try:
+                members = self.sector_breadth._members(name, market_date)
+            except Exception:
+                members = set()
+            if members:
+                verified_sectors.add(name)
+                verified_members.update(members)
         peer_rows = []
         for other in all_rows:
             other_code = normalize_stock_code(other.get("code") or other.get("stock_code") or "", add_suffix=False)
+            if other_code not in verified_members:
+                continue
             quote = quotes.get(other_code) or {}
             if new_entry_exclusion(other) or new_entry_exclusion(quote):
                 continue
             peer_rows.append(other)
         detail = {**detail, "reason": "仅取得同候选板块样本"}
         checker = make_sector_sync_checker(
-            code, sectors, peer_rows, frames,
+            code, verified_sectors, peer_rows, frames,
             previous_closes={peer: quote.get("pre_close") for peer, quote in quotes.items()},
             trade_date=market_date, evidence=detail,
         )

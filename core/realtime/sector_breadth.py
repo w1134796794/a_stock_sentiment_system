@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 from backtest.trade_calendar import TradeCalendar
 from core.realtime.models import normalize_stock_code
+from core.realtime.sector_service import RealtimeSectorService
 from core.realtime.trading_session import shanghai_now
 
 
@@ -49,9 +50,12 @@ class RealtimeSectorBreadthProvider:
                 return cached[1], dict(cached[2])
         if not names:
             return None, {"reason": "候选缺少所属板块", "data_completeness": 0.0}
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        frozen = PreopenEvidenceStore().load(self.calendar.prev(str(market_date)), str(market_date))
+        constituent_map = RealtimeSectorService.confirmation_members(frozen["inputs"]) if frozen else {}
         members: Set[str] = set()
         for name in names:
-            members.update(self._members(name, market_date))
+            members.update(constituent_map.get(name, []) if frozen else self._members(name, market_date))
         member_quotes = self._stock_quotes(sorted(members)[:80])
         observed = [
             row for row in member_quotes.values()
@@ -60,10 +64,7 @@ class RealtimeSectorBreadthProvider:
         breadth = sum(_float(row.get("change_pct")) > 0 for row in observed) / len(observed) if observed else None
         average_change = sum(_float(row.get("change_pct")) for row in observed) / len(observed) if observed else None
 
-        from core.operations.preopen_evidence import PreopenEvidenceStore
-        frozen = PreopenEvidenceStore().load(self.calendar.prev(str(market_date)), str(market_date))
         if frozen:
-            constituent_map = frozen["inputs"].get("sector_members") or {}
             index_quotes = self._stock_quotes(sorted(members))
             index_changes = []
             for name in names:
@@ -86,6 +87,7 @@ class RealtimeSectorBreadthProvider:
         detail = {
             "observed_at": shanghai_now().isoformat(timespec="seconds"),
             "sector_names": list(names),
+            "unresolved_sector_names": [name for name in names if not constituent_map.get(name)] if frozen else [],
             "member_count": len(members),
             "observed_members": len(observed),
             "coverage": round(coverage, 4),
@@ -109,7 +111,7 @@ class RealtimeSectorBreadthProvider:
         from core.operations.preopen_evidence import PreopenEvidenceStore
         frozen = PreopenEvidenceStore().load(previous, market_date)
         if frozen:
-            members = set((frozen["inputs"].get("sector_members") or {}).get(sector_name, []))
+            members = set(RealtimeSectorService.confirmation_members(frozen["inputs"]).get(sector_name, []))
         else:
             if key in self._member_cache:
                 return self._member_cache[key]

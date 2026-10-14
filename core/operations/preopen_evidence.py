@@ -52,7 +52,70 @@ class PreopenEvidenceStore:
                 or not (payload.get("health") or {}).get("ok")):
             raise ValueError("Invalid preopen evidence bundle")
         payload["bundle_id"] = bundle_id
+        supplements = []
+        from core.infrastructure.atomic_json import atomic_read_json
+        for supplement_path in path.parent.glob(path.stem + ".sectors*.json"):
+            supplement = atomic_read_json(supplement_path)
+            ident = supplement.pop("supplement_id", "")
+            if (not ident or _digest(supplement) != ident or supplement.get("original_bundle_id") != bundle_id
+                    or supplement.get("candidate_date") != candidate_date or supplement.get("market_date") != market_date
+                    or _stamp(supplement["captured_at"]) >= cutoff(market_date)):
+                raise ValueError("Invalid preopen sector supplement")
+            supplements.append((_stamp(supplement["captured_at"]), ident, supplement))
+        identifiers = []
+        for _, ident, supplement in sorted(supplements):
+            inputs = payload["inputs"]
+            codes = inputs.setdefault("sector_codes", {})
+            members = inputs.setdefault("sector_members", {})
+            for name, values in supplement["sector_members"].items():
+                if values and not members.get(name):
+                    members[name] = values
+                    if supplement["sector_codes"].get(name):
+                        codes[name] = supplement["sector_codes"][name]
+            known = {str(row.get("code") or row.get("ts_code") or "").split(".")[0] for row in inputs.get("daily_rows", [])}
+            inputs.setdefault("daily_rows", []).extend(row for row in supplement["daily_rows"]
+                if str(row.get("code") or row.get("ts_code") or "").split(".")[0] not in known)
+            identifiers.append(ident)
+        if identifiers:
+            payload["original_bundle_id"] = bundle_id
+            payload["sector_supplement_id"] = identifiers[-1]
+            payload["sector_supplement_ids"] = identifiers
+            payload["bundle_id"] = _digest({"original": bundle_id, "sectors": identifiers[0] if len(identifiers) == 1 else identifiers})
         return payload
+
+    def complete_sector_inputs(self, candidate_date, market_date, *, sector_codes, sector_members, daily_rows, now=None):
+        from core.infrastructure.atomic_json import atomic_write_json
+        from core.realtime.sector_service import RealtimeSectorService
+        sector_members = RealtimeSectorService.confirmation_members({
+            "sector_codes": sector_codes, "sector_members": sector_members})
+        current = _stamp(now or datetime.now(SHANGHAI))
+        path = self.path(candidate_date, market_date).with_name(candidate_date + ".sectors.json")
+        with file_mutex(str(path) + ".lock"):
+            bundle = self.load(candidate_date, market_date)
+            if not bundle:
+                return {"ok": False, "reason": "missing_preopen_bundle"}
+            existing = bundle["inputs"]
+            known = {str(row.get("code") or row.get("ts_code") or "").split(".")[0] for row in existing.get("daily_rows", [])}
+            new_daily = [row for row in daily_rows if str(row.get("code") or row.get("ts_code") or "").split(".")[0] not in known]
+            new_members = {name: values for name, values in sector_members.items()
+                           if values and not (existing.get("sector_members") or {}).get(name)}
+            if bundle.get("sector_supplement_id") and not new_daily and not new_members:
+                return {"ok": True, "existing": True, "bundle_id": bundle["bundle_id"]}
+            if current >= cutoff(market_date):
+                return {"ok": False, "reason": "past_preopen_cutoff"}
+            if any(str(row.get("trade_date") or candidate_date).replace("-", "")[:8] != candidate_date for row in daily_rows):
+                raise ValueError("Sector daily rows must belong to the candidate date")
+            payload = {"schema_version": 1, "original_bundle_id": bundle.get("original_bundle_id", bundle["bundle_id"]),
+                       "candidate_date": candidate_date, "market_date": market_date,
+                       "captured_at": current.isoformat(timespec="microseconds"),
+                       "sector_codes": {name: sector_codes[name] for name in new_members if name in sector_codes},
+                       "sector_members": new_members, "daily_rows": new_daily}
+            payload["supplement_id"] = _digest(payload)
+            target = path if not path.exists() else path.with_name(candidate_date + ".sectors." + uuid.uuid4().hex + ".json")
+            atomic_write_json(target, payload)
+            effective = self.load(candidate_date, market_date)
+            return {"ok": True, "existing": False, "bundle_id": effective["bundle_id"],
+                    "sector_supplement_id": payload["supplement_id"]}
 
     def freeze(self, candidate_date: str, market_date: str, *, inputs: dict, health: dict,
                now: datetime | None = None):
@@ -164,7 +227,8 @@ def freeze_preopen_inputs(candidate_date: str, market_date: str, *, web_data_dir
         with connect(db, read_only=True) as con:
             daily = con.execute("SELECT * FROM stock_daily_silver WHERE CAST(trade_date AS VARCHAR)=?", [candidate_date]).fetchdf()
             factors = con.execute("SELECT * FROM factor_stock_wide WHERE CAST(trade_date AS VARCHAR)=?", [candidate_date]).fetchdf()
-        daily = daily[daily["code"].astype(str).str.split(".").str[0].isin(codes)]
+        member_codes = {str(code).split(".")[0] for group in members.values() for code in group}
+        daily = daily[daily["code"].astype(str).str.split(".").str[0].isin(set(codes) | member_codes)]
         factors = factors[factors["code"].astype(str).str.split(".").str[0].isin(codes)]
         def records(frame):
             return json.loads(frame.to_json(orient="records", date_format="iso", force_ascii=False))

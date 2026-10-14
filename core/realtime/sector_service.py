@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import statistics
 import time
+import unicodedata
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -38,7 +39,9 @@ class RealtimeSectorService:
         self._member_cache: Dict[str, List[str]] = {}
         self._sector_names: Dict[str, str] = {}
         self._sector_types: Dict[str, str] = {}
+        self._sector_list_dates: Dict[str, str] = {}
         self._metadata_loaded = False
+        self._metadata_signature = None
         self._last_error = ""
 
     @staticmethod
@@ -76,8 +79,8 @@ class RealtimeSectorService:
         del source
         self._ensure_metadata()
         requested = self._normalize_codes(codes)
-        invalid = [code for code in requested if not self._valid_code_for_source(code, "ths")]
-        code_list = [code for code in requested if self._valid_code_for_source(code, "ths")]
+        invalid = [code for code in requested if not self._supported_member_code(code)]
+        code_list = [code for code in requested if self._supported_member_code(code)]
         auto_list = not requested
         if auto_list:
             code_list = self._list_sector_codes(limit=limit)
@@ -124,18 +127,29 @@ class RealtimeSectorService:
         }
 
     def resolve_codes_by_names(
-        self, names: Iterable[str], *, source: str = "ths",
+        self, names: Iterable[str], *, source: str = "ths", as_of_date: str = "",
     ) -> Dict[str, str]:
         del source
         self._ensure_metadata()
         requested = {str(name or "").strip() for name in names if str(name or "").strip()}
         result: Dict[str, str] = {}
-        for code, label in self._sector_names.items():
-            for name in requested:
-                if name not in result and (
-                    label == name or (len(name) >= 3 and (name in label or label in name))
-                ):
-                    result[name] = code
+        if not as_of_date:
+            from core.realtime.trading_session import shanghai_now
+            as_of_date = shanghai_now().strftime("%Y%m%d")
+        eligible = {code: name for code, name in self._sector_names.items()
+                    if not self._sector_list_dates.get(code) or self._sector_list_dates[code] <= as_of_date}
+        for name in requested:
+            canonical = self._canonical_name(name)
+            exact = [code for code, label in eligible.items() if self._canonical_name(label) == canonical]
+            if len(exact) == 1:
+                result[name] = exact[0]
+                continue
+            if exact:
+                # Prefer the actual industry classification over its concept proxy.
+                industries = [code for code in exact if self._sector_types.get(code) == "行业"]
+                if len(industries) == 1:
+                    result[name] = industries[0]
+                continue
         return result
 
     def get_market_quotes(
@@ -205,6 +219,9 @@ class RealtimeSectorService:
 
     def _members(self, code: str) -> List[str]:
         code6 = self._clean_code(code).split(".")[0]
+        self._ensure_metadata()
+        if not self._supported_member_code(code6):
+            return []
         if code6 in self._member_cache:
             return self._member_cache[code6]
         root = self.cache_dir / "sector" / "ths_member"
@@ -239,29 +256,60 @@ class RealtimeSectorService:
         return self.quote_service
 
     def _ensure_metadata(self) -> None:
-        if self._metadata_loaded:
-            return
         root = self.cache_dir / "sector" / "ths_index"
-        for filename, type_hint in (
+        files = (
+            ("index_all.csv", ""),
             ("adata_concept_ths.csv", "概念"),
             ("index_I.csv", "行业"),
             ("index_N.csv", "概念"),
-        ):
+        )
+        signature = tuple((name, (root / name).stat().st_mtime_ns, (root / name).stat().st_size)
+                          for name, _ in files if (root / name).exists())
+        if self._metadata_loaded and signature == self._metadata_signature:
+            return
+        self._sector_names.clear()
+        self._sector_types.clear()
+        self._sector_list_dates.clear()
+        self._member_cache.clear()
+        self._sector_cache.clear()
+        for filename, type_hint in files:
             path = root / filename
             if not path.exists():
                 continue
             with path.open("r", encoding="utf-8-sig", newline="") as handle:
                 for row in csv.DictReader(handle):
                     code = self._row_sector_code(row).split(".")[0]
+                    kind = self._sector_type_label(row.get("sector_type") or row.get("type") or type_hint)
                     if not self._valid_code_for_source(code, "ths"):
                         continue
                     name = self._row_sector_name(row)
-                    if name:
-                        self._sector_names[code] = name
-                    self._sector_types[code] = self._sector_type_label(
-                        row.get("sector_type") or row.get("type") or type_hint,
-                    )
+                    if not name:
+                        continue
+                    self._sector_names[code] = name
+                    self._sector_types[code] = kind
+                    listed = str(row.get("list_date") or "").replace("-", "")[:8]
+                    if listed.isdigit() and len(listed) == 8:
+                        self._sector_list_dates[code] = listed
         self._metadata_loaded = True
+        self._metadata_signature = signature
+
+    def _supported_member_code(self, code: str) -> bool:
+        return self._valid_code_for_source(code, "ths") and code in self._sector_names
+
+    @classmethod
+    def confirmation_members(cls, inputs: Dict[str, Any]) -> Dict[str, List[str]]:
+        """Use code-bound THS board evidence; never reinterpret old classifications."""
+        codes = inputs.get("sector_codes") or {}
+        return {
+            name: list(dict.fromkeys(normalize_stock_code(value, add_suffix=False) for value in values
+                                    if normalize_stock_code(value, add_suffix=False)))
+            for name, values in (inputs.get("sector_members") or {}).items()
+            if codes.get(name) and cls._valid_code_for_source(codes[name], "ths")
+        }
+
+    @staticmethod
+    def _canonical_name(name: str) -> str:
+        return unicodedata.normalize("NFKC", str(name)).replace(" ", "").strip()
 
     def _list_sector_codes(self, *, limit: int) -> List[str]:
         self._ensure_metadata()

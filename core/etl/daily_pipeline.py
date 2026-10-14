@@ -538,6 +538,11 @@ class ETLDailyPipeline:
                 trade_date, TradeCalendar().next(trade_date), web_data_dir=self.web_data_dir,
                 db_path=self.duckdb_path, snapshot_dir=self.snapshot_dir,
             )
+            if frozen.get("ok"):
+                from core.realtime.sector_evidence import prepare_preopen_sector_evidence
+                frozen["sector_preparation"] = prepare_preopen_sector_evidence(
+                    trade_date, TradeCalendar().next(trade_date), web_data_dir=self.web_data_dir,
+                    db_path=self.duckdb_path, data_manager=self.dm)
             logger.info(f"[PreopenEvidence] {trade_date}: {frozen}")
         except Exception as exc:
             result.warnings.append(f"开盘前证据冻结失败: {exc}")

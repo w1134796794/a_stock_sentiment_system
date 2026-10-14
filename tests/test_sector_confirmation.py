@@ -31,7 +31,11 @@ def minutes(close=11.0, pre_close=10.0, **kwargs):
 
 def fallback(rows, frames, quotes=None, provider=None):
     service = RealtimeEntrySignalService.__new__(RealtimeEntrySignalService)
-    service.sector_breadth = provider or SimpleNamespace(evaluate=lambda *args: (None, {}))
+    service.sector_breadth = provider or SimpleNamespace(
+        evaluate=lambda *args: (None, {}),
+        _members=lambda name, date: {"000002", "000003", "000004", "000005"}
+        if name in {"robotics", "auto"} else set(),
+    )
     checker, detail = service._sector_checker(
         peer("000001", '["robotics", "auto"]'), "000001", rows, frames, quotes or {}, DATE,
     )
@@ -247,7 +251,7 @@ def test_realtime_index_error_uses_the_shared_fallback():
         raise RuntimeError("index unavailable")
     _, checker, detail = fallback(
         [peer("000002"), peer("000003")], {"000002": minutes(), "000003": minutes()},
-        provider=SimpleNamespace(evaluate=unavailable),
+        provider=SimpleNamespace(evaluate=unavailable, _members=lambda *args:{"000002","000003"}),
     )
     assert checker("09:35:00") is True
     assert detail["sector_confirmation_version"] == SECTOR_CONFIRMATION_VERSION

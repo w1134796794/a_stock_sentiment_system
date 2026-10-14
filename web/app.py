@@ -3584,6 +3584,9 @@ def _postclose_gate_for_date(trade_date: str, market_date: str, minute_bucket: i
 def _freeze_preopen_for_minute(candidate_date: str, market_date: str, minute_bucket: int):
     from core.operations.preopen_evidence import freeze_preopen_inputs
     result = freeze_preopen_inputs(candidate_date, market_date)
+    if result.get("ok"):
+        from core.realtime.sector_evidence import prepare_preopen_sector_evidence
+        result["sector_preparation"] = prepare_preopen_sector_evidence(candidate_date, market_date)
     if not result.get("ok"):
         logger.warning("Preopen evidence unavailable for %s/%s: %s", candidate_date, market_date, result)
     return result

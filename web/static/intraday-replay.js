@@ -13,6 +13,10 @@
   function table(heads, rows) {
     return `<div class="dr-table"><table><thead><tr>${heads.map(v=>`<th>${esc(v)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
+  function missingList(values) {
+    const list=values||[];
+    return list.slice(0,8).join(', ') + (list.length>8?` 等 ${list.length} 项`:'');
+  }
   async function refreshRuns() {
     const value = await api('/api/intraday-replay');
     savedRuns = value.runs;
@@ -29,12 +33,12 @@
     $('dr-summary').innerHTML = [['候选日 / 行情日',`${r.candidate_date} / ${r.market_date}`],['规则曾确认',`${r.confirmed_stocks} / ${r.stocks.length}`],['缺证据项',r.failures.length],['分钟数据检查',r.complete?'检查通过':'数据不完整']].map(([label,v])=>`<div>${esc(label)}<strong>${esc(v)}</strong></div>`).join('');
     $('dr-evidence').classList.remove('hidden');
     $('dr-limits').innerHTML = r.limitations.map(v=>`<p>${esc(v)}</p>`).join('') + `<p>不发送微信消息，不修改账户。实时推送验证：${r.live_runtime_verified?'已验证':'未验证'}</p><div class="dr-version">输入 ${esc(r.input_hash.slice(0,16))} · 代码 ${esc(r.code_hash.slice(0,16))} · ${esc(r.input_basis)} · 回放至 ${esc(r.until)}</div>`;
-    $('dr-failures').innerHTML = r.failures.length ? table(['日期','股票','缺失证据','原因'],r.failures.map(f=>[f.date,f.code,f.evidence,f.reason])) : '';
+    $('dr-failures').innerHTML = r.failures.length ? table(['日期','股票','缺失证据','原因','缺分钟代码','缺昨收代码','未解析板块'],r.failures.map(f=>[f.date,f.code,f.evidence,f.reason,missingList(f.missing_minute_codes),missingList(f.missing_previous_close_codes),missingList(f.unresolved_sector_names)])) : '';
     const recorded = Object.values(r.recorded_runtime||{}).flatMap(source=>source.rows||[]);
     $('dr-failures').innerHTML += `<details><summary>原始运行证据 ${recorded.length} 条</summary>${recorded.length ? table(['股票','原始确认时间','门禁否决','接收时间','通知状态'],recorded.map(row=>[row.stock_code||row.code,row.evidence?.confirm_time,row.evidence?.health_gate_reason||row.evidence?.veto_reason,row.evidence?.quote_received_at,row.evidence?.notification_status])) : '<p class="text-sm text-slate-400 mt-2">没有本地原始运行记录；需要对应服务器日志或证据库。</p>'}</details>`;
     $('dr-comparison').classList.toggle('hidden',!r.comparison);
     if (r.comparison) $('dr-changes').innerHTML = `<p class="text-sm text-amber-300">${esc(r.comparison.reason)}</p>` + table(['股票','原确认时间','本次确认时间','原状态 / 原因','本次状态 / 原因'],r.comparison.changes.map(c=>[c.code,c.before.first_confirm_time||'--',c.after.first_confirm_time||'--',`${signalLabels[c.before.status]||c.before.status} / ${c.before.reason}`,`${signalLabels[c.after.status]||c.after.status} / ${c.after.reason}`]));
-    $('dr-stocks').innerHTML = r.stocks.map(s=>`<details><summary><b>${esc(s.name)} ${esc(s.code)}</b><span>${esc(signalLabels[s.status]||s.status)}</span><span>首次确认 ${esc(s.first_confirm_time||'--')} · 观测 ${esc(s.first_evaluated_at||'--')}</span></summary><p class="text-sm text-slate-400 mt-2">${esc(s.reason)}</p>${s.price_evidence?`<p class="text-sm text-amber-300 mt-2">仅价格条件首次出现 ${esc(s.price_evidence.first_price_trigger||'--')} · 跌破开盘低点 ${esc(s.price_evidence.first_opening_low_break||'--')} · 成交额${s.price_evidence.amount_estimated?'含估算':'为源数据'}</p>`:''}${table(['观测时间','分钟状态','触发 / 否决原因','确认 / 成交时点','板块覆盖','数据状态'],s.transitions.map(t=>[t.evaluated_at,signalLabels[t.signal_status]||t.signal_status,t.reason,`${t.confirm_time||'--'} / ${t.entry_time||'--'}`,`${((t.sector_detail?.coverage||0)*100).toFixed(1)}%`,t.data_status]))}</details>`).join('');
+    $('dr-stocks').innerHTML = r.stocks.map(s=>`<details><summary><b>${esc(s.name)} ${esc(s.code)}</b><span>${esc(signalLabels[s.status]||s.status)}</span><span>首次确认 ${esc(s.first_confirm_time||'--')} · 观测 ${esc(s.first_evaluated_at||'--')}</span></summary><p class="text-sm text-slate-400 mt-2">${esc(s.reason)}</p>${s.price_evidence?`<p class="text-sm text-amber-300 mt-2">仅价格条件首次出现 ${esc(s.price_evidence.first_price_trigger||'--')} · 跌破开盘低点 ${esc(s.price_evidence.first_opening_low_break||'--')} · 成交额${s.price_evidence.amount_estimated?'含估算':'为源数据'}</p>`:''}${table(['观测时间','分钟状态','触发 / 否决原因','确认 / 成交时点','板块覆盖','数据状态'],s.transitions.map(t=>[t.evaluated_at,signalLabels[t.signal_status]||t.signal_status,t.reason,`${t.confirm_time||'--'} / ${t.entry_time||'--'}`,t.sector_detail?.assessed===false?'尚未检查':`${((t.sector_detail?.coverage||0)*100).toFixed(1)}%`,t.data_status]))}</details>`).join('');
     $('dr-download').classList.remove('hidden');
     $('dr-download').href = `/api/intraday-replay/${encodeURIComponent(r.run_id)}?report=true`;
   }

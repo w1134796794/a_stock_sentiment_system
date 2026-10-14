@@ -34,10 +34,17 @@ class SectorDataManager(DataManagerBase):
         if cache_file.exists():
             file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
             if (datetime.now() - file_time).days < 1:
-                return pd.read_csv(cache_file)
+                try:
+                    cached = pd.read_csv(cache_file)
+                    if not cached.empty and {'ts_code', 'name'}.issubset(cached.columns):
+                        return cached
+                except (OSError, ValueError):
+                    pass
 
         try:
-            df = self.ts_pro.ths_index(exchange='A', type=index_type).dropna()
+            df = self.ts_pro.ths_index(exchange='A', type=index_type)
+            if df is not None:
+                df = df.dropna(subset=[column for column in ('ts_code', 'name') if column in df])
             if df is not None and not df.empty:
                 df.to_csv(cache_file, index=False)
                 return df
@@ -107,7 +114,9 @@ class SectorDataManager(DataManagerBase):
         if cache_file.exists():
             file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
             if (datetime.now() - file_time).days < 7:
-                return pd.read_csv(cache_file)
+                cached = pd.read_csv(cache_file)
+                if not cached.empty and any(column in cached for column in ('con_code', 'code')):
+                    return cached
 
         try:
             df = self.ts_pro.ths_member(ts_code=ts_code)
@@ -129,7 +138,7 @@ class SectorDataManager(DataManagerBase):
         for code in ts_codes:
             cache_key = f"ths_member_{code}"
             cached_data = self._get_from_memory_cache(cache_key)
-            if cached_data is not None:
+            if cached_data is not None and not cached_data.empty:
                 results[code] = cached_data
                 continue
 
@@ -139,6 +148,9 @@ class SectorDataManager(DataManagerBase):
                     file_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
                     if (datetime.now() - file_time).days < 7:
                         df = pd.read_csv(cache_file)
+                        if df.empty or not any(column in df for column in ('con_code', 'code')):
+                            codes_to_fetch.append(code)
+                            continue
                         results[code] = df
                         self._set_memory_cache(cache_key, df)
                         continue
