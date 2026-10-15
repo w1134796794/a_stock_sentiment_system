@@ -208,6 +208,11 @@ def save_backtest_results(
             'strategy_name': position.get('strategy_name') or '',
             'strategy_version': position.get('strategy_version') or '',
             'strategy_sources': position.get('strategy_sources') or '',
+            'strategy_execution': json.dumps(position.get('strategy_execution') or {}, ensure_ascii=False),
+            'exit_config': json.dumps(position.get('exit_config') or {}, ensure_ascii=False),
+            'stop_loss_price': position.get('stop_loss_price') or 0,
+            'highest_price': position.get('highest_price') or entry_price,
+            'entry_strength_score': position.get('entry_strength_score') or position.get('plan_score') or 50,
             'mfe_pct': (
                 float(position.get('max_favorable_price') or entry_price) / entry_price - 1.0
                 if entry_price > 0 else 0.0
@@ -223,7 +228,7 @@ def save_backtest_results(
         'current_price', 'shares', 'cost_basis', 'market_value', 'unrealized_pnl',
         'unrealized_pnl_pct', 'holding_days', 'plan_rank', 'plan_score', 'entry_signal',
         'entry_time', 'strategy_id', 'strategy_name', 'strategy_version', 'strategy_sources',
-        'mfe_pct', 'mae_pct',
+        'mfe_pct', 'mae_pct', 'strategy_execution', 'exit_config', 'stop_loss_price', 'highest_price', 'entry_strength_score',
     ]).to_csv(positions_file, index=False, encoding="utf-8-sig")
     logger.info(f"持仓快照已保存: {positions_file}")
 

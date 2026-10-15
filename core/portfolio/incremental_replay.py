@@ -70,6 +70,12 @@ class IncrementalPaperReplay:
             "core/data/data_manager_suspension.py",
             "core/utils/sector_names.py",
             "core/utils/stock_eligibility.py",
+            "core/signals/production_rules.py", "core/signals/sector_sync.py",
+            "core/signals/opening.py", "core/realtime/session_open_repository.py",
+            "core/realtime/quote_cache.py",
+            "core/realtime/day_replay.py", "core/realtime/entry_signal_service.py",
+            "core/realtime/snapshot_signal_service.py", "core/realtime/sector_breadth.py",
+            "core/portfolio/exit_decision_service.py", "core/portfolio/paper_trading_service.py",
         ):
             path = root / relative
             digest.update(relative.encode())
@@ -81,6 +87,8 @@ class IncrementalPaperReplay:
             "rotation_edge": PAPER_ROTATION_MIN_EDGE,
             "entry_mode": "hybrid", "sizing": "fixed_risk", "exit": "strategy",
         }, sort_keys=True).encode())
+        from core.signals.minute_amount_profile import MinuteAmountProfileRepository
+        digest.update(json.dumps(MinuteAmountProfileRepository().load(), sort_keys=True, default=str).encode())
         return digest.hexdigest()[:16]
 
     def checkpoint(self) -> dict[str, Any]:
@@ -160,6 +168,8 @@ class IncrementalPaperReplay:
         config.exit_policy_mode = "strategy"
         # Required minute evidence is checked before processing the day.
         config.exit_minute_data_policy = "cache_only"
+        config.production_rules = True
+        config.replay_missing_evidence_policy = 'strict'
         return config
 
     def _diagnostic_path(self) -> Path:
@@ -434,7 +444,11 @@ class IncrementalPaperReplay:
                     self._block(date, "回放期间策略配置已变化，不能混用配置版本")
                 plan_dir, candidates = self._plan(prev)
                 _, current_positions, expected_trade_id, _ = self._account_snapshot()
-                sector_peers = self._sector_peer_codes(date, prev, plan_dir)
+                production = getattr(getattr(engine, 'config', None), 'production_rules', False)
+                if production:
+                    prepared = engine._prepare_production_day(date)
+                    candidates = list(prepared.get('代码', []))
+                sector_peers = [] if production else self._sector_peer_codes(date, prev, plan_dir)
                 required = candidates + [p["code"] for p in current_positions] + sector_peers
                 if progress:
                     progress({"stage": "检查分钟证据", "trade_date": date,

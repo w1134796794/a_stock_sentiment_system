@@ -169,7 +169,7 @@ def test_snapshot_clock_and_naive_receive_time_use_same_market_timezone():
             for i in range(3)]
     common = dict(code="000001", trade_date="20261013", mode=ENTRY_WEAK, minute_bars=minutes,
                   prev_close=10, open_gap=-.01, sector_confirmed=True, is_leader=False,
-                  limit_price=11, minute_decision=EntryDecision("observing"))
+                  limit_price=11, minute_decision=EntryDecision("confirmed"))
     assert service.evaluate(snapshots=pd.DataFrame(rows[:2]), **common).data_status == "snapshot_triggered"
     clock[0] += timedelta(seconds=3)
     assert service.evaluate(snapshots=pd.DataFrame(rows), **common).status == "filled"

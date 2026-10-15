@@ -73,16 +73,20 @@ def replay_request(payload, *, now=None):
 
 
 class _ReplayEntryService(RealtimeEntrySignalService):
-    def __init__(self, previous, auctions, members, frames, profiles, opening_prices=None):
+    def __init__(self, previous, auctions, members, frames, profiles, opening_prices=None, *, evaluator=None,
+                 opening_evidence=None):
         # Explicit adapters isolate the shared rule evaluator from live providers/stores.
-        super().__init__(amount_profile_repository=profiles,
+        super().__init__(evaluator=evaluator, amount_profile_repository=profiles,
                          signal_stats_repository=SimpleNamespace(get=lambda *a, **kw: {}),
                          snapshot_signal_service=SimpleNamespace(), sector_breadth_provider=SimpleNamespace())
         self.previous = previous
         self.auctions = auctions
         self.members = members
         self.frames = frames
+        from core.signals.sector_sync import constituent_minute_prices
+        self.minute_prices = constituent_minute_prices(frames)
         self.opening_prices = opening_prices or {}
+        self.opening_evidence = opening_evidence or {}
         self.sector_minutes = {}
 
     def _auction(self, code, market_date):
@@ -92,83 +96,23 @@ class _ReplayEntryService(RealtimeEntrySignalService):
         return pd.DataFrame()
 
     def _sector_checker(self, row, code, all_rows, frames, quotes, market_date):
-        names = tuple(sorted(self._sectors(row)))
-        codes = sorted({c for name in names for c in self.members.get(name, [])})
-        detail = {"sector_names": list(names), "member_count": len(codes), "coverage": 0.0,
-                  "data_completeness": 0.0, "sector_confirmation_version": "minute_constituents_diagnostic_v2",
-                  "sector_confirmation_source": "historical_constituent_minutes",
-                  "assessed": False, "reason": "其他入场条件先行判断，尚未检查板块"}
-
-        def changes(at_time, selected, *, opening=False):
-            result = {}
-            for member in selected:
-                if member == code:  # A stock cannot confirm its own sector synchrony.
-                    continue
-                data = self.frames.get(member, pd.DataFrame())
-                prior = float(self.opening_prices.get(member) or 0) if opening else float(self.previous.get(member, {}).get("close") or 0)
-                if data.empty or prior <= 0:
-                    continue
-                known = data[data["time"] == at_time]
-                if not known.empty:
-                    result[member] = (float(known.iloc[-1]["close"]) / prior - 1) * 100
-            return result
-
-        def checker(at_time):
-            key = (code, names, str(at_time)[:8])
-            if key in self.sector_minutes:
-                state, observed_detail = self.sector_minutes[key]
-                detail.update(observed_detail)
-                return state
-            eligible = [c for c in codes if c != code]
-            observed = changes(str(at_time)[:8], eligible[:80])
-            coverage = len(observed) / min(len(eligible), 80) if eligible else 0.0
-            index_changes = []
-            for name in names:
-                group = [c for c in self.members.get(name, []) if c != code]
-                values = changes(str(at_time)[:8], group)
-                if group and len(values) / len(group) >= .6:
-                    index_changes.append(sum(values.values()) / len(values))
-            breadth = sum(v > 0 for v in observed.values()) / len(observed) if observed else None
-            average = sum(observed.values()) / len(observed) if observed else None
-            complete = coverage >= .6 and len(observed) >= 2 and bool(index_changes)
-            from core.signals.sector_sync import assess_sector_sync, TREND_WINDOW_MINUTES
-            minute = str(at_time)[:8]
-            prior_minute = (datetime.strptime(minute, "%H:%M:%S") - timedelta(minutes=TREND_WINDOW_MINUTES)).strftime("%H:%M:%S")
-            opening = changes(minute, eligible, opening=True)
-            earlier = changes(prior_minute, eligible, opening=True)
-            state, sync_detail = assess_sector_sync(complete=complete, breadth=breadth,
-                average_change=average, index_positive=sum(index_changes) >= 0 if index_changes else None,
-                opening_changes=opening, earlier_changes=earlier, expected_members=len(eligible))
-            detail.update({"coverage": round(coverage, 4), "observed_members": len(observed),
-                           "assessed": True,
-                           "breadth": breadth, "average_change_pct": average,
-                           "data_completeness": 1.0 if complete else 0.0,
-                           "observed_minute": str(at_time),
-                           **sync_detail})
-            absent_minutes = [member for member in eligible if self.frames.get(member, pd.DataFrame()).empty]
-            absent_closes = [member for member in eligible if not float(self.previous.get(member, {}).get("close") or 0)]
-            detail.update({"missing_minute_codes": absent_minutes, "missing_previous_close_codes": absent_closes,
-                           "unresolved_sector_names": [name for name in names if not self.members.get(name)]})
-            if state is None:
-                issues = []
-                if not codes:
-                    issues.append("同花顺板块名单未解析")
-                if absent_minutes:
-                    issues.append(f"缺成分股分钟 {len(absent_minutes)} 只")
-                if absent_closes:
-                    issues.append(f"缺成分股昨收 {len(absent_closes)} 只")
-                detail["reason"] = "；".join(issues) or "该时点板块分钟覆盖不足"
-            self.sector_minutes[key] = state, dict(detail)
-            return state
-        return checker, detail
+        from core.signals.sector_sync import make_constituent_sync_checker
+        from core.signals.opening import sector_reference_rows
+        return make_constituent_sync_checker(
+            code=code, names=self._sectors(row), members=self.members, frames=self.frames,
+            previous=sector_reference_rows(self.previous, self.opening_evidence),
+            opening_prices=lambda: self.opening_prices, cache=self.sector_minutes,
+            minute_prices=self.minute_prices)
 
 
 def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=None,
                    members=None, sector_codes=None, opening_prices=None, opening_price_source="",
+                   opening_evidence=None, risk_config=None,
+                   configuration_basis="",
                    profiles=None, input_basis="research", bundle_id="", progress=None):
     """Run the actual entry service against growing prefixes, with no live effects."""
     from core.signals.minute_amount_profile import MinuteAmountProfileRepository
-    from core.signals.sector_sync import SECTOR_SYNC_VERSION
+    from core.signals.sector_sync import SECTOR_SYNC_VERSION, finite_number
     from core.realtime.sector_service import RealtimeSectorService
     supplied_names = {name for name, values in (members or {}).items() if values}
     members = RealtimeSectorService.confirmation_members({
@@ -177,7 +121,12 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
     date, until = request["market_date"], request["until"]
     profiles = profiles or MinuteAmountProfileRepository()
     normalized = {code: normalize_minute_bars(frame) for code, frame in frames.items()}
-    service = _ReplayEntryService(previous, auctions or {}, members or {}, normalized, profiles, opening_prices)
+    from core.signals.production_rules import entry_parameters, minute_evaluator, RULESET_VERSION
+    from risk.risk_config import RiskConfig
+    risk = RiskConfig.from_dict(risk_config) if risk_config is not None else RiskConfig.load()
+    configuration_basis = configuration_basis or ("provided_config" if risk_config is not None else "current_config_not_frozen")
+    service = _ReplayEntryService(previous, auctions or {}, members or {}, normalized, profiles, opening_prices,
+                                  evaluator=minute_evaluator(risk), opening_evidence=opening_evidence)
     stocks, failures = [], []
     for index, source in enumerate(rows):
         row = dict(source)
@@ -188,29 +137,43 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                                       require_full_day=False, now=end)
         available = frame[frame["time"] < until[:5] + ":00"] if not frame.empty else frame
         prior = previous.get(code, {})
+        opening = finite_number((opening_prices or {}).get(code))
+        evidence = (opening_evidence or {}).get(code) or {}
+        from core.signals.opening import opening_context
+        context = opening_context({**evidence, "open_price": opening}, prior)
+        reference = context["pre_close"]
         failure = new_entry_exclusion(row)
+        failure_evidence = "candidate_minutes_or_identity"
         if available.empty or not quality["valid"]:
             failure = failure or quality["reason"] or "缺少已收盘分钟"
-        if not prior.get("close"):
+        if reference is None:
             failure = failure or "缺少候选日昨收基础数据"
+        if not failure and (opening is None or opening <= 0):
+            failure = "缺少当日真实开盘价，不能用首个分钟价格代替或判断入场模式"
+            failure_evidence = "session_open"
         stock = {"code": code, "name": row.get("name", ""), "quality": quality,
+                 "session_open": opening if opening is not None and opening > 0 else None,
+                 "opening_evidence": context,
                  "first_confirm_time": "", "first_evaluated_at": "", "transitions": []}
         if failure:
             stock.update({"status": "missing_evidence", "reason": failure})
-            failures.append({"date": date, "code": code, "evidence": "candidate_minutes_or_identity", "reason": failure})
+            failures.append({"date": date, "code": code, "evidence": failure_evidence, "reason": failure})
         else:
             from scripts.diagnose_intraday_signal import price_diagnostic
-            stock["price_evidence"] = price_diagnostic(available, {"pre_close": prior["close"],
-                "open": (opening_prices or {}).get(code) or float(available.iloc[0]["open"])},
-                str((RealtimeEntrySignalService._row_execution(row) or {}).get("confirmation_deadline") or "10:00:00"))
+            stock["price_evidence"] = price_diagnostic(available, {"pre_close": reference,
+                "open": opening},
+                str((RealtimeEntrySignalService._row_execution(row) or {}).get("confirmation_deadline") or service.evaluator.deadline),
+                evaluator=service.evaluator)
             last_key = None
             for count in range(1, len(available) + 1):
                 prefix = available.iloc[:count]
                 source_time = str(prefix.iloc[-1]["time"])
                 evaluated_at = (datetime.strptime(source_time, "%H:%M:%S") + timedelta(minutes=1)).strftime("%H:%M:%S")
                 # Derived bar values are replay context, never quotes with invented receive timestamps.
-                quote = {"date": date, "time": evaluated_at, "pre_close": prior["close"],
-                         "open_price": (opening_prices or {}).get(code) or float(available.iloc[0]["open"]),
+                quote = {"date": date, "time": evaluated_at, "pre_close": reference,
+                         "open_price": opening,
+                         "opening_source": context["opening_source"] or opening_price_source,
+                         "opening_received_at": context["received_at"],
                          "last_price": float(prefix.iloc[-1]["close"]),
                          "source": "historical_minute_context", "is_stale": False}
                 signal = service._evaluate_one(row, quote, prefix, {}, {}, prior, date, rows, {})
@@ -245,6 +208,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
               "auctions": auctions or {}, "members": members or {}, "bundle_id": bundle_id,
               "sector_codes": {name: sector_codes[name] for name in members},
               "opening_prices": opening_prices or {}, "opening_price_source": opening_price_source,
+              "opening_evidence": opening_evidence or {}, "risk_config": risk.to_dict(),
+              "configuration_basis": configuration_basis,
               "amount_profile": profiles.load(),
               "minutes": {c: json.loads(f.to_json(orient="records")) for c, f in sorted(frames.items())}}
     root = Path(__file__).resolve().parents[2]
@@ -252,7 +217,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
              "backtest/confirmation_quality.py", "backtest/reversal_entry.py", "core/data/minute_quality.py",
              "core/realtime/models.py", "core/signals/minute_amount_profile.py", "core/utils/stock_eligibility.py",
              "scripts/diagnose_intraday_signal.py", "core/realtime/sector_service.py", "core/realtime/sector_evidence.py",
-             "core/signals/sector_sync.py", "core/realtime/sector_breadth.py"]
+             "core/signals/sector_sync.py", "core/realtime/sector_breadth.py", "core/signals/opening.py",
+             "core/realtime/session_open_repository.py", "core/signals/production_rules.py"]
     versions = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
     return clean({"classification": "minute_rule_diagnostic", "market_date": date, "candidate_date": candidate_date,
                   "until": until, "profile": request["profile"], "generated_at": shanghai_now().isoformat(),
@@ -265,19 +231,22 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                   "confirmed_stocks": sum(bool(s["first_confirm_time"]) for s in stocks),
                   "sector_confirmation_policy": SECTOR_SYNC_VERSION,
                   "opening_price_source": opening_price_source,
+                  "configuration_basis": configuration_basis,
+                  "entry_parameters": entry_parameters(service.evaluator), "ruleset_version": RULESET_VERSION,
                   "excluded_sector_names": excluded_sector_names,
                   "limitations": ["分钟回放不重建历史 3 秒快照、租约、接收时间及采集空窗。",
                                   "补齐后的分钟不能证明当时及时到达；规则触发不代表实时门禁通过或微信送达。",
                                   "板块使用冻结成分股的分钟观测，不冒充当时的批量快照。",
                                   "当前代码与保存的输入用于代码回归，不是策略收益或真实成交回测。",
                                   "板块确认仅使用绑定到同花顺8开头代码的成分；700分类及无代码绑定的旧成分不参与。",
+                                  "候选缺少真实开盘价时标记缺证据，不用首个分钟价格推断开盘分层。",
                                   "开盘走强要求真实开盘价、同组成分股与3分钟前的分钟；日线仅取开盘字段，不取当日收盘或最高价。",
                                   "盘后取得的当日开盘字段只用于规则诊断，不证明盘中及时到达。"]})
 
 
 class DayReplayLoader:
     def __init__(self, *, web_data_dir=None, cache_dir=None, db_path=None, data_manager=None, calendar=None,
-                 minute_cache=None):
+                 minute_cache=None, opening_repository=None, snapshot_repository=None):
         from config.settings import WEB_DATA_DIR, CACHE_DIR, FACTOR_DB_PATH
         self.root = Path(web_data_dir or WEB_DATA_DIR)
         self.cache = Path(cache_dir or CACHE_DIR)
@@ -285,49 +254,103 @@ class DayReplayLoader:
         self.dm = data_manager
         self.calendar = calendar or TradeCalendar()
         self.minute_cache = minute_cache
+        from core.realtime.session_open_repository import SessionOpenRepository
+        self.openings = opening_repository or SessionOpenRepository(self.cache)
+        self.snapshot_repository = snapshot_repository
+        self.opening_evidence = {}
 
-    def _opening_evidence(self, date, codes, *, fetch_missing):
-        from core.signals.sector_sync import finite_number
+    def _opening_evidence(self, date, codes, *, fetch_missing, until="23:59:59"):
+        from core.signals.opening import positive_price
+        from core.realtime.session_open_repository import quote_opening
+        from core.realtime.quote_cache import RealtimeQuoteCache
+        wanted, records = set(codes), {}
+
+        def accept_quotes(rows, source, cutoff=until):
+            for row in rows:
+                evidence = quote_opening(row, date, until=cutoff)
+                if evidence and evidence["code"] in wanted and evidence["code"] not in records:
+                    records[evidence["code"]] = {**evidence, "source": source}
+
+        archived = self.openings.read(date, codes, until=until)
+        accept_quotes(({**row, "date": date} for row in archived.values()), "eltdx_open_archive")
+        missing = wanted - records.keys()
+        if missing:
+            latest = self.openings.backend.get_many_json([RealtimeQuoteCache._quote_key(c) for c in sorted(missing)])
+            accept_quotes((row for row in latest.values() if isinstance(row, dict)), "eltdx_quote_cache")
+        if wanted - records.keys():
+            from core.realtime.snapshot_repository import RealtimeSnapshotRepository
+            snapshots = self.snapshot_repository or RealtimeSnapshotRepository()
+            for code in sorted(wanted - records.keys()):
+                accept_quotes(snapshots.read(date, code), "eltdx_snapshot_cache")
+        if (fetch_missing and date == shanghai_now().strftime("%Y%m%d")
+                and shanghai_now().strftime("%H:%M:%S") >= "09:30:00"
+                and callable(getattr(self.dm, "get_quote_snapshots", None)) and wanted - records.keys()):
+            try:
+                quotes = self.dm.get_quote_snapshots(sorted(wanted - records.keys())) or {}
+                accept_quotes(quotes.values(), "eltdx_quote_posthoc", cutoff="23:59:59")
+            except Exception:
+                pass
+
+        def accept_daily(frame, source):
+            if frame is None or frame.empty or not {"open", "trade_date"}.issubset(frame.columns):
+                return
+            for row in frame.to_dict("records"):
+                code = normalize_stock_code(row.get("code") or row.get("ts_code"), add_suffix=False)
+                opening = positive_price(row.get("open"))
+                if (code in wanted and code not in records and opening is not None
+                        and str(row["trade_date"]).replace("-", "")[:8] == date):
+                    records[code] = {"code": code, "market_date": date, "open_price": opening,
+                                     "pre_close": positive_price(row.get("pre_close")), "source": source,
+                                     "received_at": ""}
+
         path = self.cache / "stock" / "all_daily" / f"{date}.csv"
-        frame, source = pd.DataFrame(), ""
-        if path.exists():
-            frame = pd.read_csv(path, dtype={"code":str, "ts_code":str})
-            source = "stock_daily_open_cache"
-        if frame.empty and self.database.exists():
+        if wanted - records.keys() and path.exists():
+            accept_daily(pd.read_csv(path, dtype={"code": str, "ts_code": str}), "stock_daily_open_cache")
+        if wanted - records.keys() and self.database.exists():
             from core.infrastructure.duckdb_access import connect
             try:
                 with connect(self.database, read_only=True) as con:
-                    frame = con.execute("SELECT code, trade_date, open FROM stock_daily_silver "
+                    frame = con.execute("SELECT code, trade_date, open, pre_close FROM stock_daily_silver "
                         "WHERE CAST(trade_date AS VARCHAR)=?", [date]).fetchdf()
-                source = "stock_daily_silver_open"
+                accept_daily(frame, "stock_daily_silver_open")
             except Exception:
                 pass
-        if frame.empty and fetch_missing and callable(getattr(self.dm, "get_all_stocks_daily", None)):
+        if wanted - records.keys() and fetch_missing and callable(getattr(self.dm, "get_all_stocks_daily", None)):
             try:
-                frame = self.dm.get_all_stocks_daily(date)
-                source = "tushare_daily_open_posthoc"
+                accept_daily(self.dm.get_all_stocks_daily(date), "tushare_daily_open_posthoc")
             except Exception:
                 pass
-        if frame is None or frame.empty or not {"open","trade_date"}.issubset(frame.columns):
-            return {}, "missing_real_session_open"
-        wanted = set(codes)
-        values = {}
-        for row in frame.to_dict("records"):
-            code = normalize_stock_code(row.get("code") or row.get("ts_code"), add_suffix=False)
-            opening = finite_number(row.get("open"))
-            if (code in wanted and opening is not None and opening > 0
-                    and str(row["trade_date"]).replace("-", "")[:8] == date):
-                values[code] = opening
-        return values, source
+        self.opening_evidence = records
+        source = "+".join(sorted({row["source"] for row in records.values()})) or "missing_real_session_open"
+        return {code: row["open_price"] for code, row in records.items()}, source
 
-    def run(self, request, progress=None):
+    def run(self, request, progress=None, *, inputs_only=False, extra_codes=(), extra_rows=()):
         date = request["market_date"]
         candidate = self.calendar.prev(date)
         if not candidate or candidate >= date:
             raise ValueError("无法确定前一交易日；不能使用当天盘后候选")
         frozen = PreopenEvidenceStore(self.root).load(candidate, date)
         inputs = frozen["inputs"] if frozen else {}
-        if request["profile"] == "leader_pool":
+        if request["profile"] == "production":
+            if not frozen:
+                from config.settings import SNAPSHOT_DIR
+                snapshot = Path(SNAPSHOT_DIR) / f'{candidate}.json'
+                decision = self.root / 'screening' / 'decision_pool' / f'decision_pool_{candidate}.json'
+                if not snapshot.exists() or not decision.exists():
+                    raise ValueError(f'缺少候选日 {candidate} 快照或决策池，不能假定空候选继续')
+            from core.signals.production_rules import production_candidates
+            if not frozen:
+                from core.realtime.leader_pool_service import LeaderPoolService
+                from core.realtime.overlay_service import RealtimeOverlayService
+                from core.screening.strategy_profiles import StrategyProfileRepository
+                inputs = {"leader_pools": {"10": LeaderPoolService(
+                    screening_dir=self.root / "screening", duckdb_path=self.database).build_pool(
+                        candidate, lookback=10, limit=30)},
+                    "candidates": RealtimeOverlayService(screening_dir=self.root / "screening").candidate_rows(
+                        candidate, profile="decision_pool", limit=20),
+                    "profiles": StrategyProfileRepository().list_profiles()}
+            rows = production_candidates(inputs)
+        elif request["profile"] == "leader_pool":
             if frozen:
                 rows = (inputs.get("leader_pools", {}).get(str(request["lookback"]), {}).get("rows") or [])[:30]
             else:
@@ -341,8 +364,11 @@ class DayReplayLoader:
             rows = RealtimeOverlayService(screening_dir=self.root / "screening").candidate_rows(candidate, profile="decision_pool", limit=10000)
         if request["codes"]:
             rows = [r for r in rows if normalize_stock_code(r.get("code"), add_suffix=False) in request["codes"]]
-        if not rows:
+        if not rows and not inputs_only:
             raise ValueError("该范围没有候选；指定股票必须属于候选日的对应池")
+        if frozen and request['profile'] != 'production':
+            from core.signals.production_rules import production_context
+            rows = production_context(rows, inputs)
         previous = {}
         daily_path = self.cache / "stock" / "all_daily" / f"{candidate}.csv"
         daily = pd.read_csv(daily_path, dtype={"ts_code": str, "code": str}) if daily_path.exists() else pd.DataFrame()
@@ -352,7 +378,8 @@ class DayReplayLoader:
                 daily = con.execute("SELECT * FROM stock_daily_silver WHERE CAST(trade_date AS VARCHAR)=?", [candidate]).fetchdf()
         for record in [*daily.to_dict("records"), *(inputs.get("daily_rows") or [])]:
             previous[normalize_stock_code(record.get("code") or record.get("ts_code"), add_suffix=False)] = clean(record)
-        names = set().union(*(RealtimeEntrySignalService._sectors(r) for r in rows))
+        context_rows = [*rows, *extra_rows]
+        names = set().union(*(RealtimeEntrySignalService._sectors(r) for r in context_rows)) if context_rows else set()
         from core.realtime.sector_service import RealtimeSectorService
         verified_members = RealtimeSectorService.confirmation_members(inputs)
         sector_codes = inputs.get("sector_codes") or {}
@@ -369,13 +396,14 @@ class DayReplayLoader:
             members = {name: prepared["sector_members"].get(name, []) for name in names}
             sector_codes = prepared["sector_codes"]
         codes = sorted({normalize_stock_code(r.get("code"), add_suffix=False) for r in rows}
-                       | {c for group in members.values() for c in group})
+                       | {c for group in members.values() for c in group} | set(extra_codes))
         frames, auctions, minute_sources = {}, {}, {}
         if request["fetch_missing"] and self.dm is None:
             from core.data.data_manager_main import DataManager
             from config.settings import TUSHARE_TOKEN
             self.dm = DataManager(TUSHARE_TOKEN, self.cache)
-        opening_prices, opening_price_source = self._opening_evidence(date, codes, fetch_missing=request["fetch_missing"])
+        opening_prices, opening_price_source = self._opening_evidence(
+            date, codes, fetch_missing=request["fetch_missing"], until=request["until"])
         for index, code in enumerate(codes):
             ts_code = normalize_stock_code(code, add_suffix=True)
             path = self.cache / "stock" / "tick" / f"{ts_code}_{date}.csv"
@@ -418,10 +446,19 @@ class DayReplayLoader:
                     auctions[code] = self.dm.get_auction_data(ts_code, date) or {}
                 except Exception:
                     pass
+        if inputs_only:
+            return {"rows": rows, "frames": frames, "previous": previous, "auctions": auctions,
+                    "members": members, "sector_codes": sector_codes, "opening_prices": opening_prices,
+                    "opening_price_source": opening_price_source, "bundle_id": frozen["bundle_id"] if frozen else "",
+                    "opening_evidence": self.opening_evidence,
+                    "risk_config": inputs.get("risk_config"),
+                    "input_basis": "preopen_frozen" if frozen else "research_candidates_not_frozen"}
         report = replay_minutes(request=request, candidate_date=candidate, rows=rows, frames=frames,
                                 previous=previous, auctions=auctions, members=members,
                                 sector_codes=sector_codes,
                                 opening_prices=opening_prices, opening_price_source=opening_price_source,
+                                opening_evidence=self.opening_evidence, risk_config=inputs.get("risk_config"),
+                                configuration_basis="preopen_frozen" if inputs.get("risk_config") else "current_config_not_frozen",
                                 input_basis="preopen_frozen" if frozen else "research_candidates_not_frozen",
                                 bundle_id=frozen["bundle_id"] if frozen else "", progress=progress)
         from scripts.diagnose_intraday_signal import runtime_evidence
@@ -430,6 +467,8 @@ class DayReplayLoader:
         report["recorded_runtime"] = {
             "confirmation_history": runtime_evidence(APP_DB_PATH, "realtime_signal_events", date, selected),
             "signal_ledger": runtime_evidence(HOLDING_DB_PATH, "signal_evidence", date, selected)}
+        from core.realtime.runtime_diagnostics import attach_runtime_diagnostics
+        attach_runtime_diagnostics(report)
         if not frozen:
             report["limitations"].append("缺少真实盘前冻结包；候选及配置仅用于研究，不证明当时运行输入。")
             report["limitations"].append("板块名单使用本地真实同花顺缓存，不具备历史时点证明，仅用于代码回归。")
@@ -450,6 +489,8 @@ def replay_saved_inputs(inputs, progress=None):
                           sector_codes=inputs.get("sector_codes") or {},
                           opening_prices=inputs.get("opening_prices") or {},
                           opening_price_source=inputs.get("opening_price_source") or "",
+                          opening_evidence=inputs.get("opening_evidence") or {}, risk_config=inputs.get("risk_config"),
+                          configuration_basis=inputs.get("configuration_basis") or "",
                           profiles=profiles, input_basis=inputs["input_basis"], bundle_id=inputs["bundle_id"], progress=progress)
 
 

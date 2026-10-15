@@ -128,6 +128,7 @@ def build_run_manifest(
         "end_date": meta.get("end_date") or result.get("as_of_date") or "",
         "model_versions": meta.get("model_versions") or {},
         "data_cutoff": result.get("as_of_date") or meta.get("end_date") or "",
+        "ruleset_version": (result.get('data_quality') or {}).get('ruleset_version', 'legacy_research'),
         "costs": {
             key: config_snapshot.get(key)
             for key in ("commission_rate", "stamp_duty_rate", "slippage")
@@ -135,7 +136,9 @@ def build_run_manifest(
     }
     return {
         **semantic_payload,
-        "execution_contract_version": "production_gate_chronological_fills_v2",
+        "execution_contract_version": semantic_payload['ruleset_version'],
+        "replay_input_manifest": (result.get('data_quality') or {}).get('input_manifest') or [],
+        "input_evidence_hash": stable_hash((result.get('data_quality') or {}).get('input_manifest') or []),
         "effective_sizing_mode": (
             "fixed_account_slots" if float(config_snapshot.get('account_position_pct') or 0) > 0
             else config_snapshot.get('position_sizing_mode') or 'fixed_risk'

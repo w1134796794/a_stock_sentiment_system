@@ -211,6 +211,13 @@ class PositionMonitor:
 
         if quote_error(quote or {}, trade_date):
             return 0
+        from core.portfolio.execution_quotes import execution_price
+        from risk.risk_config import RiskConfig
+        costs = RiskConfig.load()
+        try:
+            price = execution_price(quote, side='sell', reference_time=trade_time, slippage=costs.slippage)
+        except (KeyError, TypeError, ValueError):
+            return 0
         action = str(decision.get("action") or "")
         total = int(position.get("shares") or 0)
         if action == "sell":
@@ -238,6 +245,7 @@ class PositionMonitor:
                 "trade_time": trade_time,
                 "price": price,
                 "shares": shares,
+                "fees": price * shares * (costs.commission_rate + costs.stamp_duty_rate),
                 "reason": decision.get("reason") or decision.get("action_label") or "自动模拟退出",
                 "source": "auto_realtime_exit",
                 "execution_key": f"portfolio-exit:{position['id']}:{signal_id or trade_date}:{action}",
@@ -267,7 +275,10 @@ class PositionMonitor:
         provider = self._ensure_sector_breadth_provider()
         if provider is None or not names:
             return {"state": None, "data_completeness": 0.0, "reason": "持仓未配置所属板块"}
-        state, detail = provider.evaluate(names, market_date)
+        try:
+            state, detail = provider.evaluate(names, market_date, exclude_code=str(position.get('code') or ''))
+        except TypeError:
+            state, detail = provider.evaluate(names, market_date)
         return {**dict(detail or {}), "state": state}
 
     def _market_context(self) -> Dict[str, Any]:

@@ -49,7 +49,7 @@ def test_snapshot_signal_waits_for_next_tick_then_fills():
         "sector_confirmed": True,
         "is_leader": False,
         "limit_price": 11.0,
-        "minute_decision": EntryDecision("observing"),
+        "minute_decision": EntryDecision("confirmed"),
     }
 
     first = service.evaluate(snapshots=_ticks(2), **common)
@@ -67,7 +67,7 @@ def test_snapshot_gap_cannot_fill_trigger_from_before_collector_downtime():
     common = dict(code="000001", trade_date="20260813", mode=ENTRY_WEAK,
                   minute_bars=_minutes(), prev_close=10.0, open_gap=-0.02,
                   sector_confirmed=True, is_leader=False, limit_price=11.0,
-                  minute_decision=EntryDecision("observing"))
+                  minute_decision=EntryDecision("confirmed"))
     assert service.evaluate(snapshots=_ticks(2), **common).data_status == "snapshot_triggered"
     clock[0] = datetime(2026, 8, 13, 9, 41, 3)
     resumed = pd.concat([_ticks(2), _ticks(2, datetime(2026, 8, 13, 9, 41))], ignore_index=True)
@@ -95,7 +95,7 @@ def test_snapshot_signal_does_not_confirm_without_sector_sync():
         sector_confirmed=False,
         is_leader=False,
         limit_price=11.0,
-        minute_decision=EntryDecision("observing"),
+        minute_decision=EntryDecision("confirmed"),
     )
 
     assert result.status == "observing"
@@ -115,7 +115,7 @@ def test_snapshot_signal_rejects_stale_ticks():
         sector_confirmed=True,
         is_leader=False,
         limit_price=11.0,
-        minute_decision=EntryDecision("observing"),
+        minute_decision=EntryDecision("confirmed"),
     )
 
     assert result.status == "observing"
@@ -130,7 +130,7 @@ def test_snapshot_uses_strategy_deadline_after_ten(deadline, expected):
         code="000001", trade_date="20260813", mode=ENTRY_WEAK,
         minute_bars=_minutes(), snapshots=_ticks(3, now - timedelta(seconds=6)),
         prev_close=10.0, open_gap=-0.02, sector_confirmed=True,
-        is_leader=False, limit_price=11.0, minute_decision=EntryDecision("observing"),
+        is_leader=False, limit_price=11.0, minute_decision=EntryDecision("confirmed"),
         confirmation_deadline=deadline,
     )
     if expected == "cancelled":
@@ -146,7 +146,7 @@ def test_snapshot_deadline_does_not_relax_freshness():
         code="000001", trade_date="20260813", mode=ENTRY_WEAK,
         minute_bars=_minutes(), snapshots=_ticks(3, datetime(2026, 8, 13, 10, 10)),
         prev_close=10.0, open_gap=-0.02, sector_confirmed=True,
-        is_leader=False, limit_price=11.0, minute_decision=EntryDecision("observing"),
+        is_leader=False, limit_price=11.0, minute_decision=EntryDecision("confirmed"),
         confirmation_deadline="10:30:00",
     )
     assert result.data_status == "snapshot_stale"
@@ -165,7 +165,7 @@ def test_opening_low_break_is_only_checked_after_structure_forms(low_time, cance
         code="000001", trade_date="20260813", mode=ENTRY_WEAK,
         minute_bars=_minutes(), snapshots=ticks, prev_close=10.0,
         open_gap=-0.02, sector_confirmed=True, is_leader=False,
-        limit_price=11.0, minute_decision=EntryDecision("observing"),
+        limit_price=11.0, minute_decision=EntryDecision("confirmed"),
     )
     assert (result.status == "cancelled") == cancelled
     if not cancelled:
@@ -178,3 +178,14 @@ def test_optional_snapshot_columns_do_not_raise():
     assert len(result) == 3
     assert result["ask1"].eq(0).all()
     assert result["delta_volume"].eq(0).all()
+
+
+@pytest.mark.parametrize('status', ['observing', 'data_insufficient', 'quality_pending', 'quality_rejected', 'signal_unfilled'])
+def test_snapshot_cannot_override_common_confirmation_gates(status):
+    minute = EntryDecision(status, reason='common gate not passed', data_status='missing_amount_profile')
+    service = SnapshotSignalService(clock=lambda: datetime(2026, 8, 13, 9, 35, 12))
+    result = service.evaluate(code='000001', trade_date='20260813', mode=ENTRY_WEAK,
+        minute_bars=_minutes(), snapshots=_ticks(3), prev_close=10, open_gap=-.02,
+        sector_confirmed=True, is_leader=False, limit_price=11, minute_decision=minute)
+    assert result is minute
+    assert not service._pending

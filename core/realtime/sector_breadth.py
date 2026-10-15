@@ -43,9 +43,9 @@ class RealtimeSectorBreadthProvider:
         self._opening_history = {}
         self._lock = RLock()
 
-    def evaluate(self, sectors: Iterable[str], market_date: str) -> Tuple[Optional[bool], Dict[str, Any]]:
+    def evaluate(self, sectors: Iterable[str], market_date: str, *, exclude_code: str = '') -> Tuple[Optional[bool], Dict[str, Any]]:
         names = tuple(sorted({str(name or "").strip() for name in sectors if str(name or "").strip()}))
-        key = (str(market_date), names)
+        key = (str(market_date), names, exclude_code)
         now = monotonic()
         with self._lock:
             cached = self._result_cache.get(key)
@@ -56,9 +56,12 @@ class RealtimeSectorBreadthProvider:
         from core.operations.preopen_evidence import PreopenEvidenceStore
         frozen = PreopenEvidenceStore().load(self.calendar.prev(str(market_date)), str(market_date))
         constituent_map = RealtimeSectorService.confirmation_members(frozen["inputs"]) if frozen else {}
+        if not frozen:
+            constituent_map = {name: sorted(self._members(name, market_date)) for name in names}
+        constituent_map = {name: [c for c in codes if c != exclude_code] for name, codes in constituent_map.items()}
         members: Set[str] = set()
         for name in names:
-            members.update(constituent_map.get(name, []) if frozen else self._members(name, market_date))
+            members.update(constituent_map.get(name, []))
         member_quotes = self._stock_quotes(sorted(members)[:80])
         observed = [
             row for row in member_quotes.values()
@@ -67,7 +70,7 @@ class RealtimeSectorBreadthProvider:
         breadth = sum(_float(row.get("change_pct")) > 0 for row in observed) / len(observed) if observed else None
         average_change = sum(_float(row.get("change_pct")) for row in observed) / len(observed) if observed else None
 
-        if frozen:
+        if constituent_map:
             index_quotes = self._stock_quotes(sorted(members))
             index_changes = []
             for name in names:

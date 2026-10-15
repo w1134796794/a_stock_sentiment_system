@@ -149,6 +149,8 @@ class PaperTradingService:
                     market_date=market_date,
                     candidate_strength=candidate_strength,
                     reference_time=buy_quote["time"],
+                    strategy_id=str(row.get('strategy_id') or strategy.get('id') or profile),
+                    strategy_cap=int((row.get('strategy_execution') or strategy.get('execution') or {}).get('max_positions') or 0),
                 )
                 if not target:
                     key = "没有可换出的更弱持仓" if positions else "可用资金不足一手"
@@ -200,6 +202,14 @@ class PaperTradingService:
                 continue
             strategy_id = str(row.get("strategy_id") or strategy.get("id") or profile)
             strategy_name = str(row.get("strategy_name") or strategy.get("name") or profile)
+            execution = row.get('strategy_execution') or strategy.get('execution') or {}
+            from core.signals.production_rules import execution_defaults
+            execution = execution_defaults(execution, costs)
+            cap = int(execution.get('max_positions') or 0)
+            replaced_id = target.get('id') if rotation else None
+            if cap and sum(p.get('strategy_id') == strategy_id and p.get('id') != replaced_id for p in positions) >= cap:
+                reject('策略持仓已达上限')
+                continue
             sectors = row.get("resonance_sectors") or row.get("sector_names") or ""
             if isinstance(sectors, (list, tuple, set)):
                 sectors = ",".join(str(item) for item in sectors if item)
@@ -223,7 +233,7 @@ class PaperTradingService:
                         "metadata": {
                             "signal_id": signal_id,
                             "signal_evidence": row.get("signal_evidence") or {},
-                            "strategy_execution": row.get("strategy_execution") or strategy.get("execution") or {},
+                            "strategy_execution": execution,
                             "strategy_version": row.get("strategy_version") or strategy.get("version") or "legacy",
                             "structure": row.get("structure") or {},
                             "protection_price_source": "盘后结构保护价" if row.get("structural_stop") else "账户风险底线",
@@ -282,54 +292,13 @@ class PaperTradingService:
 
     @staticmethod
     def _candidate_strength(row: Dict[str, Any]) -> float:
-        base = 0.0
-        for field in (
-            "turn_score",
-            "screening_score",
-            "leader_score",
-            "score",
-            "success_probability",
-            "confidence_score",
-        ):
-            value = _number(row.get(field))
-            if 0 < value <= 1:
-                value *= 100.0
-            if value > 0:
-                base = value
-                break
-        if base <= 0:
-            base = 50.0
-        mode_bonus = {
-            "weak_to_strong": 4.0,
-            "continuation": 3.0,
-            "acceleration": 2.0,
-            "high_open_acceleration": 2.0,
-        }.get(str(row.get("entry_mode") or ""), 0.0)
-        group_bonus = 4.0 if str(row.get("action_group") or "") == "重点确认" else 0.0
-        sector = dict(row.get("sector_detail") or {})
-        breadth = _number(sector.get("breadth"))
-        if 0 < breadth <= 1:
-            breadth *= 100.0
-        sector_bonus = max(min((breadth - 50.0) / 20.0, 3.0), -3.0) if breadth else 0.0
-        return round(max(0.0, min(100.0, base + mode_bonus + group_bonus + sector_bonus)), 2)
+        from core.signals.production_rules import candidate_strength
+        return candidate_strength(row)
 
     @staticmethod
     def _holding_strength(position: Dict[str, Any]) -> float:
-        metadata = dict(position.get("metadata") or {})
-        base = _number(metadata.get("entry_strength_score"), 50.0)
-        entry_price = _number(position.get("entry_price"))
-        last_price = _number(position.get("last_price"), entry_price)
-        pnl_pct = (last_price / entry_price - 1.0) * 100.0 if entry_price > 0 else 0.0
-        momentum = max(min(pnl_pct * 0.8, 12.0), -12.0)
-        action_adjustment = {
-            "hold": 0.0,
-            "watch": -5.0,
-            "reduce": -12.0,
-            "sell": -25.0,
-            "blocked": -20.0,
-            "data_insufficient": -3.0,
-        }.get(str(position.get("latest_action") or "hold"), 0.0)
-        return round(max(0.0, min(100.0, base + momentum + action_adjustment)), 2)
+        from core.signals.production_rules import holding_strength
+        return holding_strength(position)
 
     def _rotation_target(
         self,
@@ -338,6 +307,7 @@ class PaperTradingService:
         market_date: str,
         candidate_strength: float,
         reference_time: str = "",
+        strategy_id: str = '', strategy_cap: int = 0,
     ) -> Dict[str, Any]:
         from core.portfolio.execution_quotes import quote_error
 
@@ -352,6 +322,10 @@ class PaperTradingService:
         ]
         if not sellable:
             return {}
+        if strategy_cap and sum(p.get('strategy_id') == strategy_id for p in positions) >= strategy_cap:
+            sellable = [p for p in sellable if p.get('strategy_id') == strategy_id]
+            if not sellable:
+                return {}
         weakest = min(sellable, key=self._holding_strength)
         weakest_strength = self._holding_strength(weakest)
         if candidate_strength < weakest_strength + self.rotation_min_edge:
@@ -364,6 +338,7 @@ class PaperTradingService:
         end_date: str,
         *,
         progress: Callable[[Dict[str, Any]], None] | None = None,
+        production: bool = False,
     ) -> Dict[str, Any]:
         """Cache T+1 minute/auction evidence before a historical replay."""
         from config.settings import CACHE_DIR, TUSHARE_TOKEN
@@ -377,6 +352,33 @@ class PaperTradingService:
         calendar = TradeCalendar()
         if not calendar.is_real:
             raise ValueError("真实交易日历不可用，不能确定回放首日对应的候选日")
+        if production:
+            from core.realtime.day_replay import DayReplayLoader
+            from core.data.data_manager_suspension import suspension_status
+            dm = DataManager(TUSHARE_TOKEN, CACHE_DIR, allow_remote_history=True)
+            loader = DayReplayLoader(data_manager=dm, calendar=calendar)
+            failures, count = [], 0
+            dates = calendar.get_trade_dates(str(start_date), str(end_date))
+            for index, date in enumerate(dates):
+                def update(item):
+                    if progress:
+                        progress({**item, 'trade_date': date, 'unit': '证据项'})
+                inputs = loader.run({'market_date': date, 'until': '15:01:00', 'profile': 'production',
+                    'lookback': 10, 'codes': [], 'fetch_missing': True}, progress=update, inputs_only=True)
+                for row in inputs['rows']:
+                    code = row['code']
+                    count += 1
+                    ts_code = normalize_stock_code(code, add_suffix=True)
+                    if suspension_status(dm, ts_code, date).get('state') == 'full_day':
+                        continue
+                    raw = inputs['frames'].get(code)
+                    if not inspect_minute_bars(raw, date, expected_code=code)['valid']:
+                        failures.append(minute_failure(dm, raw, date, ts_code))
+                if progress:
+                    progress({'stage': '候选与真实成分证据预取完成', 'completed': index + 1,
+                              'total': len(dates), 'trade_date': date, 'unit': '交易日'})
+            return {'minute_failed': len(failures), 'evidence_failures': failures,
+                    'minute_requirements': count, 'production_rules': True}
         minute_requirements, auction_requirements, audit = build_requirements(
             profiles,
             calendar.prev(str(start_date)),
@@ -541,6 +543,8 @@ class PaperTradingService:
             data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 return {}
+            from core.signals.production_rules import RULESET_VERSION
+            data['current_ruleset_version'] = RULESET_VERSION
             trades_path = path.with_name(f'backtest_trades_{run_id}.csv')
             if trades_path.exists():
                 columns = pd.read_csv(trades_path, nrows=0).columns
@@ -591,6 +595,10 @@ class PaperTradingService:
         if not run_id:
             raise ValueError("回测批次不能为空")
         result_dir = Path(OUTPUT_DIR) / "backtest_results"
+        import json
+        manifest_file = result_dir / f'backtest_manifest_{run_id}.json'
+        manifest = json.loads(manifest_file.read_text(encoding='utf-8')) if manifest_file.exists() else {}
+        capital = _number((manifest.get('backtest_config') or {}).get('initial_capital'), self.initial_capital)
         trades_path = result_dir / f"backtest_trades_{run_id}.csv"
         positions_path = result_dir / f"backtest_positions_{run_id}.csv"
         if not trades_path.exists() and not positions_path.exists():
@@ -617,12 +625,12 @@ class PaperTradingService:
         self.repository.ensure_account(
             account_key,
             name="历史重建账户" if account_key != self.ACCOUNT_KEY else "模拟交易账户",
-            initial_capital=self.initial_capital,
+            initial_capital=capital,
         )
         if reset:
             self.repository.reset_account(
                 account_key,
-                initial_capital=self.initial_capital,
+                initial_capital=capital,
             )
 
         imported = {"buy": 0, "sell": 0, "open": 0, "skipped": 0}
@@ -669,6 +677,28 @@ class PaperTradingService:
                     imported["open"] += 1
                 except (TypeError, ValueError):
                     imported["skipped"] += 1
+        if positions_path.exists():
+            for row in positions.to_dict('records'):
+                code = normalize_stock_code(row.get('stock_code'), add_suffix=False)
+                position = self.repository.get_open_position(code, account_key)
+                if not position:
+                    continue
+                metadata = dict(position.get('metadata') or {})
+                for key in ('strategy_execution', 'exit_config'):
+                    value = row.get(key)
+                    if isinstance(value, str) and value:
+                        metadata[key] = json.loads(value)
+                metadata.update(strategy_version=row.get('strategy_version') or '',
+                    entry_strength_score=_number(row.get('entry_strength_score'), 50),
+                    protection_price_source='账户风险底线')
+                hard_stop = _number((metadata.get('exit_config') or {}).get('hard_stop_loss'), .06)
+                if _number(row.get('stop_loss_price')) > _number(position.get('entry_price')) * (1 - hard_stop) + .00001:
+                    metadata['protection_price_source'] = '盘后结构保护价'
+                with self.repository._write() as conn:
+                    conn.execute('UPDATE portfolio_positions SET metadata_json=?,structural_stop=?,last_price=?,high_watermark=? WHERE id=?',
+                        (json.dumps(metadata, ensure_ascii=False), _number(row.get('stop_loss_price')),
+                         _number(row.get('current_price'), _number(position.get('entry_price'))),
+                         _number(row.get('highest_price'), _number(position.get('high_watermark'))), position['id']))
         return {**imported, "run_id": run_id, "account_key": account_key,
                 "costs_verified": bool(costs_verified),
                 "warnings": [] if costs_verified else ['旧成交文件成本未知，不可用于完整净收益评估']}

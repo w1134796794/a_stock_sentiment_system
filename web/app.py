@@ -2244,12 +2244,14 @@ def realtime_page(request: Request) -> Any:
 
 
 @app.get("/portfolio", response_class=HTMLResponse)
+@app.get("/portfolio/backtest", response_class=HTMLResponse)
 def portfolio_page(request: Request) -> Any:
     """统一模拟交易账户、持仓、退出提醒与历史成交。"""
     return templates.TemplateResponse(
         request,
         "portfolio.html",
         {
+            "portfolio_mode": 'backtest' if request.url.path.endswith('/backtest') else 'paper',
             "paper_initial_capital": PAPER_INITIAL_CAPITAL,
             "paper_max_positions": PAPER_MAX_POSITIONS,
             "paper_position_pct": PAPER_POSITION_PCT,
@@ -2400,6 +2402,31 @@ def api_portfolio_replay_checkpoint() -> Any:
                          "config_version": service.config_version()})
 
 
+@app.post('/api/portfolio/adopt/preview')
+def api_portfolio_adopt_preview(payload: dict = Body(default={})) -> Any:
+    from core.portfolio.account_replacement import AccountReplacement
+    try:
+        result = AccountReplacement(_get_holding_service().repository).preview(str(payload.get('account_key') or ''))
+        return JSONResponse({'ok': True, 'data': result})
+    except ValueError as exc:
+        return JSONResponse({'ok': False, 'message': str(exc)}, status_code=422)
+
+
+@app.post('/api/portfolio/adopt')
+def api_portfolio_adopt(payload: dict = Body(default={})) -> Any:
+    from core.portfolio.account_replacement import AccountReplacement
+    if _current_realtime_session()['is_open'] or _PAPER_REPLAY_STATE.get('state') in {'running', 'prefetching'}:
+        return JSONResponse({'ok': False, 'message': '交易时段或回放运行中不能替换账户，请等待结束'}, status_code=409)
+    if payload.get('confirm_replace') is not True:
+        return JSONResponse({'ok': False, 'message': '必须明确确认替换；当前账户未修改'}, status_code=422)
+    try:
+        result = AccountReplacement(_get_holding_service().repository).replace(
+            str(payload.get('account_key') or ''), str(payload.get('revision') or ''))
+        return JSONResponse({'ok': True, 'data': result, 'message': '模拟账户已替换，原账户已自动备份'})
+    except ValueError as exc:
+        return JSONResponse({'ok': False, 'message': str(exc)}, status_code=409)
+
+
 @app.post("/api/portfolio/rebuild")
 def api_portfolio_rebuild(payload: dict = Body(default={})) -> Any:
     from backtest.evidence_policy import normalize_policy
@@ -2423,6 +2450,8 @@ def api_portfolio_rebuild(payload: dict = Body(default={})) -> Any:
                                     "account_key": "独立历史账户（完成后生成）",
                                     "start_date": start_date, "end_date": end_date,
                                     "progress": {}, "imported": False})
+        from core.portfolio.incremental_replay import IncrementalPaperReplay
+        _PAPER_REPLAY_STATE['config_version'] = IncrementalPaperReplay.config_version()
     Thread(target=_run_paper_rebuild, args=(start_date, end_date, capital, policy),
            name="paper-history-rebuild", daemon=True).start()
     return JSONResponse({"ok": True, "message": "历史重建将在独立账户运行，不覆盖当前模拟持仓"})
@@ -2438,11 +2467,10 @@ def _run_paper_rebuild(start_date: str, end_date: str, capital: float, missing_e
             _PAPER_REPLAY_STATE["updated_epoch"] = time.time()
 
     try:
+        # The production engine loads the same frozen candidates/constituents
+        # as live matching. Legacy peer prefetch must not block unrelated rows.
         prefetch = _get_paper_trading_service().prefetch_replay_minutes(
-            start_date,
-            end_date,
-            progress=update_progress,
-        )
+            start_date, end_date, progress=update_progress, production=True)
         if prefetch.get("minute_failed") and missing_evidence_policy == "strict":
             failures = prefetch.get("evidence_failures") or prefetch.get("minute_failures_preview") or []
             with _PAPER_REPLAY_LOCK:
@@ -2546,6 +2574,14 @@ def api_portfolio_replay_status(since: int = 0) -> Any:
                     return JSONResponse({**status, "state": "blocked", "paper_replay": dict(_PAPER_REPLAY_STATE)})
                 imported = _get_paper_trading_service().import_backtest_run(
                     run_id, reset=True, account_key=f"history_{run_id}")
+                if imported.get('skipped'):
+                    raise ValueError('成交导入不完整，禁止采用此账户')
+                from core.portfolio.account_replacement import AccountReplacement
+                from core.signals.production_rules import RULESET_VERSION
+                if quality.get('ruleset_version') == RULESET_VERSION:
+                    AccountReplacement(service.repository).register(
+                        f'history_{run_id}', run_id, _PAPER_REPLAY_STATE.get('end_date') or '',
+                        _PAPER_REPLAY_STATE.get('config_version') or '', quality)
                 _PAPER_REPLAY_STATE.update({
                     "state": "done",
                     "stage": "独立历史重建完成", "finished_epoch": time.time(),
@@ -3647,6 +3683,24 @@ def _log_realtime_blockers(candidate_date: str, market_date: str, minute_bucket:
     logger.warning("Realtime readiness blocked %s/%s: %s", candidate_date, market_date, "；".join(reasons))
 
 
+def _build_production_execution_payload(trade_date, market_date):
+    from core.operations.preopen_evidence import PreopenEvidenceStore
+    from core.signals.production_rules import RULESET_VERSION, production_candidates
+    from core.realtime.leader_pool_service import LeaderPoolService
+    from core.screening.strategy_profiles import StrategyProfileRepository
+    bundle = PreopenEvidenceStore().load(trade_date, market_date)
+    inputs = bundle['inputs'] if bundle else {
+        'leader_pools': {'10': LeaderPoolService().build_pool(trade_date, lookback=10, limit=30)},
+        'candidates': RealtimeOverlayService().candidate_rows(trade_date, limit=20),
+        'profiles': StrategyProfileRepository().list_profiles()}
+    payload = RealtimeOverlayService(quote_service=_get_realtime_quote_service(),
+        entry_signal_service=_get_realtime_entry_signal_service()).build_overlay(
+        trade_date, market_date=market_date, candidates=production_candidates(inputs),
+        profile='production', limit=10000)
+    payload['ruleset_version'] = RULESET_VERSION
+    return payload
+
+
 def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
     if _data_generation_running():
         return
@@ -3697,6 +3751,8 @@ def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
     if watchlist_only or not _current_realtime_session()["is_open"]:
         return
     jobs = [
+        (_overlay_cache_key(trade_date, market_date, 'production', 10000, 90),
+         lambda: _build_production_execution_payload(trade_date, market_date)),
         (
             _intraday_strength_cache_key(
                 trade_date, market_date, "leader_pool", 10, 30, 90,
@@ -3724,6 +3780,8 @@ def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
                 from core.operations.ledger import stable_id
 
                 _prepare_signal_payload(payload)
+                if payload.get('profile') != 'production':
+                    continue
                 readiness = payload["execution_health"]
                 if not readiness["ready"]:
                     reasons = list(readiness["reasons"])

@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sqlite3
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -19,19 +17,23 @@ from backtest.minute_entry import ENTRY_WEAK, normalize_minute_bars
 from backtest.trade_calendar import TradeCalendar
 from config.settings import APP_DB_PATH, CACHE_DIR, HOLDING_DB_PATH
 from core.realtime.entry_signal_service import classify_entry_mode
+from core.realtime.trading_session import shanghai_now
 from core.utils.stock_code_utils import StockCodeUtils
 
 
-def price_diagnostic(raw: pd.DataFrame, daily: dict, deadline: str) -> dict:
+def price_diagnostic(raw: pd.DataFrame, daily: dict, deadline: str, *, evaluator=None) -> dict:
     data = normalize_minute_bars(raw)
     if data.empty:
         return {"status": "missing_minutes"}
-    previous_close = float(daily.get("pre_close") or 0)
-    open_price = float(daily.get("open") or 0)
-    mode = classify_entry_mode(open_price, previous_close)
+    from core.signals.opening import positive_price
+    from core.signals.production_rules import minute_evaluator
+    evaluator = evaluator or minute_evaluator()
+    previous_close = positive_price(daily.get("pre_close"))
+    open_price = positive_price(daily.get("open"))
+    mode = classify_entry_mode(open_price, previous_close, weak_max_gap=evaluator.weak_max_gap,
+                               continuation_max_gap=evaluator.continuation_max_gap)
     opening = data[data["time"] <= "09:35:00"].head(5)
-    if (len(opening) < 5 or not math.isfinite(previous_close) or not math.isfinite(open_price)
-            or previous_close <= 0 or open_price <= 0):
+    if len(opening) < 5 or previous_close is None or open_price is None:
         return {"status": "missing_opening_evidence", "minute_count": len(data)}
     high, low = float(opening["high"].max()), float(opening["low"].min())
     scan = data[(data["time"] > str(opening.iloc[-1]["time"])) & (data["time"] <= deadline)]
@@ -77,8 +79,10 @@ def runtime_evidence(path: Path, table: str, date: str, codes: list[str]) -> dic
             field = "payload_json" if table == "realtime_signal_events" else "evidence_json"
             raw = json.loads(row.pop(field))
             row["evidence"] = {key: raw.get(key) for key in (
-                "confirm_status", "confirm_time", "trigger_reason", "veto_reason", "health_gate_reason",
+                "status", "profile", "confirm_status", "confirm_time", "minute_closed_at",
+                "reason", "data_status", "sector_detail", "trigger_reason", "veto_reason", "health_gate_reason",
                 "quote_received_at", "sector_coverage", "sector_data_completeness", "notification_status",
+                "entry_mode", "opening_evidence", "entry_parameters",
             )}
             if table == "signal_evidence" and con.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_events'").fetchone():
@@ -94,25 +98,48 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", required=True)
     parser.add_argument("--codes", required=True)
-    parser.add_argument("--deadline", default="10:00:00")
+    parser.add_argument("--deadline")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--runtime-only", action="store_true", help="Only inspect recorded confirmation and delivery; no market requests")
     args = parser.parse_args()
     codes = list(dict.fromkeys(StockCodeUtils.standardize_code(code.strip(), add_suffix=False)
                               for code in args.codes.split(",") if code.strip()))
-    daily_path = CACHE_DIR / "stock" / "all_daily" / f"{args.date}.csv"
-    daily = pd.read_csv(daily_path, dtype={"ts_code": str}) if daily_path.exists() else pd.DataFrame()
+    candidate_date = TradeCalendar().prev(args.date)
+    opening_rows, previous, evaluator = {}, {}, None
+    if not args.runtime_only:
+        from core.realtime.day_replay import DayReplayLoader
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        from core.signals.production_rules import minute_evaluator
+        from risk.risk_config import RiskConfig
+        loader = DayReplayLoader(cache_dir=CACHE_DIR)
+        loader._opening_evidence(args.date, codes, fetch_missing=False)
+        opening_rows = loader.opening_evidence
+        frozen = PreopenEvidenceStore().load(candidate_date, args.date)
+        inputs = frozen['inputs'] if frozen else {}
+        evaluator = minute_evaluator(RiskConfig.from_dict(inputs['risk_config']) if inputs.get('risk_config') else None)
+        prior_path = CACHE_DIR / 'stock' / 'all_daily' / f'{candidate_date}.csv'
+        prior = pd.read_csv(prior_path, dtype={'code': str, 'ts_code': str}) if prior_path.exists() else pd.DataFrame()
+        for row in [*prior.to_dict('records'), *(inputs.get('daily_rows') or [])]:
+            previous[StockCodeUtils.standardize_code(row.get('code') or row.get('ts_code'), add_suffix=False)] = row
     stocks = []
     for code in codes:
         ts_code = StockCodeUtils.standardize_code(code, add_suffix=True)
         path = CACHE_DIR / "stock" / "tick" / f"{ts_code}_{args.date}.csv"
+        if args.runtime_only:
+            stocks.append({"code": code, "status": "not_evaluated"})
+            continue
         raw = pd.read_csv(path) if path.exists() else pd.DataFrame()
-        current = daily[daily["ts_code"] == ts_code] if not daily.empty else pd.DataFrame()
+        from core.signals.opening import opening_context
+        opening = opening_context(opening_rows.get(code, {}), previous.get(code, {}))
         stocks.append({"code": code, "minute_path": str(path),
-                       **price_diagnostic(raw, current.iloc[0].to_dict() if not current.empty else {}, args.deadline)})
+                       "opening_evidence": opening,
+                       **price_diagnostic(raw, {'open': opening['open_price'], 'pre_close': opening['pre_close']},
+                                          args.deadline or evaluator.deadline, evaluator=evaluator)})
     report = {
-        "market_date": args.date, "candidate_date": TradeCalendar().prev(args.date),
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "classification": "historical_price_diagnostic", "live_runtime_verified": False,
+        "market_date": args.date, "candidate_date": candidate_date,
+        "generated_at": shanghai_now().isoformat(timespec="seconds"),
+        "classification": "recorded_runtime_diagnostic" if args.runtime_only else "historical_price_diagnostic",
+        "live_runtime_verified": False,
         "limitations": ["Minute prices cannot reconstruct historical 3-second snapshots or collector leases.",
                         "Backfilled data cannot prove it was available before the original signal.",
                         "Price triggers do not establish sector, volume, tradability or delivery acceptance."],
@@ -120,6 +147,9 @@ def main() -> None:
         "confirmation_history": runtime_evidence(APP_DB_PATH, "realtime_signal_events", args.date, codes),
         "signal_ledger": runtime_evidence(HOLDING_DB_PATH, "signal_evidence", args.date, codes),
     }
+    from core.realtime.runtime_diagnostics import attach_runtime_diagnostics
+    report["recorded_runtime"] = {key: report[key] for key in ("confirmation_history", "signal_ledger")}
+    attach_runtime_diagnostics(report)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))

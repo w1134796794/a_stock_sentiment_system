@@ -122,6 +122,8 @@ class BacktestConfig:
     exit_minute_data_policy: str = "cache_or_fetch"
     replay_missing_evidence_policy: str = "legacy"
     replay_prefetch_failures: Optional[List[Dict[str, Any]]] = None
+    production_rules: bool = False  # Explicit legacy research engines remain reproducible.
+    production_strategy_ids: Optional[List[str]] = None
     daily_ohlc_path_policy: str = "conservative_stop_first"
     exit_policy_mode: str = "strategy"
 
@@ -278,6 +280,18 @@ class BacktestEngine:
         self._sector_evidence_snapshots: Dict[Tuple[str, str], Dict[str, Dict[str, Any]]] = {}
         self._sector_peer_failures: Dict[Tuple[str, str], str] = {}
         self._day_plans = pd.DataFrame()
+        self._production_inputs = {}
+        self._production_minute_prices = None
+        self._replay_progress = None
+        self._production_input_manifest = []
+        self._production_rows = {}
+        self._production_profiles = {}
+        if self.config.production_rules:
+            from core.screening.strategy_profiles import StrategyProfileRepository
+            profiles = StrategyProfileRepository().frozen()
+            self._production_profiles = {p['id']: profiles.get_profile(p['id']) for p in profiles.list_profiles()}
+            from risk.risk_config import RiskConfig
+            self._production_risk = RiskConfig.load()
         self.entry_attempts: List[Dict[str, Any]] = []
         self.entry_candidate_count: int = 0
         self.amount_profiles = MinuteAmountProfileRepository()
@@ -316,6 +330,7 @@ class BacktestEngine:
         """恢复账户状态；调用后可继续处理下一个交易日。"""
         state = dict(state or {})
         self._exit_scan_times.clear()
+        self._production_minute_prices = None
         initial = self._float(state.get("initial_capital"), self.config.initial_capital)
         self.config.initial_capital = initial
         self.cash = self._float(state.get("cash"), initial)
@@ -373,6 +388,7 @@ class BacktestEngine:
         # 生成交易日历
         trade_dates = self._get_trade_dates(start_date, end_date)
 
+        self._replay_progress = progress
         for index, date in enumerate(trade_dates):
             if progress:
                 progress({"stage": "运行分钟回放", "trade_date": date,
@@ -382,6 +398,7 @@ class BacktestEngine:
                 progress({"stage": "运行分钟回放", "trade_date": date,
                           "completed": index + 1, "total": len(trade_dates), "unit": "交易日"})
 
+        self._replay_progress = None
         # 生成回测报告
         if progress:
             progress({"stage": "生成回测报告", "completed": len(trade_dates),
@@ -415,6 +432,7 @@ class BacktestEngine:
         注意：交易计划是前一天收盘后制定的，所以当天执行的是前一天的计划
         例如：20260413 收盘后制定 20260414 的计划，20260414 开盘时执行
         """
+        production_plans = self._prepare_production_day(date) if self.config.production_rules else None
         if self.config.replay_missing_evidence_policy != "legacy":
             # Check all overnight holdings before any exit or daily-OHLC fallback.
             missing = []
@@ -436,7 +454,7 @@ class BacktestEngine:
 
         # 2. 加载前一日的交易计划（T日执行T-1日的计划）
         prev_date = self._get_prev_trade_date(date)
-        plans_df = self._load_trade_plans(prev_date, trade_plans_dir)
+        plans_df = production_plans if production_plans is not None else self._load_trade_plans(prev_date, trade_plans_dir)
 
         if not plans_df.empty:
             logger.info(f"[{date}] 加载 {prev_date} 制定的 {len(plans_df)} 条交易计划")
@@ -469,7 +487,8 @@ class BacktestEngine:
                         self._clear_entry_state(code)
                 # Exits and cash are advanced only through completed bars before
                 # each entry. A later signal cannot consume an earlier slot.
-                for at_time, _, plan, decision, state in sorted(events, key=lambda item: (item[0], item[1])):
+                for at_time, _, plan, decision, state in sorted(events, key=lambda item: (
+                    item[0], -item[4][0].get('entry_strength_score', 0) if self.config.production_rules else item[1])):
                     self._check_stop_loss_take_profit(date, until_time=at_time)
                     self._mark_positions_at_time(date, at_time)
                     code = str(plan['代码']).zfill(6)
@@ -505,6 +524,93 @@ class BacktestEngine:
     def _get_prev_trade_date(self, date: str) -> str:
         """获取前一个交易日（B-1：真实交易日历）"""
         return self.calendar.prev(date)
+
+    def _prepare_production_day(self, date: str) -> pd.DataFrame:
+        if self._production_inputs.get('date') == str(date):
+            return self._production_plans.copy()
+        self._release_completed_minute_data(str(date))
+        from core.realtime.day_replay import DayReplayLoader, digest
+        from core.realtime.entry_signal_service import RealtimeEntrySignalService
+        from backtest.plan_source import _to_backtest_row
+        from core.signals.production_rules import RULESET_VERSION
+        holdings = [{"code": c, "sector_names": p.get('resonance_sectors') or ''}
+                    for c, p in self.current_positions.items()]
+        loader = DayReplayLoader(data_manager=self.dm, calendar=self.calendar,
+            cache_dir=getattr(self.dm, 'cache_dir', None))
+        fetch_missing = bool(getattr(self.dm, 'allow_remote_minutes', getattr(self.dm, 'allow_remote_history', True)))
+        def evidence_progress(item):
+            if self._replay_progress:
+                self._replay_progress({**item, 'trade_date': str(date), 'unit': '证据项'})
+        inputs = loader.run({"market_date": str(date), "until": "15:01:00", "profile": "production",
+                             "lookback": 10, "codes": [], "fetch_missing": fetch_missing},
+                            progress=evidence_progress,
+                            inputs_only=True, extra_codes=self.current_positions, extra_rows=holdings)
+        self._production_inputs = inputs
+        inputs['date'] = str(date)
+        frozen_config = inputs.get('input_basis') == 'preopen_frozen'
+        from core.signals.production_rules import minute_evaluator
+        from risk.risk_config import RiskConfig
+        self.minute_evaluator = minute_evaluator(
+            RiskConfig.from_dict(inputs['risk_config']) if frozen_config and inputs.get('risk_config') else self.config)
+        latest_rows = []
+        from core.screening.strategy_profiles import PRODUCTION_STRATEGY_IDS
+        enabled = {key for key, p in self._production_profiles.items() if key in PRODUCTION_STRATEGY_IDS and p.get('enabled', True)}
+        selected = set(self.config.production_strategy_ids or
+                       ([r.get('strategy_id') for r in inputs['rows']] if frozen_config else enabled))
+        for source in inputs['rows']:
+            row = dict(source)
+            if row.get('strategy_id') not in selected:
+                continue
+            profile = {} if frozen_config else self._production_profiles.get(row.get('strategy_id')) or {}
+            if profile and profile.get('enabled') is False:
+                continue
+            if profile:
+                from core.signals.production_rules import execution_defaults
+                row['strategy_execution'] = execution_defaults(profile.get('execution') or {}, self._production_risk)
+                row['strategy_version'] = str(profile.get('version') or '')
+            latest_rows.append(row)
+        inputs['rows'] = latest_rows
+        self._production_rows = {str(r['code']): r for r in inputs['rows']}
+        plans = []
+        for rank, row in enumerate(inputs['rows'], 1):
+            item = _to_backtest_row({**row, "综合评分": row.get('screening_score') or row.get('leader_score') or row.get('score'),
+                                    "共振板块": ','.join(RealtimeEntrySignalService._sectors(row)),
+                                    "优先级": rank, "入场门控来源": "production_decision_v1",
+                                    "生产决策允许入场": True})
+            if item:
+                item['pool_type'] = row.get('pool_type') or ''
+                plans.append(item)
+        for code, raw in inputs['frames'].items():
+            self._minute_frames[(str(date), code)] = normalize_minute_bars(raw)
+        for code, auction in inputs.get('auctions', {}).items():
+            self._auction_rows[(str(date), code)] = auction
+        for code in self.current_positions:
+            self._exit_minute_frames.pop((str(date), code), None)
+        manifest = {"date": str(date), "ruleset": RULESET_VERSION, "input_basis": inputs['input_basis'],
+                    "bundle_id": inputs['bundle_id'], "candidate_codes": sorted(self._production_rows),
+                    "sector_codes": inputs['sector_codes'], "opening_price_source": inputs['opening_price_source']}
+        from core.signals.production_rules import entry_parameters
+        manifest['entry_parameters'] = entry_parameters(self.minute_evaluator)
+        manifest['configuration_basis'] = 'preopen_frozen' if frozen_config and inputs.get('risk_config') else 'run_config'
+        manifest['input_hash'] = digest({**manifest, 'rows': inputs['rows'], 'previous': inputs['previous'],
+            'opening_prices': inputs['opening_prices'], 'members': inputs['members'],
+            'opening_evidence': inputs.get('opening_evidence', {}),
+            'amount_profile': self.amount_profiles.load(),
+            'minutes': {c: f.to_dict('records') for c, f in inputs['frames'].items()}})
+        self._production_input_manifest.append(manifest)
+        self._production_plans = pd.DataFrame(plans)
+        return self._production_plans.copy()
+
+    def _release_completed_minute_data(self, date: str) -> None:
+        # Constituent histories can cover thousands of stocks; retain only this session.
+        for cache in (self._minute_frames, self._exit_minute_frames, self._auction_rows,
+                      self._exit_scan_times, self._sector_evidence, self._sector_evidence_snapshots):
+            for key in list(cache):
+                if str(key[0]) != date:
+                    del cache[key]
+        if self._production_inputs.get('date') != date:
+            self._production_inputs = {}
+        self._production_minute_prices = None
 
     def _load_trade_plans(self, date: str, trade_plans_dir: str) -> pd.DataFrame:
         """加载交易计划"""
@@ -796,6 +902,7 @@ class BacktestEngine:
             'resonance_sectors': ','.join(normalize_sector_names(plan.get('共振板块'))),
             'plan_rank': plan_rank,
             'plan_score': plan_score,
+            'entry_strength_score': self._float(entry_meta.get('entry_strength_score'), plan_score),
             'plan_reason': plan_reason,
             'factor_metrics_json': factor_metrics_json,
             'factor_context_json': factor_context_json,
@@ -919,6 +1026,18 @@ class BacktestEngine:
         )
 
     def _prefetch_entry_data(self, plans: pd.DataFrame, date: str) -> None:
+        if self.config.production_rules:
+            from core.data.minute_quality import inspect_minute_bars, minute_failure
+            for _, plan in plans.iterrows():
+                code = str(plan['代码']).zfill(6)
+                if self._is_full_day_suspended(code, date, scope='candidate'):
+                    continue
+                self._candidate_evidence_samples.add((str(date), code))
+                frame = self._production_inputs['frames'].get(code)
+                if not inspect_minute_bars(frame, str(date), expected_code=code)['valid']:
+                    self._entry_evidence_missing[(str(date), code)] = minute_failure(self.dm, frame, str(date), code)
+                self._auction_rows[(str(date), code)] = self._production_inputs['auctions'].get(code, {})
+            return
         from core.utils.stock_eligibility import new_entry_exclusion
         requested = loaded = 0
         sector_map: Dict[str, set[str]] = {}
@@ -1036,6 +1155,28 @@ class BacktestEngine:
         return output
 
     def _sector_sync_checker(self, plan: pd.Series, date: str, stock_code: str):
+        if self.config.production_rules:
+            from core.signals.sector_sync import constituent_minute_prices, make_constituent_sync_checker
+            from core.signals.opening import sector_reference_rows
+            inputs = self._production_inputs
+            frames = {c: self._minute_frames.get((str(date), c)) for c in inputs.get('frames', {})}
+            if getattr(self, '_production_minute_prices', None) is None:
+                self._production_minute_prices = constituent_minute_prices(frames)
+            checker, evidence = make_constituent_sync_checker(
+                code=stock_code, names=normalize_sector_names(plan.get('共振板块') or plan.get('所属板块')),
+                members=inputs.get('members', {}),
+                frames=frames,
+                previous=sector_reference_rows(inputs.get('previous', {}), inputs.get('opening_evidence', {})),
+                opening_prices=inputs.get('opening_prices', {}),
+                minute_prices=self._production_minute_prices)
+            key = (str(date), stock_code)
+            self._sector_evidence[key] = evidence
+            snapshots = self._sector_evidence_snapshots[key] = {}
+            def observe(at_time):
+                result = checker(at_time)
+                snapshots[str(at_time)] = deepcopy(evidence)
+                return result
+            return observe
         sectors = set(normalize_sector_names(plan.get('共振板块') or plan.get('所属板块')))
         key = (str(date), stock_code)
         evidence = self._sector_evidence[key] = {'sector_names': sorted(sectors), 'peer_codes': [],
@@ -1074,6 +1215,8 @@ class BacktestEngine:
         return observe
 
     def _is_leader_or_mainline_core(self, plan: pd.Series) -> bool:
+        if str(plan.get('pool_type') or '') in {'核心龙头', '板块龙头'}:
+            return True
         leader_quality = self._float(plan.get('因子_stk_kpl_leader_quality'))
         mainline = self._float(plan.get('因子_stk_sector_mainline_score'))
         board_position = self._float(plan.get('因子_stk_board_position'))
@@ -1102,13 +1245,10 @@ class BacktestEngine:
         if configured == ENTRY_FIXED:
             return ENTRY_FIXED
         if configured == ENTRY_HYBRID:
-            if self.config.weak_entry_min_gap <= gap <= self.config.weak_entry_max_gap:
-                resolved = ENTRY_WEAK
-            elif self.config.weak_entry_max_gap < gap <= self.config.continuation_max_gap:
-                resolved = ENTRY_CONTINUATION
-            elif gap > self.config.continuation_max_gap:
-                resolved = ENTRY_ACCELERATION
-            else:
+            from core.signals.opening import classify_opening_gap
+            resolved = classify_opening_gap(gap, weak_max_gap=self.minute_evaluator.weak_max_gap,
+                                           continuation_max_gap=self.minute_evaluator.continuation_max_gap)
+            if not resolved:
                 return None
         else:
             resolved = configured
@@ -1152,7 +1292,7 @@ class BacktestEngine:
         key = (str(date), stock_code)
         snapshots = self._sector_evidence_snapshots.get(key, {})
         sector_evidence = deepcopy(snapshots.get(decision.confirm_time, self._sector_evidence.get(key, {})))
-        if reason_code == 'missing_sector_confirmation' and sector_evidence:
+        if reason_code == 'missing_sector_confirmation' and sector_evidence and not self.config.production_rules:
             reason_text += (f"；板块：{'、'.join(sector_evidence['sector_names']) or '未解析到有效板块'}"
                 f"；同板块样本{len(sector_evidence['peer_codes'])}只"
                 f"，{sector_evidence['at_time'] or '确认时点'}有效观测{sector_evidence['observed_count']}/2只")
@@ -1178,6 +1318,7 @@ class BacktestEngine:
             'entry_time': decision.entry_time,
             'entry_price': decision.entry_price,
             'open_gap_pct': decision.open_gap_pct,
+            'opening_evidence': deepcopy(self._last_entry_meta.get(stock_code, {}).get('opening_evidence', {})),
             'amount_pace': decision.amount_pace,
             'sector_confirmed': decision.sector_confirmed,
             'data_status': decision.data_status,
@@ -1255,6 +1396,7 @@ class BacktestEngine:
             (是否可以买入, 买入价格)
         """
         target_price = plan['目标价']
+        self._last_entry_meta.get(stock_code, {}).pop('opening_evidence', None)
         entry_timing = plan.get('介入时机', '09:31-10:00')
         def reject(reason_code: str, reason: str, *, data_status: str = 'complete') -> Tuple[bool, float]:
             decision = EntryDecision(
@@ -1280,19 +1422,25 @@ class BacktestEngine:
         # 获取当日开盘数据
         try:
             standardized_code = self._standardize_stock_code(stock_code)
-            daily_data = self.dm.get_stock_daily_data(standardized_code, date)
+            if self.config.production_rules:
+                opening_evidence = self._production_inputs.get('opening_evidence', {}).get(stock_code, {})
+                daily_data = {'open': self._production_inputs.get('opening_prices', {}).get(stock_code),
+                              'pre_close': opening_evidence.get('pre_close')}
+            else:
+                daily_data = self.dm.get_stock_daily_data(standardized_code, date)
             
             if not daily_data:
                 logger.info(f"{stock_name} 无法获取当日开盘数据，不能确认高开，放弃买入")
                 return reject('missing_daily_open', '缺少当日开盘数据', data_status='missing_daily')
             
-            open_price = daily_data.get('open', 0)
+            from core.signals.opening import positive_price
+            open_price = positive_price(daily_data.get('open'))
             high_price = daily_data.get('high', 0)
             low_price = daily_data.get('low', 0)
             
-            if open_price <= 0:
+            if open_price is None:
                 logger.info(f"{stock_name} 开盘价无效，不能确认高开，放弃买入")
-                return reject('invalid_daily_open', '当日开盘价无效', data_status='invalid_daily')
+                return reject('invalid_daily_open', '当日真实开盘价缺失或无效', data_status='missing_session_open')
                 
         except ReplayEvidenceBlocked:
             raise
@@ -1300,14 +1448,21 @@ class BacktestEngine:
             logger.debug(f"{stock_name} 获取开盘数据失败: {e}，不能确认高开，放弃买入")
             return reject('daily_open_error', f'获取开盘数据失败: {e}', data_status='daily_error')
         
-        prev_close = float(daily_data.get('pre_close') or 0)
-        if prev_close <= 0:
-            prev_close = self._get_prev_close(stock_code, date) or 0
+        prev_close = positive_price(daily_data.get('pre_close'))
+        if prev_close is None:
+            prev_close = (self._production_inputs.get('previous', {}).get(stock_code, {}).get('close')
+                          if self.config.production_rules else self._get_prev_close(stock_code, date))
         gap = open_gap_pct({"open": open_price, "pre_close": prev_close}, prev_close)
         if gap is None:
             logger.info(f"{stock_name} 昨收价缺失，无法计算开盘状态，放弃买入")
             return reject('missing_previous_close', '缺少昨收，无法计算开盘状态', data_status='missing_previous_close')
         self._last_entry_gap[stock_code] = gap
+        from core.signals.opening import opening_context
+        opening_facts = opening_context({'open_price': open_price, 'pre_close': daily_data.get('pre_close'),
+                                         'opening_source': (opening_evidence.get('source') if self.config.production_rules else 'historical_daily'),
+                                         'opening_received_at': (opening_evidence.get('received_at') if self.config.production_rules else '')},
+                                        {'close': prev_close})
+        self._last_entry_meta.setdefault(stock_code, {})['opening_evidence'] = opening_facts
 
         lu_price = None
         if prev_close and prev_close > 0:
@@ -1322,12 +1477,16 @@ class BacktestEngine:
             return reject('entry_mode_not_allowed', '开盘分层不在策略允许入场模式内')
         if entry_mode != ENTRY_FIXED:
             previous_date = self.calendar.prev(date)
-            previous_bar = self._get_stock_daily_bar(stock_code, previous_date) or {}
+            previous_bar = (self._production_inputs.get('previous', {}).get(stock_code, {}) if self.config.production_rules
+                            else self._get_stock_daily_bar(stock_code, previous_date) or {})
             auction = self._auction_rows.get((str(date), stock_code), {})
             amount_ratio = self._float(
                 plan.get('原始_amount_ratio_5d'), self._float(plan.get('原始_amount_ratio'))
             )
             execution = self._plan_execution(plan)
+            if self.config.production_rules:
+                from core.realtime.entry_signal_service import RealtimeEntrySignalService
+                amount_ratio = RealtimeEntrySignalService._metric(self._production_rows.get(stock_code, {}), 'amount_ratio', 0)
             if requires_auction(execution) and not (
                 self._float(auction.get('竞价成交额')) > 0
                 and self._float(auction.get('竞价成交量')) > 0
@@ -1379,6 +1538,7 @@ class BacktestEngine:
             from backtest.reversal_entry import STRUCTURAL_LABELS
             entry_mode = next((key for key, label in STRUCTURAL_LABELS.items() if label == decision.signal), entry_mode)
             self._last_entry_meta[stock_code] = {
+                'opening_evidence': opening_facts,
                 'structural_stop': (self._plan_execution(plan).get('structures') or {}).get(entry_mode, {}).get('protection', 0),
                 'confirm_time': decision.confirm_time,
                 'entry_time': decision.entry_time,
@@ -1389,6 +1549,14 @@ class BacktestEngine:
                 'confirmation_policy': decision.confirmation_policy,
             }
             entry_price = decision.entry_price * (1 + self.config.slippage)
+            if self.config.production_rules:
+                from core.utils.price_limit import round_price
+                entry_price = round_price(entry_price)
+                from core.signals.production_rules import candidate_strength
+                row = self._production_rows.get(stock_code, {})
+                evidence = self._sector_evidence_snapshots.get((str(date), stock_code), {}).get(decision.confirm_time, {})
+                self._last_entry_meta[stock_code]['entry_strength_score'] = candidate_strength(
+                    {**row, 'entry_mode': entry_mode, 'sector_detail': evidence})
             logger.info(
                 f"{stock_name} {decision.confirm_time}确认{decision.signal}，"
                 f"{decision.entry_time}按下一分钟开盘价{decision.entry_price:.2f}成交"
@@ -1553,10 +1721,16 @@ class BacktestEngine:
         stock_name: str,
     ) -> bool:
         """Use a confirmed intraday signal to replace a weaker T+1 holding."""
-        candidate_strength = self._plan_strength(plan)
+        candidate_strength = (self._float((self._last_entry_meta.get(stock_code) or {}).get('entry_strength_score'), self._plan_strength(plan))
+                              if getattr(self.config, 'production_rules', False) else self._plan_strength(plan))
         entry_time = str((self._last_entry_meta.get(stock_code) or {}).get("entry_time") or "09:30:00")
+        strategy_cap = int(self._plan_execution(plan).get('max_positions') or 0)
+        strategy_id = str(plan.get('策略ID') or 'default')
+        at_strategy_cap = strategy_cap and sum(p.get('strategy_id') == strategy_id for p in self.current_positions.values()) >= strategy_cap
         eligible = []
         for code, position in self.current_positions.items():
+            if at_strategy_cap and str(position.get('strategy_id') or 'default') != strategy_id:
+                continue
             if self._is_full_day_suspended(code, date, scope='holding'):
                 continue
             if str(position.get("entry_date") or "") >= str(date):
@@ -1574,6 +1748,11 @@ class BacktestEngine:
                     + max(min(pnl_pct * 0.8, 12.0), -12.0),
                 ),
             )
+            if getattr(self.config, 'production_rules', False):
+                from core.signals.production_rules import holding_strength
+                current_strength = holding_strength({
+                    'metadata': {'entry_strength_score': position.get('entry_strength_score', position.get('plan_score', 50))},
+                    'entry_price': entry_price, 'last_price': price, 'latest_action': position.get('latest_action', 'hold')})
             eligible.append((current_strength, code, price, position))
         if not eligible:
             return False
@@ -1677,6 +1856,7 @@ class BacktestEngine:
                         self._float(minute_result.get("price"), current_price),
                         str(minute_result.get("reason") or "minute_exit"),
                         str(minute_result.get("time") or ''),
+                        minute_result.get('shares'),
                     ))
                 continue
             if until_time is not None:
@@ -1766,7 +1946,8 @@ class BacktestEngine:
         for event in stocks_to_sell:
             stock_code, sell_price, reason = event[:3]
             at_time = event[3] if len(event) > 3 else ''
-            self._execute_sell(stock_code, sell_price, date, reason, exit_time=at_time)
+            self._execute_sell(stock_code, sell_price, date, reason, exit_time=at_time,
+                               shares_to_sell=event[4] if len(event) > 4 else None)
 
     def _minute_exit_decision(
         self, stock_code: str, position: Dict[str, Any], date: str, daily_bar: Dict[str, Any],
@@ -1790,8 +1971,6 @@ class BacktestEngine:
             bars = bars[bars['time'].astype(str) < until_time]
         if bars.empty:
             return {'sell': False}
-        if hasattr(self, '_exit_scan_times'):
-            self._exit_scan_times[(date, stock_code)] = str(bars.iloc[-1]['time'])
         entry_price = self._float(position.get("entry_price"))
         stop_price = self._float(position.get("stop_loss_price"))
         exit_config = self._position_exit_config(position)
@@ -1801,6 +1980,8 @@ class BacktestEngine:
         session_high = peak
         first = not previous_time
         for row in bars.itertuples(index=False):
+            if hasattr(self, '_exit_scan_times'):
+                self._exit_scan_times[(date, stock_code)] = str(row.time)
             minute_open = self._float(getattr(row, "open", 0.0))
             minute_high = self._float(getattr(row, "high", minute_open), minute_open)
             minute_low = self._float(getattr(row, "low", minute_open), minute_open)
@@ -1833,6 +2014,38 @@ class BacktestEngine:
                 price = min(minute_open, trailing_price) if 0 < minute_open < trailing_price else trailing_price
                 return {"sell": True, "price": price, "reason": "trailing_stop_minute", "time": str(row.time)}
             position["last_close"] = minute_close
+            if self.config.production_rules:
+                from core.portfolio.exit_decision_service import ExitDecisionService
+                quote = {'last_price': minute_close, 'high_price': peak, 'time': str(row.time),
+                         'open_price': self._float(daily_bar.get('open')),
+                         'change_pct': (minute_close / self._float(daily_bar.get('pre_close')) - 1) * 100
+                                      if self._float(daily_bar.get('pre_close')) > 0 else 0}
+                checker = self._sector_sync_checker(pd.Series({'共振板块': position.get('resonance_sectors') or ''}), date, stock_code)
+                state = checker(str(row.time))
+                sector = {**self._sector_evidence[(str(date), stock_code)], 'state': state}
+                if state is None and position.get('resonance_sectors') and self.config.replay_missing_evidence_policy != 'legacy':
+                    self._raise_replay_evidence([{'trade_date': date, 'code': stock_code,
+                        'scope': 'holding', 'evidence': 'holding_sector_minutes',
+                        'reason': '持仓板块分钟证据不足', 'action': 'blocked', 'sector_evidence': sector}])
+                decision = ExitDecisionService().evaluate(
+                    {'entry_price': entry_price, 'entry_date': position['entry_date'], 'shares': position['shares'],
+                     'sellable_shares': position['shares'] if position['entry_date'] < date else 0,
+                     'strategy_id': position.get('strategy_id'), 'high_watermark': peak,
+                     'structural_stop': stop_price,
+                     'metadata': {'strategy_execution': {'exit': exit_config}, 'protection_price_source': '账户风险底线'}},
+                    quote, signal_date=date, sector_context=sector,
+                    market_context=self._production_market_context(date, str(row.time)))
+                position['latest_action'] = decision.action
+                if decision.action in {'sell', 'reduce'} and decision.can_sell:
+                    exit_key = (str(date), decision.action, ';'.join(decision.reasons))
+                    if list(exit_key) in position.get('context_exit_keys', []):
+                        continue
+                    shares = (position['shares'] if decision.action == 'sell' else
+                              int(position['shares'] * .5 / 100) * 100)
+                    if shares > 0:
+                        position.setdefault('context_exit_keys', []).append(list(exit_key))
+                        return {'sell': True, 'price': minute_close, 'reason': 'context_' + decision.action,
+                                'time': str(row.time), 'shares': shares}
 
             minute_pnl = minute_close / entry_price - 1 if entry_price > 0 else 0.0
             if (str(getattr(row, "time", "")) >= "14:55:00"
@@ -1855,6 +2068,11 @@ class BacktestEngine:
         ):
             return {"sell": True, "price": close_price, "reason": "time_stop_minute_close", "time": str(bars.iloc[-1]["time"])}
         return {"sell": False}
+
+    def _production_market_context(self, date, at_time):
+        # A daily close or T-1 regime is not an intraday index observation.
+        return {'market_score': 50, 'regime': '数据不足', 'index_count': 0,
+                'data_completeness': 0, 'source': 'historical_market_context_unavailable'}
 
     def _load_exit_minute_bars(self, stock_code: str, date: str) -> pd.DataFrame:
         key = (str(date), str(stock_code).zfill(6))
@@ -1994,7 +2212,7 @@ class BacktestEngine:
         execution = position.get('strategy_execution')
         return self._execution_exit_config(execution if isinstance(execution, dict) else {})
 
-    def _execute_sell(self, stock_code: str, sell_price: float, date: str, reason: str, *, exit_time: str = ''):
+    def _execute_sell(self, stock_code: str, sell_price: float, date: str, reason: str, *, exit_time: str = '', shares_to_sell=None):
         """执行卖出"""
         if self._is_full_day_suspended(stock_code, date, scope='holding'):
             return
@@ -2002,10 +2220,16 @@ class BacktestEngine:
             return
 
         position = self.current_positions[stock_code]
-        shares = position['shares']
+        total_shares = position['shares']
+        shares = min(int(shares_to_sell or total_shares), total_shares)
+        if shares <= 0:
+            return
 
         # 计算卖出金额（减去滑点）
         actual_sell_price = sell_price * (1 - self.config.slippage)
+        if getattr(self.config, 'production_rules', False):
+            from core.utils.price_limit import round_price
+            actual_sell_price = round_price(actual_sell_price)
         sell_value = shares * actual_sell_price
 
         # 计算费用
@@ -2013,7 +2237,7 @@ class BacktestEngine:
         stamp_duty = sell_value * self.config.stamp_duty_rate
 
         # 计算盈亏
-        total_cost = position['cost_basis']
+        total_cost = position['cost_basis'] * shares / total_shares
         total_revenue = sell_value - commission - stamp_duty
         pnl = total_revenue - total_cost
         pnl_pct = pnl / total_cost if total_cost > 0 else 0
@@ -2073,7 +2297,12 @@ class BacktestEngine:
         logger.info(f"[{date}] 卖出 {position['stock_name']}({stock_code}): {shares}股 @ {actual_sell_price:.2f}, 盈亏:{pnl:.2f}({pnl_pct:.2%})")
 
         # 移除持仓
-        del self.current_positions[stock_code]
+        if shares == total_shares:
+            del self.current_positions[stock_code]
+        else:
+            position['shares'] -= shares
+            position['cost_basis'] -= total_cost
+            position['market_value'] = position['shares'] * sell_price
 
     def _cost_version(self) -> str:
         from core.operations.ledger import stable_id
@@ -2269,7 +2498,12 @@ class BacktestEngine:
         total = len(self._candidate_evidence_samples)
         incomplete = bool(skipped or self._replay_blocked_evidence)
         checked = self.config.replay_missing_evidence_policy != "legacy"
-        return {"policy": self.config.replay_missing_evidence_policy,
+        from core.signals.production_rules import RULESET_VERSION
+        return {"ruleset_version": RULESET_VERSION if self.config.production_rules else 'legacy_research',
+            "execution_precision": 'historical_minute_estimate',
+            "live_runtime_verified": False,
+            "input_manifest": list(self._production_input_manifest),
+            "policy": self.config.replay_missing_evidence_policy,
             "status": "not_checked" if self.config.replay_missing_evidence_policy == "legacy" else
                       "incomplete" if incomplete else "complete",
             "label": "未执行严格证据检查" if not checked else "数据不完整" if incomplete else "证据完整",

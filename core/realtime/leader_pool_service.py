@@ -1000,8 +1000,10 @@ class IntradayStrengthService:
         quotes = self._quote_map(row.get("code") for row in rows)
         candidate_date = str(pool.get("trade_date") or trade_date or "")
         market_date = str(market_date or candidate_date)
+        from core.signals.production_rules import production_context
+        evaluation_rows = production_context(rows, frozen['inputs']) if frozen else rows
         signals = self.entry_signal_service.evaluate(
-            rows, quotes, market_date=market_date,
+            evaluation_rows, quotes, market_date=market_date,
         ) if self.entry_signal_service is not None else {}
         enriched = [
             self._build_row(
@@ -1017,6 +1019,7 @@ class IntradayStrengthService:
         counts: Dict[str, int] = {}
         for row in enriched:
             counts[row["status"]] = counts.get(row["status"], 0) + 1
+        from core.signals.production_rules import threshold_labels
         return {
             "ok": bool(enriched),
             "trade_date": candidate_date,
@@ -1027,11 +1030,7 @@ class IntradayStrengthService:
             "evidence_bundle_id": frozen["bundle_id"] if frozen else "",
             "strategy": {"id": self.LEADER_POOL_PROFILE, "name": "近期龙头池"},
             "observation_source": self.LEADER_POOL_PROFILE,
-            "thresholds": {
-                "weak_to_strong": "-3%至+1%",
-                "continuation": "+1%至+5%",
-                "acceleration": "+5%以上仅龙头/主线核心",
-            },
+            "thresholds": threshold_labels(getattr(self.entry_signal_service, 'evaluator', None)),
             "counts": counts,
             "rows": enriched,
         }
@@ -1163,7 +1162,7 @@ class IntradayStrengthService:
         status = str(signal.get("signal_status") or "observe")
         order = {"confirmed": 0, "unfilled": 1, "observe": 2, "cancelled": 3}.get(status, 2)
         reason = str(signal.get("reason") or "等待当日分钟入场条件")
-        mode = str(signal.get("entry_mode") or classify_entry_mode(open_price, pre_close))
+        mode = str(signal["entry_mode"] if "entry_mode" in signal else classify_entry_mode(open_price, pre_close))
         realtime_score = self._realtime_score(open_gap, change_pct, intraday_lift)
         turn_score = _to_float(pool_row.get("leader_score")) * 0.45 + realtime_score * 0.55
         if status == "cancelled":
@@ -1217,6 +1216,9 @@ class IntradayStrengthService:
             "change_pct": round(change_pct, 2),
             "pct_chg": round(change_pct, 2),
             "open_gap_pct": round(open_gap, 2) if open_gap is not None else None,
+            "opening_evidence": signal.get("opening_evidence") or {},
+            "entry_parameters": signal.get("entry_parameters") or {},
+            "execution_strategy_id": signal.get("execution_strategy_id") or "",
             "intraday_lift_pct": round(intraday_lift, 2) if intraday_lift is not None else None,
             "high_from_open_pct": round(high_from_open, 2) if high_from_open is not None else None,
         }

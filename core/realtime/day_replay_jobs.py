@@ -99,6 +99,9 @@ class DayReplayJobs:
         if not path.exists():
             raise FileNotFoundError("回放记录不存在或报告尚未完成")
         value = atomic_read_json(path)
+        if report:
+            from core.realtime.runtime_diagnostics import attach_runtime_diagnostics
+            attach_runtime_diagnostics(value)
         if not report and value.get("state") in {"running", "queued"} and time.time() - value.get("updated_epoch", 0) > 1800:
             value.update(state="interrupted", error="任务超过30分钟未更新，可能服务已重启；请重新运行")
         return value

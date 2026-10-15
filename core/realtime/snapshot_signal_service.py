@@ -77,6 +77,9 @@ class SnapshotSignalService:
             )
         if minute_decision.status in {"rejected", "cancelled"}:
             return minute_decision
+        # Snapshots refine execution, never override the common minute gates.
+        if minute_decision.status not in {"confirmed", "filled"}:
+            return minute_decision
 
         recent = ticks.tail(self.consecutive_ticks)
         recent_times = pd.to_datetime(trade_date + " " + recent["time"], format="%Y%m%d %H:%M:%S", errors="coerce")

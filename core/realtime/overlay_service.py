@@ -90,6 +90,9 @@ class RealtimeOverlayService:
             candidate_date, profile=resolved_profile,
         )
         rows = self._dedupe_candidates(rows)[: max(int(limit or 20), 1)]
+        if frozen and resolved_profile in {'', DECISION_POOL_PROFILE}:
+            from core.signals.production_rules import production_context
+            rows = production_context(rows, frozen['inputs'])
         strategy = self._strategy_metadata(resolved_profile, rows)
         if frozen:
             frozen_profile = next((item for item in frozen["inputs"].get("profiles", [])
@@ -116,6 +119,12 @@ class RealtimeOverlayService:
             quote = quotes.get(cand.get("code") or "", {})
             signal = signals.get(cand.get("code") or "", {})
             row = self._build_row(candidate_date, market_date, cand, quote, signal)
+            for key in ('is_leader_observation', 'leader_time_label', 'pool_rank', 'source_rank', 'primary_role',
+                        'sector_status_score', 'market_status_score', 'continuity_score',
+                        'capital_recognition_score', 'safety_score', 'limit_progress', 'limit_pct',
+                        'evidence', 'sector_tags'):
+                if key in cand:
+                    row[key] = cand[key]
             strategy_id = str(cand.get("strategy_id") or strategy["id"] or "")
             strategy_name = str(
                 cand.get("strategy_name")
@@ -148,6 +157,7 @@ class RealtimeOverlayService:
             "unfilled": sum(1 for r in overlay_rows if r["confirm_status"] == "unfilled"),
         }
         screening_exists = self._screening_path(candidate_date, strategy["id"]).exists()
+        from core.signals.production_rules import threshold_labels
         payload = {
             "ok": bool(overlay_rows),
             "trade_date": candidate_date,
@@ -157,11 +167,7 @@ class RealtimeOverlayService:
             "source": f"候选策略 · {strategy['name']}" if screening_exists else "候选策略尚未生成",
             "profile": strategy["id"],
             "strategy": strategy,
-            "thresholds": {
-                "weak_to_strong": "-3%至+1%",
-                "continuation": "+1%至+5%",
-                "acceleration": "+5%以上仅龙头/主线核心",
-            },
+            "thresholds": threshold_labels(getattr(self.entry_signal_service, 'evaluator', None)),
             "counts": counts,
             "rows": overlay_rows,
             "evidence_bundle_id": frozen["bundle_id"] if frozen else "",
@@ -326,9 +332,9 @@ class RealtimeOverlayService:
     def _strategy_metadata(profile: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         first = dict(rows[0] or {}) if rows else {}
         profile_id = str(profile or first.get("strategy_id") or first.get("profile") or "default")
-        if profile_id == DECISION_POOL_PROFILE:
+        if profile_id in {DECISION_POOL_PROFILE, 'production'}:
             return {
-                "id": DECISION_POOL_PROFILE,
+                "id": profile_id,
                 "name": "今日决策池",
                 "version": "1",
                 "execution": {},
@@ -399,7 +405,7 @@ class RealtimeOverlayService:
         )
         status = str(signal.get("signal_status") or "observe")
         reason = str(signal.get("reason") or "等待当日分钟入场条件")
-        mode = str(signal.get("entry_mode") or classify_entry_mode(open_price, pre_close))
+        mode = str(signal["entry_mode"] if "entry_mode" in signal else classify_entry_mode(open_price, pre_close))
         return {
             "trade_date": candidate_date,
             "candidate_date": candidate_date,
@@ -407,7 +413,14 @@ class RealtimeOverlayService:
             "code": candidate.get("code") or "",
             "name": quote.get("name") or candidate.get("name") or "",
             "screening_rank": candidate.get("rank") or candidate.get("池排名"),
-            "screening_score": candidate.get("score") or candidate.get("策略组合评分"),
+            "screening_score": candidate.get("screening_score") or candidate.get("score") or candidate.get("策略组合评分") or candidate.get("leader_score"),
+            "leader_score": candidate.get('leader_score'),
+            "pool_type": candidate.get('pool_type') or '',
+            "leader_roles": candidate.get('leader_roles') or [],
+            "lifecycle_state": candidate.get('lifecycle_state') or '',
+            "last_leader_date": candidate.get('last_leader_date') or '',
+            "industry_tags": candidate.get('industry_tags') or [],
+            "concept_tags": candidate.get('concept_tags') or [],
             "factor_values": candidate.get("metrics") or {},
             "strategy_id": candidate.get("strategy_id") or candidate.get("策略ID") or "",
             "weight_version": candidate.get("model_as_of_date") or "",
@@ -421,6 +434,9 @@ class RealtimeOverlayService:
             "change_pct": change_pct,
             "pct_chg": change_pct,
             "open_gap_pct": gap_pct,
+            "opening_evidence": signal.get("opening_evidence") or {},
+            "entry_parameters": signal.get("entry_parameters") or {},
+            "execution_strategy_id": signal.get("execution_strategy_id") or "",
             "intraday_lift_pct": intraday_lift_pct,
             "sector_rt_score": None,
             "is_stale": bool(quote.get("is_stale")),

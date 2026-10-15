@@ -46,18 +46,19 @@ def _float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def classify_entry_mode(open_price: Any, pre_close: Any) -> str:
+def classify_entry_mode(open_price: Any, pre_close: Any, *, weak_max_gap=None, continuation_max_gap=None) -> str:
     """Classify the opening layer independently from minute confirmation."""
-    open_value = _float(open_price)
-    previous_value = _float(pre_close)
-    if open_value <= 0 or previous_value <= 0:
+    from core.signals.opening import classify_opening_gap, opening_gap
+    gap = opening_gap(open_price, pre_close)
+    if gap is None:
         return ""
-    gap = open_value / previous_value - 1.0
-    if gap <= 0.0100001:
-        return ENTRY_WEAK
-    if gap <= 0.0500001:
-        return ENTRY_CONTINUATION
-    return ENTRY_ACCELERATION
+    if weak_max_gap is None or continuation_max_gap is None:
+        from risk.risk_config import RiskConfig
+        risk = RiskConfig.load()
+        weak_max_gap = risk.weak_entry_max_gap if weak_max_gap is None else weak_max_gap
+        continuation_max_gap = risk.continuation_max_gap if continuation_max_gap is None else continuation_max_gap
+    return classify_opening_gap(gap,
+                                weak_max_gap=weak_max_gap, continuation_max_gap=continuation_max_gap)
 
 
 def entry_mode_text(mode: str) -> str:
@@ -82,7 +83,10 @@ class RealtimeEntrySignalService:
     ) -> None:
         self.dm = data_manager
         self.quote_service = quote_service
-        self.evaluator = evaluator or MinuteEntryEvaluator()
+        from core.signals.production_rules import minute_evaluator
+        self.evaluator = evaluator or minute_evaluator()
+        self._automatic_evaluator = self.evaluator if evaluator is None else None
+        self._evaluator_day_key = None
         self.minute_ttl_seconds = max(float(minute_ttl_seconds), 1.0)
         self.calendar = calendar or TradeCalendar()
         self.amount_profiles = amount_profile_repository or MinuteAmountProfileRepository()
@@ -105,11 +109,26 @@ class RealtimeEntrySignalService:
         market_date: str,
         execution: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Dict[str, Any]]:
+        # UI diagnostics and live matching can request different market dates.
+        with self._lock:
+            return self._evaluate_batch(rows, quotes, market_date=market_date, execution=execution)
+
+    def _evaluate_batch(self, rows, quotes, *, market_date, execution=None):
         from core.utils.stock_eligibility import new_entry_exclusion
         source_rows = [dict(row or {}) for row in rows or [] if not new_entry_exclusion(row or {})]
         market_date = str(market_date or "").replace("-", "")[:8]
         if not market_date:
             return {}
+        if self.evaluator is self._automatic_evaluator:
+            from core.operations.preopen_evidence import PreopenEvidenceStore
+            from core.signals.production_rules import minute_evaluator
+            from risk.risk_config import RiskConfig
+            bundle = PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
+            key = (market_date, bundle['bundle_id'] if bundle else 'unfrozen')
+            if key != self._evaluator_day_key:
+                risk = RiskConfig.from_dict(bundle['inputs']['risk_config']) if bundle and bundle['inputs'].get('risk_config') else RiskConfig.load()
+                self.evaluator = self._automatic_evaluator = minute_evaluator(risk)
+                self._evaluator_day_key = key
 
         frames: Dict[str, pd.DataFrame] = {}
         for row in source_rows:
@@ -158,17 +177,16 @@ class RealtimeEntrySignalService:
         code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
         name = str(quote.get("name") or row.get("name") or "")
         quote_date = str(quote.get("date") or "").replace("-", "")[:8]
-        pre_close = _float(quote.get("pre_close"), _float(previous.get("close")))
-        open_price = _float(quote.get("open_price"))
-        if not frame.empty:
-            first = frame.iloc[0]
-            open_price = open_price or _float(first.get("open"), _float(first.get("close")))
-            pre_close = pre_close or _float(first.get("pre_close"))
-        preliminary_mode = classify_entry_mode(open_price, pre_close)
+        from core.signals.opening import opening_context
+        opening = opening_context(quote, previous)
+        pre_close, open_price = opening["pre_close"], opening["open_price"]
+        preliminary_mode = classify_entry_mode(open_price, pre_close,
+            weak_max_gap=self.evaluator.weak_max_gap, continuation_max_gap=self.evaluator.continuation_max_gap)
         if quote_date and quote_date != market_date:
             return self._payload(
                 EntryDecision("observing", reason=f"行情日期{quote_date}与当日{market_date}不一致"),
                 preliminary_mode, market_date,
+                opening_evidence=opening,
             )
         if bool(quote.get("is_stale")):
             return self._payload(
@@ -177,18 +195,21 @@ class RealtimeEntrySignalService:
                     data_status="quote_stale", data_completeness=0.0,
                 ),
                 preliminary_mode, market_date,
+                opening_evidence=opening,
             )
 
-        if open_price <= 0 or pre_close <= 0:
+        if opening["open_gap"] is None:
             return self._payload(
-                EntryDecision("observing", reason="当日开盘价或昨收价尚未取得"),
+                EntryDecision("data_insufficient", reason="当日真实开盘价或昨收价尚未取得，不使用首分钟价格代替",
+                              data_status="missing_session_open", data_completeness=0),
                 "", market_date,
+                opening_evidence=opening,
             )
 
         row_execution = self._row_execution(row)
         if row_execution:
             execution = {**execution, **row_execution}
-        gap = open_price / pre_close - 1.0
+        gap = opening["open_gap"]
         mode = preliminary_mode
         allowed_modes = normalize_strategy_entry_modes(
             execution.get("allowed_entry_modes") or []
@@ -202,12 +223,17 @@ class RealtimeEntrySignalService:
             if len(quote_time) >= 5 and quote_time[2] == ":":
                 frame = frame[frame["time"] < quote_time[:5] + ":00"].copy()
             else:
-                return self._payload(EntryDecision("observing", reason="缺少行情时间，无法验证完整分钟"), mode, market_date)
+                return self._payload(EntryDecision("observing", reason="缺少行情时间，无法验证完整分钟"), mode, market_date,
+                                     opening_evidence=opening)
         strategy_mode_allowed = not allowed_modes or mode in allowed_modes
         allowed_text = "、".join(
             MODE_LABELS.get(item, item) for item in sorted(allowed_modes)
         )
-        auction = self._auction(code, market_date) if mode == ENTRY_CONTINUATION else {}
+        from backtest.evidence_policy import requires_auction
+        auction = self._auction(code, market_date) if mode == ENTRY_CONTINUATION or requires_auction(execution) else {}
+        if requires_auction(execution) and not (_float(auction.get('竞价成交额')) > 0 and _float(auction.get('竞价成交量')) > 0):
+            return self._payload(EntryDecision('data_insufficient', reason='策略要求的集合竞价证据缺失',
+                data_status='missing_auction', data_completeness=0), mode, market_date, opening_evidence=opening)
         amount_ratio = self._metric(row, "amount_ratio", 0.0)
         previous_amount = self._previous_amount_yuan(previous)
         _, profile_samples = self.amount_profiles.expected_fraction(previous_amount, "10:00:00")
@@ -291,6 +317,7 @@ class RealtimeEntrySignalService:
             strategy_mode_allowed=strategy_mode_allowed,
             strength_detected=strength_detected,
             stats_context=row,
+            opening_evidence=opening,
         )
         if mode in STRUCTURAL_MODES:
             payload["structure"] = structures.get(mode, {})
@@ -299,7 +326,8 @@ class RealtimeEntrySignalService:
         payload["strategy_version"] = row.get("strategy_version", "")
         deadline = resolve_entry_deadline(execution, mode, self.evaluator.deadline)
         if decision.confirm_time and decision.confirm_time > deadline:
-            return self._payload(EntryDecision("cancelled", reason="超过策略确认截止时间"), mode, market_date)
+            return self._payload(EntryDecision("cancelled", reason="超过策略确认截止时间"), mode, market_date,
+                                 opening_evidence=opening)
         if decision.confirm_time:
             from core.signals.case_features import build_signal_case
             snapshot = build_signal_case({**row, **quote, **payload}, {"market_date": market_date}, minutes=frame)
@@ -403,11 +431,7 @@ class RealtimeEntrySignalService:
 
     @staticmethod
     def _mode_for_gap(gap: float) -> str:
-        if gap <= 0.01:
-            return ENTRY_WEAK
-        if gap <= 0.05:
-            return ENTRY_CONTINUATION
-        return ENTRY_ACCELERATION
+        return classify_entry_mode(1 + gap, 1)
 
     def _payload(
         self, decision: EntryDecision, mode: str, market_date: str,
@@ -415,6 +439,7 @@ class RealtimeEntrySignalService:
         strategy_mode_allowed: bool = True,
         strength_detected: bool = False,
         stats_context: Optional[Dict[str, Any]] = None,
+        opening_evidence: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if decision.status in {"filled", "confirmed"}:
             status = "confirmed"
@@ -470,8 +495,12 @@ class RealtimeEntrySignalService:
             pullback_quality=decision.pullback_quality,
             active_buy_ratio=decision.active_buy_ratio,
         )
+        from core.signals.production_rules import entry_parameters
         return {
             "market_date": market_date,
+            "opening_evidence": opening_evidence or {},
+            "entry_parameters": entry_parameters(getattr(self, 'evaluator', None)),
+            "execution_strategy_id": context.get('strategy_id') or '',
             "entry_mode": mode,
             "entry_mode_text": entry_mode_text(mode),
             "signal_status": status,
@@ -599,7 +628,10 @@ class RealtimeEntrySignalService:
     ) -> Tuple[Any, Dict[str, Any]]:
         sectors = self._sectors(row)
         try:
-            state, detail = self.sector_breadth.evaluate(sectors, market_date)
+            try:
+                state, detail = self.sector_breadth.evaluate(sectors, market_date, exclude_code=code)
+            except TypeError:
+                state, detail = self.sector_breadth.evaluate(sectors, market_date)
             if state is not None:
                 from datetime import datetime, timedelta
 
@@ -610,7 +642,7 @@ class RealtimeEntrySignalService:
 
                     stamp = stamp.astimezone(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
                 history = getattr(self, "_sector_observations", {})
-                key = (market_date, tuple(sorted(sectors)))
+                key = (market_date, tuple(sorted(sectors)), code)
                 samples = history.setdefault(key, [])
                 if not samples or samples[-1][0] != stamp:
                     samples.append((stamp, state))
@@ -628,6 +660,10 @@ class RealtimeEntrySignalService:
                                    else "sector_index_breadth_v1"}
         except Exception:
             detail = {}
+        if isinstance(self.sector_breadth, RealtimeSectorBreadthProvider):
+            return lambda at_time: None, {**detail, 'data_completeness': 0.0,
+                'reason': detail.get('reason') or '真实同花顺板块证据不足，不使用候选样本代替',
+                'sector_confirmation_source': 'ths_constituents_missing'}
         # Candidate peers must also belong to a verified THS trading board.
         verified_sectors = set()
         verified_members = set()

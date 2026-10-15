@@ -85,14 +85,9 @@ def _get(ohlc: Dict, key: str) -> float:
 
 def open_gap_pct(ohlc: Dict, pre_close: Optional[float] = None) -> Optional[float]:
     """开盘相对昨收涨跌幅；缺少开盘价/昨收价时返回 None。"""
-    open_price = _get(ohlc, "open")
-    try:
-        prev = _get(ohlc, "pre_close") if pre_close is None else float(pre_close or 0)
-    except Exception:
-        prev = 0.0
-    if open_price <= 0 or prev <= 0:
-        return None
-    return (open_price - prev) / prev
+    from core.signals.opening import opening_gap
+    return opening_gap((ohlc or {}).get("open"),
+                       (ohlc or {}).get("pre_close") if pre_close is None else pre_close)
 
 
 def is_positive_open_gap(ohlc: Dict, pre_close: Optional[float] = None) -> bool:

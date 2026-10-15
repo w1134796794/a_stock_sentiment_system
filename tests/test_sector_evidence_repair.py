@@ -138,6 +138,7 @@ def test_saved_replay_cannot_reintroduce_700_or_unbound_members(sector_code, exp
         frames={"000001":bars,"000002":bars.assign(code="000002"),"600000":bars.assign(code="600000")},
         previous={c:{"close":10} for c in ("000001","000002","600000")},
         members={"电池":["000002","600000"]},sector_codes={"电池":sector_code},
+        opening_prices={"000001":10},
         profiles=SimpleNamespace(available=False,load=lambda:{},expected_fraction=lambda *a:(None,0)))
     inputs = result["replay_inputs"]
     if not sector_code:
@@ -246,7 +247,8 @@ def test_replay_does_not_report_unchecked_sector_as_missing_evidence():
                          "open":9.5,"high":9.6,"low":9.4,"close":9.5,"volume":100} for i in range(20)])
     profiles = SimpleNamespace(available=False,load=lambda:{},expected_fraction=lambda *a:(None,0))
     result = replay_minutes(request=replay_request({"market_date":"20261013","until":"09:51"}),candidate_date="20261012",
-        rows=[{"code":"000001"}],frames={"000001":raw},previous={"000001":{"close":10}},profiles=profiles)
+        rows=[{"code":"000001"}],frames={"000001":raw},previous={"000001":{"close":10}},
+        opening_prices={"000001":9.5},profiles=profiles)
     assert result["stocks"][0]["status"] == "cancelled"
     assert not result["failures"]
     assert result["stocks"][0]["last_signal"]["sector_detail"]["assessed"] is False

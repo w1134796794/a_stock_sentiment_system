@@ -783,7 +783,7 @@ class BacktestController:
                 enhancements=selected_enhancements,
                 strategy_ids=selected_strategy_ids,
             )
-            if file_count <= 0:
+            if file_count <= 0 and account_profile != 'aggressive_three' and (entry_mode != 'hybrid' or selected_enhancements):
                 self.buffer.append_line(f"!!! 当前数据快照中没有可回测的交易计划：{SNAPSHOT_DIR}")
                 self.buffer.append_line("请先到「生成数据」生成每日交易计划后再回测。")
                 self.error = "当前交易计划为空"
@@ -799,6 +799,10 @@ class BacktestController:
             )
             config.replay_missing_evidence_policy = missing_evidence_policy
             config.replay_prefetch_failures = list(prefetch_failures or [])
+            config.production_rules = bool(entry_mode == 'hybrid' and not selected_enhancements)
+            config.production_strategy_ids = selected_strategy_ids if account_profile != 'aggressive_three' else None
+            if config.production_rules and missing_evidence_policy == 'legacy':
+                config.replay_missing_evidence_policy = 'strict'
             from risk.capital_presets import apply_capital_preset
             capital_preset = apply_capital_preset(config, capital)
             if account_profile == "aggressive_three":
@@ -815,6 +819,7 @@ class BacktestController:
                 config.account_position_pct = float(PAPER_POSITION_PCT) / 100.0
                 config.rotation_enabled = True
                 config.rotation_min_edge = float(PAPER_ROTATION_MIN_EDGE)
+                config.production_rules = True
             self.buffer.append_line(
                 f"账户方案：{'激进三仓' if account_profile == 'aggressive_three' else capital_preset.label}，"
                 f"最多{config.max_positions}只，单票目标{config.max_position_per_stock:.0%}"
@@ -918,6 +923,7 @@ class BacktestController:
                 "strategy_ids": selected_strategy_ids,
                 "account_profile": account_profile,
                 "missing_evidence_policy": missing_evidence_policy,
+                "ruleset_version": 'production_shared_v3' if config.production_rules else 'legacy_research',
             })
             self.run_id = run_id
             self.data_quality = result.get("data_quality") or {}
@@ -1050,7 +1056,7 @@ class BacktestController:
                 enhancements=selected_enhancements,
                 strategy_ids=selected_strategy_ids,
             )
-            if file_count <= 0:
+            if file_count <= 0 and (entry_mode != 'hybrid' or selected_enhancements):
                 self.buffer.append_line(f"!!! 未找到上一交易日 {prev_date} 的交易计划，无法执行 {trade_date}。")
                 self.error = f"缺少 {prev_date} 交易计划"
                 self.state = "error"
@@ -1082,6 +1088,11 @@ class BacktestController:
             config.entry_mode = entry_mode
             config.position_sizing_mode = position_sizing_mode
             config.exit_policy_mode = exit_policy_mode
+            config.production_rules = bool(entry_mode == 'hybrid' and not selected_enhancements)
+            config.production_strategy_ids = selected_strategy_ids if account_profile != 'aggressive_three' else None
+            if config.production_rules:
+                config.replay_missing_evidence_policy = 'strict'
+                dm.allow_remote_minutes = True
             self.buffer.append_line(
                 f"退出策略：盈利5%-10%/10%-20%/20%以上分别从高点回撤 "
                 f"{config.trailing_early_stop_pct:.0%}/{config.trailing_mid_stop_pct:.0%}/"
@@ -1095,6 +1106,10 @@ class BacktestController:
             else:
                 state = self._load_rolling_state()
                 if state:
+                    if config.production_rules and state.get('ruleset_version') != 'production_shared_v3':
+                        self.error = '接力状态属于旧规则，请明确重置独立回测状态或使用历史回测新账户'
+                        self.state = 'error'
+                        return
                     state_enhancements = normalize_enhancements(state.get("enhancements"))
                     if state_enhancements != selected_enhancements:
                         self.buffer.append_line(
@@ -1224,6 +1239,8 @@ class BacktestController:
         state["state_source"] = state_source
         state["enhancements"] = normalize_enhancements(enhancements)
         state["strategy_ids"] = list(strategy_ids or ["default"])
+        state['ruleset_version'] = ('production_shared_v3' if getattr(engine.config, 'production_rules', False)
+                                    else 'legacy_research')
         state["entry_mode"] = str(getattr(engine.config, "entry_mode", "hybrid"))
         state["position_sizing_mode"] = str(
             getattr(engine.config, "position_sizing_mode", "fixed_risk")

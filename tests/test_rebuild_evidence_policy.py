@@ -178,7 +178,7 @@ def test_completed_incomplete_rebuild_imports_only_independent_account(monkeypat
     monkeypatch.setattr(module, '_get_paper_trading_service', lambda: SimpleNamespace(
         rebuild_data_quality=lambda run: quality,
         rebuild_evidence_failures=lambda run, **kw: [] if kw['allow_candidate_skips'] else ['failure'],
-        import_backtest_run=lambda run, **kw: imported.append(kw)))
+        import_backtest_run=lambda run, **kw: imported.append(kw) or {}))
     response = json.loads(module.api_portfolio_replay_status().body)
     assert response['state'] == 'done'
     assert imported == [{'reset': True, 'account_key': 'history_audit'}]

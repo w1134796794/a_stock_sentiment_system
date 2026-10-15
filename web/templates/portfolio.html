@@ -1,26 +1,29 @@
 {% extends "base.html" %}
-{% block title %}模拟交易 · 管理控制台{% endblock %}
-{% block page_title %}模拟交易{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ '%.0f'|format(paper_initial_capital / 10000) }}万模拟账户 · 最多{{ paper_max_positions }}只 · 分钟确认自动交易</div>{% endblock %}
+{% set historical_view = portfolio_mode == 'backtest' %}
+{% block title %}{{ '历史回测' if historical_view else '模拟交易' }} · 管理控制台{% endblock %}
+{% block page_title %}{{ '历史回测' if historical_view else '模拟交易' }}{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ '独立账户 · 分钟级成交估计' if historical_view else '分钟确认自动交易' }} · 最多{{ paper_max_positions }}只</div>{% endblock %}
 
 {% block header_extra %}
   {% if is_admin %}
-  <button id="add-position" class="pf-primary" type="button">手工买入</button>
+  <button id="add-position" class="pf-primary {{ 'hidden' if historical_view else '' }}" type="button">手工买入</button>
   {% endif %}
-  <button id="run-monitor" class="pf-button" type="button" title="立即检查持仓退出条件">检查持仓</button>
+  <button id="run-monitor" class="pf-button {{ 'hidden' if historical_view else '' }}" type="button" title="立即检查持仓退出条件">检查持仓</button>
 {% endblock %}
 
 {% block content %}
+<nav class="pf-modes" aria-label="账户功能"><a href="/portfolio" class="{{ 'active' if not historical_view else '' }}">模拟交易</a><a href="/portfolio/backtest" class="{{ 'active' if historical_view else '' }}">历史回测</a></nav>
 <section class="pf-account-bar" aria-label="模拟账户">
-  <div class="pf-auto-status"><span></span><strong>激进交易已开启</strong><small>每只约{{ '%.0f'|format(paper_position_pct) }}%，最多{{ paper_max_positions }}只；满仓时新信号强{{ '%.0f'|format(paper_rotation_min_edge) }}分以上自动换出弱持仓</small></div>
+  <div class="pf-auto-status"><span></span><strong>{{ '历史分钟估计' if historical_view else '激进交易已开启' }}</strong><small>每只约{{ '%.0f'|format(paper_position_pct) }}%，最多{{ paper_max_positions }}只；满仓时新信号强{{ '%.0f'|format(paper_rotation_min_edge) }}分以上自动换出弱持仓</small></div>
   {% if is_admin %}
   <div id="replay-controls" class="pf-replay">
     <label>账户<select id="portfolio-account"><option value="default">模拟交易账户</option></select></label>
-    <label>首次开始日<input id="replay-start" value="" maxlength="8" placeholder="自动接力"></label>
+    <label>{{ '开始日期' if historical_view else '首次开始日' }}<input id="replay-start" value="" maxlength="8" placeholder="{{ 'YYYYMMDD' if historical_view else '自动接力' }}"></label>
     <label>结束日期<input id="replay-end" value="{{ latest_trade_date }}" maxlength="8" placeholder="YYYYMMDD"></label>
-    <button id="start-replay" class="pf-button" type="button" title="接续默认模拟账户的下一交易日，保留持仓和手工成交">补跑至结束日</button>
-    <button id="start-rebuild" class="pf-button" type="button" title="按当前配置从起止日重算，生成独立账户，不覆盖默认账户">独立历史重建</button>
-    <label class="pf-replay-option" title="仅用于独立历史重建；默认账户接力仍严格检查全部证据"><input id="rebuild-skip-candidates" type="checkbox">跳过缺证据候选，持仓缺证据仍停止</label>
+    <button id="start-replay" class="pf-button {{ 'hidden' if historical_view else '' }}" type="button" title="接续默认模拟账户的下一交易日，保留持仓和手工成交">补跑至结束日</button>
+    <button id="start-rebuild" class="pf-button {{ '' if historical_view else 'hidden' }}" type="button" title="按最新共享规则生成独立账户，保留原有账户">开始独立回测</button>
+    <button id="adopt-backtest" class="pf-danger hidden" type="button">采用结果并替换模拟账户</button>
+    <label class="pf-replay-option {{ '' if historical_view else 'hidden' }}" title="仅用于独立历史重建；默认账户接力仍严格检查全部证据"><input id="rebuild-skip-candidates" type="checkbox">跳过缺证据候选，持仓缺证据仍停止</label>
     <span id="replay-status">读取账户检查点中…</span>
   </div>
   {% endif %}
@@ -68,7 +71,7 @@
 
 <section id="panel-positions" class="pf-panel">
   <div id="positions" class="pf-position-list"></div>
-  <div id="positions-empty" class="pf-empty hidden">暂无持仓。可手工买入，或等待交易时段出现分时确认信号。</div>
+  <div id="positions-empty" class="pf-empty hidden">{{ '本次回测暂无持仓。' if historical_view else '暂无持仓。可手工买入，或等待交易时段出现分时确认信号。' }}</div>
 </section>
 
 <section id="panel-signals" class="pf-panel hidden">
@@ -130,6 +133,9 @@
 
 <style>
   .hidden { display:none !important; }
+  .pf-modes { display:flex; gap:1.2rem; border-bottom:1px solid #263449; margin-bottom:1rem; font-size:.85rem; }
+  .pf-modes a { padding:.6rem 0; color:#94a3b8; border-bottom:2px solid transparent; }
+  .pf-modes a.active { color:#34d399; border-color:#34d399; }
   .pf-account-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
   .pf-auto-status { display:flex; align-items:center; gap:.5rem; color:#d1fae5; }
   .pf-auto-status>span { width:8px; height:8px; border-radius:50%; background:#34d399; box-shadow:0 0 0 4px rgba(52,211,153,.1); }
@@ -223,6 +229,7 @@
 
 <script>
   const admin = {{ 'true' if is_admin else 'false' }};
+  const historicalView = {{ 'true' if historical_view else 'false' }};
   let currentAccount = 'default';
   let replayCursor = 0;
   let replayTimer = null;
@@ -250,16 +257,17 @@
   }
   function renderReplayQuality() {
     const accountQuality=state.replay_data_quality;
-    const quality=accountQuality?.status?accountQuality:latestReplayQuality;
+    const quality=accountQuality!==undefined?accountQuality:latestReplayQuality;
     renderPeerWarnings(quality?.optional_evidence_warnings||[]);
-    const visible=quality&&['complete','incomplete'].includes(quality.status);
+    const visible=quality&&(historicalView||['complete','incomplete'].includes(quality.status));
     $('replay-quality').classList.toggle('hidden',!visible);if(!visible)return;
     $('replay-quality').dataset.incomplete=String(quality.status==='incomplete');
-    $('replay-quality-label').textContent=quality.costs_verified===false?'成本未验证 · 仅供研究':quality.status==='incomplete'?'数据不完整 · 仅供研究':'历史重建 · 候选证据完整';
+    const legacy=!quality.current_ruleset_version||quality.ruleset_version!==quality.current_ruleset_version;
+    $('replay-quality-label').textContent=legacy?'旧口径 · 需重新回测':quality.costs_verified===false?'成本未验证 · 仅供研究':quality.status==='incomplete'?'数据不完整 · 仅供研究':'共享规则 · 候选分钟证据完整';
     $('replay-quality-context').textContent=accountQuality?.status?`账户 ${currentAccount}`:'本次独立历史重建';
     const coverage=quality.candidate_coverage_pct;
     $('replay-quality-summary').textContent=`跳过 ${quality.skipped_candidate_count||0} / ${quality.candidate_samples||0} 个候选样本（股票 × 日期） · 候选证据覆盖 ${quality.covered_candidate_count||0}/${quality.candidate_samples||0} · ${coverage==null?'--':Number(coverage).toFixed(1)+'%'} · 已确认全天停牌候选 ${quality.suspended_candidate_count||0} 个（不计入缺失）`;
-    $('replay-quality-warning').textContent=quality.cost_warning||(quality.status==='incomplete'?'胜率、收益与回撤仅针对剩余证据可用样本，不能代表完整候选样本。':quality.coverage_denominator_scope||'');
+    $('replay-quality-warning').textContent=legacy?'旧账户保留，不代表当前盘中规则的收益。':quality.cost_warning||(quality.status==='incomplete'?'胜率、收益与回撤仅针对剩余证据可用样本，不能代表完整候选样本。':'分钟回测不证明历史快照及时到达、实时门禁通过或微信送达。');
     const rows=quality.skipped_candidates||[];
     $('replay-skips-panel').classList.toggle('hidden',!rows.length);
     const labels={minute_bars:'分钟行情',missing_minutes:'分钟行情',missing_auction:'集合竞价',missing_sector:'板块分时确认',missing_sector_confirmation:'板块分时确认',missing_amount_profile:'历史同分钟量能'};
@@ -330,7 +338,7 @@
   $('run-monitor').addEventListener('click',async()=>{try{$('run-monitor').disabled=true;const result=await api('/api/portfolio/monitor',{method:'POST',body:JSON.stringify({account:currentAccount})});message(`检查完成：${result.count||0}只持仓，推送${result.notified||0}条提醒${result.executed?`，自动退出${result.executed}只`:''}`);await load();}catch(error){message(error.message,true);}finally{$('run-monitor').disabled=false;}});
 
   {% if is_admin %}
-  async function loadAccounts(){try{const result=await api('/api/portfolio/accounts');$('portfolio-account').innerHTML=(result.data||[]).map(row=>`<option value="${esc(row.account_key)}">${esc(row.name||row.account_key)} · ${esc(row.account_key)}</option>`).join('');if((result.data||[]).some(row=>row.account_key===currentAccount))$('portfolio-account').value=currentAccount;}catch(error){message(error.message,true);}}
+  async function loadAccounts(){try{const result=await api('/api/portfolio/accounts');const rows=(result.data||[]).filter(row=>historicalView?row.account_key.startsWith('history_'):row.account_key==='default'||row.account_key.startsWith('backup_'));$('portfolio-account').innerHTML=rows.map(row=>`<option value="${esc(row.account_key)}">${esc(row.name||row.account_key)} · ${esc(row.account_key)}</option>`).join('');if(!rows.some(row=>row.account_key===currentAccount))currentAccount=rows[0]?.account_key||'default';$('portfolio-account').value=currentAccount;setReplayBusy(replayBusy);}catch(error){message(error.message,true);}}
   $('portfolio-account').addEventListener('change',async event=>{currentAccount=event.target.value;setReplayBusy(replayBusy);await load();});
   function today(){const d=new Date();return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;}
   document.querySelectorAll('.dialog-close').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
@@ -344,6 +352,8 @@
     const disabled=busy||replaySubmitting;
     $('start-replay').disabled=disabled||currentAccount!=='default';
     $('start-rebuild').disabled=disabled;
+    $('adopt-backtest').classList.toggle('hidden',!historicalView||!currentAccount.startsWith('history_'));
+    $('adopt-backtest').disabled=disabled;
     $('replay-start').disabled=disabled;
     $('replay-end').disabled=disabled;
     $('rebuild-skip-candidates').disabled=disabled;
@@ -390,7 +400,7 @@
       if(generation!==replayGeneration)return;
       replayCursor=result.next??replayCursor;renderReplayProgress(result);
       if(['running','prefetching'].includes(result.state))replayTimer=setTimeout(pollReplay,2000);
-      else if(result.paper_replay?.mode){setReplayBusy(false);await loadAccounts();await load();}
+      else if(result.paper_replay?.mode){setReplayBusy(false);if(historicalView&&result.paper_replay.import_result?.account_key)currentAccount=result.paper_replay.import_result.account_key;await loadAccounts();await load();}
     }catch(error){
       if(generation!==replayGeneration)return;
       $('replay-status').textContent=`状态连接失败：${error.message}；正在重试`;
@@ -417,9 +427,10 @@
   }
   $('start-replay').addEventListener('click',()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if((start&&!/^\d{8}$/.test(start))||!/^\d{8}$/.test(end)){message('日期请填写YYYYMMDD；已有检查点时开始日可留空',true);return;}if(start&&start>end){message('开始日期不能晚于结束日期',true);return;}launchReplay('/api/portfolio/replay',start,end);});
   $('start-rebuild').addEventListener('click',()=>{const start=$('replay-start').value.trim(),end=$('replay-end').value.trim();if(!/^\d{8}$/.test(start)||!/^\d{8}$/.test(end)||start>end){message('独立重建需填写完整起止日期',true);return;}const policy=$('rebuild-skip-candidates').checked?'跳过缺证据候选；持仓缺证据仍停止。结果仅供不完整样本研究。':'严格检查候选与持仓证据。';if(window.confirm(`在独立账户重建 ${start} 至 ${end}？${policy}当前模拟持仓和手工成交不会被覆盖。`))launchReplay('/api/portfolio/rebuild',start,end);});
+  $('adopt-backtest').addEventListener('click',async()=>{const source=currentAccount;try{const preview=(await api('/api/portfolio/adopt/preview',{method:'POST',body:JSON.stringify({account_key:source})})).data;const old=preview.counts.default,next=preview.counts[source];if(!window.confirm(`采用 ${source}（完成至 ${preview.end_date}）？\n当前 ${old.positions} 只持仓、${old.trades} 笔成交将全部备份，包括手工成交。\n替换为 ${next.positions} 只持仓、${next.trades} 笔成交，并从下一交易日接力。`))return;$('adopt-backtest').disabled=true;const result=await api('/api/portfolio/adopt',{method:'POST',body:JSON.stringify({account_key:source,revision:preview.revision,confirm_replace:true})});window.alert(`替换完成。原账户备份：${result.data.backup_account}`);window.location.href='/portfolio';}catch(error){message(error.message,true);}finally{setReplayBusy(replayBusy);}});
   (async()=>{await replayCheckpoint();await pollReplay();})();
-  loadAccounts();
+  loadAccounts().then(load);
   {% endif %}
-  load();
+  if(!admin){if(historicalView){api('/api/portfolio/accounts').then(result=>{const account=(result.data||[]).find(row=>row.account_key.startsWith('history_'));if(account){currentAccount=account.account_key;return load();}render();$('positions-empty').textContent='尚无独立回测结果。';}).catch(error=>message(error.message,true));}else load();}
 </script>
 {% endblock %}

@@ -517,7 +517,14 @@ def test_simulation_monitor_executes_sell_decision(tmp_path):
 
     assert result["executed"] == 1
     assert repository.get_position(opened["id"])["status"] == "closed"
-    assert repository.account("default")["cash"] == 99_700
+    from core.portfolio.execution_quotes import execution_price
+    from risk.risk_config import RiskConfig
+    costs = RiskConfig.load()
+    quote = _quote(last_price=9.7, high_price=10.0, change_pct=-3.0)
+    sell_price = execution_price(quote, side='sell', reference_time=quote['time'], slippage=costs.slippage)
+    expected_cash = 90_000 + sell_price * 1000 * (1 - costs.commission_rate - costs.stamp_duty_rate)
+    assert abs(repository.account('default')['cash'] - expected_cash) < .00001
+    assert repository.list_trades('default')[0]['fees'] > 0
 
 
 def test_import_historical_backtest_trades_into_simulation_account(tmp_path, monkeypatch):

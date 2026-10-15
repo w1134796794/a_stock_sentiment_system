@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List
 from core.infrastructure.shared_state import get_shared_state_backend
 from core.realtime.models import QuoteSnapshot, normalize_stock_code
 from core.realtime.snapshot_repository import RealtimeSnapshotRepository
+from core.realtime.session_open_repository import SessionOpenRepository
 
 
 class RealtimeQuoteCache:
@@ -15,11 +16,12 @@ class RealtimeQuoteCache:
     META_KEY = "realtime:quotes:meta"
     COLLECTOR_HEALTH_KEY = "realtime:collector:health"
 
-    def __init__(self, backend: Any = None, snapshot_repository: Any = None) -> None:
+    def __init__(self, backend: Any = None, snapshot_repository: Any = None, opening_repository: Any = None) -> None:
         from config.settings import REALTIME_QUOTE_STALE_SECONDS, REALTIME_QUOTE_TTL_SECONDS
 
         self.backend = backend or get_shared_state_backend()
         self.snapshots = snapshot_repository or RealtimeSnapshotRepository()
+        self.openings = opening_repository or SessionOpenRepository(backend=self.backend)
         self.stale_after_seconds = float(REALTIME_QUOTE_STALE_SECONDS)
         self.ttl_seconds = int(REALTIME_QUOTE_TTL_SECONDS)
 
@@ -92,6 +94,13 @@ class RealtimeQuoteCache:
         self.backend.set_many_json(values, self.ttl_seconds)
         trade_date = max(trade_dates) if trade_dates else now.strftime("%Y%m%d")
         self.snapshots.append_batch(trade_date, snapshot_rows)
+        opening_error = ""
+        try:
+            self.openings.record_batch(values.values(), now=now)
+        except Exception as exc:
+            from loguru import logger
+            opening_error = str(exc)
+            logger.warning("Session opening evidence could not be retained: {}", exc)
         meta = {
             "schema_version": 1,
             "source": source,
@@ -100,6 +109,7 @@ class RealtimeQuoteCache:
             "quote_count": len(values),
             "updated_at": now.isoformat(timespec="milliseconds"),
             "storage": self.storage,
+            "opening_evidence_error": opening_error,
         }
         self.backend.set_json(self.META_KEY, meta, self.ttl_seconds)
         return {"ok": True, "count": len(values), "rejected_codes": rejected_codes, **meta}

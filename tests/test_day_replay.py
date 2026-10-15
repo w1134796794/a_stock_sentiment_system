@@ -47,7 +47,8 @@ def test_growing_prefixes_cannot_see_later_bars_or_fabricated_receipts(monkeypat
                 "sector_detail": {"data_completeness": 1}, "data_status": "minute"}
     monkeypatch.setattr(_ReplayEntryService, "_evaluate_one", evaluate)
     result = replay_minutes(request=request(), candidate_date="20261008", rows=[{"code": "000001"}],
-                            frames={"000001": bars()}, previous={"000001": {"close": 10}}, profiles=profile())
+                            frames={"000001": bars()}, previous={"000001": {"close": 10}},
+                            opening_prices={"000001": 10}, profiles=profile())
     assert [len(f) for _, f in seen] == list(range(1, 21))
     assert all("received_at" not in q for q, _ in seen)
     assert all(f["time"].max() < q["time"] for q, f in seen)
@@ -84,18 +85,67 @@ def test_sector_checker_requires_same_minute_real_peers_not_target_itself():
 
 def test_missing_sector_does_not_turn_into_confirmation():
     result = replay_minutes(request=request(), candidate_date="20261008", rows=[{"code":"000001", "amount_ratio":1}],
-                            frames={"000001":bars()}, previous={"000001":{"close":10, "amount":1000}}, profiles=profile())
+                            frames={"000001":bars()}, previous={"000001":{"close":10, "amount":1000}},
+                            opening_prices={"000001":10}, profiles=profile())
     assert result["confirmed_stocks"] == 0
     assert any(f["evidence"] == "sector_minutes" for f in result["failures"])
 
 
 def test_captured_input_replay_has_identical_input_hash_and_never_uses_loader():
     result = replay_minutes(request=request(), candidate_date="20261008", rows=[{"code":"000001"}],
-                            frames={"000001":bars()}, previous={"000001":{"close":10}}, profiles=profile())
+                            frames={"000001":bars()}, previous={"000001":{"close":10}},
+                            opening_prices={"000001":10}, profiles=profile())
     saved = json.loads(json.dumps(result["replay_inputs"]))
     replayed = replay_saved_inputs(saved)
     assert replayed["input_hash"] == result["input_hash"]
     assert replayed["stocks"] == result["stocks"]
+
+
+@pytest.mark.parametrize("opening", [None, 0, -1, float("nan"), float("inf"), "bad"])
+def test_missing_real_open_cannot_be_replaced_with_first_minute_price(opening, monkeypatch):
+    def unexpected_evaluation(*args, **kwargs):
+        pytest.fail("Missing session open must block entry evaluation")
+    monkeypatch.setattr(_ReplayEntryService, "_evaluate_one", unexpected_evaluation)
+    result = replay_minutes(request=request(), candidate_date="20261008", rows=[{"code":"000001"}],
+                            frames={"000001":bars()}, previous={"000001":{"close":10}},
+                            opening_prices={"000001":opening}, profiles=profile())
+    stock = result["stocks"][0]
+    assert stock["status"] == "missing_evidence" and stock["session_open"] is None
+    assert stock["transitions"] == [] and not stock["first_confirm_time"]
+    assert "price_evidence" not in stock
+    assert result["failures"][0]["evidence"] == "session_open"
+    assert not result["complete"] and result["confirmed_stocks"] == 0
+    assert not result["notification_sent"] and not result["account_modified"]
+
+
+def test_real_session_open_controls_mode_even_when_first_minute_crosses_layer():
+    frame = bars()
+    frame[["open", "high", "low", "close"]] = 10.4
+    result = replay_minutes(request=request(), candidate_date="20261008", rows=[{"code":"000001"}],
+                            frames={"000001":frame}, previous={"000001":{"close":10}},
+                            opening_prices={"000001":10}, profiles=profile())
+    stock = result["stocks"][0]
+    assert stock["session_open"] == 10
+    assert stock["price_evidence"]["open_gap_pct"] == 0
+    assert stock["price_evidence"]["entry_mode"] == "weak_only"
+    assert stock["last_signal"]["entry_mode"] == "weak_only"
+
+
+def test_partial_session_opens_block_only_candidates_without_evidence(monkeypatch):
+    evaluated = []
+    def evaluate(self, row, quote, frame, *args):
+        evaluated.append((row["code"], quote["open_price"]))
+        return {"signal_status":"observe", "reason":"test", "data_status":"minute"}
+    monkeypatch.setattr(_ReplayEntryService, "_evaluate_one", evaluate)
+    result = replay_minutes(request=request(), candidate_date="20261008",
+                            rows=[{"code":"000001"}, {"code":"000002"}],
+                            frames={"000001":bars(), "000002":bars("000002")},
+                            previous={"000001":{"close":10}, "000002":{"close":10}},
+                            opening_prices={"000001":10}, profiles=profile())
+    assert set(evaluated) == {("000001", 10)}
+    assert [stock["status"] for stock in result["stocks"]] == ["observe", "missing_evidence"]
+    assert result["failures"] == [{"date":"20261009", "code":"000002", "evidence":"session_open",
+                                  "reason":result["stocks"][1]["reason"]}]
 
 
 def test_baseline_rejects_changed_request(tmp_path):
@@ -194,7 +244,9 @@ def test_loader_reads_collector_minute_cache_without_remote_access(tmp_path, mon
     result = loader.run(request(profile="decision_pool"))
     assert calls == [("20261009", "000001")]
     assert result["minute_sources"]["000001"] == "collector_minute_cache"
-    assert result["stocks"][0]["status"] != "missing_evidence"
+    assert result["stocks"][0]["quality"]["valid"]
+    assert result["stocks"][0]["status"] == "missing_evidence"
+    assert result["failures"][0]["evidence"] == "session_open"
 
 
 def test_diagnostic_permissions_are_admin_only():

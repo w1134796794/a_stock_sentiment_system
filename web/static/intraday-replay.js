@@ -3,6 +3,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const labels = {queued:'等待运行',running:'运行中',done:'已完成',failed:'失败',cancelled:'已取消',interrupted:'任务中断'};
   const signalLabels = {confirmed:'分钟规则确认',observe:'观察',cancelled:'否决',unfilled:'无法成交',missing_evidence:'缺证据'};
+  const runtimeLabels = {sent:'有通知发送成功记录',attempt_not_sent:'有通知尝试，未见发送成功记录',confirmed_no_delivery_record:'生产确认，未见通知流水',observation_confirmed:'观察视图曾确认',veto_recorded:'有门禁否决记录',recorded_without_confirmation:'有运行记录，未见确认',no_runtime_evidence:'未见原始运行记录'};
   let runId = '', timer, pending = false, savedRuns = [];
   async function api(url, body) {
     const response = await fetch(url, body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {});
@@ -24,6 +25,20 @@
   function percent(value) {
     return value === null || value === undefined ? '--' : `${Number(value).toFixed(2)}%`;
   }
+  function runtimeDetail(stock) {
+    const d = stock.runtime_diagnostic;
+    if (!d) return '';
+    const last = (d.notification_attempts || []).at(-1);
+    const difference = {replay_missing_evidence:'实盘记录与回放分开：本次回放缺少证据，不能据此否定原始确认。',replay_result_differs:'实盘记录与当前规则回放不一致，需核对代码、配置与输入版本。'}[d.replay_discrepancy] || '';
+    return `<p class="text-sm text-emerald-300 mt-2">当日原始运行：${esc(runtimeLabels[d.state]||d.state)} · 确认 ${esc(d.confirm_times.join('、')||'--')} · 范围 ${esc(d.profiles.join('、')||'--')}</p>${last?`<p class="text-sm text-slate-400 mt-2">最近通知尝试 ${esc(last.occurred_at)} · ${esc(last.status)} · ${esc(last.reason||'--')}</p>`:''}${d.veto_reasons.length?`<p class="text-sm text-amber-300 mt-2">原始门禁记录：${esc(d.veto_reasons.join('；'))}</p>`:''}${difference?`<p class="text-sm text-amber-300 mt-2">${esc(difference)}</p>`:''}`;
+  }
+  function openingDetail(stock) {
+    const o=stock.opening_evidence;
+    if(!o||!Object.keys(o).length)return '';
+    const value=n=>n===null||n===undefined?'--':Number(n).toFixed(2);
+    const sources={eltdx_batch:'eltdx行情',eltdx_open_archive:'eltdx按日归档',eltdx_quote_cache:'eltdx报价缓存',eltdx_snapshot_cache:'eltdx快照缓存',eltdx_quote_posthoc:'eltdx事后查询',stock_daily_open_cache:'当日日线缓存',stock_daily_silver_open:'当日日线表',tushare_daily_open_posthoc:'盘后日线补充'};
+    return `<p class="text-sm text-slate-400 mt-2">开盘 ${esc(value(o.open_price))} · 昨收参考 ${esc(value(o.pre_close))} · 开盘涨跌 ${esc(percent(o.open_gap==null?null:o.open_gap*100))} · 来源 ${esc(sources[o.opening_source]||o.opening_source||'未取得')}</p>`;
+  }
   async function refreshRuns() {
     const value = await api('/api/intraday-replay');
     savedRuns = value.runs;
@@ -37,15 +52,17 @@
     return value.runs;
   }
   function renderReport(r) {
-    $('dr-summary').innerHTML = [['候选日 / 行情日',`${r.candidate_date} / ${r.market_date}`],['规则曾确认',`${r.confirmed_stocks} / ${r.stocks.length}`],['缺证据项',r.failures.length],['分钟数据检查',r.complete?'检查通过':'数据不完整']].map(([label,v])=>`<div>${esc(label)}<strong>${esc(v)}</strong></div>`).join('');
+    $('dr-summary').innerHTML = [['候选日 / 行情日',`${r.candidate_date} / ${r.market_date}`],['本次分钟回放曾确认',`${r.confirmed_stocks} / ${r.stocks.length}`],['缺证据项',r.failures.length],['当日全天通知发送记录',r.runtime_summary?`${r.runtime_summary.sent_stocks} / ${r.stocks.length}`:'--']].map(([label,v])=>`<div>${esc(label)}<strong>${esc(v)}</strong></div>`).join('');
     $('dr-evidence').classList.remove('hidden');
     $('dr-limits').innerHTML = r.limitations.map(v=>`<p>${esc(v)}</p>`).join('') + `<p>不发送微信消息，不修改账户。实时推送验证：${r.live_runtime_verified?'已验证':'未验证'}</p><div class="dr-version">输入 ${esc(r.input_hash.slice(0,16))} · 代码 ${esc(r.code_hash.slice(0,16))} · ${esc(r.input_basis)} · 回放至 ${esc(r.until)}</div>`;
     $('dr-failures').innerHTML = r.failures.length ? table(['日期','股票','缺失证据','原因','缺分钟代码','缺昨收代码','未解析板块'],r.failures.map(f=>[f.date,f.code,f.evidence,f.reason,missingList(f.missing_minute_codes),missingList(f.missing_previous_close_codes),missingList(f.unresolved_sector_names)])) : '';
     const recorded = Object.values(r.recorded_runtime||{}).flatMap(source=>source.rows||[]);
-    $('dr-failures').innerHTML += `<details><summary>原始运行证据 ${recorded.length} 条</summary>${recorded.length ? table(['股票','原始确认时间','门禁否决','接收时间','通知状态'],recorded.map(row=>[row.stock_code||row.code,row.evidence?.confirm_time,row.evidence?.health_gate_reason||row.evidence?.veto_reason,row.evidence?.quote_received_at,row.evidence?.notification_status])) : '<p class="text-sm text-slate-400 mt-2">没有本地原始运行记录；需要对应服务器日志或证据库。</p>'}</details>`;
+    $('dr-failures').innerHTML += `<details><summary>原始运行证据 ${recorded.length} 条</summary>${recorded.length ? table(['股票','范围','原始状态','原始确认时间','门禁否决','接收时间'],recorded.map(row=>[row.stock_code||row.code,row.profile||row.evidence?.profile,row.evidence?.status||row.evidence?.confirm_status||row.status,row.evidence?.confirm_time||row.evidence?.minute_closed_at||row.first_confirmed_at,row.evidence?.health_gate_reason||row.evidence?.veto_reason,row.evidence?.quote_received_at])) : '<p class="text-sm text-slate-400 mt-2">没有本地原始运行记录；需要对应服务器日志或证据库。</p>'}</details>`;
     $('dr-comparison').classList.toggle('hidden',!r.comparison);
     if (r.comparison) $('dr-changes').innerHTML = `<p class="text-sm text-amber-300">${esc(r.comparison.reason)}</p>` + table(['股票','原确认时间','本次确认时间','原状态 / 原因','本次状态 / 原因'],r.comparison.changes.map(c=>[c.code,c.before.first_confirm_time||'--',c.after.first_confirm_time||'--',`${signalLabels[c.before.status]||c.before.status} / ${c.before.reason}`,`${signalLabels[c.after.status]||c.after.status} / ${c.after.reason}`]));
     $('dr-stocks').innerHTML = r.stocks.map(s=>`<details><summary><b>${esc(s.name)} ${esc(s.code)}</b><span>${esc(signalLabels[s.status]||s.status)}</span><span>首次确认 ${esc(s.first_confirm_time||'--')} · 观测 ${esc(s.first_evaluated_at||'--')}</span></summary><p class="text-sm text-slate-400 mt-2">${esc(s.reason)}</p>${s.price_evidence?`<p class="text-sm text-amber-300 mt-2">仅价格条件首次出现 ${esc(s.price_evidence.first_price_trigger||'--')} · 跌破开盘低点 ${esc(s.price_evidence.first_opening_low_break||'--')} · 成交额${s.price_evidence.amount_estimated?'含估算':'为源数据'}</p>`:''}${table(['观测时间','分钟状态','触发 / 否决原因','确认 / 成交时点','板块覆盖','板块路径','相对开盘 / 3分钟','趋势覆盖','数据状态'],s.transitions.map(t=>[t.evaluated_at,signalLabels[t.signal_status]||t.signal_status,t.reason,`${t.confirm_time||'--'} / ${t.entry_time||'--'}`,t.sector_detail?.assessed===false?'尚未检查':`${((t.sector_detail?.coverage||0)*100).toFixed(1)}%`,sectorPath(t.sector_detail),`${percent(t.sector_detail?.open_gain_pct)} / ${percent(t.sector_detail?.three_minute_change_pct)}`,percent(t.sector_detail?.trend_coverage===undefined?null:t.sector_detail.trend_coverage*100),t.data_status]))}</details>`).join('');
+    const stockPanels = $('dr-stocks').querySelectorAll(':scope > details');
+    r.stocks.forEach((stock,index)=>stockPanels[index]?.querySelector('summary')?.insertAdjacentHTML('afterend',openingDetail(stock)+runtimeDetail(stock)));
     $('dr-download').classList.remove('hidden');
     $('dr-download').href = `/api/intraday-replay/${encodeURIComponent(r.run_id)}?report=true`;
   }

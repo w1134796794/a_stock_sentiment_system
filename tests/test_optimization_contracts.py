@@ -107,6 +107,7 @@ def test_entry_funnel_and_manifest_are_reproducible():
     semantic = {key: manifest[key] for key in (
         "backtest_config", "config_files", "strategy_versions", "entry_mode",
         "start_date", "end_date", "model_versions", "data_cutoff", "costs",
+        "ruleset_version",
     )}
     assert manifest["configuration_hash"] == stable_hash(semantic)
     assert manifest["strategy_versions"] == [
