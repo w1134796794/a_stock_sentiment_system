@@ -4,7 +4,15 @@
 {% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">运行资源 · 仓位风控 · 交易成本</div>{% endblock %}
 
 {% macro render_input(f) %}
-  {%- if f.type == 'bool' -%}
+  {%- if f.choices -%}
+    <select class="cfg-input w-64 max-w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
+            data-scope="{{ f.scope }}" data-path="{{ f.path }}" data-type="str" data-initial="{{ f.value }}"
+            aria-label="{{ f.display_name or f.key }}">
+      {% for choice in f.choices %}
+      <option value="{{ choice.value }}" {% if f.value == choice.value %}selected{% endif %}>{{ choice.label }}</option>
+      {% endfor %}
+    </select>
+  {%- elif f.type == 'bool' -%}
     <input type="checkbox" class="cfg-input h-4 w-4 accent-emerald-500"
            data-scope="{{ f.scope }}" data-path="{{ f.path }}" data-type="bool"
            data-initial="{{ 'true' if f.value else 'false' }}"
@@ -34,6 +42,14 @@
 {% endmacro %}
 
 {% block content %}
+<style>
+@media (max-width: 767px) {
+  tr.cfg-choice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  tr.cfg-choice-row > td:first-child,
+  tr.cfg-choice-row > td:nth-child(2) { grid-column: 1 / -1; width: auto; min-width: 0; overflow-wrap: anywhere; }
+  tr.cfg-choice-row select { width: 100%; min-width: 0; max-width: 100%; }
+}
+</style>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
   <div class="card border border-slate-800 rounded-xl p-4">
     <div class="text-xs text-slate-400 mb-1">当前覆盖</div>
@@ -136,7 +152,7 @@
       <table class="w-full text-sm">
         <tbody>
           {% for f in group.fields %}
-          <tr class="border-b border-slate-800/60 hover:bg-slate-800/20" data-row
+          <tr class="border-b border-slate-800/60 hover:bg-slate-800/20{% if f.choices %} cfg-choice-row{% endif %}" data-row
               data-overridden="{{ 'true' if f.overridden else 'false' }}"
               data-name="{{ f.key|lower }} {{ f.path|lower }} {{ f.desc }}">
             <td class="px-4 py-2 align-top w-1/3">

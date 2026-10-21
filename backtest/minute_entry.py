@@ -79,6 +79,7 @@ class EntryDecision:
     breakout_level: float = 0.0
     initial_confirm_time: str = ""
     confirmation_policy: str = "legacy"
+    confirmation_reason: str = ""
 
     @property
     def filled(self) -> bool:
@@ -346,7 +347,7 @@ class MinuteEntryEvaluator:
                 and sector_ok
                 and self.min_amount_pace <= pace <= self.max_amount_pace
             )
-            if confirmed and (not live or index >= len(data) - 2):
+            if confirmed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2):
                 decision = self._next_minute_fill(
                     data, index, "弱转强", "收复昨收、站上VWAP并突破前5分钟高点",
                     gap, pace, sector_ok, limit_price, live=live,
@@ -354,8 +355,11 @@ class MinuteEntryEvaluator:
                     false_break_count=false_breaks, pullback_quality=pullback_quality,
                     active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
                     data_completeness=1.0,
-                    breakout_level=opening_high, protection_price=opening_low * 0.999,
+                    breakout_level=max(opening_high, prev_close)
+                    if self.confirmation_policy.mode == "volume_price" else opening_high,
+                    protection_price=opening_low * 0.999,
                     sector_sync=sector_sync,
+                    amount_pace_at=lambda final: self._amount_pace(final, previous_amount, plan_amount_ratio, expected_amount_fraction),
                 )
                 if decision.status in {"quality_rejected", "quality_pending"}:
                     quality_denial = decision
@@ -424,7 +428,7 @@ class MinuteEntryEvaluator:
                     )
                     signal = "开盘强势确认"
                     reason = "竞价明细缺失，按突破前5分钟高点、站稳VWAP和分钟量能确认"
-                if confirmed and (not live or index >= len(data) - 2):
+                if confirmed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2):
                     if not sector_observed:
                         reason += "（缺少板块确认）"
                     decision = self._next_minute_fill(
@@ -434,7 +438,13 @@ class MinuteEntryEvaluator:
                         false_break_count=false_breaks, pullback_quality=pullback_quality,
                         active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
                         data_completeness=0.75 if not sector_observed else 1.0,
-                        breakout_level=opening_high, sector_sync=sector_sync,
+                        breakout_level=(vwap if self.confirmation_policy.mode == "volume_price"
+                                        and auction_available and float(row["close"]) <= opening_high else opening_high),
+                        protection_price=float(first_five["low"].min()) * 0.999
+                        if self.confirmation_policy.mode == "volume_price" else 0.0,
+                        sector_sync=sector_sync,
+                        amount_pace_at=lambda final: self._amount_pace(final, previous_amount, plan_amount_ratio, expected_amount_fraction),
+                        minimum_final_pace=self.min_amount_pace if auction_available else max(self.min_amount_pace, 1.0),
                     )
                     if decision.status in {"quality_rejected", "quality_pending"}:
                         quality_denial = decision
@@ -477,7 +487,7 @@ class MinuteEntryEvaluator:
             sector_observed = sector_observed or sector_state is not None
             sector_ok = bool(sector_state)
             sector_check_passed = sector_ok if sector_observed else False
-            if sector_check_passed and (not live or index >= len(data) - 2) and (
+            if sector_check_passed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2) and (
                 float(row["high"]) > opening_high
                 or (limit_price > 0 and float(row["high"]) >= limit_price * 0.998)
             ):
@@ -488,7 +498,10 @@ class MinuteEntryEvaluator:
                     data, index, "高开加速", reason, gap, 0.0,
                     sector_ok, limit_price, unfilled_when_locked=True, live=live,
                     data_completeness=0.75 if not sector_observed else 1.0,
-                    breakout_level=opening_high, sector_sync=sector_sync,
+                    breakout_level=opening_high,
+                    protection_price=float(first_five["low"].min()) * 0.999
+                    if self.confirmation_policy.mode == "volume_price" else 0.0,
+                    sector_sync=sector_sync,
                 )
                 if decision.status in {"quality_rejected", "quality_pending"}:
                     quality_denial = decision
@@ -518,6 +531,8 @@ class MinuteEntryEvaluator:
         breakout_level: float = 0.0,
         protection_price: float = 0.0,
         sector_sync=None,
+        amount_pace_at=None,
+        minimum_final_pace=None,
     ) -> EntryDecision:
         from backtest.confirmation_quality import confirmation_index
         initial_time = str(data.loc[index, "time"])
@@ -529,11 +544,33 @@ class MinuteEntryEvaluator:
             return EntryDecision(quality_status, signal, quality_reason, str(data.loc[index, "time"]),
                                  open_gap_pct=gap, breakout_level=breakout_level,
                                  initial_confirm_time=initial_time,
-                                 confirmation_policy=self.confirmation_policy.mode)
+                                 confirmation_policy=self.confirmation_policy.mode,
+                                 data_status="missing_confirmation_evidence" if quality_status == "data_insufficient" else "complete",
+                                 data_completeness=0.65 if quality_status == "data_insufficient" else data_completeness)
         if quality_reason:
             reason += "；" + quality_reason
         quality_meta = dict(breakout_level=breakout_level, initial_confirm_time=initial_time,
-                            confirmation_policy=self.confirmation_policy.mode)
+                            confirmation_policy=self.confirmation_policy.mode,
+                            confirmation_reason=quality_reason)
+        if live and self.confirmation_policy.mode != "legacy" and index < len(data) - 2:
+            return EntryDecision("quality_rejected", signal, "确认时点已过期，不追认历史买点",
+                                 open_gap_pct=gap, **quality_meta)
+        if self.confirmation_policy.mode == "volume_price" and amount_pace_at is not None:
+            pace = amount_pace_at(data.loc[index])
+            if not math.isfinite(pace):
+                return EntryDecision("data_insufficient", signal, "最终确认时点缺少成交进度模型",
+                                     open_gap_pct=gap, data_status="missing_amount_profile", **quality_meta)
+            minimum = self.min_amount_pace if minimum_final_pace is None else minimum_final_pace
+            if not minimum <= pace <= self.max_amount_pace:
+                return EntryDecision("quality_rejected", signal, "最终确认时点成交进度不在允许范围",
+                                     open_gap_pct=gap, amount_pace=pace, **quality_meta)
+        if self.confirmation_policy.mode == "volume_price":
+            history = data[(data.index <= index) & (data["time"] > "09:35:00")]
+            hold_minutes = int((history["close"] >= history["vwap"]).sum())
+            false_break_count = int(((history["high"] > breakout_level) & (history["close"] < breakout_level)).sum())
+            pullback_quality = float((history["close"] / history["vwap"]).clip(upper=1.02).mean())
+            buy_ratio = data.loc[index].get("active_buy_ratio")
+            active_buy_ratio = float(buy_ratio) if pd.notna(buy_ratio) else 0.0
         following = data[data.index > index]
         if following.empty:
             if live:
@@ -541,6 +578,9 @@ class MinuteEntryEvaluator:
                     "confirmed", signal, f"{reason}，等待下一分钟成交确认",
                     str(data.loc[index, "time"]), open_gap_pct=gap,
                     amount_pace=pace, sector_confirmed=sector_ok,
+                    profile_samples=profile_samples, hold_minutes=hold_minutes,
+                    false_break_count=false_break_count, pullback_quality=pullback_quality,
+                    active_buy_ratio=active_buy_ratio, data_completeness=data_completeness,
                     **quality_meta,
                 )
             return EntryDecision("signal_unfilled", signal, f"{reason}，但缺少下一分钟成交", str(data.loc[index, "time"]), open_gap_pct=gap, **quality_meta)
@@ -551,6 +591,12 @@ class MinuteEntryEvaluator:
         price = float(next_row.get("open") or next_row.get("close") or 0.0)
         volume = float(next_row.get("volume") or 0.0)
         locked = limit_price > 0 and price >= limit_price * 0.998
+        from backtest.confirmation_quality import price_quality_reason
+        denial = price_quality_reason(price, float(data.loc[index, "vwap"]), breakout_level, self.confirmation_policy)
+        if denial:
+            return EntryDecision("signal_unfilled", signal, f"下一分钟价格不符合执行条件：{denial}",
+                                 str(data.loc[index, "time"]), str(next_row["time"]),
+                                 open_gap_pct=gap, sector_confirmed=sector_ok, **quality_meta)
         if not math.isfinite(price) or not math.isfinite(volume) or price <= 0 or volume <= 0 or locked:
             return EntryDecision(
                 "signal_unfilled", signal, f"{reason}，下一分钟无可成交量或仍封涨停",

@@ -66,6 +66,10 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
             "entry_time": row.get("entry_time") or "",
             "entry_price": row.get("entry_price"),
             "entry_mode": mode,
+            "confirmation_policy": row.get("confirmation_policy") or "legacy",
+            "confirmation_reason": row.get("confirmation_reason") or "",
+            "initial_confirm_time": row.get("initial_confirm_time") or "",
+            "breakout_level": row.get("breakout_level"),
             "opening_evidence": row.get("opening_evidence") or {},
             "board_feedback": row.get("board_feedback") or {},
             "entry_parameters": row.get("entry_parameters") or {},
@@ -127,6 +131,7 @@ def record_runtime_observations(ledger, payload, *, now=None):
         observation = {key: evidence.get(key) for key in (
             "candidate_date", "market_date", "code", "profile", "signal_id", "status", "data_status",
             "entry_mode", "minute_closed_at", "entry_time", "entry_price", "opening_evidence", "board_feedback",
+            "confirmation_policy", "confirmation_reason", "initial_confirm_time", "breakout_level", "entry_parameters",
             "trigger_reason", "veto_reason", "quote_received_at", "quote_source_time", "quote_stale_seconds",
             "sector_detail", "sector_coverage", "sector_data_completeness", "evidence_bundle_id", "config_version")}
         observation.update({"observed_at": clock.isoformat(timespec="milliseconds"),

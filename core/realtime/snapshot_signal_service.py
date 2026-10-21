@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from dataclasses import replace
 from threading import RLock
 from typing import Any, Dict, Optional, Tuple
 
@@ -63,6 +64,7 @@ class SnapshotSignalService:
         limit_price: float,
         minute_decision: EntryDecision,
         confirmation_deadline: str = "",
+        confirmation_policy=None,
     ) -> Optional[EntryDecision]:
         ticks = self._normalize_ticks(snapshots, trade_date)
         if len(ticks) < self.consecutive_ticks:
@@ -75,10 +77,10 @@ class SnapshotSignalService:
                 open_gap_pct=open_gap, data_status="minute_structure_pending",
                 data_completeness=0.7,
             )
-        if minute_decision.status in {"rejected", "cancelled"}:
-            return minute_decision
         # Snapshots refine execution, never override the common minute gates.
         if minute_decision.status not in {"confirmed", "filled"}:
+            with self._lock:
+                self._pending.pop((str(trade_date), str(code), str(mode)), None)
             return minute_decision
 
         recent = ticks.tail(self.consecutive_ticks)
@@ -130,6 +132,15 @@ class SnapshotSignalService:
         has_turnover = float(ticks.tail(5)["delta_volume"].sum()) > 0
         sector_ok = bool(sector_confirmed)
         current = float(latest["last_price"])
+        from backtest.confirmation_quality import ConfirmationPolicy, price_quality_reason
+        policy = confirmation_policy or ConfirmationPolicy(mode=minute_decision.confirmation_policy)
+        key_level = minute_decision.breakout_level if policy.mode == "volume_price" else opening_high
+        denial = price_quality_reason(_number(latest.get("ask1")) or current, vwap, key_level, policy)
+        if denial:
+            with self._lock:
+                self._pending.pop((str(trade_date), str(code), str(mode)), None)
+            return replace(minute_decision, status="observing", reason=denial, entry_price=0,
+                           entry_time="", data_status="snapshot_price_quality")
 
         if mode == ENTRY_WEAK:
             after_opening = ticks[ticks["time"] > str(first_five.iloc[-1]["time"])]
@@ -141,7 +152,7 @@ class SnapshotSignalService:
             triggered = (
                 bool((prices >= prev_close).all())
                 and above_vwap
-                and current > opening_high
+                and current > key_level
                 and sector_ok
                 and has_turnover
             )
@@ -149,7 +160,7 @@ class SnapshotSignalService:
         elif mode == ENTRY_CONTINUATION:
             triggered = (
                 above_vwap
-                and current > opening_high
+                and current > key_level
                 and sector_ok
                 and has_turnover
             )
@@ -158,7 +169,7 @@ class SnapshotSignalService:
             triggered = (
                 is_leader
                 and above_vwap
-                and current >= opening_high
+                and current >= key_level
                 and sector_ok
                 and has_turnover
             )
@@ -166,9 +177,17 @@ class SnapshotSignalService:
         else:
             return None
 
+        above_key = bool((prices >= key_level).all())
+        if policy.mode == "volume_price":
+            triggered = triggered and above_key
+
         key = (str(trade_date), str(code), str(mode))
         with self._lock:
             pending = self._pending.get(key)
+            signature = (minute_decision.confirm_time, minute_decision.breakout_level, policy.mode)
+            if pending and pending.get("confirmation_signature") != signature:
+                self._pending.pop(key, None)
+                pending = None
             if pending:
                 between = ticks[ticks["time"] >= str(pending.get("time") or "")]
                 timeline = pd.to_datetime(trade_date + " " + between["time"], format="%Y%m%d %H:%M:%S", errors="coerce")
@@ -182,8 +201,8 @@ class SnapshotSignalService:
                 missing = []
                 if not above_vwap:
                     missing.append("连续站稳VWAP")
-                if current <= opening_high:
-                    missing.append("突破前5分钟高点")
+                if current <= key_level or (policy.mode == "volume_price" and not above_key):
+                    missing.append("站稳确认关键价" if policy.mode == "volume_price" else "突破前5分钟高点")
                 if not sector_ok:
                     missing.append("板块同步走强")
                 if not has_turnover:
@@ -195,17 +214,19 @@ class SnapshotSignalService:
                     data_completeness=0.95,
                 )
             if not pending:
-                self._pending[key] = {"time": latest_time, "price": current}
-                return EntryDecision(
-                    "observing", MODE_LABELS.get(mode, ""),
-                    f"{reason}，等待下一快照模拟成交", latest_time,
+                self._pending[key] = {"time": latest_time, "price": current, "confirmation_signature": signature}
+                return replace(
+                    minute_decision, status="observing", signal=MODE_LABELS.get(mode, ""),
+                    reason=f"{reason}，等待下一快照模拟成交", confirm_time=latest_time,
+                    entry_time="", entry_price=0,
                     open_gap_pct=open_gap, sector_confirmed=sector_ok,
                     data_status="snapshot_triggered", data_completeness=1.0,
                 )
             if latest_time <= str(pending.get("time") or ""):
-                return EntryDecision(
-                    "observing", MODE_LABELS.get(mode, ""),
-                    f"{reason}，等待下一快照模拟成交", str(pending.get("time") or ""),
+                return replace(
+                    minute_decision, status="observing", signal=MODE_LABELS.get(mode, ""),
+                    reason=f"{reason}，等待下一快照模拟成交", confirm_time=str(pending.get("time") or ""),
+                    entry_time="", entry_price=0,
                     open_gap_pct=open_gap, sector_confirmed=sector_ok,
                     data_status="snapshot_triggered", data_completeness=1.0,
                 )
@@ -215,16 +236,16 @@ class SnapshotSignalService:
         delta_volume = _number(latest.get("delta_volume"))
         locked = limit_price > 0 and current >= limit_price * 0.998 and ask1 <= 0
         if locked or delta_volume <= 0:
-            return EntryDecision(
-                "signal_unfilled", MODE_LABELS.get(mode, ""),
-                f"{reason}，但下一快照无可成交证明", str(pending.get("time") or ""),
-                latest_time, 0.0, open_gap, sector_confirmed=sector_ok,
+            return replace(
+                minute_decision, status="signal_unfilled", signal=MODE_LABELS.get(mode, ""),
+                reason=f"{reason}，但下一快照无可成交证明", confirm_time=str(pending.get("time") or ""),
+                entry_time=latest_time, entry_price=0.0, open_gap_pct=open_gap, sector_confirmed=sector_ok,
                 data_status="snapshot_unfilled", data_completeness=1.0,
             )
-        return EntryDecision(
-            "filled", MODE_LABELS.get(mode, ""), reason,
-            str(pending.get("time") or ""), latest_time, ask1 or current,
-            open_gap, sector_confirmed=sector_ok,
+        return replace(
+            minute_decision, status="filled", signal=MODE_LABELS.get(mode, ""), reason=reason,
+            confirm_time=str(pending.get("time") or ""), entry_time=latest_time, entry_price=ask1 or current,
+            open_gap_pct=open_gap, sector_confirmed=sector_ok,
             data_status="snapshot_filled", data_completeness=1.0,
         )
 

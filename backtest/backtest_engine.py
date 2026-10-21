@@ -73,6 +73,7 @@ class BacktestConfig:
     entry_max_amount_pace: float = 3.00
     continuation_min_auction_volume_ratio: float = 0.008
     continuation_min_auction_amount: float = 5_000_000
+    entry_confirmation_policy: Optional[Dict[str, Any]] = None
     three_board_feedback_enabled: Optional[bool] = None  # Defaults to production_rules for direct construction.
     three_board_feedback_limit_fraction: float = 0.50
     three_board_feedback_score_penalty: float = 20.0
@@ -138,6 +139,7 @@ class BacktestConfig:
     ) -> "BacktestConfig":
         """Project the unified RiskConfig into the active backtest engine."""
         trailing_pct = max(float(risk_config.trailing_stop), 0.0)
+        from backtest.confirmation_quality import policy_from_config
         return cls(
             initial_capital=float(initial_capital or risk_config.initial_capital),
             max_position_per_stock=float(risk_config.max_position_per_stock),
@@ -163,6 +165,7 @@ class BacktestConfig:
             entry_max_amount_pace=float(risk_config.entry_max_amount_pace),
             continuation_min_auction_volume_ratio=float(risk_config.continuation_min_auction_volume_ratio),
             continuation_min_auction_amount=float(risk_config.continuation_min_auction_amount),
+            entry_confirmation_policy=asdict(policy_from_config(risk_config)),
             three_board_feedback_enabled=bool(risk_config.three_board_feedback_enabled),
             three_board_feedback_limit_fraction=float(risk_config.three_board_feedback_limit_fraction),
             three_board_feedback_score_penalty=float(risk_config.three_board_feedback_score_penalty),
@@ -304,6 +307,7 @@ class BacktestEngine:
         self.entry_attempts: List[Dict[str, Any]] = []
         self.entry_candidate_count: int = 0
         self.amount_profiles = MinuteAmountProfileRepository()
+        from backtest.confirmation_quality import policy_from_config
         self.minute_evaluator = MinuteEntryEvaluator(
             deadline=self.config.entry_confirm_deadline,
             weak_min_gap=self.config.weak_entry_min_gap,
@@ -313,6 +317,7 @@ class BacktestEngine:
             max_amount_pace=self.config.entry_max_amount_pace,
             min_auction_volume_ratio=self.config.continuation_min_auction_volume_ratio,
             min_auction_amount=self.config.continuation_min_auction_amount,
+            confirmation_policy=policy_from_config(self.config),
         )
         from core.signals.board_feedback import feedback_policy
         self.minute_evaluator.board_feedback_policy = feedback_policy(self.config)
@@ -929,6 +934,7 @@ class BacktestEngine:
             'breakout_level': self._float(entry_meta.get('breakout_level')),
             'initial_confirm_time': str(entry_meta.get('initial_confirm_time') or ''),
             'confirmation_policy': str(entry_meta.get('confirmation_policy') or 'legacy'),
+            'confirmation_reason': str(entry_meta.get('confirmation_reason') or ''),
             'stop_loss_price': max(entry_price * (1 - exit_config['hard_stop_loss']), self._float(entry_meta.get('structural_stop'))),
             'highest_price': entry_price,  # 用于跟踪回撤
             'max_favorable_price': entry_price,
@@ -1346,6 +1352,7 @@ class BacktestEngine:
             'breakout_level': decision.breakout_level,
             'initial_confirm_time': decision.initial_confirm_time,
             'confirmation_policy': decision.confirmation_policy,
+            'confirmation_reason': decision.confirmation_reason,
         })
         if self.config.replay_missing_evidence_policy != "legacy" and missing_entry_evidence(self.entry_attempts[-1]):
             failure = self._entry_evidence_missing.get((str(date), stock_code)) or {
@@ -1565,6 +1572,7 @@ class BacktestEngine:
                 'breakout_level': decision.breakout_level,
                 'initial_confirm_time': decision.initial_confirm_time,
                 'confirmation_policy': decision.confirmation_policy,
+                'confirmation_reason': decision.confirmation_reason,
             }
             entry_price = decision.entry_price * (1 + self.config.slippage)
             if self.config.production_rules:

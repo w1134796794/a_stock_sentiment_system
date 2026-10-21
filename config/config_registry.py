@@ -49,6 +49,15 @@ _YAML_LABELS = {
 _RISK_GROUP = "risk_control"
 _RISK_LABEL = "风控参数 (RiskConfig)"
 _RISK_DESCRIPTIONS = {
+    "entry_confirmation_mode": "volume_price使用放量站稳或缩量回踩再突破；legacy保留原规则。两者均不绕过策略模式、板块及行情新鲜度限制。",
+    "entry_sustain_minutes": "放量突破后连续站稳的已完成分钟数，包含突破分钟。",
+    "entry_volume_lookback": "局部放量使用之前连续分钟的平均成交量，不含当前分钟。",
+    "entry_min_local_volume_ratio": "突破或回踩再突破分钟成交量相对之前窗口均量的最低倍数，试运行值尚未收益校准。",
+    "entry_pullback_window": "初次突破后等待缩量回踩再突破的最长分钟数。",
+    "entry_pullback_tolerance": "关键价上下允许的回踩比例；回踩与再突破必须是不同已完成分钟。",
+    "entry_pullback_max_volume_ratio": "回踩分钟成交量相对初次突破分钟的最高倍数。",
+    "entry_max_vwap_distance": "确认与执行价格最多高于已知VWAP的比例，不追离均价线过远的价格。",
+    "entry_max_breakout_extension": "确认与执行价格最多高于突破关键价的比例。",
     "hard_stop_loss": "相对买入成本的硬止损比例。",
     "three_board_feedback_enabled": "启用三板负反馈风险因子及第五日反抽退出；因子命中或缺数均不作为买入门禁。",
     "three_board_feedback_limit_fraction": "第四日收盘跌幅占该股票涨跌停幅度的比例；0.5对应普通10%股票收盘跌5%。",
@@ -80,6 +89,10 @@ _SIMPLE_RISK = {
     "max_sector_concentration",
     "fixed_risk_per_trade",
     "hard_stop_loss",
+    "entry_confirmation_mode",
+    "entry_min_local_volume_ratio",
+    "entry_max_vwap_distance",
+    "entry_max_breakout_extension",
     "three_board_feedback_enabled",
     "three_board_feedback_limit_fraction",
     "three_board_feedback_score_penalty",
@@ -106,6 +119,10 @@ _FIELD_LABELS = {
     "max_sector_concentration": "单一板块仓位上限",
     "fixed_risk_per_trade": "单笔风险预算",
     "hard_stop_loss": "硬止损比例",
+    "entry_confirmation_mode": "分钟买点确认方式",
+    "entry_min_local_volume_ratio": "局部放量最低倍数",
+    "entry_max_vwap_distance": "距VWAP最大追价比例",
+    "entry_max_breakout_extension": "距突破价最大追价比例",
     "three_board_feedback_enabled": "三板负反馈风险因子",
     "three_board_feedback_limit_fraction": "负反馈阈值占涨跌停比例",
     "three_board_feedback_score_penalty": "三板负反馈扣分",
@@ -308,6 +325,9 @@ def _build_risk() -> List[Dict[str, Any]]:
         item = _field("risk", _RISK_GROUP, _RISK_LABEL, key, key,
                       eff_val, default_val, key in store)
         item["desc"] = _RISK_DESCRIPTIONS.get(key, "")
+        if key == "entry_confirmation_mode":
+            item["choices"] = [{"value": "volume_price", "label": "放量站稳 / 缩量回踩再突破"},
+                               {"value": "legacy", "label": "原规则（对照）"}]
         fields.append(item)
     return [{"key": _RISK_GROUP, "label": _RISK_LABEL, "fields": fields}] if fields else []
 
@@ -429,11 +449,32 @@ def apply_updates(updates: List[Dict[str, Any]]) -> Dict[str, Any]:
         if field is None:
             errors.append({"path": path, "error": "未知或不可编辑字段"})
             continue
+        if scope == "risk" and path.startswith("entry_") and path in _RISK_DESCRIPTIONS:
+            if field["type"] in {"int", "float"} and isinstance(raw, bool):
+                errors.append({"path": path, "error": "确认参数不能使用布尔值"})
+                continue
+            if field["type"] == "int":
+                try:
+                    if not float(raw).is_integer():
+                        raise ValueError("确认窗口必须为整数")
+                except (ValueError, TypeError, OverflowError):
+                    errors.append({"path": path, "error": "确认窗口必须为整数"})
+                    continue
         try:
             value = coerce_value(field["type"], raw)
         except (ValueError, TypeError) as e:
             errors.append({"path": path, "error": f"类型错误({field['type']}): {e}"})
             continue
+        if scope == "risk" and path.startswith("entry_") and path in _RISK_DESCRIPTIONS:
+            try:
+                from risk.risk_config import RiskConfig
+                from backtest.confirmation_quality import policy_from_config
+                proposed = RiskConfig.load()
+                setattr(proposed, path, value)
+                policy_from_config(proposed)
+            except (ValueError, TypeError, OverflowError) as exc:
+                errors.append({"path": path, "error": str(exc)})
+                continue
         if scope == "risk" and path in {"three_board_feedback_limit_fraction", "three_board_rebound_exit_gain"}:
             if not math.isfinite(value) or not 0 < value <= 1:
                 errors.append({"path": path, "error": "三板负反馈阈值必须在(0, 1]内"})

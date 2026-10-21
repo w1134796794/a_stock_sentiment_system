@@ -69,6 +69,15 @@ class RiskConfig:
     entry_max_amount_pace: float = 3.00
     continuation_min_auction_volume_ratio: float = 0.008
     continuation_min_auction_amount: float = 5_000_000.0
+    entry_confirmation_mode: str = "volume_price"
+    entry_sustain_minutes: int = 2
+    entry_volume_lookback: int = 3
+    entry_min_local_volume_ratio: float = 1.2
+    entry_pullback_window: int = 5
+    entry_pullback_tolerance: float = 0.002
+    entry_pullback_max_volume_ratio: float = 0.8
+    entry_max_vwap_distance: float = 0.02
+    entry_max_breakout_extension: float = 0.015
     three_board_feedback_enabled: bool = True
     three_board_feedback_limit_fraction: float = 0.50
     three_board_feedback_score_penalty: float = 20.0
@@ -130,12 +139,13 @@ class RiskConfig:
     @classmethod
     def from_dict(cls, data: Optional[Dict[str, Any]]) -> "RiskConfig":
         """从字典构造，未知键忽略，缺失键用默认值。"""
-        if not data:
+        if data is None:
             return cls()
         known = {f.name for f in fields(cls)}
         kwargs = {k: v for k, v in data.items() if k in known}
         # Never retroactively assign a new scoring weight to an old saved config.
         kwargs.setdefault("three_board_feedback_score_penalty", 0.0)
+        kwargs.setdefault("entry_confirmation_mode", "legacy")
         # Fixed take-profit was removed in favour of trailing exits. Old web
         # overrides can still contain this key, so treat it as a silent legacy
         # migration instead of logging the same warning on every config load.

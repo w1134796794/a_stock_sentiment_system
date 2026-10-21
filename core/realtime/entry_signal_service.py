@@ -307,6 +307,7 @@ class RealtimeEntrySignalService:
                     is_leader=self._is_leader(row),
                     limit_price=_float(limit_up_price(pre_close, code, name)),
                     minute_decision=decision,
+                    confirmation_policy=self.evaluator.confirmation_policy,
                     confirmation_deadline=resolve_entry_deadline(execution, mode, self.evaluator.deadline),
                 )
                 if snapshot_decision is not None:
@@ -552,6 +553,10 @@ class RealtimeEntrySignalService:
             "confirm_time": decision.confirm_time,
             "entry_time": decision.entry_time,
             "entry_price": decision.entry_price or None,
+            "breakout_level": decision.breakout_level or None,
+            "initial_confirm_time": decision.initial_confirm_time,
+            "confirmation_policy": decision.confirmation_policy,
+            "confirmation_reason": decision.confirmation_reason,
             "amount_pace": decision.amount_pace or None,
             "sector_confirmed": bool(decision.sector_confirmed),
             "sector_detail": sector_detail or {},

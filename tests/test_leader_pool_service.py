@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
+from backtest.confirmation_quality import ConfirmationPolicy
+from backtest.minute_entry import MinuteEntryEvaluator
 from core.realtime.entry_signal_service import RealtimeEntrySignalService
 from core.realtime.leader_pool_service import IntradayStrengthService, LeaderPoolService
 
@@ -159,7 +162,8 @@ def test_leader_pool_ignores_strategy_combination_candidates(tmp_path: Path):
     assert [row["code"] for row in rows] == ["002281"]
 
 
-def test_intraday_strength_uses_weak_to_strong_for_low_open():
+@pytest.mark.parametrize("policy_mode,expected_status", [("legacy", "confirmed"), ("volume_price", "observe")])
+def test_intraday_strength_uses_weak_to_strong_for_low_open(policy_mode, expected_status):
     class FakeBreadth:
         def evaluate(self, sectors, market_date):
             return True, {"breadth": 0.7, "index_change_pct": 1.0, "data_completeness": 1.0,
@@ -237,14 +241,16 @@ def test_intraday_strength_uses_weak_to_strong_for_low_open():
         pool_service=FakePool(),
         entry_signal_service=RealtimeEntrySignalService(
             FakeMinuteData(), sector_breadth_provider=FakeBreadth(),
+            evaluator=MinuteEntryEvaluator(confirmation_policy=ConfirmationPolicy(mode=policy_mode)),
             board_feedback_repository=SimpleNamespace(capture=safe_history),
         ),
     ).build("20260618", market_date="20260619")
 
     assert result["candidate_date"] == "20260618"
     assert result["market_date"] == "20260619"
-    assert result["rows"][0]["status"] == "confirmed"
-    assert result["rows"][0]["confirm_status"] == "confirmed"
+    assert result["rows"][0]["status"] == expected_status
+    assert result["rows"][0]["confirm_status"] == expected_status
+    assert result["rows"][0]["confirmation_policy"] == policy_mode
     assert result["rows"][0]["pct_chg"] == 1.0
     assert result["rows"][0]["is_leader_observation"] is True
     assert result["rows"][0]["strategy_id"] == "leader_pool"

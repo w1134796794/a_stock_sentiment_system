@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 
-RULESET_VERSION = "production_shared_v6_optional_feedback_factor"
+RULESET_VERSION = "production_shared_v7_volume_price_confirmation"
 
 
 def number(value, default=0.0):
@@ -18,6 +18,7 @@ def number(value, default=0.0):
 def minute_evaluator(risk=None):
     from backtest.minute_entry import MinuteEntryEvaluator
     from risk.risk_config import RiskConfig
+    from backtest.confirmation_quality import policy_from_config
     risk = risk or RiskConfig.load()
     evaluator = MinuteEntryEvaluator(
         deadline=risk.entry_confirm_deadline,
@@ -26,6 +27,7 @@ def minute_evaluator(risk=None):
         min_amount_pace=risk.entry_min_amount_pace, max_amount_pace=risk.entry_max_amount_pace,
         min_auction_volume_ratio=risk.continuation_min_auction_volume_ratio,
         min_auction_amount=risk.continuation_min_auction_amount,
+        confirmation_policy=policy_from_config(risk),
     )
     from core.signals.board_feedback import feedback_policy
     evaluator.board_feedback_policy = feedback_policy(risk)
