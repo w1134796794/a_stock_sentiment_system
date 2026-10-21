@@ -71,6 +71,7 @@ class RiskConfig:
     continuation_min_auction_amount: float = 5_000_000.0
     three_board_feedback_enabled: bool = True
     three_board_feedback_limit_fraction: float = 0.50
+    three_board_feedback_score_penalty: float = 20.0
     three_board_rebound_exit_gain: float = 0.02
     intraday_strength_trigger_pct: float = 0.01
     intraday_min_tech_score: float = 80.0
@@ -133,6 +134,8 @@ class RiskConfig:
             return cls()
         known = {f.name for f in fields(cls)}
         kwargs = {k: v for k, v in data.items() if k in known}
+        # Never retroactively assign a new scoring weight to an old saved config.
+        kwargs.setdefault("three_board_feedback_score_penalty", 0.0)
         # Fixed take-profit was removed in favour of trailing exits. Old web
         # overrides can still contain this key, so treat it as a silent legacy
         # migration instead of logging the same warning on every config load.

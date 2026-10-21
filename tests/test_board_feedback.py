@@ -6,12 +6,13 @@ import pandas as pd
 import pytest
 
 from backtest.backtest_engine import BacktestConfig, BacktestEngine
+from backtest.minute_entry import EntryDecision
 from backtest.trade_calendar import TradeCalendar
 from core.portfolio.exit_decision_service import ExitDecisionService
 from core.realtime.board_feedback_repository import BoardFeedbackRepository, feedback_inputs
 from core.realtime.day_replay import _ReplayEntryService, replay_minutes, replay_saved_inputs
-from core.signals.board_feedback import assess_feedback, feedback_policy, history_dates, rebound_exit
-from core.signals.production_rules import minute_evaluator
+from core.signals.board_feedback import assess_feedback, feedback_policy, feedback_score_adjustment, history_dates, rebound_exit
+from core.signals.production_rules import candidate_strength, minute_evaluator
 from core.utils.price_limit import get_price_limit_pct, round_price
 from risk.risk_config import RiskConfig
 
@@ -55,18 +56,20 @@ def quote(**overrides):
     ("20261015", False, None), ("20261016", True, 5),
     ("20261019", True, 6), ("20261020", False, None),
 ])
-def test_cuhua_veto_is_d5_d6_not_d4_or_d7(day, active, board_day):
+def test_cuhua_negative_factor_is_d5_d6_not_d4_or_d7(day, active, board_day):
     result = context(day)
     assert result["assessed"]
     assert result["active"] is active
     assert result.get("board_day") == board_day
+    assert result["factor_value"] == int(active)
+    assert not result["entry_veto"]
     if active:
         assert result["third_board_date"] == "20261014"
         assert result["feedback_date"] == "20261015"
         assert result["feedback_change_pct"] == -10
 
 
-def test_future_d4_close_cannot_veto_d4_entry():
+def test_future_d4_close_cannot_change_d4_factor():
     captured = inputs("20261015")
     captured["stocks"][CODE].extend(inputs()["stocks"][CODE])
     assert not assess_feedback(captured, CODE, "20261015", POLICY)["active"]
@@ -104,6 +107,8 @@ def test_invalid_failure_price_is_unknown_not_passed(bad):
     result = assess_feedback(captured, CODE, "20261016", POLICY)
     assert not result["assessed"]
     assert not result["active"]
+    assert result["factor_value"] is None
+    assert result["score_adjustment"] == 0
 
 
 def test_duplicate_conflict_and_wrong_snapshot_date_are_unknown():
@@ -159,26 +164,39 @@ def profiles():
 
 
 @pytest.mark.parametrize("gap", [-.01, .02, .06])
-def test_live_veto_precedes_all_entry_modes_and_snapshot_confirmation(gap):
+@pytest.mark.parametrize("known", [True, False])
+def test_optional_factor_never_replaces_minute_or_snapshot_confirmation(gap, known):
     evaluator = minute_evaluator(RiskConfig())
-    evaluator.evaluate = lambda **kwargs: pytest.fail("veto must run before minute confirmation")
+    calls = []
+    def confirmed(**kwargs):
+        calls.append("minute")
+        return EntryDecision("confirmed", reason="minute confirmed", confirm_time="09:39:00")
+    evaluator.evaluate = confirmed
     service = _ReplayEntryService({}, {}, {}, {}, profiles(), evaluator=evaluator,
-                                  board_feedback_inputs=inputs())
+                                  board_feedback_inputs=inputs() if known else {})
+    service._snapshot_frame = lambda *a: pd.DataFrame([{"time": "09:39:58"}])
+    service.snapshot_signals = SimpleNamespace(evaluate=lambda **kw: calls.append("snapshot"))
     signal = service._evaluate_one({"code": CODE, "name": "Cuhua", "score": 100},
         quote(open_price=14.22 * (1 + gap)), pd.DataFrame(), {}, {}, {"close": 14.22},
         "20261016", [], {})
-    assert signal["signal_status"] == "cancelled"
-    assert signal["data_status"] == "three_board_feedback_veto"
-    assert signal["board_feedback"]["active"]
-    assert not signal["confirm_time"]
+    assert calls == ["minute", "snapshot"]
+    assert signal["signal_status"] == "confirmed"
+    assert signal["reason"] == "minute confirmed"
+    assert signal["data_status"] == "complete"
+    assert signal["board_feedback"]["active"] is known
+    assert signal["board_feedback"]["assessed"] is known
+    assert not signal.get("entry_veto_reason")
+    assert signal["confirm_time"] == "09:39:00"
 
 
-def test_missing_history_cannot_confirm_production_entry():
+def test_missing_history_retains_the_real_entry_reason():
     service = _ReplayEntryService({}, {}, {}, {}, profiles(), evaluator=minute_evaluator(RiskConfig()))
     signal = service._evaluate_one({"code": CODE}, quote(), pd.DataFrame(), {}, {},
                                    {"close": 14.22}, "20261016", [], {})
-    assert signal["data_status"] == "missing_board_feedback"
+    assert signal["data_status"] != "missing_board_feedback"
     assert signal["signal_status"] == "observe"
+    assert signal["reason"] == "等待当日一分钟行情"
+    assert signal["board_feedback"]["factor_status"] == "unassessed"
 
 
 def minute_bars():
@@ -193,7 +211,8 @@ def test_replay_freezes_feedback_history_policy_and_missing_evidence(monkeypatch
         previous={CODE: {"close": 14.22}}, opening_prices={CODE: 13.8}, profiles=profiles(),
         risk_config=RiskConfig().to_dict())
     report = replay_minutes(**kwargs, board_feedback_inputs=inputs())
-    assert report["stocks"][0]["status"] == "cancelled"
+    assert report["stocks"][0]["status"] == "observe"
+    assert report["stocks"][0]["board_feedback"]["active"]
     assert report["confirmed_stocks"] == 0
     assert report["complete"]
     monkeypatch.setattr(BoardFeedbackRepository, "capture", lambda *a, **kw: pytest.fail("saved inputs must not read live data"))
@@ -202,8 +221,10 @@ def test_replay_freezes_feedback_history_policy_and_missing_evidence(monkeypatch
     assert replayed["input_hash"] == report["input_hash"]
     assert replayed["stocks"][0]["reason"] == report["stocks"][0]["reason"]
     missing = replay_minutes(**kwargs, board_feedback_inputs={})
-    assert not missing["complete"]
-    assert any(item["evidence"] == "missing_board_feedback" for item in missing["failures"])
+    assert missing["complete"]
+    assert missing["failures"] == []
+    assert missing["factor_warnings"][0]["status"] == "unassessed"
+    assert missing["stocks"][0]["reason"] == report["stocks"][0]["reason"]
 
 
 @pytest.mark.parametrize("last,triggered", [(14.07, False), (14.08, True), (14.3, True)])
@@ -246,12 +267,22 @@ def engine():
     return result
 
 
-def test_backtest_records_the_same_buy_veto_as_live():
+@pytest.mark.parametrize("known", [True, False])
+def test_backtest_factor_does_not_veto_a_valid_buy(known):
     result = engine()
-    assert result._check_buy_conditions(pd.Series({"目标价": 0, "综合评分": 100}), "20261016", CODE, "Cuhua") == (False, 0)
+    result._board_feedback_repository = SimpleNamespace(capture=lambda *a: inputs() if known else {})
+    result.dm = SimpleNamespace(get_stock_daily_data=lambda *a: {"open": 13.8, "pre_close": 14.22})
+    result._is_full_day_suspended = lambda *a, **kw: False
+    result._get_stock_daily_bar = lambda *a: {"close": 14.22, "amount": 1000}
+    result._entry_mode_for_plan = lambda *a: "weak_only"
+    result.minute_evaluator.evaluate = lambda **kw: EntryDecision("filled", reason="minute confirmed",
+        signal="弱转强", confirm_time="09:39:00", entry_time="09:40:00", entry_price=14.08)
+    allowed, price = result._check_buy_conditions(pd.Series({"目标价": 0, "综合评分": 100}), "20261016", CODE, "Cuhua")
+    assert allowed and price > 0
     attempt = result.entry_attempts[-1]
-    assert attempt["reason_code"] == "three_board_feedback_veto"
-    assert attempt["board_feedback"] == context()
+    assert attempt["board_feedback"]["active"] is known
+    assert attempt["board_feedback"]["assessed"] is known
+    assert attempt["reason_code"] not in {"three_board_feedback_veto", "missing_board_feedback"}
 
 
 @pytest.mark.parametrize("hard_stop", [False, True])
@@ -270,7 +301,8 @@ def test_backtest_rebound_is_chronological_and_hard_stop_has_priority(hard_stop)
 
 
 def test_risk_projection_keeps_feedback_thresholds_in_sync():
-    risk = RiskConfig(three_board_feedback_limit_fraction=.7, three_board_rebound_exit_gain=.03)
+    risk = RiskConfig(three_board_feedback_limit_fraction=.7, three_board_rebound_exit_gain=.03,
+                      three_board_feedback_score_penalty=20)
     projected = BacktestConfig.from_risk_config(risk)
     assert feedback_policy(projected) == minute_evaluator(risk).board_feedback_policy == feedback_policy(risk)
     assert not feedback_policy(BacktestConfig())["enabled"]
@@ -290,7 +322,8 @@ def test_config_controls_expose_policy_and_reject_invalid_thresholds(monkeypatch
     from config import config_registry as registry
     paths = {field["path"] for section in registry.build_simple_registry()["sections"]
              for group in section["groups"] for field in group["fields"]}
-    assert {"three_board_feedback_enabled", "three_board_feedback_limit_fraction", "three_board_rebound_exit_gain"} <= paths
+    assert {"three_board_feedback_enabled", "three_board_feedback_limit_fraction", "three_board_rebound_exit_gain",
+            "three_board_feedback_score_penalty"} <= paths
     monkeypatch.setattr(registry, "_index_fields", lambda: {
         ("risk", "three_board_feedback_limit_fraction"): {"type": "float", "default": .5}})
     monkeypatch.setattr(registry, "_reapply_live", lambda: None)
@@ -300,23 +333,111 @@ def test_config_controls_expose_policy_and_reject_invalid_thresholds(monkeypatch
         assert result["errors"]
 
 
-def test_overlay_and_leader_rows_preserve_the_veto_evidence(monkeypatch):
+def test_overlay_and_leader_rows_keep_factor_separate_from_entry_evidence(monkeypatch):
     from core.realtime.overlay_service import RealtimeOverlayService
     from core.realtime.leader_pool_service import IntradayStrengthService
     from core.operations import evidence as evidence_module
     monkeypatch.setattr(evidence_module, "_fetch_time", lambda *a: "")
-    signal = {"signal_status": "cancelled", "board_feedback": context(), "reason": context()["reason"],
-              "entry_veto_reason": context()["reason"], "data_status": "three_board_feedback_veto"}
+    signal = {"signal_status": "confirmed", "board_feedback": context(), "reason": "minute confirmed",
+              "data_status": "complete"}
     candidate = {"code": CODE, "leader_score": 100}
     overlay = RealtimeOverlayService.__new__(RealtimeOverlayService)._build_row(
         "20261015", "20261016", candidate, quote(), signal)
     leader = IntradayStrengthService.__new__(IntradayStrengthService)._build_row(candidate, quote(), signal)
     for row in (overlay, leader):
         assert row["board_feedback"] == context()
-        assert row["data_status"] == "three_board_feedback_veto"
+        assert row["data_status"] == "complete"
         result = evidence_module.attach_evidence({"rows": [row]})["rows"][0]["signal_evidence"]
-        assert result["veto_reason"] == context()["reason"]
+        assert result["veto_reason"] == ""
         assert result["board_feedback"] == context()
+
+
+def test_feedback_penalty_is_shared_and_not_applied_twice():
+    from core.portfolio.paper_trading_service import PaperTradingService
+    from core.realtime.leader_pool_service import IntradayStrengthService
+    policy = feedback_policy(RiskConfig(three_board_feedback_score_penalty=20))
+    factor = assess_feedback(inputs(), CODE, "20261016", policy)
+    assert feedback_score_adjustment(factor) == -20
+    assert factor["score_adjustment"] == -20
+    assert candidate_strength({"score": 80, "board_feedback": factor}) == 60
+    unknown = assess_feedback({}, CODE, "20261016", policy)
+    assert candidate_strength({"score": 80, "board_feedback": unknown}) == 80
+    service = IntradayStrengthService.__new__(IntradayStrengthService)
+    plain = service._build_row({"code": CODE, "leader_score": 80}, quote(), {"signal_status": "confirmed"})
+    ranked = service._build_row({"code": CODE, "leader_score": 80}, quote(),
+                               {"signal_status": "confirmed", "board_feedback": factor})
+    assert ranked["turn_score"] == pytest.approx(plain["turn_score"] - 20)
+    assert candidate_strength(ranked) == pytest.approx(candidate_strength(plain) - 20)
+    assert PaperTradingService._candidate_strength(ranked) == candidate_strength(ranked)
+    assert candidate_strength({"score": 10, "board_feedback": factor}) == 0
+    assert ranked["confirm_status"] == "confirmed"
+
+
+def test_production_backtest_uses_the_same_factor_deduction_as_live():
+    result = BacktestEngine(None, BacktestConfig(production_rules=True, three_board_feedback_score_penalty=20))
+    result._production_inputs = {"board_feedback_inputs": inputs(), "opening_prices": {CODE: 13.8},
+        "opening_evidence": {CODE: {"pre_close": 14.22}}, "previous": {CODE: {"close": 14.22}},
+        "members": {}, "frames": {}}
+    result._production_rows = {CODE: {"code": CODE, "score": 80}}
+    result._is_full_day_suspended = lambda *a, **kw: False
+    result._entry_mode_for_plan = lambda *a: "weak_only"
+    result.minute_evaluator.evaluate = lambda **kw: EntryDecision("filled", reason="minute confirmed",
+        signal="弱转强", confirm_time="09:39:00", entry_time="09:40:00", entry_price=14.08)
+    allowed, _ = result._check_buy_conditions(pd.Series({"目标价": 0, "综合评分": 80}), "20261016", CODE, "Cuhua")
+    assert allowed
+    assert result._last_entry_meta[CODE]["entry_strength_score"] == 60
+
+
+def test_legacy_frozen_config_does_not_invent_a_new_factor_weight():
+    assert RiskConfig().three_board_feedback_score_penalty == 20
+    old = RiskConfig.from_dict({"three_board_feedback_enabled": True})
+    assert old.three_board_feedback_score_penalty == 0
+
+
+def test_zero_factor_penalty_is_editable_without_turning_off_the_factor(monkeypatch):
+    from config import config_registry as registry
+    saved = []
+    monkeypatch.setattr(registry, "_index_fields", lambda: {
+        ("risk", "three_board_feedback_score_penalty"): {"type": "float", "default": 20.0}})
+    monkeypatch.setattr(registry, "_reapply_live", lambda: None)
+    monkeypatch.setattr(registry.ov, "set_override", lambda scope, path, value: saved.append(value))
+    result = registry.apply_updates([{"scope": "risk", "path": "three_board_feedback_score_penalty", "value": 0}])
+    assert result["applied"] and not result["errors"]
+    assert saved == [0.0]
+
+
+@pytest.mark.parametrize("penalty", [-1, 100.1, "nan", "inf", True, False])
+def test_factor_weight_rejects_nonfinite_and_out_of_range_values(penalty):
+    with pytest.raises(ValueError, match="扣分"):
+        feedback_policy({"three_board_feedback_score_penalty": penalty})
+
+
+def test_optional_history_failure_cannot_become_an_entry_gate(tmp_path):
+    broken = SimpleNamespace(prev=lambda day: (_ for _ in ()).throw(OSError("calendar unavailable")))
+    captured = BoardFeedbackRepository(tmp_path, calendar=broken).capture("20261016", [CODE])
+    factor = assess_feedback(captured, CODE, "20261016", POLICY)
+    assert factor["factor_status"] == "unassessed"
+    assert factor["factor_value"] is None
+    assert feedback_score_adjustment(factor) == 0
+
+
+@pytest.mark.parametrize("bad", ["bad", [1], {"dates": [[1]]}, {"stocks": "bad"}])
+def test_malformed_optional_factor_inputs_stay_unknown_and_neutral(bad):
+    result = assess_feedback(bad, CODE, "20261016", POLICY)
+    assert result["factor_value"] is None
+    assert not result["entry_veto"]
+    assert feedback_score_adjustment(result) == 0
+    assert feedback_score_adjustment(bad) == 0
+
+
+def test_factor_never_bypasses_real_quote_freshness():
+    service = _ReplayEntryService({}, {}, {}, {}, profiles(), evaluator=minute_evaluator(RiskConfig()),
+                                  board_feedback_inputs=inputs())
+    signal = service._evaluate_one({"code": CODE}, quote(is_stale=True), pd.DataFrame(), {}, {},
+                                   {"close": 14.22}, "20261016", [], {})
+    assert signal["data_status"] == "quote_stale"
+    assert signal["board_feedback"]["active"]
+    assert signal["signal_status"] == "observe"
 
 
 def test_closed_trade_keeps_rebound_exit_evidence():

@@ -233,6 +233,7 @@
           <div class="is-metric"><span>${activeProfile === 'decision_pool' ? '建议仓位' : '龙头阶段'}</span><strong>${esc(row.suggested_position || row.position_advice || row.lifecycle_state || '--')}</strong></div>
         </div>
         <div class="is-reason"><b>确认依据：</b>${esc(row.reason || '等待分钟买点确认')}</div>
+        ${row.board_feedback && (row.board_feedback.active || row.board_feedback.assessed === false) ? `<div class="is-action is-factor-warning"><b>风险因子 · 三板负反馈：</b>${esc(row.board_feedback.active ? '命中' : '未评估')} · ${esc(row.board_feedback.reason || '--')}${Number(row.board_feedback.score_adjustment)<0 ? ` · 强度扣分 ${esc(-Number(row.board_feedback.score_adjustment))}` : ''}</div>` : ''}
         ${row.was_confirmed_today ? `<div class="is-reason"><b>确认记录：</b>${esc(row.first_confirmed_at || row.confirm_time || '--')}${row.current_status_text ? ` · 当前${esc(row.current_status_text)}` : ''}</div>` : ''}
         <div class="is-action"><b>当前行动：</b>${esc(row.action || '继续观察')}</div>
       </article>`).join('');

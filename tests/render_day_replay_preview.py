@@ -13,4 +13,5 @@ context = {"current_user":{"role":"admin", "username":"preview"}, "is_admin":Tru
 directory = root / "outputs/intraday-replay-ui"
 directory.mkdir(parents=True, exist_ok=True)
 (directory / "page.html").write_text(env.get_template("intraday_replay.html").render(**context), encoding="utf-8")
+(directory / "intraday.html").write_text(env.get_template("intraday.html").render(**context), encoding="utf-8")
 print(directory)

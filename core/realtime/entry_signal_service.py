@@ -170,6 +170,16 @@ class RealtimeEntrySignalService:
         return out
 
     def _evaluate_one(
+        self, row, quote, frame, frames, quotes, previous, market_date, all_rows, execution,
+    ):
+        payload = self._evaluate_entry(row, quote, frame, frames, quotes, previous,
+                                       market_date, all_rows, execution)
+        code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
+        # Optional factor evidence must not replace the executable entry decision.
+        payload["board_feedback"] = self._board_feedback_context(code, market_date)
+        return payload
+
+    def _evaluate_entry(
         self,
         row: Dict[str, Any],
         quote: Dict[str, Any],
@@ -218,17 +228,6 @@ class RealtimeEntrySignalService:
             execution = {**execution, **row_execution}
         gap = opening["open_gap"]
         mode = preliminary_mode
-        feedback = self._board_feedback_context(code, market_date)
-        if feedback["active"] or not feedback["assessed"]:
-            payload = self._payload(
-                EntryDecision("rejected" if feedback["active"] else "data_insufficient",
-                              reason=feedback["reason"],
-                              data_status="three_board_feedback_veto" if feedback["active"] else "missing_board_feedback",
-                              data_completeness=1.0 if feedback["assessed"] else 0.0),
-                mode, market_date, opening_evidence=opening, stats_context=row)
-            payload["board_feedback"] = feedback
-            payload["entry_veto_reason"] = feedback["reason"]
-            return payload
         allowed_modes = normalize_strategy_entry_modes(
             execution.get("allowed_entry_modes") or []
         )
@@ -341,7 +340,6 @@ class RealtimeEntrySignalService:
             payload["structure"] = structures.get(mode, {})
             payload["structural_stop"] = (structures.get(mode) or {}).get("protection")
         payload["strategy_execution"] = execution
-        payload["board_feedback"] = feedback
         payload["strategy_version"] = row.get("strategy_version", "")
         deadline = resolve_entry_deadline(execution, mode, self.evaluator.deadline)
         if decision.confirm_time and decision.confirm_time > deadline:
@@ -356,12 +354,17 @@ class RealtimeEntrySignalService:
     def _load_feedback_inputs(self, market_date, codes):
         from core.operations.preopen_evidence import PreopenEvidenceStore
         from core.realtime.board_feedback_repository import BoardFeedbackRepository
-        if self.board_feedback_repository is None:
-            self.board_feedback_repository = BoardFeedbackRepository(
-                cache_dir=getattr(self.dm, "cache_dir", None), calendar=self.calendar)
-        frozen = PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
-        return self.board_feedback_repository.capture(
-            market_date, codes, frozen_inputs=frozen["inputs"] if frozen else None)
+        try:
+            if self.board_feedback_repository is None:
+                self.board_feedback_repository = BoardFeedbackRepository(
+                    cache_dir=getattr(self.dm, "cache_dir", None), calendar=self.calendar)
+            frozen = PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
+            return self.board_feedback_repository.capture(
+                market_date, codes, frozen_inputs=frozen["inputs"] if frozen else None)
+        except Exception as exc:
+            from loguru import logger
+            logger.warning("三板负反馈因子输入不可用，买点仍独立评估: {}", type(exc).__name__)
+            return {"source_basis": "optional_history_unavailable"}
 
     def _board_feedback_context(self, code, market_date):
         from core.signals.board_feedback import assess_feedback, feedback_policy

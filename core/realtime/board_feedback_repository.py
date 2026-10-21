@@ -37,10 +37,20 @@ class BoardFeedbackRepository:
         self._cached = None
 
     def capture(self, market_date, codes, *, frozen_inputs=None):
-        if frozen_inputs is not None:
-            captured = frozen_inputs.get("board_feedback_inputs") or {}
-            return deepcopy({**captured, "stocks": {
-                normalize_code(code): (captured.get("stocks") or {}).get(normalize_code(code), []) for code in codes}})
+        codes = list(codes)
+        try:
+            if frozen_inputs is not None:
+                captured = frozen_inputs.get("board_feedback_inputs") or {}
+                return deepcopy({**captured, "stocks": {
+                    normalize_code(code): (captured.get("stocks") or {}).get(normalize_code(code), []) for code in codes}})
+            return self._capture_local(market_date, codes)
+        except Exception as exc:
+            from loguru import logger
+            logger.warning("三板负反馈因子历史不可用，保留未评估状态: {}", type(exc).__name__)
+            return feedback_inputs(market_date, codes, [], [], source_basis="optional_history_unavailable",
+                                   calendar_verified=False)
+
+    def _capture_local(self, market_date, codes):
         dates = history_dates(market_date, self.calendar)
         paths = [self.cache / "stock" / "all_daily" / f"{day}.csv" for day in dates]
         revisions = tuple(path.stat().st_mtime_ns if path.exists() else None for path in paths)

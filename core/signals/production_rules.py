@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 
-RULESET_VERSION = "production_shared_v5_board_feedback"
+RULESET_VERSION = "production_shared_v6_optional_feedback_factor"
 
 
 def number(value, default=0.0):
@@ -118,13 +118,17 @@ def candidate_strength(row):
     base = next((number(row.get(key)) * (100 if 0 < number(row.get(key)) <= 1 else 1)
                  for key in ("turn_score", "screening_score", "leader_score", "score",
                              "success_probability", "confidence_score") if number(row.get(key)) > 0), 50.0)
+    if "turn_score_before_feedback" in row:
+        base = number(row["turn_score_before_feedback"])
     mode_bonus = {"weak_to_strong": 4.0, "continuation": 3.0,
                   "acceleration": 2.0, "high_open_acceleration": 2.0}.get(row.get("entry_mode"), 0.0)
     group_bonus = 4.0 if row.get("action_group") == "重点确认" else 0.0
     breadth = number((row.get("sector_detail") or {}).get("breadth"))
     breadth = breadth * 100 if 0 < breadth <= 1 else breadth
     sector_bonus = max(min((breadth - 50) / 20, 3), -3) if breadth else 0
-    return round(max(0, min(100, base + mode_bonus + group_bonus + sector_bonus)), 2)
+    from core.signals.board_feedback import feedback_score_adjustment
+    unadjusted = max(0, min(100, base + mode_bonus + group_bonus + sector_bonus))
+    return round(max(0, unadjusted + feedback_score_adjustment(row.get("board_feedback"))), 2)
 
 
 def holding_strength(position):

@@ -1,4 +1,4 @@
-"""Point-in-time veto and rebound exit after a three-limit-up failure."""
+"""Optional risk factor and rebound exit after a three-limit-up failure."""
 from __future__ import annotations
 
 import math
@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from core.signals.opening import positive_price
 from core.utils.price_limit import get_price_limit_pct, limit_up_price, normalize_code
 
-FEEDBACK_VERSION = "three_board_feedback_v1"
+FEEDBACK_VERSION = "three_board_feedback_factor_v2"
 
 
 def feedback_policy(config=None):
@@ -16,13 +16,21 @@ def feedback_policy(config=None):
 
     fraction = positive_price(get("three_board_feedback_limit_fraction", .5))
     rebound = positive_price(get("three_board_rebound_exit_gain", .02))
+    if isinstance(get("three_board_feedback_score_penalty", 0), bool):
+        raise ValueError("三板负反馈扣分必须在[0, 100]内")
+    try:
+        penalty = float(get("three_board_feedback_score_penalty", 0))
+    except (TypeError, ValueError):
+        raise ValueError("三板负反馈扣分必须在[0, 100]内") from None
+    if not math.isfinite(penalty) or not 0 <= penalty <= 100:
+        raise ValueError("三板负反馈扣分必须在[0, 100]内")
     if fraction is None or fraction > 1 or rebound is None or rebound > 1:
         raise ValueError("三板负反馈阈值必须在(0, 1]内")
     enabled = get("three_board_feedback_enabled", None)
     if enabled is None:
         enabled = get("production_rules", False)
     return {"enabled": bool(enabled),
-            "loss_limit_fraction": fraction, "rebound_gain": rebound}
+            "loss_limit_fraction": fraction, "rebound_gain": rebound, "score_penalty": penalty}
 
 
 def history_dates(market_date, calendar):
@@ -39,20 +47,31 @@ def date_text(value):
 
 
 def assess_feedback(inputs, code, market_date, policy):
-    """Only previous completed sessions are eligible; D4 itself is never vetoed."""
+    """Only previous completed sessions contribute; this factor never vetoes entry."""
     code = normalize_code(code)
+    inputs = inputs if isinstance(inputs, Mapping) else {}
     base = {"version": FEEDBACK_VERSION, "market_date": market_date, "code": code,
             "policy": dict(policy), "active": False, "assessed": True,
-            "source_basis": (inputs or {}).get("source_basis", "missing_history")}
+            "source_basis": (inputs or {}).get("source_basis", "missing_history"),
+            "factor_id": "three_board_negative_feedback", "direction": "negative",
+            "role": "risk_factor", "entry_veto": False, "score_adjustment": 0.0}
     if not policy["enabled"]:
-        return {**base, "reason": "三板负反馈门禁未启用"}
+        return {**base, "factor_status": "disabled", "factor_value": None,
+                "reason": "三板负反馈因子未启用"}
     inputs = inputs or {}
     dates = inputs.get("dates") or []
-    if (inputs.get("market_date") != market_date or not inputs.get("calendar_verified")
+    if (not isinstance(dates, list) or any(not isinstance(day, str) or len(day) != 8 or not day.isdigit() for day in dates)
+            or not isinstance(inputs.get("stocks", {}), Mapping)
+            or inputs.get("market_date") != market_date or not inputs.get("calendar_verified")
             or len(dates) != 6 or dates != sorted(set(dates)) or any(d >= market_date for d in dates)):
-        return {**base, "assessed": False, "reason": "缺少三板负反馈历史日线或真实交易日历"}
+        return {**base, "assessed": False, "factor_status": "unassessed", "factor_value": None,
+                "reason": "三板负反馈因子未评估：缺少历史日线或真实交易日历"}
     records, conflicts = {}, set()
-    for row in (inputs.get("stocks") or {}).get(code, []):
+    rows = (inputs.get("stocks") or {}).get(code, [])
+    rows = rows if isinstance(rows, list) else []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
         day = date_text(row.get("trade_date"))
         if day not in dates or normalize_code(row.get("code") or code) != code:
             continue
@@ -96,17 +115,27 @@ def assess_feedback(inputs, code, market_date, policy):
             missing.update(day for day in [prior_date, *board_dates] if sealed(day) is None)
             continue
         board_day = 4 + age
-        return {**base, "active": True, "board_day": board_day,
+        return {**base, "active": True, "factor_status": "risk", "factor_value": 1, "board_day": board_day,
+                "score_adjustment": -policy.get("score_penalty", 0.0),
                 "board_dates": board_dates, "third_board_date": board_dates[-1],
                 "feedback_date": failure_date, "feedback_close": close,
                 "feedback_pre_close": previous, "feedback_change_pct": round(loss * 100, 4),
                 "feedback_threshold_pct": -limit * policy["loss_limit_fraction"] * 100,
                 "known_after": failure_date + " 15:00:00",
-                "reason": f"三连板后第4日({failure_date})收盘{loss * 100:+.2f}%，第{board_day}个交易日禁止新买入"}
+                "reason": f"三连板后第4日({failure_date})收盘{loss * 100:+.2f}%，第{board_day}个交易日负反馈风险"}
     if missing:
-        return {**base, "assessed": False, "missing_dates": sorted(missing),
-                "reason": "缺少三板负反馈历史日线，不能确认是否处于禁入期"}
-    return {**base, "reason": "未命中三板后第4日强负反馈禁入条件"}
+        return {**base, "assessed": False, "factor_status": "unassessed", "factor_value": None,
+                "missing_dates": sorted(missing), "reason": "三板负反馈因子未评估：历史日线缺失或冲突"}
+    return {**base, "factor_status": "clear", "factor_value": 0, "reason": "未命中三板负反馈风险因子"}
+
+
+def feedback_score_adjustment(context):
+    if (not isinstance(context, Mapping) or context.get("assessed") is not True or context.get("active") is not True
+            or context.get("version") != FEEDBACK_VERSION or not isinstance(context.get("policy"), Mapping)
+            or context["policy"].get("enabled") is not True):
+        return 0.0
+    penalty = positive_price((context.get("policy") or {}).get("score_penalty"))
+    return -penalty if penalty is not None and penalty <= 100 else 0.0
 
 
 def rebound_exit(context, position, quote, market_date):

@@ -38,6 +38,7 @@ continuation_min_auction_volume_ratio: 0.008
 continuation_min_auction_amount: 5000000.0
 three_board_feedback_enabled: true
 three_board_feedback_limit_fraction: 0.50  # D4 close loss / daily price-limit ratio
+three_board_feedback_score_penalty: 20.0  # Trial deduction on a 0-100 strength score, not an entry veto.
 three_board_rebound_exit_gain: 0.02        # D5 current price / actual session open - 1
 intraday_strength_trigger_pct: 0.01
 intraday_min_tech_score: 80.0

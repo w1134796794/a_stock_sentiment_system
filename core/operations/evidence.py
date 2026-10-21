@@ -126,7 +126,7 @@ def record_runtime_observations(ledger, payload, *, now=None):
             continue
         observation = {key: evidence.get(key) for key in (
             "candidate_date", "market_date", "code", "profile", "signal_id", "status", "data_status",
-            "entry_mode", "minute_closed_at", "entry_time", "entry_price", "opening_evidence",
+            "entry_mode", "minute_closed_at", "entry_time", "entry_price", "opening_evidence", "board_feedback",
             "trigger_reason", "veto_reason", "quote_received_at", "quote_source_time", "quote_stale_seconds",
             "sector_detail", "sector_coverage", "sector_data_completeness", "evidence_bundle_id", "config_version")}
         observation.update({"observed_at": clock.isoformat(timespec="milliseconds"),

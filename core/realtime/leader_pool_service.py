@@ -1072,6 +1072,9 @@ class IntradayStrengthService:
             turn_score = screening_score * 0.45 + realtime_score * 0.55
             if status == "cancelled":
                 turn_score = min(turn_score, 45.0)
+            from core.signals.board_feedback import feedback_score_adjustment
+            turn_score = round(max(0.0, min(100.0, turn_score)), 2)
+            adjustment = feedback_score_adjustment(row.get("board_feedback"))
             row.update({
                 "status": status,
                 "status_text": {
@@ -1080,7 +1083,8 @@ class IntradayStrengthService:
                     "observe": "继续观察",
                     "cancelled": "取消",
                 }.get(status, "继续观察"),
-                "turn_score": round(max(0.0, min(100.0, turn_score)), 2),
+                "turn_score_before_feedback": turn_score,
+                "turn_score": round(max(0.0, turn_score + adjustment), 2),
                 "leader_score": screening_score,
                 "pool_rank": index,
                 "source_rank": row.get("screening_rank"),
@@ -1167,6 +1171,9 @@ class IntradayStrengthService:
         turn_score = _to_float(pool_row.get("leader_score")) * 0.45 + realtime_score * 0.55
         if status == "cancelled":
             turn_score = min(turn_score, 45.0)
+        from core.signals.board_feedback import feedback_score_adjustment
+        turn_score = round(max(0.0, min(100.0, turn_score)), 2)
+        adjustment = feedback_score_adjustment(signal.get("board_feedback"))
         return {
             **pool_row,
             "status": status,
@@ -1178,7 +1185,8 @@ class IntradayStrengthService:
                 "observe": "继续观察",
                 "cancelled": "取消",
             }.get(status, "继续观察"),
-            "turn_score": round(max(0.0, min(100.0, turn_score)), 2),
+            "turn_score_before_feedback": turn_score,
+            "turn_score": round(max(0.0, turn_score + adjustment), 2),
             "reason": reason,
             "entry_mode": mode,
             "entry_mode_text": signal.get("entry_mode_text") or entry_mode_text(mode),

@@ -156,6 +156,7 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
         stock = {"code": code, "name": row.get("name", ""), "quality": quality,
                  "session_open": opening if opening is not None and opening > 0 else None,
                  "opening_evidence": context,
+                 "board_feedback": clean(service._board_feedback_context(code, date)),
                  "first_confirm_time": "", "first_evaluated_at": "", "transitions": []}
         if failure:
             stock.update({"status": "missing_evidence", "reason": failure})
@@ -232,6 +233,11 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                   "code_hash": digest(versions), "code_versions": versions,
                   "live_runtime_verified": False, "notification_sent": False, "account_modified": False,
                   "complete": bool(rows) and not failures, "failures": failures, "stocks": stocks,
+                  "factor_warnings": [{"code": stock["code"], "factor": "three_board_negative_feedback",
+                                       "status": stock["board_feedback"]["factor_status"],
+                                       "reason": stock["board_feedback"]["reason"]}
+                                      for stock in stocks if stock["board_feedback"]["active"]
+                                      or not stock["board_feedback"]["assessed"]],
                   "counts": dict(Counter(stock["status"] for stock in stocks)),
                   "confirmed_stocks": sum(bool(s["first_confirm_time"]) for s in stocks),
                   "sector_confirmation_policy": SECTOR_SYNC_VERSION,

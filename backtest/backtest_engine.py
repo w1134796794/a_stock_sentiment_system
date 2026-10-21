@@ -75,6 +75,7 @@ class BacktestConfig:
     continuation_min_auction_amount: float = 5_000_000
     three_board_feedback_enabled: Optional[bool] = None  # Defaults to production_rules for direct construction.
     three_board_feedback_limit_fraction: float = 0.50
+    three_board_feedback_score_penalty: float = 20.0
     three_board_rebound_exit_gain: float = 0.02
     min_open_gap: float = 0.0  # 必须严格高开
     max_open_gap: float = 0.03  # 高开超过3%不追
@@ -164,6 +165,7 @@ class BacktestConfig:
             continuation_min_auction_amount=float(risk_config.continuation_min_auction_amount),
             three_board_feedback_enabled=bool(risk_config.three_board_feedback_enabled),
             three_board_feedback_limit_fraction=float(risk_config.three_board_feedback_limit_fraction),
+            three_board_feedback_score_penalty=float(risk_config.three_board_feedback_score_penalty),
             three_board_rebound_exit_gain=float(risk_config.three_board_rebound_exit_gain),
             market_entry_threshold=float(risk_config.market_entry_threshold),
             market_strong_threshold=float(risk_config.market_active_threshold),
@@ -1427,9 +1429,6 @@ class BacktestEngine:
             return reject('restricted_stock', exclusion)
         feedback = self._board_feedback_context(stock_code, date)
         self._last_entry_meta.setdefault(stock_code, {})['board_feedback'] = feedback
-        if feedback['active'] or not feedback['assessed']:
-            return reject('three_board_feedback_veto' if feedback['active'] else 'missing_board_feedback',
-                          feedback['reason'], data_status='complete' if feedback['active'] else 'missing_board_feedback')
         if self._is_full_day_suspended(stock_code, date, scope='candidate'):
             return reject('suspended', 'suspend_d确认全天停牌，当日不能买入', data_status='suspended')
         missing = self._entry_evidence_missing.get((str(date), stock_code))
@@ -1575,7 +1574,7 @@ class BacktestEngine:
                 row = self._production_rows.get(stock_code, {})
                 evidence = self._sector_evidence_snapshots.get((str(date), stock_code), {}).get(decision.confirm_time, {})
                 self._last_entry_meta[stock_code]['entry_strength_score'] = candidate_strength(
-                    {**row, 'entry_mode': entry_mode, 'sector_detail': evidence})
+                    {**row, 'entry_mode': entry_mode, 'sector_detail': evidence, 'board_feedback': feedback})
             logger.info(
                 f"{stock_name} {decision.confirm_time}确认{decision.signal}，"
                 f"{decision.entry_time}按下一分钟开盘价{decision.entry_price:.2f}成交"

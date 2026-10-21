@@ -84,7 +84,7 @@ def runtime_evidence(path: Path, table: str, date: str, codes: list[str]) -> dic
                 "status", "profile", "confirm_status", "confirm_time", "minute_closed_at",
                 "reason", "data_status", "sector_detail", "trigger_reason", "veto_reason", "health_gate_reason",
                 "quote_received_at", "sector_coverage", "sector_data_completeness", "notification_status",
-                "entry_mode", "opening_evidence", "entry_parameters", "quote_stale_seconds",
+                "entry_mode", "opening_evidence", "entry_parameters", "quote_stale_seconds", "board_feedback",
             )}
             if table == "signal_evidence" and con.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_events'").fetchone():
