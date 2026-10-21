@@ -31,6 +31,7 @@ class PositionMonitor:
         market_context_provider: Callable[[], Dict[str, Any]] | None = None,
         notifier: Any = None,
         backend: Any = None,
+        board_feedback_repository: Any = None,
     ) -> None:
         self.repository = repository or HoldingRepository()
         self.decisions = decision_service or ExitDecisionService()
@@ -40,6 +41,7 @@ class PositionMonitor:
         self.notifier = notifier
         self.backend = backend or get_shared_state_backend()
         self._lock = Lock()
+        self.board_feedback_repository = board_feedback_repository
 
     def run_once(
         self,
@@ -67,11 +69,26 @@ class PositionMonitor:
                 for row in quote_payload.get("quotes") or []
             }
             market = self._market_context()
+            from backtest.trade_calendar import TradeCalendar
+            from core.operations.preopen_evidence import PreopenEvidenceStore
+            from core.realtime.board_feedback_repository import BoardFeedbackRepository
+            from core.signals.board_feedback import assess_feedback, feedback_policy
+            from risk.risk_config import RiskConfig
+            calendar = TradeCalendar()
+            frozen = PreopenEvidenceStore().load(calendar.prev(current_date), current_date)
+            risk = RiskConfig.from_dict(frozen["inputs"]["risk_config"]) if frozen and frozen["inputs"].get("risk_config") else RiskConfig.load()
+            policy = feedback_policy(risk)
+            if self.board_feedback_repository is None:
+                self.board_feedback_repository = BoardFeedbackRepository(calendar=calendar)
+            feedback_inputs = self.board_feedback_repository.capture(
+                current_date, [row["code"] for row in positions],
+                frozen_inputs=frozen["inputs"] if frozen else None) if policy["enabled"] else {}
             results: List[Dict[str, Any]] = []
             notified = 0
             executed = 0
             now = datetime.now().isoformat(timespec="seconds")
             for position in positions:
+                position["board_feedback"] = assess_feedback(feedback_inputs, position["code"], current_date, policy)
                 position["sellable_shares"] = self.repository.sellable_shares(int(position["id"]), current_date)
                 quote = quote_map.get(str(position["code"]), {})
                 sector = self._sector_context(position, current_date)

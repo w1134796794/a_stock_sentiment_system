@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 
-RULESET_VERSION = "production_shared_v4_opening"
+RULESET_VERSION = "production_shared_v5_board_feedback"
 
 
 def number(value, default=0.0):
@@ -19,7 +19,7 @@ def minute_evaluator(risk=None):
     from backtest.minute_entry import MinuteEntryEvaluator
     from risk.risk_config import RiskConfig
     risk = risk or RiskConfig.load()
-    return MinuteEntryEvaluator(
+    evaluator = MinuteEntryEvaluator(
         deadline=risk.entry_confirm_deadline,
         weak_min_gap=risk.weak_entry_min_gap, weak_max_gap=risk.weak_entry_max_gap,
         continuation_max_gap=risk.continuation_max_gap,
@@ -27,6 +27,9 @@ def minute_evaluator(risk=None):
         min_auction_volume_ratio=risk.continuation_min_auction_volume_ratio,
         min_auction_amount=risk.continuation_min_auction_amount,
     )
+    from core.signals.board_feedback import feedback_policy
+    evaluator.board_feedback_policy = feedback_policy(risk)
+    return evaluator
 
 
 def entry_parameters(evaluator):
@@ -37,6 +40,7 @@ def entry_parameters(evaluator):
     policy = getattr(evaluator, 'confirmation_policy', None)
     if is_dataclass(policy):
         values['confirmation_policy'] = asdict(policy)
+    values['board_feedback_policy'] = getattr(evaluator, 'board_feedback_policy', {})
     return values
 
 

@@ -69,6 +69,8 @@ def runtime_evidence(path: Path, table: str, date: str, codes: list[str]) -> dic
         con.row_factory = sqlite3.Row
         if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
             return {"status": "missing_table", "rows": []}
+        if not codes:
+            return {"status": "no_local_runtime_evidence", "rows": []}
         placeholders = ",".join("?" for _ in codes)
         column = "stock_code" if table == "realtime_signal_events" else "code"
         rows = con.execute(f"SELECT * FROM {table} WHERE market_date=? AND {column} IN ({placeholders})",
@@ -82,7 +84,7 @@ def runtime_evidence(path: Path, table: str, date: str, codes: list[str]) -> dic
                 "status", "profile", "confirm_status", "confirm_time", "minute_closed_at",
                 "reason", "data_status", "sector_detail", "trigger_reason", "veto_reason", "health_gate_reason",
                 "quote_received_at", "sector_coverage", "sector_data_completeness", "notification_status",
-                "entry_mode", "opening_evidence", "entry_parameters",
+                "entry_mode", "opening_evidence", "entry_parameters", "quote_stale_seconds",
             )}
             if table == "signal_evidence" and con.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_events'").fetchone():
@@ -91,6 +93,17 @@ def runtime_evidence(path: Path, table: str, date: str, codes: list[str]) -> dic
                     "AND kind IN ('notification', 'notification_attempt') ORDER BY occurred_at", (row["signal_id"],)
                 ).fetchall()]
             result.append(row)
+        if table == "signal_evidence" and con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_observations'").fetchone():
+            observations = con.execute(
+                f"SELECT * FROM runtime_observations WHERE market_date=? AND code IN ({placeholders}) ORDER BY observed_at",
+                [date, *codes]).fetchall()
+            for item in observations:
+                raw = json.loads(item["payload_json"])
+                result.append({"event_id": item["observation_id"], "signal_id": item["signal_id"],
+                               "code": raw.get("code"), "profile": raw.get("profile"),
+                               "status": raw.get("status"), "observed_at": item["observed_at"],
+                               "evidence_kind": "runtime_observation", "evidence": raw, "delivery_events": []})
     return {"status": "recorded" if result else "no_local_runtime_evidence", "rows": result}
 
 

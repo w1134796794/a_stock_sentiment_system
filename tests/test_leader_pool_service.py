@@ -221,11 +221,23 @@ def test_intraday_strength_uses_weak_to_strong_for_low_open():
         def get_all_stocks_daily(self, trade_date):
             return pd.DataFrame()
 
+    from backtest.trade_calendar import TradeCalendar
+    from core.realtime.board_feedback_repository import feedback_inputs
+    from core.signals.board_feedback import history_dates
+    from types import SimpleNamespace
+    calendar = TradeCalendar()
+    def safe_history(day, codes, **kwargs):
+        dates = history_dates(day, calendar)
+        records = [{"code": code, "trade_date": date, "close": 10, "pre_close": 10}
+                   for code in codes for date in dates]
+        return feedback_inputs(day, codes, dates, records, source_basis="test_prior_daily")
+
     result = IntradayStrengthService(
         quote_service=FakeQuotes(),
         pool_service=FakePool(),
         entry_signal_service=RealtimeEntrySignalService(
             FakeMinuteData(), sector_breadth_provider=FakeBreadth(),
+            board_feedback_repository=SimpleNamespace(capture=safe_history),
         ),
     ).build("20260618", market_date="20260619")
 

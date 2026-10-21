@@ -80,6 +80,7 @@ class RealtimeEntrySignalService:
         signal_stats_repository: Optional[HistoricalSignalStatsRepository] = None,
         snapshot_signal_service: Any = None,
         quote_service: Any = None,
+        board_feedback_repository: Any = None,
     ) -> None:
         self.dm = data_manager
         self.quote_service = quote_service
@@ -100,6 +101,8 @@ class RealtimeEntrySignalService:
         self._minute_cache: Dict[Tuple[str, str], Tuple[float, pd.DataFrame]] = {}
         self._previous_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._lock = RLock()
+        self.board_feedback_repository = board_feedback_repository
+        self._feedback_inputs = None
 
     def evaluate(
         self,
@@ -137,6 +140,10 @@ class RealtimeEntrySignalService:
                 frames[code] = self._minute_frame(code, market_date)
 
         previous = self._previous_daily_map(market_date)
+        if getattr(self.evaluator, "board_feedback_policy", {}).get("enabled"):
+            codes = [normalize_stock_code(row.get("code") or row.get("stock_code"), add_suffix=False)
+                     for row in source_rows]
+            self._feedback_inputs = self._load_feedback_inputs(market_date, codes)
         out: Dict[str, Dict[str, Any]] = {}
         for row in source_rows:
             code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
@@ -211,6 +218,17 @@ class RealtimeEntrySignalService:
             execution = {**execution, **row_execution}
         gap = opening["open_gap"]
         mode = preliminary_mode
+        feedback = self._board_feedback_context(code, market_date)
+        if feedback["active"] or not feedback["assessed"]:
+            payload = self._payload(
+                EntryDecision("rejected" if feedback["active"] else "data_insufficient",
+                              reason=feedback["reason"],
+                              data_status="three_board_feedback_veto" if feedback["active"] else "missing_board_feedback",
+                              data_completeness=1.0 if feedback["assessed"] else 0.0),
+                mode, market_date, opening_evidence=opening, stats_context=row)
+            payload["board_feedback"] = feedback
+            payload["entry_veto_reason"] = feedback["reason"]
+            return payload
         allowed_modes = normalize_strategy_entry_modes(
             execution.get("allowed_entry_modes") or []
         )
@@ -323,6 +341,7 @@ class RealtimeEntrySignalService:
             payload["structure"] = structures.get(mode, {})
             payload["structural_stop"] = (structures.get(mode) or {}).get("protection")
         payload["strategy_execution"] = execution
+        payload["board_feedback"] = feedback
         payload["strategy_version"] = row.get("strategy_version", "")
         deadline = resolve_entry_deadline(execution, mode, self.evaluator.deadline)
         if decision.confirm_time and decision.confirm_time > deadline:
@@ -333,6 +352,24 @@ class RealtimeEntrySignalService:
             snapshot = build_signal_case({**row, **quote, **payload}, {"market_date": market_date}, minutes=frame)
             payload["signal_feature_snapshot"] = {"features": snapshot["features"], "quality": snapshot["quality"]}
         return payload
+
+    def _load_feedback_inputs(self, market_date, codes):
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        from core.realtime.board_feedback_repository import BoardFeedbackRepository
+        if self.board_feedback_repository is None:
+            self.board_feedback_repository = BoardFeedbackRepository(
+                cache_dir=getattr(self.dm, "cache_dir", None), calendar=self.calendar)
+        frozen = PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
+        return self.board_feedback_repository.capture(
+            market_date, codes, frozen_inputs=frozen["inputs"] if frozen else None)
+
+    def _board_feedback_context(self, code, market_date):
+        from core.signals.board_feedback import assess_feedback, feedback_policy
+        policy = getattr(self.evaluator, "board_feedback_policy", feedback_policy())
+        inputs = self._feedback_inputs
+        if inputs is None and policy["enabled"]:
+            inputs = self._load_feedback_inputs(market_date, [code])
+        return assess_feedback(inputs, code, market_date, policy)
 
     @staticmethod
     def _disallowed_mode_observation(

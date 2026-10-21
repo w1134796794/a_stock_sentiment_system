@@ -67,13 +67,17 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
             "entry_price": row.get("entry_price"),
             "entry_mode": mode,
             "opening_evidence": row.get("opening_evidence") or {},
+            "board_feedback": row.get("board_feedback") or {},
             "entry_parameters": row.get("entry_parameters") or {},
             "sector_observed_at": sector.get("observed_at") or "",
             "sector_coverage": round(sector_coverage, 4) if sector_coverage is not None else None,
             "sector_data_completeness": sector.get("data_completeness"),
             "status": row.get("confirm_status") or row.get("status") or "",
+            "data_status": row.get("data_status") or "",
+            "quote_stale_seconds": row.get("quote_stale_seconds"),
+            "sector_detail": sector,
             "trigger_reason": row.get("raw_trigger_reason") or row.get("reason") or "",
-            "veto_reason": row.get("notification_skip_reason") or row.get("health_gate_reason") or "",
+            "veto_reason": row.get("entry_veto_reason") or row.get("notification_skip_reason") or row.get("health_gate_reason") or "",
             "paper_execution_time": "",
         }
         if confirm_time and row["signal_evidence"]["status"] in {"confirmed", "unfilled"}:
@@ -106,3 +110,29 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
             row["case_id"] = case["case_id"]
             row["signal_evidence"]["signal_case"] = case
     return payload
+
+
+def record_runtime_observations(ledger, payload, *, now=None):
+    """Audit background observations without turning them into executable signals."""
+    from core.realtime.trading_session import shanghai_now
+    clock = shanghai_now(now)
+    if str(payload.get("market_date") or "") != clock.strftime("%Y%m%d"):
+        return 0
+    records = []
+    for row in payload.get("rows") or []:
+        evidence = row.get("signal_evidence") or {}
+        signal_id = row.get("signal_id")
+        if not signal_id or not evidence.get("code"):
+            continue
+        observation = {key: evidence.get(key) for key in (
+            "candidate_date", "market_date", "code", "profile", "signal_id", "status", "data_status",
+            "entry_mode", "minute_closed_at", "entry_time", "entry_price", "opening_evidence",
+            "trigger_reason", "veto_reason", "quote_received_at", "quote_source_time", "quote_stale_seconds",
+            "sector_detail", "sector_coverage", "sector_data_completeness", "evidence_bundle_id", "config_version")}
+        observation.update({"observed_at": clock.isoformat(timespec="milliseconds"),
+                            "evidence_kind": "runtime_observation"})
+        event_id = stable_id(signal_id, "runtime_observation", clock.strftime("%Y%m%d%H%M"),
+                             evidence.get("status"), evidence.get("data_status"),
+                             evidence.get("trigger_reason"), evidence.get("veto_reason"))
+        records.append((event_id, observation))
+    return ledger.record_observations(records)

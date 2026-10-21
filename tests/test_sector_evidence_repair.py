@@ -248,7 +248,8 @@ def test_replay_does_not_report_unchecked_sector_as_missing_evidence():
     profiles = SimpleNamespace(available=False,load=lambda:{},expected_fraction=lambda *a:(None,0))
     result = replay_minutes(request=replay_request({"market_date":"20261013","until":"09:51"}),candidate_date="20261012",
         rows=[{"code":"000001"}],frames={"000001":raw},previous={"000001":{"close":10}},
-        opening_prices={"000001":9.5},profiles=profiles)
+        opening_prices={"000001":9.5},profiles=profiles,
+        risk_config={"three_board_feedback_enabled": False})
     assert result["stocks"][0]["status"] == "cancelled"
     assert not result["failures"]
     assert result["stocks"][0]["last_signal"]["sector_detail"]["assessed"] is False

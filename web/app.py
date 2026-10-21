@@ -3780,6 +3780,8 @@ def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
                 from core.operations.ledger import stable_id
 
                 _prepare_signal_payload(payload)
+                from core.operations.evidence import record_runtime_observations
+                record_runtime_observations(_trading_ledger(), payload)
                 if payload.get('profile') != 'production':
                     continue
                 readiness = payload["execution_health"]

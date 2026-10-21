@@ -46,10 +46,15 @@ def assess_sector_sync(*, complete, breadth, average_change, index_positive,
     }
 
 
-def constituent_minute_prices(frames):
+def constituent_minute_prices(frames, quote_minutes=None):
     """Index immutable replay evidence without filling absent observation times."""
-    return {code: dict(zip(frame['time'].astype(str), frame['close']))
-            for code, frame in frames.items() if frame is not None and not frame.empty}
+    prices = {code: dict(zip(frame['time'].astype(str), frame['close']))
+              for code, frame in frames.items() if frame is not None and not frame.empty}
+    for code, points in (quote_minutes or {}).items():
+        # Actual received constituent points take precedence for sector diagnostics;
+        # they are not candidate bars, volumes or executable historical quotes.
+        prices.setdefault(code, {}).update(points)
+    return prices
 
 
 def make_constituent_sync_checker(*, code, names, members, frames, previous, opening_prices,
@@ -106,8 +111,9 @@ def make_constituent_sync_checker(*, code, names, members, frames, previous, ope
                        "index_change_pct": sum(indexes) / len(indexes) if indexes else None,
                        "data_completeness": 1.0 if state is not None else 0.0, "observed_minute": minute,
                        "unresolved_sector_names": [n for n in names if not members.get(n)],
-                       "missing_minute_codes": [c for c in eligible if not minute_prices.get(c)],
-                       "missing_previous_close_codes": [c for c in eligible if not finite_number(closes.get(c))],
+                       "missing_minute_codes": [c for c in eligible
+                           if (finite_number(minute_prices.get(c, {}).get(minute)) or 0) <= 0],
+                       "missing_previous_close_codes": [c for c in eligible if (finite_number(closes.get(c)) or 0) <= 0],
                        **evidence})
         cache[key] = state, dict(detail)
         return state

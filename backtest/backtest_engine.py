@@ -73,6 +73,9 @@ class BacktestConfig:
     entry_max_amount_pace: float = 3.00
     continuation_min_auction_volume_ratio: float = 0.008
     continuation_min_auction_amount: float = 5_000_000
+    three_board_feedback_enabled: Optional[bool] = None  # Defaults to production_rules for direct construction.
+    three_board_feedback_limit_fraction: float = 0.50
+    three_board_rebound_exit_gain: float = 0.02
     min_open_gap: float = 0.0  # 必须严格高开
     max_open_gap: float = 0.03  # 高开超过3%不追
     reduced_position_gap: float = 0.02  # 高开2%-3%仍可买，但降低追高风险
@@ -159,6 +162,9 @@ class BacktestConfig:
             entry_max_amount_pace=float(risk_config.entry_max_amount_pace),
             continuation_min_auction_volume_ratio=float(risk_config.continuation_min_auction_volume_ratio),
             continuation_min_auction_amount=float(risk_config.continuation_min_auction_amount),
+            three_board_feedback_enabled=bool(risk_config.three_board_feedback_enabled),
+            three_board_feedback_limit_fraction=float(risk_config.three_board_feedback_limit_fraction),
+            three_board_rebound_exit_gain=float(risk_config.three_board_rebound_exit_gain),
             market_entry_threshold=float(risk_config.market_entry_threshold),
             market_strong_threshold=float(risk_config.market_active_threshold),
             market_hot_threshold=float(risk_config.market_strong_threshold),
@@ -236,6 +242,7 @@ class TradeRecord:
     exit_rule_version: str = ""
     cost_version: str = ""
     result_available_at: str = ""
+    exit_evidence_json: str = ""
 
 
 class BacktestEngine:
@@ -305,6 +312,10 @@ class BacktestEngine:
             min_auction_volume_ratio=self.config.continuation_min_auction_volume_ratio,
             min_auction_amount=self.config.continuation_min_auction_amount,
         )
+        from core.signals.board_feedback import feedback_policy
+        self.minute_evaluator.board_feedback_policy = feedback_policy(self.config)
+        self._board_feedback_repository = None
+        self._board_feedback_contexts = {}
 
     def export_state(self) -> Dict[str, Any]:
         """导出可落盘的账户状态，用于单日接力回测。"""
@@ -593,6 +604,7 @@ class BacktestEngine:
         manifest['entry_parameters'] = entry_parameters(self.minute_evaluator)
         manifest['configuration_basis'] = 'preopen_frozen' if frozen_config and inputs.get('risk_config') else 'run_config'
         manifest['input_hash'] = digest({**manifest, 'rows': inputs['rows'], 'previous': inputs['previous'],
+            'board_feedback_inputs': inputs.get('board_feedback_inputs', {}),
             'opening_prices': inputs['opening_prices'], 'members': inputs['members'],
             'opening_evidence': inputs.get('opening_evidence', {}),
             'amount_profile': self.amount_profiles.load(),
@@ -1161,7 +1173,7 @@ class BacktestEngine:
             inputs = self._production_inputs
             frames = {c: self._minute_frames.get((str(date), c)) for c in inputs.get('frames', {})}
             if getattr(self, '_production_minute_prices', None) is None:
-                self._production_minute_prices = constituent_minute_prices(frames)
+                self._production_minute_prices = constituent_minute_prices(frames, inputs.get('sector_quote_minutes'))
             checker, evidence = make_constituent_sync_checker(
                 code=stock_code, names=normalize_sector_names(plan.get('共振板块') or plan.get('所属板块')),
                 members=inputs.get('members', {}),
@@ -1319,6 +1331,7 @@ class BacktestEngine:
             'entry_price': decision.entry_price,
             'open_gap_pct': decision.open_gap_pct,
             'opening_evidence': deepcopy(self._last_entry_meta.get(stock_code, {}).get('opening_evidence', {})),
+            'board_feedback': deepcopy(self._last_entry_meta.get(stock_code, {}).get('board_feedback', {})),
             'amount_pace': decision.amount_pace,
             'sector_confirmed': decision.sector_confirmed,
             'data_status': decision.data_status,
@@ -1412,6 +1425,11 @@ class BacktestEngine:
         exclusion = new_entry_exclusion(dict(plan, stock_name=stock_name))
         if exclusion:
             return reject('restricted_stock', exclusion)
+        feedback = self._board_feedback_context(stock_code, date)
+        self._last_entry_meta.setdefault(stock_code, {})['board_feedback'] = feedback
+        if feedback['active'] or not feedback['assessed']:
+            return reject('three_board_feedback_veto' if feedback['active'] else 'missing_board_feedback',
+                          feedback['reason'], data_status='complete' if feedback['active'] else 'missing_board_feedback')
         if self._is_full_day_suspended(stock_code, date, scope='candidate'):
             return reject('suspended', 'suspend_d确认全天停牌，当日不能买入', data_status='suspended')
         missing = self._entry_evidence_missing.get((str(date), stock_code))
@@ -1539,6 +1557,7 @@ class BacktestEngine:
             entry_mode = next((key for key, label in STRUCTURAL_LABELS.items() if label == decision.signal), entry_mode)
             self._last_entry_meta[stock_code] = {
                 'opening_evidence': opening_facts,
+                'board_feedback': feedback,
                 'structural_stop': (self._plan_execution(plan).get('structures') or {}).get(entry_mode, {}).get('protection', 0),
                 'confirm_time': decision.confirm_time,
                 'entry_time': decision.entry_time,
@@ -1622,6 +1641,21 @@ class BacktestEngine:
             # 目标价为0，使用开盘价
             entry_price = open_price * (1 + self.config.slippage)
             return True, entry_price
+
+    def _board_feedback_context(self, stock_code, date):
+        from core.signals.board_feedback import assess_feedback, feedback_policy
+        policy = getattr(self.minute_evaluator, 'board_feedback_policy', feedback_policy(self.config))
+        key = (date, stock_code, tuple(sorted(policy.items())))
+        if key not in self._board_feedback_contexts:
+            inputs = self._production_inputs.get('board_feedback_inputs', {}) if self.config.production_rules else {}
+            if policy['enabled'] and not self.config.production_rules:
+                from core.realtime.board_feedback_repository import BoardFeedbackRepository
+                if self._board_feedback_repository is None:
+                    self._board_feedback_repository = BoardFeedbackRepository(
+                        getattr(self.dm, 'cache_dir', None), calendar=self.calendar)
+                inputs = self._board_feedback_repository.capture(date, [stock_code])
+            self._board_feedback_contexts[key] = assess_feedback(inputs, stock_code, date, policy)
+        return self._board_feedback_contexts[key]
 
     def _intraday_strength_ready(self, plan: pd.Series) -> bool:
         """Point-in-time factor gate used before waiting for the intraday trigger."""
@@ -1958,10 +1992,20 @@ class BacktestEngine:
         ``None`` requests the explicitly audited daily-OHLC fallback. A dict
         means the minute session was handled, even when no exit was triggered.
         """
-        if str(self.config.exit_minute_data_policy or "").lower() == "daily_only":
-            return None
-        bars = self._load_exit_minute_bars(stock_code, date)
+        feedback = self._board_feedback_context(stock_code, date)
+        bars = (pd.DataFrame() if str(self.config.exit_minute_data_policy or "").lower() == "daily_only"
+                else self._load_exit_minute_bars(stock_code, date))
         if bars.empty:
+            if (feedback['active'] and feedback.get('board_day') == 5
+                    and position.get('entry_date') == feedback.get('feedback_date')):
+                failure = {'trade_date': date, 'code': stock_code, 'scope': 'holding',
+                           'evidence': 'board_feedback_exit_minutes',
+                           'reason': '缺少第5日反抽退出分钟证据，不使用全天最高价伪造卖出',
+                           'action': 'blocked'}
+                if failure not in self._exit_evidence_failures:
+                    self._exit_evidence_failures.append(failure)
+                if self.config.production_rules and self.config.replay_missing_evidence_policy != 'legacy':
+                    self._raise_replay_evidence([failure])
             return None
         cursors = getattr(self, '_exit_scan_times', {})
         previous_time = cursors.get((date, stock_code))
@@ -2014,9 +2058,17 @@ class BacktestEngine:
                 price = min(minute_open, trailing_price) if 0 < minute_open < trailing_price else trailing_price
                 return {"sell": True, "price": price, "reason": "trailing_stop_minute", "time": str(row.time)}
             position["last_close"] = minute_close
+            from core.signals.board_feedback import rebound_exit
+            feedback_quote = {'code': stock_code, 'last_price': minute_close, 'date': date, 'is_stale': False,
+                              'open_price': self._float(daily_bar.get('open'))}
+            rebound = rebound_exit(feedback, {**position, 'code': stock_code}, feedback_quote, date)
+            if rebound:
+                position['board_feedback_exit'] = {'context': feedback, 'trigger': rebound, 'time': str(row.time)}
+                return {'sell': True, 'price': minute_close, 'reason': 'three_board_feedback_rebound', 'time': str(row.time)}
             if self.config.production_rules:
                 from core.portfolio.exit_decision_service import ExitDecisionService
                 quote = {'last_price': minute_close, 'high_price': peak, 'time': str(row.time),
+                         'date': date, 'is_stale': False,
                          'open_price': self._float(daily_bar.get('open')),
                          'change_pct': (minute_close / self._float(daily_bar.get('pre_close')) - 1) * 100
                                       if self._float(daily_bar.get('pre_close')) > 0 else 0}
@@ -2028,7 +2080,8 @@ class BacktestEngine:
                         'scope': 'holding', 'evidence': 'holding_sector_minutes',
                         'reason': '持仓板块分钟证据不足', 'action': 'blocked', 'sector_evidence': sector}])
                 decision = ExitDecisionService().evaluate(
-                    {'entry_price': entry_price, 'entry_date': position['entry_date'], 'shares': position['shares'],
+                    {'code': stock_code, 'board_feedback': feedback,
+                     'entry_price': entry_price, 'entry_date': position['entry_date'], 'shares': position['shares'],
                      'sellable_shares': position['shares'] if position['entry_date'] < date else 0,
                      'strategy_id': position.get('strategy_id'), 'high_watermark': peak,
                      'structural_stop': stop_price,
@@ -2290,6 +2343,8 @@ class BacktestEngine:
             exit_rule_version=self._exit_rule_version(position),
             cost_version=self._cost_version(),
             result_available_at=datetime.now().isoformat(timespec="seconds"),
+            exit_evidence_json=(json.dumps(position['board_feedback_exit'], ensure_ascii=False, sort_keys=True)
+                                if position.get('board_feedback_exit') else ''),
         )
 
         self.trade_history.append(trade_record)
@@ -2311,7 +2366,13 @@ class BacktestEngine:
 
     def _exit_rule_version(self, position: Dict[str, Any]) -> str:
         from core.operations.ledger import stable_id
-        return stable_id("engine_exit_v1", self._position_exit_config(position),
+        from core.signals.board_feedback import FEEDBACK_VERSION, feedback_policy
+        policy = getattr(self.minute_evaluator, 'board_feedback_policy', feedback_policy(self.config))
+        if not policy['enabled']:
+            return stable_id("engine_exit_v1", self._position_exit_config(position),
+                             self.config.exit_policy_mode, self.config.daily_ohlc_path_policy)
+        return stable_id("engine_exit_v2", self._position_exit_config(position), FEEDBACK_VERSION,
+                         policy,
                          self.config.exit_policy_mode, self.config.daily_ohlc_path_policy)
 
     def _get_stock_price(self, stock_code: str, date: str) -> Optional[float]:

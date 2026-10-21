@@ -74,7 +74,7 @@ def replay_request(payload, *, now=None):
 
 class _ReplayEntryService(RealtimeEntrySignalService):
     def __init__(self, previous, auctions, members, frames, profiles, opening_prices=None, *, evaluator=None,
-                 opening_evidence=None):
+                 opening_evidence=None, board_feedback_inputs=None, sector_quote_minutes=None):
         # Explicit adapters isolate the shared rule evaluator from live providers/stores.
         super().__init__(evaluator=evaluator, amount_profile_repository=profiles,
                          signal_stats_repository=SimpleNamespace(get=lambda *a, **kw: {}),
@@ -84,10 +84,11 @@ class _ReplayEntryService(RealtimeEntrySignalService):
         self.members = members
         self.frames = frames
         from core.signals.sector_sync import constituent_minute_prices
-        self.minute_prices = constituent_minute_prices(frames)
+        self.minute_prices = constituent_minute_prices(frames, sector_quote_minutes)
         self.opening_prices = opening_prices or {}
         self.opening_evidence = opening_evidence or {}
         self.sector_minutes = {}
+        self._feedback_inputs = board_feedback_inputs or {}
 
     def _auction(self, code, market_date):
         return self.auctions.get(code, {})
@@ -107,8 +108,8 @@ class _ReplayEntryService(RealtimeEntrySignalService):
 
 def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=None,
                    members=None, sector_codes=None, opening_prices=None, opening_price_source="",
-                   opening_evidence=None, risk_config=None,
-                   configuration_basis="",
+                   opening_evidence=None, risk_config=None, board_feedback_inputs=None,
+                   configuration_basis="", sector_quote_minutes=None,
                    profiles=None, input_basis="research", bundle_id="", progress=None):
     """Run the actual entry service against growing prefixes, with no live effects."""
     from core.signals.minute_amount_profile import MinuteAmountProfileRepository
@@ -126,7 +127,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
     risk = RiskConfig.from_dict(risk_config) if risk_config is not None else RiskConfig.load()
     configuration_basis = configuration_basis or ("provided_config" if risk_config is not None else "current_config_not_frozen")
     service = _ReplayEntryService(previous, auctions or {}, members or {}, normalized, profiles, opening_prices,
-                                  evaluator=minute_evaluator(risk), opening_evidence=opening_evidence)
+                                  evaluator=minute_evaluator(risk), opening_evidence=opening_evidence,
+                                  board_feedback_inputs=board_feedback_inputs, sector_quote_minutes=sector_quote_minutes)
     stocks, failures = [], []
     for index, source in enumerate(rows):
         row = dict(source)
@@ -210,6 +212,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
               "opening_prices": opening_prices or {}, "opening_price_source": opening_price_source,
               "opening_evidence": opening_evidence or {}, "risk_config": risk.to_dict(),
               "configuration_basis": configuration_basis,
+              "board_feedback_inputs": board_feedback_inputs or {},
+              "sector_quote_minutes": sector_quote_minutes or {},
               "amount_profile": profiles.load(),
               "minutes": {c: json.loads(f.to_json(orient="records")) for c, f in sorted(frames.items())}}
     root = Path(__file__).resolve().parents[2]
@@ -218,7 +222,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
              "core/realtime/models.py", "core/signals/minute_amount_profile.py", "core/utils/stock_eligibility.py",
              "scripts/diagnose_intraday_signal.py", "core/realtime/sector_service.py", "core/realtime/sector_evidence.py",
              "core/signals/sector_sync.py", "core/realtime/sector_breadth.py", "core/signals/opening.py",
-             "core/realtime/session_open_repository.py", "core/signals/production_rules.py"]
+             "core/realtime/session_open_repository.py", "core/realtime/sector_quote_minutes.py", "core/signals/production_rules.py",
+             "core/signals/board_feedback.py", "core/realtime/board_feedback_repository.py", "risk/risk_config.py"]
     versions = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
     return clean({"classification": "minute_rule_diagnostic", "market_date": date, "candidate_date": candidate_date,
                   "until": until, "profile": request["profile"], "generated_at": shanghai_now().isoformat(),
@@ -236,7 +241,7 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                   "excluded_sector_names": excluded_sector_names,
                   "limitations": ["分钟回放不重建历史 3 秒快照、租约、接收时间及采集空窗。",
                                   "补齐后的分钟不能证明当时及时到达；规则触发不代表实时门禁通过或微信送达。",
-                                  "板块使用冻结成分股的分钟观测，不冒充当时的批量快照。",
+                                  "板块使用冻结成分股的分钟观测或实际采集报价的分钟价格留档，不冒充完整3秒快照或成交K线。",
                                   "当前代码与保存的输入用于代码回归，不是策略收益或真实成交回测。",
                                   "板块确认仅使用绑定到同花顺8开头代码的成分；700分类及无代码绑定的旧成分不参与。",
                                   "候选缺少真实开盘价时标记缺证据，不用首个分钟价格推断开盘分层。",
@@ -397,6 +402,11 @@ class DayReplayLoader:
             sector_codes = prepared["sector_codes"]
         codes = sorted({normalize_stock_code(r.get("code"), add_suffix=False) for r in rows}
                        | {c for group in members.values() for c in group} | set(extra_codes))
+        from core.realtime.board_feedback_repository import BoardFeedbackRepository
+        feedback_codes = [normalize_stock_code(row.get("code"), add_suffix=False) for row in context_rows]
+        feedback_codes.extend(extra_codes)
+        board_feedback_inputs = BoardFeedbackRepository(self.cache, db_path=self.database, calendar=self.calendar).capture(
+            date, feedback_codes, frozen_inputs=inputs if frozen else None)
         frames, auctions, minute_sources = {}, {}, {}
         if request["fetch_missing"] and self.dm is None:
             from core.data.data_manager_main import DataManager
@@ -404,6 +414,8 @@ class DayReplayLoader:
             self.dm = DataManager(TUSHARE_TOKEN, self.cache)
         opening_prices, opening_price_source = self._opening_evidence(
             date, codes, fetch_missing=request["fetch_missing"], until=request["until"])
+        from core.realtime.sector_quote_minutes import SectorQuoteMinuteRepository
+        sector_quote_minutes = SectorQuoteMinuteRepository(self.cache).read_prices(date, codes, until=request["until"])
         for index, code in enumerate(codes):
             ts_code = normalize_stock_code(code, add_suffix=True)
             path = self.cache / "stock" / "tick" / f"{ts_code}_{date}.csv"
@@ -451,6 +463,8 @@ class DayReplayLoader:
                     "members": members, "sector_codes": sector_codes, "opening_prices": opening_prices,
                     "opening_price_source": opening_price_source, "bundle_id": frozen["bundle_id"] if frozen else "",
                     "opening_evidence": self.opening_evidence,
+                    "board_feedback_inputs": board_feedback_inputs,
+                    "sector_quote_minutes": sector_quote_minutes,
                     "risk_config": inputs.get("risk_config"),
                     "input_basis": "preopen_frozen" if frozen else "research_candidates_not_frozen"}
         report = replay_minutes(request=request, candidate_date=candidate, rows=rows, frames=frames,
@@ -458,6 +472,8 @@ class DayReplayLoader:
                                 sector_codes=sector_codes,
                                 opening_prices=opening_prices, opening_price_source=opening_price_source,
                                 opening_evidence=self.opening_evidence, risk_config=inputs.get("risk_config"),
+                                board_feedback_inputs=board_feedback_inputs,
+                                sector_quote_minutes=sector_quote_minutes,
                                 configuration_basis="preopen_frozen" if inputs.get("risk_config") else "current_config_not_frozen",
                                 input_basis="preopen_frozen" if frozen else "research_candidates_not_frozen",
                                 bundle_id=frozen["bundle_id"] if frozen else "", progress=progress)
@@ -475,6 +491,7 @@ class DayReplayLoader:
         report["limitations"].append("成交进度模型使用当前本地版本并记录输入哈希；未冻结的历史模型不证明当时使用版本。")
         report["requested_codes_not_in_pool"] = sorted(set(request["codes"]) - set(selected))
         report["minute_sources"] = minute_sources
+        report["sector_quote_minute_codes"] = sorted(sector_quote_minutes)
         return report
 
 
@@ -490,6 +507,8 @@ def replay_saved_inputs(inputs, progress=None):
                           opening_prices=inputs.get("opening_prices") or {},
                           opening_price_source=inputs.get("opening_price_source") or "",
                           opening_evidence=inputs.get("opening_evidence") or {}, risk_config=inputs.get("risk_config"),
+                          board_feedback_inputs=inputs.get("board_feedback_inputs") or {},
+                          sector_quote_minutes=inputs.get("sector_quote_minutes") or {},
                           configuration_basis=inputs.get("configuration_basis") or "",
                           profiles=profiles, input_basis=inputs["input_basis"], bundle_id=inputs["bundle_id"], progress=progress)
 

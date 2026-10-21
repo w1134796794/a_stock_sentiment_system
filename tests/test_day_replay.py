@@ -86,7 +86,8 @@ def test_sector_checker_requires_same_minute_real_peers_not_target_itself():
 def test_missing_sector_does_not_turn_into_confirmation():
     result = replay_minutes(request=request(), candidate_date="20261008", rows=[{"code":"000001", "amount_ratio":1}],
                             frames={"000001":bars()}, previous={"000001":{"close":10, "amount":1000}},
-                            opening_prices={"000001":10}, profiles=profile())
+                            opening_prices={"000001":10}, profiles=profile(),
+                            risk_config={"three_board_feedback_enabled": False})
     assert result["confirmed_stocks"] == 0
     assert any(f["evidence"] == "sector_minutes" for f in result["failures"])
 

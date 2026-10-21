@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from config import overrides as ov
@@ -49,6 +50,9 @@ _RISK_GROUP = "risk_control"
 _RISK_LABEL = "风控参数 (RiskConfig)"
 _RISK_DESCRIPTIONS = {
     "hard_stop_loss": "相对买入成本的硬止损比例。",
+    "three_board_feedback_enabled": "三连板后第四日收盘强负反馈，第五、第六个交易日禁买；第四日买入仓位在第五日反抽退出。",
+    "three_board_feedback_limit_fraction": "第四日收盘跌幅占该股票涨跌停幅度的比例；0.5对应普通10%股票收盘跌5%。",
+    "three_board_rebound_exit_gain": "第五日最新有效价格相对当日真实开盘价的反弹比例，达到后退出；硬止损仍优先。",
     "min_open_gap": "仅原固定开盘区间对照模式使用的最小高开比例。",
     "max_open_gap": "仅原固定开盘区间对照模式使用的最大高开比例。",
     "market_entry_threshold": "低于该市场评分时停止新开仓。",
@@ -75,6 +79,9 @@ _SIMPLE_RISK = {
     "max_sector_concentration",
     "fixed_risk_per_trade",
     "hard_stop_loss",
+    "three_board_feedback_enabled",
+    "three_board_feedback_limit_fraction",
+    "three_board_rebound_exit_gain",
     "trailing_activation",
     "trailing_stop",
     "time_stop_days",
@@ -97,6 +104,9 @@ _FIELD_LABELS = {
     "max_sector_concentration": "单一板块仓位上限",
     "fixed_risk_per_trade": "单笔风险预算",
     "hard_stop_loss": "硬止损比例",
+    "three_board_feedback_enabled": "三板负反馈禁入",
+    "three_board_feedback_limit_fraction": "负反馈阈值占涨跌停比例",
+    "three_board_rebound_exit_gain": "第五日反抽退出涨幅",
     "trailing_activation": "移动止盈启动涨幅",
     "trailing_stop": "高点回撤退出比例",
     "time_stop_days": "最长观察天数",
@@ -421,6 +431,10 @@ def apply_updates(updates: List[Dict[str, Any]]) -> Dict[str, Any]:
         except (ValueError, TypeError) as e:
             errors.append({"path": path, "error": f"类型错误({field['type']}): {e}"})
             continue
+        if scope == "risk" and path in {"three_board_feedback_limit_fraction", "three_board_rebound_exit_gain"}:
+            if not math.isfinite(value) or not 0 < value <= 1:
+                errors.append({"path": path, "error": "三板负反馈阈值必须在(0, 1]内"})
+                continue
         if value == field["default"]:
             ov.clear_override(scope, path)
             skipped += 1

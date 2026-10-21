@@ -69,6 +69,9 @@ class RiskConfig:
     entry_max_amount_pace: float = 3.00
     continuation_min_auction_volume_ratio: float = 0.008
     continuation_min_auction_amount: float = 5_000_000.0
+    three_board_feedback_enabled: bool = True
+    three_board_feedback_limit_fraction: float = 0.50
+    three_board_rebound_exit_gain: float = 0.02
     intraday_strength_trigger_pct: float = 0.01
     intraday_min_tech_score: float = 80.0
     intraday_min_sector_resonance: float = 60.0

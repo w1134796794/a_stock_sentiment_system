@@ -224,9 +224,17 @@ def freeze_preopen_inputs(candidate_date: str, market_date: str, *, web_data_dir
         mapping = sector_service.resolve_codes_by_names(sectors, source="ths")
         members = {name: sector_service.member_codes(code) for name, code in mapping.items()}
         codes = sorted({str(row.get("code") or "").split(".")[0] for row in rows})
+        from backtest.trade_calendar import TradeCalendar
+        from core.signals.board_feedback import history_dates
+        from core.realtime.board_feedback_repository import feedback_inputs
+        calendar = TradeCalendar()
+        feedback_dates = history_dates(market_date, calendar)
         with connect(db, read_only=True) as con:
             daily = con.execute("SELECT * FROM stock_daily_silver WHERE CAST(trade_date AS VARCHAR)=?", [candidate_date]).fetchdf()
             factors = con.execute("SELECT * FROM factor_stock_wide WHERE CAST(trade_date AS VARCHAR)=?", [candidate_date]).fetchdf()
+            feedback_daily = con.execute(
+                "SELECT * FROM stock_daily_silver WHERE CAST(trade_date AS VARCHAR) IN (" +
+                ",".join("?" for _ in feedback_dates) + ")", feedback_dates).fetchdf()
         member_codes = {str(code).split(".")[0] for group in members.values() for code in group}
         daily = daily[daily["code"].astype(str).str.split(".").str[0].isin(set(codes) | member_codes)]
         factors = factors[factors["code"].astype(str).str.split(".").str[0].isin(codes)]
@@ -243,6 +251,9 @@ def freeze_preopen_inputs(candidate_date: str, market_date: str, *, web_data_dir
                   "factor_rows": records(factors), "sector_members": members, "sector_codes": mapping,
                   "artifacts": artifacts, "profiles": captured_profiles,
                   "risk_config": captured_risk, "source_fingerprint": before}
+        inputs["board_feedback_inputs"] = feedback_inputs(
+            market_date, codes, feedback_dates, records(feedback_daily), source_basis="preopen_frozen",
+            calendar_verified=calendar.is_real and calendar.is_trade_date(market_date))
         # Use the actual end-of-capture time, not the earlier validation time.
         return store.freeze(candidate_date, market_date, inputs=inputs, health=health,
                             now=(now if now is not None else datetime.now(SHANGHAI)))

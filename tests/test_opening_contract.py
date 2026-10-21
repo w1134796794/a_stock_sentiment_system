@@ -178,7 +178,7 @@ def test_no_live_minute_fallback_and_same_opening_inputs_in_three_adapters(monke
     assert invalid["data_status"] == "missing_session_open" and invalid["entry_mode"] == ""
     assert len(live_recorder.seen) == 1
 
-    engine = BacktestEngine(None, BacktestConfig(production_rules=True))
+    engine = BacktestEngine(None, BacktestConfig(production_rules=True, three_board_feedback_enabled=False))
     engine.minute_evaluator = history_recorder
     engine._production_inputs = {"previous": previous, "opening_evidence": evidence, "opening_prices": {"000001": 10.2}}
     monkeypatch.setattr(engine, "_is_full_day_suspended", lambda *a, **kw: False)

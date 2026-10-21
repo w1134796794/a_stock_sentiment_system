@@ -4,7 +4,8 @@ const path = require('node:path');
 const http = require('node:http');
 const {chromium} = require(require.resolve('playwright', {paths: [process.argv[2] || process.cwd()]}));
 const root = path.resolve(__dirname, '..');
-const output = path.join(root, 'outputs/intraday-diagnosis-20261015');
+const output = path.join(root, 'outputs/intraday-diagnosis-20261021');
+fs.mkdirSync(output,{recursive:true});
 const report = {
   run_id:'a'.repeat(32), candidate_date:'20261014', market_date:'20261015', until:'10:30:00',
   input_hash:'a'.repeat(64), code_hash:'b'.repeat(64), input_basis:'preopen_frozen',
@@ -20,7 +21,10 @@ const report = {
       opening_evidence:{open_price:24,pre_close:23.25,open_gap:.032258,opening_source:'eltdx_open_archive'},
       runtime_diagnostic:{state:'attempt_not_sent',confirm_times:['09:47:00'],profiles:['production'],
         notification_attempts:[{occurred_at:'2026-10-15T09:48:01',status:'blocked',reason:'collector_stale'}],
-        veto_reasons:['采集器门禁'],replay_discrepancy:'replay_missing_evidence'}}],
+        veto_reasons:['采集器门禁'],replay_discrepancy:'replay_missing_evidence'}},
+    {code:'002242',name:'九阳股份',status:'observe',reason:'实时行情已过期',transitions:[],
+      runtime_diagnostic:{state:'no_runtime_evidence',confirm_times:[],profiles:[],
+        notification_attempts:[],veto_reasons:[],replay_discrepancy:''}}],
   recorded_runtime:{confirmation_history:{rows:[]}},
 };
 (async () => {
@@ -28,7 +32,7 @@ const report = {
     const url = new URL(req.url, 'http://127.0.0.1');
     const file = url.pathname.startsWith('/static/')
       ? path.join(root,'web',url.pathname)
-      : path.join(output,'replay.html');
+      : path.join(root,'outputs/intraday-replay-ui/page.html');
     if (!fs.existsSync(file)) {res.writeHead(404);res.end();return;}
     res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');
     res.end(fs.readFileSync(file));
@@ -59,13 +63,19 @@ const report = {
       assert.match(await first.innerText(),/缺少当日真实开盘价/);
       assert.match(await first.innerText(),/开盘 --.*昨收参考 29.92.*来源 未取得/);
       assert.match(await first.innerText(),/本次回放缺少证据，不能据此否定原始确认/);
-      assert.match(await page.locator('#dr-summary').innerText(),/1 \/ 2/);
+      assert.match(await page.locator('#dr-summary').innerText(),/1 \/ 3/);
       assert.equal(await first.locator('img').count(),0);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
       assert.deepEqual(errors,[]);
       const second=page.locator('#dr-stocks > details').nth(1);
       await second.locator('summary').click();
       assert.match(await second.innerText(),/开盘 24.00.*昨收参考 23.25.*来源 eltdx按日归档/);
+      const unknown=page.locator('#dr-stocks > details').nth(2);
+      await unknown.locator('summary').click();
+      assert.equal(await unknown.locator('p.text-emerald-300').count(),0);
+      assert.match(await unknown.locator('p.text-amber-300').innerText(),/未见原始运行记录/);
+      await page.locator('#dr-failures details > summary').click();
+      assert.match(await page.locator('#dr-failures').innerText(),/未归档原始运行记录，不能据此判断是否触发或被拦截/);
       await page.screenshot({path:path.join(output,`replay-runtime-${width}.png`),fullPage:true});
       await page.close();
     }

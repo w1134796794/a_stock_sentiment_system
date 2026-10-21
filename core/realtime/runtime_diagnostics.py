@@ -45,9 +45,17 @@ def attach_runtime_diagnostics(report):
     for stock in report.get("stocks") or []:
         records = grouped.get(stock["code"], [])
         profiles, times, vetoes, attempts = set(), set(), set(), {}
+        observations = []
         confirmed = production_confirmed = delivered = delivered_in_window = False
         for row in records:
             evidence = row.get("evidence") or {}
+            if row.get("evidence_kind") == "runtime_observation":
+                observations.append({"observed_at": row.get("observed_at") or "",
+                                     "status": evidence.get("status") or "",
+                                     "reason": evidence.get("trigger_reason") or evidence.get("reason") or "",
+                                     "data_status": evidence.get("data_status") or "",
+                                     "quote_received_at": evidence.get("quote_received_at") or "",
+                                     "quote_stale_seconds": evidence.get("quote_stale_seconds")})
             profile = str(evidence.get("profile") or row.get("profile") or "")
             profiles.add(profile or "unknown")
             status = evidence.get("status") or evidence.get("confirm_status") or row.get("status")
@@ -95,6 +103,7 @@ def attach_runtime_diagnostics(report):
             "confirm_times": sorted(times), "notification_sent": delivered,
             "notification_attempts": ordered, "veto_reasons": sorted(vetoes),
             "replay_discrepancy": discrepancy,
+            "last_observation": max(observations, key=lambda item: item["observed_at"]) if observations else None,
         }
         counts[state] += 1
     report["runtime_summary"] = {

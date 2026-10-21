@@ -8,7 +8,7 @@ from backtest.exit_policy import normalize_exit_parameters, trailing_distance
 from backtest.trade_calendar import TradeCalendar
 from core.portfolio.protection_price import resolve_protection_price
 
-POLICY_VERSION = "context-exit-v2"
+POLICY_VERSION = "context-exit-v3-board-feedback"
 
 ACTION_LABELS = {
     "hold": "继续持有",
@@ -129,6 +129,11 @@ class ExitDecisionService:
             (hard_reasons if configured else stock_reasons).append(
                 f"盈利后从高点回落{abs(drawdown_pct):.1f}%，跌破动态保护价{trailing_stop:.2f}"
             )
+        from core.signals.board_feedback import rebound_exit
+        feedback = position.get("board_feedback") or {}
+        rebound = rebound_exit(feedback, position, quote, signal_date)
+        if rebound:
+            hard_reasons.append(rebound["reason"])
         if configured and str(quote.get("time") or "") >= "14:55:00":
             days = TradeCalendar().holding_days(str(position.get("entry_date") or ""), signal_date)
             if days >= configured["time_stop_days"] and pnl_pct / 100 < configured["time_stop_profit_threshold"]:
@@ -158,6 +163,8 @@ class ExitDecisionService:
             "trailing_stop": round(trailing_stop, 4),
             "strategy_policy": policy,
             "configured_exit": configured,
+            "board_feedback": feedback,
+            "board_feedback_rebound": rebound,
             "strategy_version": (position.get("metadata") or {}).get("strategy_version") or "legacy-context-v1",
             "quote": quote,
             "market": market,

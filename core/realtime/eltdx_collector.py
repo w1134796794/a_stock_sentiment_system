@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from threading import Lock, Thread
 
@@ -10,6 +11,7 @@ from loguru import logger
 from backtest.trade_calendar import TradeCalendar
 from config.settings import (
     ELTDX_COLLECTOR_ID,
+    ELTDX_CONSTITUENT_WORKERS,
     ELTDX_HOST,
     ELTDX_MINUTE_SYNC_SECONDS,
     ELTDX_POLL_INTERVAL_SECONDS,
@@ -58,6 +60,11 @@ class EltdxQuoteCollector:
         self._last_minute_sync = 0.0
         self._minute_sync_lock = Lock()
         self._minute_sync_thread: Thread | None = None
+        self._constituent_thread: Thread | None = None
+        self._constituent_lock = Lock()
+        self._constituent_health = {}
+        from core.realtime.sector_quote_minutes import SectorQuoteMinuteRepository
+        self.sector_minutes = SectorQuoteMinuteRepository(backend=self.quote_cache.backend)
         self._consecutive_failures = 0
         self._stop = False
         self._cycles = 0
@@ -82,7 +89,11 @@ class EltdxQuoteCollector:
         )
 
     def collect_once(self) -> dict:
-        codes = self.targets()
+        all_codes = self.targets()
+        # Keep the execution lane independent of the thousands of sector members.
+        codes = self.targets(minutes_only=True) or all_codes[:80]
+        priority = set(codes)
+        self._schedule_constituent_sync([code for code in all_codes if code not in priority])
         if not codes:
             result = {"ok": False, "count": 0, "message": "观察列表为空"}
             self._record_health(result)
@@ -124,6 +135,7 @@ class EltdxQuoteCollector:
                 rows_by_code.values(), source="eltdx_batch", collector_id=ELTDX_COLLECTOR_ID,
                 snapshot_codes=self.targets(minutes_only=True),
             )
+            self._archive_sector_minutes(rows_by_code.values())
         except Exception as exc:  # noqa: BLE001
             self._consecutive_failures += 1
             result = {
@@ -149,6 +161,8 @@ class EltdxQuoteCollector:
         rejected = set(result.get("rejected_codes") or [])
         result["missing_codes"] = [code for code in codes if code not in rows_by_code or code in rejected]
         result["source_diagnostics"] = getattr(self.provider, "last_quote_diagnostics", {})
+        result["quote_lane"] = "execution_priority"
+        result["constituents"] = dict(self._constituent_health)
         result["consecutive_failures"] = self._consecutive_failures
         self._record_health(result)
 
@@ -157,6 +171,58 @@ class EltdxQuoteCollector:
             self._last_minute_sync = now
             self._schedule_minute_sync(self.targets(minutes_only=True))
         return result
+
+    def _archive_sector_minutes(self, rows) -> None:
+        try:
+            self.sector_minutes.record_batch(rows, now=self.clock())
+        except Exception as exc:
+            logger.warning("板块分钟价格归档失败，实时行情仍继续: {}", exc)
+
+    def _schedule_constituent_sync(self, codes: list[str]) -> None:
+        if not codes:
+            return
+        with self._constituent_lock:
+            if self._constituent_thread and self._constituent_thread.is_alive():
+                return
+            self._constituent_thread = Thread(target=self._sync_constituents, args=(codes,),
+                                              name="eltdx-constituent-quotes", daemon=True)
+            self._constituent_thread.start()
+
+    def _sync_constituents(self, codes: list[str]) -> None:
+        started = time.monotonic()
+        count, failures = 0, 0
+        date = self.clock().strftime("%Y%m%d")
+        lease = getattr(self, "_active_lease", None)
+
+        def fetch(chunk):
+            provider = EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None)
+            return provider.get_quote_snapshots(chunk) or {}
+
+        chunks = [codes[i:i + 80] for i in range(0, len(codes), 80)]
+        with ThreadPoolExecutor(max_workers=ELTDX_CONSTITUENT_WORKERS) as workers:
+            futures = {workers.submit(fetch, chunk): chunk for chunk in chunks}
+            for future in as_completed(futures):
+                if self._stop or self.clock().strftime("%Y%m%d") != date or (lease and not lease.is_owner()):
+                    for pending in futures:
+                        pending.cancel()
+                    break
+                try:
+                    rows = future.result()
+                    priority = set(self.targets(minutes_only=True))
+                    rows = {code: row for code, row in rows.items() if code not in priority}
+                    # Publish each received chunk immediately, with its original receipt times.
+                    result = self.quote_cache.write_batch(rows.values(), source="eltdx_batch",
+                                                         collector_id=ELTDX_COLLECTOR_ID, snapshot_codes=[])
+                    count += int(result.get("count") or 0)
+                    failures += len(futures[future]) - int(result.get("count") or 0)
+                    self._archive_sector_minutes(rows.values())
+                except Exception as exc:
+                    failures += len(futures[future])
+                    logger.warning("板块报价分批采集失败: {}", exc)
+        self._constituent_health = {"requested_count": len(codes), "count": count,
+                                    "missing_count": failures,
+                                    "duration_seconds": round(time.monotonic() - started, 3),
+                                    "updated_at": self.clock().isoformat(timespec="milliseconds")}
 
     def _record_health(self, result: dict) -> None:
         payload = {
@@ -224,6 +290,7 @@ class EltdxQuoteCollector:
                 return
 
     def _run_as_owner(self, lease: TaskLease, *, once: bool) -> None:
+        self._active_lease = lease
         logger.info("eltdx实时采集已取得唯一任务锁")
         while not self._stop:
             if not lease.is_owner():

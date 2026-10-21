@@ -117,6 +117,7 @@ ELTDX_POLL_INTERVAL_SECONDS = max(
     2.0, float(os.getenv("ELTDX_POLL_INTERVAL_SECONDS", "3"))
 )
 ELTDX_TIMEOUT_SECONDS = max(1.0, float(os.getenv("ELTDX_TIMEOUT_SECONDS", "5")))
+ELTDX_CONSTITUENT_WORKERS = min(max(1, int(os.getenv("ELTDX_CONSTITUENT_WORKERS", "4"))), 8)
 ELTDX_RETRY_COUNT = min(max(1, int(os.getenv("ELTDX_RETRY_COUNT", "3"))), 5)
 ELTDX_RETRY_BACKOFF_SECONDS = max(
     0.2, float(os.getenv("ELTDX_RETRY_BACKOFF_SECONDS", "0.8"))

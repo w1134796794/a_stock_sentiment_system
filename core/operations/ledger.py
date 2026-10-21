@@ -36,6 +36,13 @@ class TradingLedger:
                 );
                 CREATE INDEX IF NOT EXISTS idx_signal_evidence_date
                     ON signal_evidence(market_date, code);
+                CREATE TABLE IF NOT EXISTS runtime_observations (
+                    observation_id TEXT PRIMARY KEY, signal_id TEXT NOT NULL,
+                    market_date TEXT NOT NULL, code TEXT NOT NULL, profile TEXT NOT NULL,
+                    observed_at TEXT NOT NULL, payload_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_runtime_observations_date_code
+                    ON runtime_observations(market_date, code, observed_at);
                 CREATE TABLE IF NOT EXISTS signal_case_staging (
                     case_id TEXT PRIMARY KEY, market_date TEXT NOT NULL,
                     payload_json TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0
@@ -107,6 +114,17 @@ class TradingLedger:
             conn.commit()
         finally:
             conn.close()
+
+    def record_observations(self, records) -> int:
+        if not records:
+            return 0
+        with self._connect() as conn:
+            result = conn.executemany(
+                "INSERT OR IGNORE INTO runtime_observations VALUES (?,?,?,?,?,?,?)",
+                [(key, str(row.get("signal_id") or ""), row["market_date"], row["code"],
+                  str(row.get("profile") or ""), row["observed_at"],
+                  json.dumps(row, ensure_ascii=False, default=str)) for key, row in records])
+        return result.rowcount
 
     def evidence(self, signal_id: str, evidence: Mapping[str, Any]) -> None:
         now = datetime.now().isoformat(timespec="milliseconds")

@@ -1,6 +1,7 @@
 """Language-neutral realtime quote contract shared by collector and Web."""
 from __future__ import annotations
 
+from datetime import datetime
 from core.realtime.trading_session import shanghai_now
 from typing import Any, Dict, Iterable, List
 
@@ -73,6 +74,19 @@ class RealtimeQuoteCache:
             same_session = str(old.get("date") or "") == str(item.date or "")
             old_time = str(old.get("time") or "")
             source_time_ok = not same_session or not old_time or str(item.time or "") >= old_time
+            old_date = str(old.get("date") or "").replace("-", "")
+            incoming_date = str(item.date or "").replace("-", "")
+            receipt_regressed = False
+            if same_session and old.get("received_at") and item.received_at:
+                try:
+                    receipt_regressed = (shanghai_now(datetime.fromisoformat(item.received_at))
+                                         < shanghai_now(datetime.fromisoformat(old["received_at"])))
+                except ValueError:
+                    receipt_regressed = True
+            if (not source_time_ok or (old_date and incoming_date and incoming_date < old_date)
+                    or receipt_regressed):
+                rejected_codes.append(item.code)
+                continue
             delta_volume = (
                 max(item.vol_hand - float(old.get("vol_hand") or 0), 0.0)
                 if same_session else 0.0
@@ -91,6 +105,9 @@ class RealtimeQuoteCache:
             values[key] = normalized
             if recorded_codes is None or item.code in recorded_codes:
                 snapshot_rows.append(normalized)
+        if not values:
+            return {"ok": False, "count": 0, "rejected_codes": rejected_codes,
+                    "message": "收到的报价早于已有报价，保留较新缓存"}
         self.backend.set_many_json(values, self.ttl_seconds)
         trade_date = max(trade_dates) if trade_dates else now.strftime("%Y%m%d")
         self.snapshots.append_batch(trade_date, snapshot_rows)
