@@ -84,10 +84,16 @@ class NotificationService:
                     results.append({"ok": False, "retry_pending": True, "channel": channel, "recipient": recipient})
                     continue
                 try:
+                    from core.realtime.trading_session import shanghai_now
+                    submitted_at = shanghai_now().isoformat(timespec="milliseconds")
+                    started = time.monotonic()
                     result = (self._post_form(url, {"title": title, "desp": content}) if form else
                               self._post_json(url, {"msgtype": "text", "text": {"content": f"{title}\n{content}"}}))
                 except Exception:
                     result = {"ok": False, "message": "通知渠道请求失败"}
+                result.update({"submitted_at": submitted_at,
+                               "completed_at": shanghai_now().isoformat(timespec="milliseconds"),
+                               "duration_ms": round((time.monotonic() - started) * 1000, 3)})
                 if endpoint_key:
                     attempts = int(previous.get("attempts") or 0) + 1
                     self.backend.set_json(endpoint_key, {"sent": bool(result.get("ok")), "attempts": attempts,

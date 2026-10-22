@@ -17,15 +17,15 @@ def _fetch_time(candidate_date: str) -> str:
         return ""
 
 
-def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+def attach_evidence(payload: dict[str, Any], *, frozen_bundle=None) -> dict[str, Any]:
     candidate_date = str(payload.get("candidate_date") or payload.get("trade_date") or "")
     market_date = str(payload.get("market_date") or "")
     fetched_at = _fetch_time(candidate_date)
     bundle_id = str(payload.get("evidence_bundle_id") or "")
-    frozen = None
+    frozen = frozen_bundle
     if candidate_date and market_date:
         from core.operations.preopen_evidence import PreopenEvidenceStore
-        frozen = PreopenEvidenceStore().load(candidate_date, market_date)
+        frozen = frozen or PreopenEvidenceStore().load(candidate_date, market_date)
         if frozen:
             fetched_at = str(frozen["inputs"]["artifacts"]["fetch"].get("fetched_at") or "")
             bundle_id = frozen["bundle_id"]
@@ -41,8 +41,10 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
         sector = row.get("sector_detail") or {}
         member_count = int(sector.get("member_count") or 0)
         observed_members = int(sector.get("observed_members") or 0)
-        sector_coverage = observed_members / min(member_count, 80) if member_count > 0 else None
-        minute_closed_at = f"{market_date} {confirm_time}" if confirm_time else ""
+        denominator = int(sector.get("coverage_denominator") or min(member_count, 80))
+        sector_coverage = observed_members / denominator if denominator > 0 else None
+        snapshot_primary = row.get("trigger_source") == "eltdx_snapshot"
+        minute_closed_at = f"{market_date} {confirm_time}" if confirm_time and not snapshot_primary else ""
         row["signal_id"] = signal_id
         row["signal_evidence"] = {
             "signal_id": signal_id,
@@ -63,6 +65,8 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
             "quote_source_time": row.get("quote_source_time") or row.get("time") or "",
             "quote_received_at": row.get("received_at") or row.get("quote_time") or "",
             "minute_closed_at": minute_closed_at,
+            "confirm_time": confirm_time,
+            "trigger_source": row.get("trigger_source") or "minute_fallback",
             "entry_time": row.get("entry_time") or "",
             "entry_price": row.get("entry_price"),
             "entry_mode": mode,
@@ -73,6 +77,8 @@ def attach_evidence(payload: dict[str, Any]) -> dict[str, Any]:
             "opening_evidence": row.get("opening_evidence") or {},
             "board_feedback": row.get("board_feedback") or {},
             "entry_parameters": row.get("entry_parameters") or {},
+            "condition_checks": row.get("condition_checks") or {},
+            "evaluation_timing": row.get("evaluation_timing") or {},
             "sector_observed_at": sector.get("observed_at") or "",
             "sector_coverage": round(sector_coverage, 4) if sector_coverage is not None else None,
             "sector_data_completeness": sector.get("data_completeness"),
@@ -130,10 +136,13 @@ def record_runtime_observations(ledger, payload, *, now=None):
             continue
         observation = {key: evidence.get(key) for key in (
             "candidate_date", "market_date", "code", "profile", "signal_id", "status", "data_status",
-            "entry_mode", "minute_closed_at", "entry_time", "entry_price", "opening_evidence", "board_feedback",
+            "entry_mode", "confirm_time", "trigger_source", "minute_closed_at", "entry_time", "entry_price", "opening_evidence", "board_feedback",
             "confirmation_policy", "confirmation_reason", "initial_confirm_time", "breakout_level", "entry_parameters",
             "trigger_reason", "veto_reason", "quote_received_at", "quote_source_time", "quote_stale_seconds",
             "sector_detail", "sector_coverage", "sector_data_completeness", "evidence_bundle_id", "config_version")}
+        observation["condition_checks"] = evidence.get("condition_checks") or {}
+        observation["evaluation_timing"] = evidence.get("evaluation_timing") or {}
+        observation["runtime_cycle"] = payload.get("runtime_cycle") or {}
         observation.update({"observed_at": clock.isoformat(timespec="milliseconds"),
                             "evidence_kind": "runtime_observation"})
         event_id = stable_id(signal_id, "runtime_observation", clock.strftime("%Y%m%d%H%M"),

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 
-SECTOR_SYNC_VERSION = "ths_red_or_open_rising_3m_v2"
+SECTOR_SYNC_VERSION = "ths_constituent_closed_minutes_v3"
 TREND_WINDOW_MINUTES = 3
 MIN_COVERAGE = 0.6
 MIN_OBSERVATIONS = 2
@@ -90,8 +90,8 @@ def make_constituent_sync_checker(*, code, names, members, frames, previous, ope
             state, observed = cache[key]
             detail.update(observed)
             return state
-        observed = changes(minute, eligible[:80], closes)
-        coverage = len(observed) / min(len(eligible), 80) if eligible else 0
+        observed = changes(minute, eligible, closes)
+        coverage = len(observed) / len(eligible) if eligible else 0
         indexes = []
         for name in names:
             group = [c for c in members.get(name, []) if c != code]
@@ -107,6 +107,8 @@ def make_constituent_sync_checker(*, code, names, members, frames, previous, ope
             opening_changes=changes(minute, eligible, opening_prices),
             earlier_changes=changes(earlier, eligible, opening_prices), expected_members=len(eligible))
         detail.update({"coverage": round(coverage, 4), "observed_members": len(observed), "assessed": True,
+                       "coverage_basis": "full_frozen_constituents", "coverage_denominator": len(eligible),
+                       "current_coverage": round(coverage, 4), "trend_coverage_denominator": len(eligible),
                        "breadth": breadth, "average_change_pct": average,
                        "index_change_pct": sum(indexes) / len(indexes) if indexes else None,
                        "data_completeness": 1.0 if state is not None else 0.0, "observed_minute": minute,

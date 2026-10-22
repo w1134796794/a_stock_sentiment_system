@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from threading import Lock, Thread
@@ -28,6 +29,8 @@ from core.realtime.minute_cache import RealtimeMinuteCache
 from core.realtime.quote_cache import RealtimeQuoteCache
 from core.realtime.watchlist_repository import RealtimeWatchlistRepository
 from core.realtime.trading_session import shanghai_now
+from core.realtime.collection_plan import DailyCollectionPlan
+from core.realtime.market_journal import MarketJournal
 
 
 class EltdxQuoteCollector:
@@ -46,7 +49,9 @@ class EltdxQuoteCollector:
     ) -> None:
         self.fixed_codes = RealtimeWatchlistRepository.normalize(fixed_codes)
         self.watchlists = RealtimeWatchlistRepository()
-        self.quote_cache = RealtimeQuoteCache()
+        self.journal = MarketJournal()
+        self.quote_cache = RealtimeQuoteCache(journal=self.journal)
+        self.plans = DailyCollectionPlan(backend=self.quote_cache.backend)
         if require_shared and self.quote_cache.storage != "redis":
             raise RuntimeError("独立eltdx采集器必须配置可用的 REDIS_URL")
         if MARKET_DATA_NODE_ROLE == "server" and self.quote_cache.storage != "redis":
@@ -76,26 +81,23 @@ class EltdxQuoteCollector:
         self._stop = True
 
     def targets(self, *, minutes_only: bool = False) -> list[str]:
-        holding_codes = []
-        try:
-            holding_codes = [
-                row.get("code", "")
-                for row in HoldingRepository().list_positions(status="open")
-            ]
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("读取持仓观察列表失败: {}", exc)
-        return RealtimeWatchlistRepository.normalize(
-            [*self.fixed_codes, *self.watchlists.read_all(minutes_only=minutes_only), *holding_codes]
-        )
+        date = self.clock().strftime("%Y%m%d")
+        plan = self.plans.load(date)
+        if not plan:
+            return list(self.fixed_codes)  # Explicit CLI diagnostics only; never expand from stale watchlists.
+        codes = [row["code"] for row in plan["rows"]]
+        if not minutes_only:
+            codes.extend(c for sector in plan["sectors"] for c in sector["members"])
+        return RealtimeWatchlistRepository.normalize(codes)
 
     def collect_once(self) -> dict:
         all_codes = self.targets()
         # Keep the execution lane independent of the thousands of sector members.
-        codes = self.targets(minutes_only=True) or all_codes[:80]
+        codes = self.targets(minutes_only=True)
         priority = set(codes)
         self._schedule_constituent_sync([code for code in all_codes if code not in priority])
         if not codes:
-            result = {"ok": False, "count": 0, "message": "观察列表为空"}
+            result = {"ok": False, "count": 0, "message": "当日盘前采集名单缺失或为空，禁止扩大采集范围"}
             self._record_health(result)
             return result
 
@@ -104,7 +106,8 @@ class EltdxQuoteCollector:
         attempts = max(int(ELTDX_RETRY_COUNT), 1)
         for attempt in range(attempts):
             try:
-                rows_by_code = self.provider.get_quote_snapshots(codes) or {}
+                rows_by_code = {code: row for code, row in (self.provider.get_quote_snapshots(codes) or {}).items()
+                                if code in priority}
                 if rows_by_code:
                     break
                 last_error = "行情源未返回数据"
@@ -150,6 +153,7 @@ class EltdxQuoteCollector:
             return result
 
         self._consecutive_failures = 0 if result.get("ok") else self._consecutive_failures + 1
+        self._capture_auctions(rows_by_code)
         if result.get("ok"):
             received = self.clock()
             if (self._last_success_at is None or self._last_success_at.date() != received.date()
@@ -162,6 +166,9 @@ class EltdxQuoteCollector:
         result["missing_codes"] = [code for code in codes if code not in rows_by_code or code in rejected]
         result["source_diagnostics"] = getattr(self.provider, "last_quote_diagnostics", {})
         result["quote_lane"] = "execution_priority"
+        plan = self.plans.load(self.clock().strftime("%Y%m%d")) if hasattr(self, "plans") else None
+        result["collection_plan_id"] = plan["plan_id"] if plan else ""
+        result["archive"] = self.journal.health() if hasattr(self, "journal") else {}
         result["constituents"] = dict(self._constituent_health)
         result["consecutive_failures"] = self._consecutive_failures
         self._record_health(result)
@@ -171,6 +178,19 @@ class EltdxQuoteCollector:
             self._last_minute_sync = now
             self._schedule_minute_sync(self.targets(minutes_only=True))
         return result
+
+    def _capture_auctions(self, rows):
+        for code, row in rows.items():
+            amount, price = float(row.get("open_amount") or 0), float(row.get("open_price") or 0)
+            if amount > 0 and price > 0:
+                date = self.clock().strftime("%Y%m%d")
+                existing = self.quote_cache.backend.get_json(f"realtime:auction:{date}:{code}") or {}
+                if existing.get("开盘价") == price and existing.get("竞价成交额") == amount:
+                    continue
+                value = {"开盘价": price, "竞价成交额": amount, "竞价成交量": amount / price / 100,
+                         "数据源": "eltdx_open", "received_at": row.get("received_at"), "code": code}
+                self.journal.append("auction", date, [value])
+                self.quote_cache.backend.set_json(f"realtime:auction:{date}:{code}", value, 172800)
 
     def _archive_sector_minutes(self, rows) -> None:
         try:
@@ -227,7 +247,8 @@ class EltdxQuoteCollector:
     def _record_health(self, result: dict) -> None:
         payload = {
             "protocol_version": 2,
-            "capabilities": ["lease_proof", "continuous_session", "constituent_snapshots"],
+            "capabilities": ["lease_proof", "continuous_session", "constituent_snapshots",
+                             "dated_collection_plan", "durable_market_spool", "snapshot_hot_window_v2", "market_revisions"],
             "collector_id": ELTDX_COLLECTOR_ID,
             "source": "eltdx_batch",
             "lease_owned": bool(getattr(self, "_lease_owned", False)),
@@ -250,12 +271,17 @@ class EltdxQuoteCollector:
         for code in codes:
             try:
                 frame = self.provider.get_minute_bars(code, trade_date)
+                if not frame.empty:
+                    self.journal.append("minutes", trade_date, [{"code": code,
+                        "received_at": self.clock().isoformat(), "bars": json.loads(frame.to_json(orient="records", date_format="iso"))}])
                 written += self.minute_cache.write(trade_date, code, frame)
                 failures += int(frame.empty)
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 logger.debug("eltdx分钟序列失败 {}/{}: {}", code, trade_date, exc)
         logger.info("eltdx分钟序列同步: 股票={} 行={} 失败={}", len(codes), written, failures)
+        from core.realtime.market_events import publish_revision
+        publish_revision(self.quote_cache.backend, trade_date, kind="minutes")
 
     def _schedule_minute_sync(self, codes: list[str]) -> None:
         """Run minute history separately so snapshots keep their 3-second cadence."""
@@ -311,6 +337,7 @@ class EltdxQuoteCollector:
                     "message": f"采集循环异常: {exc}",
                     "consecutive_failures": self._consecutive_failures,
                 }
+                self._record_health(result)
                 logger.exception("eltdx采集循环异常，进程保持运行并在下一轮重试")
             self._cycles += 1
             if not result.get("ok") or self._cycles % 20 == 1:

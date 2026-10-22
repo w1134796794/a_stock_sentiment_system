@@ -1,7 +1,8 @@
-"""Confirm minute entry structures with a short normalized eltdx snapshot sequence."""
+"""Confirm entries from live eltdx snapshots, with completed opening structure."""
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from dataclasses import replace
 from threading import RLock
 from typing import Any, Dict, Optional, Tuple
@@ -32,7 +33,7 @@ def _number(value: Any) -> float:
 
 
 class SnapshotSignalService:
-    """Use minute structure as a gate and 3-second snapshots as the trigger."""
+    """Use snapshots as the primary trigger, not as proof of a minute signal."""
 
     def __init__(
         self,
@@ -48,6 +49,168 @@ class SnapshotSignalService:
         self.clock = clock or shanghai_now
         self._pending: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         self._lock = RLock()
+
+    def evaluate_primary(
+        self, *, code, trade_date, mode, minute_bars, snapshots, prev_close,
+        open_gap, sector_sync, is_leader, limit_price, evaluator,
+        previous_amount=0.0, expected_amount_fraction=None, profile_samples=0,
+        auction_amount=0.0, auction_volume=0.0, previous_volume=0.0,
+        confirmation_deadline="",
+    ):
+        """Return (decision, fallback reason); a valid negative is never fallback."""
+        key = (str(trade_date), str(code), str(mode))
+
+        def unavailable(reason):
+            with self._lock:
+                self._pending.pop(key, None)
+            return None, reason
+
+        ticks = self._normalize_ticks(snapshots, trade_date)
+        if len(ticks) < self.consecutive_ticks:
+            return unavailable("snapshot_sequence_missing")
+        recent = ticks.tail(self.consecutive_ticks)
+        now = shanghai_now(self.clock())
+        times = pd.to_datetime(trade_date + " " + recent["time"], errors="coerce")
+        receipts = [pd.to_datetime(v, errors="coerce") for v in recent["received_at"]]
+        if times.isna().any() or any(pd.isna(v) for v in receipts):
+            return unavailable("snapshot_timestamp_missing")
+        if (times.diff().dt.total_seconds().dropna() > self.max_snapshot_age_seconds).any():
+            return unavailable("snapshot_gap")
+        for at, received in zip(times, receipts):
+            if (not -1 <= (now - shanghai_now(at.to_pydatetime())).total_seconds() <= self.max_snapshot_age_seconds
+                    or not -1 <= (now - shanghai_now(received.to_pydatetime())).total_seconds() <= self.max_snapshot_age_seconds):
+                return unavailable("snapshot_stale")
+        if (not bool(recent["quality_ok"].all()) or "source" not in recent
+                or not recent["source"].eq("eltdx_batch").all()):
+            return unavailable("snapshot_invalid")
+        if "code" not in recent or not recent["code"].astype(str).eq(str(code)).all():
+            return unavailable("snapshot_identity_mismatch")
+        required = ("vol_hand", "amount_yuan", "open_price", "pre_close")
+        if any(column not in recent for column in required):
+            return unavailable("snapshot_cumulative_fields_missing")
+        totals = recent[list(required)].apply(pd.to_numeric, errors="coerce")
+        if not totals.apply(lambda column: column.map(lambda v: math.isfinite(v) and v > 0)).all().all():
+            return unavailable("snapshot_cumulative_fields_invalid")
+        if (totals[["vol_hand", "amount_yuan"]].diff().dropna() < 0).any().any():
+            return unavailable("snapshot_cumulative_regressed")
+        true_open = prev_close * (1 + open_gap)
+        if (not (totals["pre_close"] - prev_close).abs().le(0.011).all()
+                or not (totals["open_price"] - true_open).abs().le(0.011).all()):
+            return unavailable("snapshot_session_reference_mismatch")
+
+        latest_time = str(recent.iloc[-1]["time"])
+        minutes = normalize_minute_bars(minute_bars)
+        if not minutes.empty:
+            minutes = minutes[minutes["time"] < latest_time[:5] + ":00"].copy()
+        checks = {"basis": "eltdx_snapshot_primary_v1", "snapshot_count": len(recent),
+                  "snapshot_received_at": str(recent.iloc[-1]["received_at"]),
+                  "minute": latest_time, "quote_fresh": True}
+
+        def stop(reason, status="observing", data_status="snapshot_observing"):
+            with self._lock:
+                self._pending.pop(key, None)
+            return EntryDecision(status, MODE_LABELS.get(mode, ""), reason,
+                open_gap_pct=open_gap, data_status=data_status,
+                data_completeness=0.0 if data_status in {"snapshot_structure_pending", "snapshot_missing_sector", "snapshot_missing_amount_profile"} else 1.0,
+                condition_checks={"latest": {"minute": latest_time, "checks": dict(checks)},
+                                  "source_policy": "snapshot_first"}), ""
+
+        opening = minutes[minutes["time"].isin([f"09:{m}:00" for m in range(31, 36)])] if not minutes.empty else minutes
+        if len(opening) != 5:
+            return stop("等待完整开盘前5分钟结构，不以稀疏快照替代高低点", data_status="snapshot_structure_pending")
+        checks["opening_structure_complete"] = True
+        deadline = confirmation_deadline or evaluator.deadline
+        if latest_time > deadline:
+            return stop(f"{deadline[:5]}前未完成3秒快照确认", "cancelled")
+        allowed = {
+            ENTRY_WEAK: evaluator.weak_min_gap <= open_gap <= evaluator.weak_max_gap,
+            ENTRY_CONTINUATION: evaluator.weak_max_gap < open_gap <= evaluator.continuation_max_gap,
+            ENTRY_ACCELERATION: open_gap > evaluator.continuation_max_gap and is_leader,
+        }.get(mode, False)
+        checks["opening_gap_allowed"] = bool(allowed)
+        if not allowed:
+            return stop("开盘分层或龙头身份不满足当前入场模式", "rejected")
+        opening_high, opening_low = float(opening["high"].max()), float(opening["low"].min())
+        protection = opening_low * 0.999
+        after_open = minutes[minutes["time"] > "09:35:00"]
+        observed_after = ticks[ticks["time"] > "09:35:00"]
+        protection_ok = ((after_open.empty or float(after_open["low"].min()) >= protection)
+                         and (observed_after.empty or float(observed_after["last_price"].min()) >= protection)
+                         and (_number(recent.iloc[-1].get("low_price")) or opening_low) >= protection)
+        checks["protection"] = protection_ok
+        if not protection_ok and (mode == ENTRY_WEAK or evaluator.confirmation_policy.mode == "volume_price"):
+            return stop("已跌破开盘前5分钟保护低点", "cancelled")
+        auction_available = auction_amount > 0 and auction_volume > 0 and previous_volume > 0
+        checks["auction_available"] = auction_available
+        if mode == ENTRY_CONTINUATION and auction_available:
+            auction_ok = auction_amount >= evaluator.min_auction_amount and auction_volume / previous_volume >= evaluator.min_auction_volume_ratio
+            checks["auction_allowed"] = auction_ok
+            if not auction_ok:
+                return stop("竞价成交额或竞价量比不足")
+
+        # Snapshot volume is in hands, amount in yuan; never use a rolling-window
+        # weighted price as the full-session VWAP.
+        vwaps = totals["amount_yuan"] / (totals["vol_hand"] * 100)
+        if not vwaps.map(lambda v: math.isfinite(v) and v > 0).all():
+            return unavailable("snapshot_vwap_invalid")
+        vwap = float(vwaps.iloc[-1])
+        prices = recent["last_price"]
+        level = max(opening_high, prev_close) if mode == ENTRY_WEAK else opening_high
+        checks.update({"previous_close": bool((prices >= prev_close).all()),
+                       "vwap": bool((prices >= vwaps).all()), "vwap_value": vwap,
+                       "breakout": bool((prices > level).all()), "breakout_level": level})
+        fraction = expected_amount_fraction(latest_time) if expected_amount_fraction else None
+        pace = (float(totals.iloc[-1]["amount_yuan"]) / (previous_amount * fraction)
+                if previous_amount > 0 and fraction is not None and fraction > 0 else None)
+        minimum = max(evaluator.min_amount_pace, 1.0) if mode == ENTRY_CONTINUATION and not auction_available else evaluator.min_amount_pace
+        checks["amount_pace"] = pace
+        checks["amount_pace_allowed"] = (minimum <= pace <= evaluator.max_amount_pace) if pace is not None and math.isfinite(pace) else None
+        if mode != ENTRY_ACCELERATION and checks["amount_pace_allowed"] is None:
+            return stop("缺少真实累计量能或历史同分钟进度模型", data_status="snapshot_missing_amount_profile")
+
+        elapsed = (times.iloc[-1] - times.iloc[0]).total_seconds()
+        traded = float(totals["vol_hand"].iloc[-1] - totals["vol_hand"].iloc[0]) * 100
+        amount_delta = float(totals["amount_yuan"].iloc[-1] - totals["amount_yuan"].iloc[0])
+        checks["turnover"] = traded > 0 and amount_delta > 0
+        baseline = float(minutes.tail(evaluator.confirmation_policy.volume_lookback)["volume_shares"].mean())
+        ratio = traded * 60 / elapsed / baseline if elapsed > 0 and baseline > 0 else None
+        checks["local_volume_ratio"] = ratio
+        checks["local_volume_allowed"] = ratio is not None and ratio >= evaluator.confirmation_policy.min_volume_ratio
+        sector = sector_sync(latest_time) if sector_sync else None
+        checks["sector"] = sector
+        from backtest.confirmation_quality import price_quality_reason
+        ask = _number(recent.iloc[-1].get("ask1"))
+        price_denial = price_quality_reason(ask or float(prices.iloc[-1]), vwap, level, evaluator.confirmation_policy)
+        checks["price_quality"] = not bool(price_denial)
+        checks["tradable"] = ask > 0 and (limit_price <= 0 or ask <= limit_price + 0.011)
+        gates = ["vwap", "breakout", "turnover", "price_quality", "tradable"]
+        if mode == ENTRY_WEAK:
+            gates.append("previous_close")
+        if mode != ENTRY_ACCELERATION:
+            gates.append("amount_pace_allowed")
+        if evaluator.confirmation_policy.mode == "volume_price":
+            gates.append("local_volume_allowed")
+        if not bool(sector):
+            return stop("缺少真实板块指数或成分股宽度，保持观察" if sector is None else "板块同步走强条件尚未满足",
+                        data_status="snapshot_missing_sector" if sector is None else "snapshot_observing")
+        failed = [field for field in gates if not checks[field]]
+        if failed:
+            labels = {"vwap": "连续站稳VWAP", "breakout": "连续突破关键价", "turnover": "真实增量成交",
+                      "price_quality": price_denial, "tradable": "可成交卖一报价", "previous_close": "收复昨收",
+                      "amount_pace_allowed": "同分钟量能进度", "local_volume_allowed": "快照局部放量"}
+            return stop("等待" + "、".join(labels[field] for field in failed))
+        base = EntryDecision("confirmed", MODE_LABELS[mode], breakout_level=level,
+            open_gap_pct=open_gap, amount_pace=pace or 0, sector_confirmed=True,
+            profile_samples=profile_samples, confirmation_policy=evaluator.confirmation_policy.mode,
+            confirmation_reason="连续真实快照独立确认，不等待分钟收盘确认",
+            condition_checks={"latest": {"minute": latest_time, "checks": dict(checks)},
+                "confirmation": {"minute": latest_time, "checks": dict(checks)}, "source_policy": "snapshot_first"})
+        result = self.evaluate(code=code, trade_date=trade_date, mode=mode, minute_bars=minutes,
+            snapshots=ticks, prev_close=prev_close, open_gap=open_gap, sector_confirmed=True,
+            is_leader=is_leader, limit_price=limit_price, minute_decision=base,
+            confirmation_deadline=deadline, confirmation_policy=evaluator.confirmation_policy,
+            snapshot_vwap=vwap, primary=True)
+        return result, ""
 
     def evaluate(
         self,
@@ -65,12 +228,14 @@ class SnapshotSignalService:
         minute_decision: EntryDecision,
         confirmation_deadline: str = "",
         confirmation_policy=None,
+        snapshot_vwap=None,
+        primary=False,
     ) -> Optional[EntryDecision]:
         ticks = self._normalize_ticks(snapshots, trade_date)
         if len(ticks) < self.consecutive_ticks:
             return None
         minutes = normalize_minute_bars(minute_bars)
-        first_five = minutes[minutes["time"] <= "09:35:00"].head(5)
+        first_five = minutes[minutes["time"].between("09:31:00", "09:35:00")].head(5) if primary else minutes[minutes["time"] <= "09:35:00"].head(5)
         if len(first_five) < 5:
             return EntryDecision(
                 "observing", MODE_LABELS.get(mode, ""), "等待开盘前5分钟结构完成",
@@ -126,7 +291,7 @@ class SnapshotSignalService:
 
         opening_high = float(first_five["high"].max())
         opening_low = float(first_five["low"].min())
-        vwap = self._current_vwap(minutes, ticks)
+        vwap = snapshot_vwap if snapshot_vwap is not None else self._current_vwap(minutes, ticks)
         prices = recent["last_price"]
         above_vwap = bool((prices >= vwap).all()) if vwap > 0 else False
         has_turnover = float(ticks.tail(5)["delta_volume"].sum()) > 0
@@ -134,7 +299,7 @@ class SnapshotSignalService:
         current = float(latest["last_price"])
         from backtest.confirmation_quality import ConfirmationPolicy, price_quality_reason
         policy = confirmation_policy or ConfirmationPolicy(mode=minute_decision.confirmation_policy)
-        key_level = minute_decision.breakout_level if policy.mode == "volume_price" else opening_high
+        key_level = minute_decision.breakout_level if primary or policy.mode == "volume_price" else opening_high
         denial = price_quality_reason(_number(latest.get("ask1")) or current, vwap, key_level, policy)
         if denial:
             with self._lock:
@@ -211,12 +376,12 @@ class SnapshotSignalService:
                     "observing", MODE_LABELS.get(mode, ""),
                     "等待" + "、".join(missing or ["3秒快照连续确认"]),
                     open_gap_pct=open_gap, data_status="snapshot_observing",
-                    data_completeness=0.95,
+                    data_completeness=0.95, condition_checks=minute_decision.condition_checks,
                 )
             if not pending:
                 self._pending[key] = {"time": latest_time, "price": current, "confirmation_signature": signature}
                 return replace(
-                    minute_decision, status="observing", signal=MODE_LABELS.get(mode, ""),
+                    minute_decision, status="confirmed", signal=MODE_LABELS.get(mode, ""),
                     reason=f"{reason}，等待下一快照模拟成交", confirm_time=latest_time,
                     entry_time="", entry_price=0,
                     open_gap_pct=open_gap, sector_confirmed=sector_ok,
@@ -224,7 +389,7 @@ class SnapshotSignalService:
                 )
             if latest_time <= str(pending.get("time") or ""):
                 return replace(
-                    minute_decision, status="observing", signal=MODE_LABELS.get(mode, ""),
+                    minute_decision, status="confirmed", signal=MODE_LABELS.get(mode, ""),
                     reason=f"{reason}，等待下一快照模拟成交", confirm_time=str(pending.get("time") or ""),
                     entry_time="", entry_price=0,
                     open_gap_pct=open_gap, sector_confirmed=sector_ok,

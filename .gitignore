@@ -43,6 +43,8 @@ htmlcov/
 /webdata/intraday_replays/
 /webdata/portfolio_replay_diagnostics/
 /webdata/preopen_evidence/
+/webdata/collection_plans/
+/webdata/market_archive/
 /webdata/replay_research/
 /webdata/signal_cases/
 

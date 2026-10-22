@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import math
 from copy import copy
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable, Optional
 
 import pandas as pd
+
+_condition_trace = ContextVar("entry_condition_trace", default=None)
 
 ENTRY_FIXED = "fixed_gap"
 ENTRY_WEAK = "weak_only"
@@ -80,6 +83,7 @@ class EntryDecision:
     initial_confirm_time: str = ""
     confirmation_policy: str = "legacy"
     confirmation_reason: str = ""
+    condition_checks: dict = field(default_factory=dict)
 
     @property
     def filled(self) -> bool:
@@ -215,7 +219,31 @@ class MinuteEntryEvaluator:
             pair[1].confirm_time or "99:99:99",
         ))
 
-    def evaluate(
+    def evaluate(self, **kwargs) -> EntryDecision:
+        token = _condition_trace.set([])
+        try:
+            decision = self._evaluate(**kwargs)
+            checks = _condition_trace.get()
+        finally:
+            _condition_trace.reset(token)
+        if decision.condition_checks:
+            return decision
+        selected = next((r for r in reversed(checks) if r["minute"] == decision.confirm_time), None)
+        mode, gap = kwargs.get("mode"), kwargs.get("open_gap")
+        gap_allowed = (self.weak_min_gap <= gap <= self.weak_max_gap if mode == ENTRY_WEAK else
+                       self.weak_max_gap < gap <= self.continuation_max_gap if mode == ENTRY_CONTINUATION else
+                       gap > self.continuation_max_gap if mode == ENTRY_ACCELERATION else None)
+        return replace(decision, condition_checks={
+            "latest": checks[-1] if checks else None, "confirmation": selected,
+            "open_gap": gap, "opening_gap_allowed": gap_allowed,
+            "status": decision.status, "reason": decision.reason})
+
+    def _record_checks(self, row, **checks):
+        trace = _condition_trace.get()
+        if trace is not None:
+            trace.append({"minute": str(row["time"]), "checks": checks})
+
+    def _evaluate(
         self,
         *,
         mode: str,
@@ -331,6 +359,9 @@ class MinuteEntryEvaluator:
         quality_denial = None
         for index, row in scan.iterrows():
             if float(row["low"]) < opening_low * 0.999:
+                self._record_checks(row, protection=False, previous_close=float(row["close"]) >= prev_close,
+                    vwap=float(row["close"]) >= float(row["vwap"]), breakout=float(row["high"]) > opening_high,
+                    amount_pace=None, amount_pace_allowed=None, sector=None)
                 return EntryDecision("cancelled", "弱转强", "跌破开盘前5分钟低点", str(row["time"]), open_gap_pct=gap)
             pace = self._amount_pace(row, previous_amount, plan_amount_ratio, expected_amount_fraction)
             sector_state = sector_sync(str(row["time"])) if sector_sync else None
@@ -347,6 +378,11 @@ class MinuteEntryEvaluator:
                 and sector_ok
                 and self.min_amount_pace <= pace <= self.max_amount_pace
             )
+            self._record_checks(row, previous_close=float(row["close"]) >= prev_close,
+                vwap=float(row["close"]) >= float(row["vwap"]),
+                breakout=float(row["high"]) > opening_high, amount_pace=pace if math.isfinite(pace) else None,
+                amount_pace_allowed=self.min_amount_pace <= pace <= self.max_amount_pace,
+                sector=sector_state, protection=float(row["low"]) >= opening_low * 0.999)
             if confirmed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2):
                 decision = self._next_minute_fill(
                     data, index, "弱转强", "收复昨收、站上VWAP并突破前5分钟高点",
@@ -395,6 +431,8 @@ class MinuteEntryEvaluator:
                 and auction_ratio >= self.min_auction_volume_ratio
             )
             if not auction_ok:
+                self._record_checks(first_five.iloc[-1], auction_available=True, auction_allowed=False,
+                                    vwap=None, breakout=None, amount_pace=None, sector=None)
                 status = "observing" if live else "cancelled"
                 return EntryDecision(status, "强势延续", "竞价成交额或竞价量比不足", open_gap_pct=gap)
         opening_high = float(first_five["high"].max())
@@ -409,6 +447,11 @@ class MinuteEntryEvaluator:
             sector_ok = bool(sector_state)
             pace = self._amount_pace(row, previous_amount, plan_amount_ratio, expected_amount_fraction)
             trigger = (touched_vwap and float(row["close"]) >= vwap) or float(row["high"]) > opening_high
+            self._record_checks(row, vwap=float(row["close"]) >= vwap,
+                breakout=float(row["high"]) > opening_high, vwap_reclaim=touched_vwap,
+                amount_pace=pace if math.isfinite(pace) else None,
+                amount_pace_allowed=(self.min_amount_pace if auction_available else max(self.min_amount_pace, 1.0)) <= pace <= self.max_amount_pace,
+                sector=sector_state, auction_available=auction_available)
             sector_check_passed = sector_ok if sector_observed else False
             if trigger and sector_check_passed and self.min_amount_pace <= pace <= self.max_amount_pace:
                 history = scan.loc[:index]
@@ -486,6 +529,8 @@ class MinuteEntryEvaluator:
             sector_state = sector_sync(str(row["time"])) if sector_sync else None
             sector_observed = sector_observed or sector_state is not None
             sector_ok = bool(sector_state)
+            self._record_checks(row, leader=is_leader, vwap=float(row["close"]) >= float(row["vwap"]),
+                breakout=float(row["high"]) > opening_high, sector=sector_state)
             sector_check_passed = sector_ok if sector_observed else False
             if sector_check_passed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2) and (
                 float(row["high"]) > opening_high
@@ -571,6 +616,13 @@ class MinuteEntryEvaluator:
             pullback_quality = float((history["close"] / history["vwap"]).clip(upper=1.02).mean())
             buy_ratio = data.loc[index].get("active_buy_ratio")
             active_buy_ratio = float(buy_ratio) if pd.notna(buy_ratio) else 0.0
+            final = data.loc[index]
+            self._record_checks(final, vwap=float(final["close"]) >= float(final["vwap"]),
+                breakout=float(final["close"]) >= breakout_level, sector=sector_ok,
+                amount_pace=pace if math.isfinite(pace) else None,
+                amount_pace_allowed=(minimum_final_pace if minimum_final_pace is not None else self.min_amount_pace) <= pace <= self.max_amount_pace
+                if amount_pace_at is not None else None,
+                quality_confirmed=True)
         following = data[data.index > index]
         if following.empty:
             if live:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 
-RULESET_VERSION = "production_shared_v7_volume_price_confirmation"
+RULESET_VERSION = "production_shared_v10_independent_market"
 
 
 def number(value, default=0.0):
@@ -71,7 +71,7 @@ def production_candidates(inputs):
     from core.utils.stock_eligibility import new_entry_exclusion
     leaders = ((inputs.get("leader_pools") or {}).get("10", {}).get("rows") or [])[:30]
     leader_codes = {normalize_stock_code(r.get('code'), add_suffix=False) for r in leaders}
-    candidates = (inputs.get("candidates") or [])[:20]
+    candidates = inputs.get("candidates") or []
     from risk.risk_config import RiskConfig
     risk = RiskConfig.from_dict(inputs['risk_config']) if inputs.get('risk_config') else RiskConfig.load()
     profiles = {p['id']: p for p in inputs.get('profiles', []) if p.get('id')}

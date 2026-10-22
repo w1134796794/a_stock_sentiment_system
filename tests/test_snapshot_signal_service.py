@@ -55,7 +55,8 @@ def test_snapshot_signal_waits_for_next_tick_then_fills():
     first = service.evaluate(snapshots=_ticks(2), **common)
     second = service.evaluate(snapshots=_ticks(3), **common)
 
-    assert first.status == "observing"
+    assert first.status == "confirmed"
+    assert first.entry_price == 0  # Notification is eligible before the simulated fill.
     assert first.data_status == "snapshot_triggered"
     assert second.status == "filled"
     assert second.entry_time == "09:35:12"

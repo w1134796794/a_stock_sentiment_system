@@ -196,7 +196,7 @@ def freeze_preopen_inputs(candidate_date: str, market_date: str, *, web_data_dir
         def source_fingerprint():
             paths = set((root / "screening").rglob("*.json")) | set(artifact_paths.values())
             paths.update((profiles.path, profiles.base_profile_path, BASE_DIR / "config" / "risk_control.yaml",
-                          root / "config_overrides.json"))
+                          root / "config_overrides.json", root / "models" / "minute_amount_profiles.json"))
             return {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in paths if path.is_file()}
         before = source_fingerprint()
@@ -219,7 +219,8 @@ def freeze_preopen_inputs(candidate_date: str, market_date: str, *, web_data_dir
         holdings = HoldingRepository().list_positions(status="open")
         rows = [*candidates, *(row for values in candidates_by_profile.values() for row in values),
                 *(pools["20"].get("rows") or []), *holdings]
-        sectors = sorted(set().union(*(sector_names_from_row(row) for row in rows))) if rows else []
+        from core.realtime.collection_plan import collection_sector_names
+        sectors = sorted(set().union(*(collection_sector_names(row) for row in rows))) if rows else []
         sector_service = get_realtime_sector_service()
         mapping = sector_service.resolve_codes_by_names(sectors, source="ths")
         members = {name: sector_service.member_codes(code) for name, code in mapping.items()}
@@ -251,6 +252,8 @@ def freeze_preopen_inputs(candidate_date: str, market_date: str, *, web_data_dir
                   "factor_rows": records(factors), "sector_members": members, "sector_codes": mapping,
                   "artifacts": artifacts, "profiles": captured_profiles,
                   "risk_config": captured_risk, "source_fingerprint": before}
+        from core.signals.minute_amount_profile import MinuteAmountProfileRepository
+        inputs["minute_amount_profile"] = MinuteAmountProfileRepository(root / "models" / "minute_amount_profiles.json").load()
         inputs["board_feedback_inputs"] = feedback_inputs(
             market_date, codes, feedback_dates, records(feedback_daily), source_basis="preopen_frozen",
             calendar_verified=calendar.is_real and calendar.is_trade_date(market_date))

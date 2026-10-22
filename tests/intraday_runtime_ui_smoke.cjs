@@ -11,22 +11,25 @@ const report = {
   input_hash:'a'.repeat(64), code_hash:'b'.repeat(64), input_basis:'preopen_frozen',
   confirmed_stocks:1, complete:false, limitations:[], live_runtime_verified:false,
   failures:[{date:'20261015',code:'603533',evidence:'session_open',reason:'缺少当日真实开盘价'}],
-  runtime_summary:{sent_stocks:1},
+  runtime_summary:{sent_stocks:1,cycle_summary:{recorded_cycles:100,duration_p50_ms:300,duration_max_ms:1000}},
   stocks:[{code:'603533',name:'掌阅科技',status:'missing_evidence',session_open:null,reason:'缺少当日真实开盘价',transitions:[],
     opening_evidence:{open_price:null,pre_close:29.92,open_gap:null,opening_source:''},
     runtime_diagnostic:{state:'sent',confirm_times:['20261015 09:38:00'],profiles:['production'],
+      last_observation:{observed_at:'2026-10-15T09:38:03+08:00',condition_checks:{selected_source:'eltdx_snapshot',fallback_reason:''}},
       notification_attempts:[{occurred_at:'2026-10-15T09:39:01',status:'sent',reason:'<img src=x onerror=alert(1)>'}],
       veto_reasons:[],replay_discrepancy:'replay_missing_evidence'}},
     {code:'601811',name:'新华文轩',status:'observe',reason:'缺少板块证据',transitions:[],
       board_feedback:{role:'risk_factor',active:true,assessed:true,factor_value:1,score_adjustment:-20,reason:'第4日强负反馈'},
       opening_evidence:{open_price:24,pre_close:23.25,open_gap:.032258,opening_source:'eltdx_open_archive'},
       runtime_diagnostic:{state:'attempt_not_sent',confirm_times:['09:47:00'],profiles:['production'],
+        last_observation:{observed_at:'2026-10-15T09:47:03+08:00',condition_checks:{selected_source:'minute_fallback',fallback_reason:'snapshot_gap'}},
         notification_attempts:[{occurred_at:'2026-10-15T09:48:01',status:'blocked',reason:'collector_stale'}],
         veto_reasons:['采集器门禁'],replay_discrepancy:'replay_missing_evidence'}},
-    {code:'002242',name:'九阳股份',status:'confirmed',reason:'独立分钟买点确认',transitions:[],
+    {code:'002242',name:'九阳股份',status:'confirmed',reason:'独立分钟买点确认',first_confirm_time:'09:36:00',transitions:[
+      {evaluated_at:'09:37:00',signal_status:'confirmed',condition_checks:{latest:{minute:'09:36:00',checks:{sector:true,amount_pace_allowed:false,previous_close:true}}}}],
       board_feedback:{role:'risk_factor',active:false,assessed:false,factor_value:null,score_adjustment:0,reason:'历史因子未评估'},
       runtime_diagnostic:{state:'no_runtime_evidence',confirm_times:[],profiles:[],
-        notification_attempts:[],veto_reasons:[],replay_discrepancy:''}}],
+        notification_attempts:[],veto_reasons:[],replay_discrepancy:'replay_confirmed_without_runtime_evidence'}}],
   recorded_runtime:{confirmation_history:{rows:[]}},
 };
 (async () => {
@@ -51,7 +54,11 @@ const report = {
       await page.route('**/api/**',route=> {
         const url=new URL(route.request().url());
         let body;
-        if(url.pathname==='/api/intraday-strength') body={ok:true,rows:report.stocks.slice(1).map(row=>({
+        if(url.pathname==='/api/realtime/collection-plan') body={ok:true,plan:{stock_count:35,leader_count:30,decision_count:5,
+          frozen_at:'2026-10-15T09:00:00+08:00',hot_window_seconds:180,sector_member_count:200,
+          uncollected_holdings:[],sectors:[{name:'文化传媒'}],rows:[{code:'603533',name:'掌阅科技',
+          sources:['leader_pool','decision_pool'],sectors:['文化传媒','数字媒体']}]},archive:{pending:0},strategy:{updated_at:'2026-10-15T09:38:03+08:00'}};
+        else if(url.pathname==='/api/intraday-strength') body={ok:true,rows:report.stocks.slice(1).map(row=>({
           ...row,status:'confirmed',confirm_status:'confirmed',status_text:'确认',reason:'独立分钟买点确认',
           last_price:24.9,open_price:24.5,pre_close:24.43,change_pct:1.92})),counts:{confirmed:2},
           market_date:report.market_date,candidate_date:report.candidate_date};
@@ -69,6 +76,7 @@ const report = {
       assert.match(await first.innerText(),/缺少当日真实开盘价/);
       assert.match(await first.innerText(),/开盘 --.*昨收参考 29.92.*来源 未取得/);
       assert.match(await first.innerText(),/本次回放缺少证据，不能据此否定原始确认/);
+      assert.match(await first.innerText(),/实际判断来源 eltdx快照主判断/);
       assert.match(await page.locator('#dr-summary').innerText(),/1 \/ 3/);
       assert.equal(await first.locator('img').count(),0);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
@@ -76,18 +84,30 @@ const report = {
       const second=page.locator('#dr-stocks > details').nth(1);
       await second.locator('summary').click();
       assert.match(await second.innerText(),/开盘 24.00.*昨收参考 23.25.*来源 eltdx按日归档/);
+      assert.match(await second.innerText(),/实际判断来源 分钟兜底.*快照采集空窗/);
       assert.match(await second.locator('.dr-factor-warning').innerText(),/命中.*强度扣分 20/);
       const unknown=page.locator('#dr-stocks > details').nth(2);
-      await unknown.locator('summary').click();
+      await unknown.locator(':scope > summary').click();
       assert.equal(await unknown.locator('p.text-emerald-300').count(),0);
       assert.match(await unknown.locator('p').filter({hasText:'当日原始运行'}).innerText(),/未见原始运行记录/);
       assert.match(await unknown.locator('.dr-factor-warning').innerText(),/未评估/);
-      assert.match(await unknown.locator('summary').innerText(),/分钟规则确认/);
+      assert.match(await unknown.locator(':scope > summary').innerText(),/分钟规则确认/);
+      assert.match(await unknown.locator(':scope > summary').innerText(),/回放首次确认 09:36:00/);
+      assert.match(await unknown.innerText(),/回放曾确认，但缺少原始运行证据/);
+      await unknown.locator(':scope > details > summary').click();
+      assert.match(await unknown.innerText(),/成交进度范围: 未通过/);
+      assert.match(await page.locator('#dr-summary').innerText(),/真实后台循环/);
+      await unknown.screenshot({path:path.join(output,`replay-conditions-${width}.png`)});
       await page.locator('#dr-failures details > summary').click();
       assert.match(await page.locator('#dr-failures').innerText(),/未归档原始运行记录，不能据此判断是否触发或被拦截/);
       await page.screenshot({path:path.join(output,`replay-runtime-${width}.png`),fullPage:true});
       await page.goto(`http://127.0.0.1:${server.address().port}/intraday`, {waitUntil:'domcontentloaded',timeout:60000});
       await page.locator('.is-card').first().waitFor();
+      await page.locator('#collection-summary').filter({hasText:'个股 35'}).waitFor();
+      await page.locator('#collection-plan > summary').click();
+      assert.match(await page.locator('#collection-health').innerText(),/热窗口 180秒.*归档待处理 0/);
+      assert.match(await page.locator('#collection-rows').innerText(),/掌阅科技.*603533/);
+      assert.match(await page.locator('#collection-rows').innerText(),/龙头池、决策池/);
       assert.equal(await page.locator('.is-card.confirmed').count(),2);
       assert.match(await page.locator('.is-reason').first().innerText(),/独立分钟买点确认/);
       assert.match(await page.locator('.is-factor-warning').first().innerText(),/命中.*强度扣分 20/);

@@ -27,6 +27,16 @@
 {% endblock %}
 
 {% block content %}
+<section class="border-b border-slate-700 pb-4 mb-4 min-w-0">
+  <details id="collection-plan">
+    <summary class="font-semibold text-sm cursor-pointer">当日行情采集 <span id="collection-summary" class="text-slate-400 font-normal">--</span></summary>
+    <p id="collection-health" class="text-xs text-slate-400 mt-2 break-words"></p>
+    <div class="overflow-x-auto mt-3">
+      <table class="w-full text-xs text-left"><thead class="text-slate-500"><tr><th class="p-2">股票</th><th class="p-2">来源</th><th class="p-2">所属板块 / 概念</th></tr></thead><tbody id="collection-rows"></tbody></table>
+    </div>
+    <p id="collection-sectors" class="text-xs text-slate-400 mt-2 break-words"></p>
+  </details>
+</section>
 <section class="card border border-slate-800 rounded-xl p-3 mb-4">
   <div id="strategy-tabs" class="flex flex-wrap gap-2"></div>
 </section>
@@ -184,11 +194,32 @@
       const r = await fetch('/api/intraday-strength?' + params.toString());
       const j = await r.json();
       renderStrength(j);
+      loadCollectionPlan(j.market_date || initialMarketDate);
     } catch (e) {
       els.grid.innerHTML = `<div class="text-sm text-rose-300 py-10 text-center lg:col-span-2 xl:col-span-3">${esc(e)}</div>`;
     } finally {
       els.refresh.disabled = false;
       els.spin.classList.add('hidden');
+    }
+  }
+
+  async function loadCollectionPlan(date) {
+    try {
+      const r = await fetch('/api/realtime/collection-plan?' + new URLSearchParams(date ? {market_date:date} : {}));
+      const value = await r.json(), plan = value.plan;
+      document.getElementById('collection-summary').textContent = plan
+        ? `个股 ${plan.stock_count} · 龙头 ${plan.leader_count} · 决策 ${plan.decision_count} · 板块 ${plan.sectors.length}`
+        : '等待盘前名单';
+      document.getElementById('collection-health').textContent = plan
+        ? `冻结 ${plan.frozen_at} · 热窗口 ${plan.hot_window_seconds}秒 · 归档待处理 ${value.archive?.pending ?? '--'} · 策略 ${value.strategy?.updated_at || '未启动'}`
+        : value.preopen?.reason || value.reason || '未取得采集名单';
+      const sourceName = {leader_pool:'龙头池',decision_pool:'决策池'};
+      document.getElementById('collection-rows').innerHTML = (plan?.rows || []).map(row=>
+        `<tr class="border-t border-slate-800"><td class="p-2">${esc(row.name)} <span class="mono">${esc(row.code)}</span></td><td class="p-2">${esc(row.sources.map(s=>sourceName[s]||s).join('、'))}</td><td class="p-2 break-words">${esc(row.sectors.join('、'))}</td></tr>`).join('');
+      document.getElementById('collection-sectors').textContent = plan
+        ? `板块证据成分股 ${plan.sector_member_count} · 未纳入采集的持仓 ${(plan.uncollected_holdings || []).join('、') || '无'}${(plan.warnings || []).length ? ' · ' + plan.warnings.join('；') : ''}` : '';
+    } catch (e) {
+      document.getElementById('collection-summary').textContent = '名单读取失败';
     }
   }
 
@@ -209,6 +240,7 @@
       : '龙头弱转强观察';
     if (!rows.length) {
       els.grid.innerHTML = '';
+      els.empty.textContent = j.reason || '暂无实时确认数据';
       els.empty.classList.remove('hidden');
       return;
     }

@@ -1,0 +1,238 @@
+"""Single-owner, storage-only strategy process driven by market revisions."""
+from __future__ import annotations
+
+from copy import deepcopy
+import math
+from threading import Event
+from time import monotonic
+from uuid import uuid4
+
+from core.infrastructure.shared_state import TaskLease, get_shared_state_backend
+from core.realtime.collection_plan import DailyCollectionPlan
+from core.realtime.market_events import CHANNEL, REVISION_KEY
+from core.realtime.trading_session import realtime_session_status, shanghai_now
+
+
+RESULT_KEY = "realtime:strategy:result:"
+HEALTH_KEY = "realtime:strategy:health"
+
+
+def stored_strategy_view(date, *, profile="production", limit=10000, backend=None):
+    backend = backend or get_shared_state_backend()
+    value = backend.get_json(RESULT_KEY + date)
+    plan = DailyCollectionPlan(backend=backend).load(date)
+    if not value:
+        return {"ok": False, "market_date": date, "candidate_date": (plan or {}).get("candidate_date"),
+                "profile": profile, "rows": [], "counts": {}, "reason": "等待独立策略进程发布结果",
+                "collection_plan_id": (plan or {}).get("plan_id")}
+    value = deepcopy(value)
+    source = "leader_pool" if profile == "leader_pool" else "decision_pool"
+    if profile != "production":
+        allowed = {r["code"] for r in (plan or {}).get("rows") or [] if source in r["sources"]}
+        value["rows"] = [r for r in value["rows"] if r["code"] in allowed and
+                         (profile in {"leader_pool", "decision_pool", ""} or r.get("strategy_id") == profile)]
+    value["rows"] = value["rows"][:max(1, limit)]
+    now = shanghai_now()
+    from datetime import datetime
+    try:
+        age = (now - shanghai_now(datetime.fromisoformat(value["generated_at"]))).total_seconds()
+    except (ValueError, KeyError):
+        age = float("inf")
+    value["result_age_seconds"] = age if math.isfinite(age) else None
+    from config.settings import REALTIME_QUOTE_STALE_SECONDS
+    # A stopped worker must never leave a stale green executable confirmation.
+    for row in value["rows"]:
+        try:
+            quote_age = (now - shanghai_now(datetime.fromisoformat(row.get("received_at") or ""))).total_seconds()
+        except (ValueError, TypeError):
+            quote_age = float("inf")
+        if age > REALTIME_QUOTE_STALE_SECONDS or age < -1 or not -1 <= quote_age <= REALTIME_QUOTE_STALE_SECONDS:
+            if row.get("confirm_status") == "confirmed":
+                row.update(status="observe", confirm_status="observe", status_text="结果已过期",
+                           reason="独立策略结果已过期，等待更新", health_gate_reason="策略结果已过期")
+            value["ok"] = False
+    value["counts"] = {key: sum(r.get("confirm_status") == key for r in value["rows"])
+                       for key in ("confirmed", "confirmed_history", "observe", "cancelled", "unfilled")}
+    value["counts"]["confirmed"] += value["counts"]["confirmed_history"]
+    value["profile"] = profile
+    return value
+
+
+class StrategyRuntime:
+    def __init__(self, *, backend=None, plans=None, ledger=None, notifications=False, clock=shanghai_now):
+        from core.operations.ledger import TradingLedger
+        self.backend = backend or get_shared_state_backend()
+        self.plans = plans or DailyCollectionPlan(backend=self.backend)
+        self.ledger = ledger or TradingLedger()
+        self.notifications = notifications
+        self.clock = clock
+        self.stop_event = Event()
+        self._date = ""
+        self._version = ""
+        self._completed = 0
+        self._loaded_plan_id = ""
+        self.outbox = None
+        self._lease = None
+
+    def _load(self, date):
+        from core.realtime.entry_signal_service import RealtimeEntrySignalService
+        from core.realtime.read_only_market import ReadOnlyMarketData
+        from core.realtime.quote_service import RealtimeQuoteService
+        from core.signals.minute_amount_profile import MinuteAmountProfileRepository
+        from core.signals.production_rules import minute_evaluator, production_candidates
+        from risk.risk_config import RiskConfig
+        if self._date == date and self._loaded_plan_id:
+            return
+        plan = self.plans.load(date)
+        bundle = self.plans.bundle(date) if plan else None
+        if not plan or not bundle:
+            raise ValueError("缺少当日盘前采集名单或冻结策略输入，禁止盘中重建")
+        if self._loaded_plan_id == plan["plan_id"]:
+            return
+        self.plan, self.bundle = plan, bundle
+        from core.data.providers.redis_quote_provider import RedisQuoteProvider
+        from core.realtime.quote_cache import RealtimeQuoteCache
+        from core.realtime.snapshot_repository import RealtimeSnapshotRepository
+        from core.realtime.minute_cache import RealtimeMinuteCache
+        reader = ReadOnlyMarketData(frozen=bundle, provider=RedisQuoteProvider(
+            cache=RealtimeQuoteCache(backend=self.backend, snapshot_repository=RealtimeSnapshotRepository(backend=self.backend)),
+            minute_cache=RealtimeMinuteCache(backend=self.backend)))
+        self.quotes = RealtimeQuoteService(data_manager=reader)
+        profiles = MinuteAmountProfileRepository()
+        profiles._payload = bundle["inputs"].get("minute_amount_profile") or {}
+        evaluator = minute_evaluator(RiskConfig.from_dict(bundle["inputs"]["risk_config"]))
+        self.signals = RealtimeEntrySignalService(data_manager=reader, quote_service=self.quotes,
+            evaluator=evaluator, frozen_bundle=bundle, amount_profile_repository=profiles)
+        self.rows = production_candidates(bundle["inputs"])
+        allowed = {r["code"] for r in plan["rows"]}
+        self.rows = [r for r in self.rows if r["code"] in allowed]
+        self._loaded_plan_id = plan["plan_id"]
+
+    def _prepare(self, payload):
+        from core.operations.evidence import attach_evidence
+        from core.operations.health import gate_realtime_payload, realtime_readiness
+        from core.realtime.quote_cache import RealtimeQuoteCache
+        health = self.quotes.dm.provider.cache.health()
+        payload["execution_health"] = realtime_readiness(self.bundle["health"], health, payload["market_date"])
+        gate_realtime_payload(payload, collector=health)
+        if (health.get("collector") or {}).get("collection_plan_id") != self.plan["plan_id"]:
+            payload["execution_health"]["ready"] = False
+            payload["execution_health"]["reasons"].append("采集器与策略的当日冻结名单版本未对齐")
+            for row in payload.get("rows") or []:
+                if row.get("confirm_status") == "confirmed":
+                    row.update(status="observe", confirm_status="observe", status_text="数据待恢复",
+                               reason="采集名单版本未对齐", health_gate_reason="采集名单版本未对齐")
+        return attach_evidence(payload, frozen_bundle=self.bundle)
+
+    def _record(self, payload):
+        from core.operations.ledger import stable_id
+        from core.realtime.signal_event_repository import RealtimeSignalEventRepository
+        if self._lease is not None and not self._lease.is_owner():
+            raise RuntimeError("策略任务租约已丢失，停止发布和入队")
+        history = RealtimeSignalEventRepository()
+        history.record_payload(payload)
+        for row in payload["rows"]:
+            status = row.get("confirm_status")
+            if status in {"confirmed", "cancelled", "unfilled"} or row.get("health_gate_reason"):
+                evidence = row["signal_evidence"]
+                ident = row["signal_id"]
+                if self.ledger.event(stable_id(ident, "signal", status, row.get("reason")), "signal", evidence, signal_id=ident):
+                    self.ledger.evidence(ident, evidence)
+        if self.notifications and self.outbox:
+            self.outbox.enqueue(payload)
+
+    def run_once(self, *, force=False):
+        from core.realtime.overlay_service import RealtimeOverlayService
+        from core.operations.evidence import record_runtime_observations
+        now = shanghai_now(self.clock())
+        date = now.strftime("%Y%m%d")
+        revision = self.backend.get_json(REVISION_KEY) or {}
+        version = revision.get("id") if revision.get("market_date") == date else ""
+        if not force and version == self._version and date == self._date:
+            return None
+        started = monotonic()
+        self._load(date)
+        quotes = self.quotes.refresh_quotes([r["code"] for r in self.rows])
+        quote_map = {r["code"]: r for r in quotes.get("quotes") or []}
+        projector = RealtimeOverlayService.__new__(RealtimeOverlayService)
+        meta = {"candidate_date": self.plan["candidate_date"], "market_date": date,
+                "profile": "production", "evidence_bundle_id": self.bundle["bundle_id"]}
+
+        def project(row, quote, signal):
+            item = {**row, **projector._build_row(self.plan["candidate_date"], date, row, quote, signal)}
+            item.update({"status": item["confirm_status"], "status_text": signal.get("signal_status_text") or "观察",
+                         "is_leader_observation": row.get("is_leader_observation", False),
+                         "strategy_name": row.get("strategy_name") or "", "leader_score": row.get("leader_score"),
+                         "last_leader_date": row.get("last_leader_date") or ""})
+            return item
+
+        def confirmed(row, quote, signal):
+            if signal.get("signal_status") == "confirmed":
+                self._record(self._prepare({**meta, "rows": [project(row, quote, signal)]}))
+
+        signals = self.signals.evaluate(self.rows, quote_map, market_date=date, on_evaluated=confirmed)
+        payload = {**meta, "ok": True, "generated_at": shanghai_now(self.clock()).isoformat(),
+                   "collection_plan_id": self.plan["plan_id"], "market_revision": version,
+                   "rows": [project(row, quote_map.get(row["code"], {}), signals.get(row["code"], {})) for row in self.rows]}
+        payload = self._prepare(payload)
+        self._record(payload)
+        self._completed += 1
+        cycle = {"id": uuid4().hex, "market_date": date, "started_at": now.isoformat(),
+                 "finished_at": shanghai_now(self.clock()).isoformat(), "duration_ms": round((monotonic() - started) * 1000, 3),
+                 "jobs": [{"profile": "production", "evaluated_stocks": len(payload["rows"]),
+                           "stock_timings": [{"code": r["code"], **r["evaluation_timing"]} for r in payload["rows"]]}]}
+        payload["runtime_cycle"] = {k: v for k, v in cycle.items() if k != "jobs"}
+        record_runtime_observations(self.ledger, payload)
+        self.ledger.event(cycle["id"], "runtime_cycle", cycle)
+        from core.realtime.signal_event_repository import RealtimeSignalEventRepository
+        view = RealtimeSignalEventRepository().merge_history(deepcopy(payload))
+        self.backend.set_json(RESULT_KEY + date, view, 172800)
+        self.backend.set_json(HEALTH_KEY, {"ok": True, "updated_at": payload["generated_at"],
+            "market_date": date, "completed_cycles": self._completed, "duration_ms": cycle["duration_ms"],
+            "market_revision": version, "plan_id": self.plan["plan_id"]}, 60)
+        self._date, self._version = date, version
+        return payload
+
+    def run(self, *, once=False):
+        from loguru import logger
+        if not self.backend.is_shared:
+            raise RuntimeError("独立策略进程要求可用的Redis，禁止降级为进程内缓存")
+        lease = TaskLease.acquire("realtime_strategy", 30)
+        if lease is None:
+            raise RuntimeError("已有独立策略进程持有任务锁")
+        self._lease = lease
+        subscription = None
+        try:
+            if self.notifications:
+                from core.notifications.outbox import RealtimeNotificationOutbox
+                self.outbox = RealtimeNotificationOutbox(self.ledger)
+                self.outbox.start()
+            if hasattr(self.backend, "client"):
+                subscription = self.backend.client.pubsub(ignore_subscribe_messages=True)
+                subscription.subscribe(self.backend._key(CHANNEL))
+            while not self.stop_event.is_set() and lease.is_owner():
+                try:
+                    if once or realtime_session_status(self.clock())["is_open"]:
+                        self.run_once(force=once)
+                except Exception as exc:
+                    self.backend.set_json(HEALTH_KEY, {"ok": False, "reason": str(exc),
+                        "updated_at": shanghai_now(self.clock()).isoformat()}, 60)
+                    logger.exception("Read-only strategy cycle failed")
+                    if once:
+                        raise
+                if once:
+                    break
+                # Notification loss is harmless: every wake checks the stored revision.
+                if subscription:
+                    subscription.get_message(timeout=1)
+                    while subscription.get_message(timeout=0):
+                        pass
+                else:
+                    self.stop_event.wait(1)
+        finally:
+            if subscription:
+                subscription.close()
+            if self.outbox:
+                self.outbox.stop()
+            lease.release()
+            self._lease = None

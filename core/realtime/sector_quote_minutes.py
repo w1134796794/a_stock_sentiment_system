@@ -57,6 +57,8 @@ class SectorQuoteMinuteRepository:
                 if minute in {"09:30:00", "13:00:00"} or minute > "15:00:00":
                     continue
                 value = {"code": code, "time": minute, "price": price,
+                         "open_price": positive_price(raw.get("open_price")),
+                         "pre_close": positive_price(raw.get("pre_close")),
                          "received_at": stamp.isoformat(timespec="milliseconds"), "source": "eltdx_batch"}
                 key = date, code, minute
                 if value["received_at"] > self._pending.get(key, {}).get("received_at", ""):
@@ -111,31 +113,43 @@ class SectorQuoteMinuteRepository:
             self.backend.set_many_json(shared, 2 * 86400)
             self._history = {key: value for key, value in self._history.items() if f":{date}:" in key}
 
-    def read_prices(self, date, codes, *, until="15:00:00"):
+    def read_points(self, date, codes, *, until="15:00:00", minutes=None):
         date = str(date).replace("-", "")
         datetime.strptime(date, "%Y%m%d")
         wanted = {normalize_stock_code(code, add_suffix=False) for code in codes}
         keys = [self._key(date, code) for code in sorted(wanted)]
+        selected_minutes = set(minutes) if minutes is not None else None
         client = getattr(self.backend, "client", None)
         key_builder = getattr(self.backend, "_key", None)
         if client is not None and callable(key_builder):
             pipe = client.pipeline(transaction=False)
             for key in keys:
-                pipe.hvals(key_builder(key))
-            rows = [json.loads(raw) for values in pipe.execute() for raw in values]
+                if selected_minutes is None:
+                    pipe.hvals(key_builder(key))
+                else:
+                    pipe.hmget(key_builder(key), sorted(selected_minutes))
+            rows = [json.loads(raw) for values in pipe.execute() for raw in values if raw]
         else:
             rows = [row for values in self.backend.get_many_json(keys).values() for row in values or []]
         path = self.root / f"{date}.sqlite3"
         if wanted and path.exists():
             with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as con:
                 # Avoid SQL variable limits on large constituent universes.
-                rows.extend(json.loads(row[0]) for row in con.execute(
-                    "SELECT payload FROM quote_minutes WHERE minute<=?", (until,)))
+                if selected_minutes:
+                    placeholders = ",".join("?" for _ in selected_minutes)
+                    rows.extend(json.loads(row[0]) for row in con.execute(
+                        f"SELECT payload FROM quote_minutes WHERE minute<=? AND minute IN ({placeholders})",
+                        (until, *sorted(selected_minutes))))
+                elif selected_minutes is None:
+                    rows.extend(json.loads(row[0]) for row in con.execute(
+                        "SELECT payload FROM quote_minutes WHERE minute<=?", (until,)))
         selected = {}
         for row in rows:
             code, minute = row.get("code"), row.get("time", "")
             price = positive_price(row.get("price"))
             if code not in wanted or not price or minute > until or row.get("source") != "eltdx_batch":
+                continue
+            if selected_minutes is not None and minute not in selected_minutes:
                 continue
             try:
                 stamp = shanghai_now(datetime.fromisoformat(row["received_at"]))
@@ -149,5 +163,10 @@ class SectorQuoteMinuteRepository:
                 selected[key] = row
         result = {}
         for (code, minute), row in selected.items():
-            result.setdefault(code, {})[minute] = row["price"]
+            result.setdefault(code, {})[minute] = dict(row)
         return result
+
+    def read_prices(self, date, codes, *, until="15:00:00"):
+        points = self.read_points(date, codes, until=until)
+        return {code: {minute: row["price"] for minute, row in values.items()}
+                for code, values in points.items()}

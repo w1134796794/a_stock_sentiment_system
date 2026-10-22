@@ -130,10 +130,11 @@ ELTDX_COLLECTOR_ID = (
     os.getenv("ELTDX_COLLECTOR_ID", "eltdx-auto").strip() or "eltdx-auto"
 )
 ELTDX_EMBEDDED_COLLECTOR_ENABLED = os.getenv(
-    "ELTDX_EMBEDDED_COLLECTOR_ENABLED", "true"
+    "ELTDX_EMBEDDED_COLLECTOR_ENABLED", "false"
 ).strip().lower() not in {"0", "false", "no", "off"}
 REALTIME_SNAPSHOT_MAX_ITEMS = max(20, int(os.getenv("REALTIME_SNAPSHOT_MAX_ITEMS", "120")))
-REALTIME_SNAPSHOT_TTL_SECONDS = max(60, int(os.getenv("REALTIME_SNAPSHOT_TTL_SECONDS", "900")))
+REALTIME_SNAPSHOT_TTL_SECONDS = max(180, int(os.getenv("REALTIME_SNAPSHOT_TTL_SECONDS", "180")))
+REALTIME_STRATEGY_EXTERNAL = os.getenv("REALTIME_STRATEGY_EXTERNAL", "true").lower() in {"true", "1", "yes"}
 
 # 动态因子权重：YAML weights 仅作为冷启动先验；存在有效发布物时按交易日加载。
 FACTOR_WEIGHT_DIR = _env_path("FACTOR_WEIGHT_DIR", WEB_DATA_DIR / "models" / "factor_weights")

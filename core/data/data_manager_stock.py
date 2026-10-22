@@ -653,8 +653,7 @@ class StockDataManager(SuspensionDataManager):
     def get_minute_bars_live(self, ts_code: str, trade_date: str) -> pd.DataFrame:
         """读取实时分钟序列。
 
-        Linux/server 只读 Windows 采集器写入 Redis 的 eltdx 分钟序列；
-        collector/workstation 可在缓存缺失时直连 eltdx，且不会落半截 CSV。
+        所有节点都只读采集器写入 Redis 的分钟序列；缺数时等待采集器。
         """
         realtime_provider = self._get_realtime_quote_provider()
         if realtime_provider is not None:
@@ -664,15 +663,7 @@ class StockDataManager(SuspensionDataManager):
                     return cached
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"[get_minute_bars_live] Redis分钟序列读取失败 {ts_code}: {e}")
-        provider = self._get_eltdx_provider()
-        if provider is None:
-            return pd.DataFrame()
-        try:
-            df = provider.get_minute_bars(ts_code, trade_date)
-            return df if df is not None else pd.DataFrame()
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"[get_minute_bars_live] eltdx 实时分时失败 {ts_code} {trade_date}: {e}")
-            return pd.DataFrame()
+        return pd.DataFrame()
 
     def get_realtime_snapshot_ticks(self, ts_code: str, trade_date: str) -> pd.DataFrame:
         """Read recent eltdx snapshots from Redis without issuing a market request."""

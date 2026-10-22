@@ -39,6 +39,8 @@ class InternalScheduler:
         self.state = TaskStateStore("automation")
         self.daily_state = TaskStateStore("automation_daily")
         self.auction_state = TaskStateStore("automation_auction")
+        self.preopen_state = TaskStateStore("automation_preopen")
+        self.preopen_time = os.getenv("AUTOMATION_PREOPEN_TIME", "09:00").strip() or "09:00"
         self.timezone_name = os.getenv("AUTOMATION_TIMEZONE", "Asia/Shanghai").strip() or "Asia/Shanghai"
         self.timezone = ZoneInfo(self.timezone_name)
         self._stop = threading.Event()
@@ -67,6 +69,7 @@ class InternalScheduler:
             # ZoneInfo 的上海时间判断，避免服务器系统时区影响盘中/盘后任务。
             self.scheduler.every().second.do(self._recover_due_auction_job).tag("auction")
             self.scheduler.every().minute.do(self._recover_due_daily_job).tag("daily")
+            self.scheduler.every().minute.do(self._recover_due_preopen_job).tag("preopen")
             self._stop.clear()
             self._catchup_checked = False
             self._thread = threading.Thread(target=self._loop, daemon=True, name="internal-automation")
@@ -96,6 +99,8 @@ class InternalScheduler:
             "running": bool(self._thread and self._thread.is_alive()),
             "daily_time": self.daily_time,
             "auction_time": self.auction_time,
+            "preopen_time": self.preopen_time,
+            "preopen": self.preopen_state.load(),
             "timezone": self.timezone_name,
             "auto_backtest": self.auto_backtest,
             "capital": self.capital,
@@ -236,6 +241,51 @@ class InternalScheduler:
                 f"自动恢复第 {attempts + 1}/{self.max_daily_attempts} 次"
             )
         return dispatched
+
+    def _recover_due_preopen_job(self) -> bool:
+        now = self._now()
+        date = now.strftime("%Y%m%d")
+        if (self._stop.is_set() or not self.calendar.is_real or not self.calendar.is_trade_date(date)
+                or not self.preopen_time <= now.strftime("%H:%M") < "09:25"):
+            return False
+        from core.realtime.collection_plan import DailyCollectionPlan
+        if DailyCollectionPlan().load(date):
+            return False
+        return self._dispatch_job("preopen", lambda: self._preopen_job(date))
+
+    def _preopen_job(self, date):
+        from config.settings import BASE_DIR, WEB_DATA_DIR
+        lease = TaskLease.acquire(f"preopen-collection-{date}", 60)
+        if lease is None:
+            return
+        state = {"job": "preopen", "market_date": date, "started_at": self._now().isoformat()}
+        try:
+            from core.realtime.collection_plan import DailyCollectionPlan
+            if DailyCollectionPlan().load(date):
+                return
+            self.preopen_state.save({**state, "status": "running"})
+            path = Path(WEB_DATA_DIR) / "logs" / f"preopen_collection_{date}.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            now = self._now()
+            cutoff = now.replace(hour=9, minute=25, second=0, microsecond=0)
+            with path.open("a", encoding="utf-8") as output:
+                process = subprocess.Popen([sys.executable, "-X", "utf8", str(Path(BASE_DIR) / "scripts" / "prepare_realtime_collection.py"),
+                    "--market-date", date], cwd=BASE_DIR, stdout=output, stderr=subprocess.STDOUT,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                try:
+                    exit_code = process.wait(timeout=max(1, min(180, (cutoff - now).total_seconds())))
+                except subprocess.TimeoutExpired:
+                    self._terminate_worker(process)
+                    raise
+            plan = DailyCollectionPlan().load(date)
+            self.preopen_state.save({**state, "status": "done" if exit_code == 0 and plan else "failed",
+                "finished_at": self._now().isoformat(), "plan_id": (plan or {}).get("plan_id"),
+                "log_path": str(path), "reason": "" if plan else "盘前准备未通过，查看准备日志；09:25后不再重试"})
+        except Exception as exc:
+            self.preopen_state.save({**state, "status": "failed", "reason": str(exc)})
+            logger.exception("Preopen collection preparation failed")
+        finally:
+            lease.release()
 
     def _recover_due_auction_job(self) -> bool:
         if self._stop.is_set():
@@ -471,13 +521,23 @@ class InternalScheduler:
         if lease is None:
             return
         try:
-            from config.settings import CACHE_DIR, TUSHARE_TOKEN
-            from core.data.data_manager_main import DataManager
+            from core.realtime.read_only_market import ReadOnlyMarketData
+            from core.realtime.collection_plan import DailyCollectionPlan
             from core.notifications.notifier import NotificationService
             from core.realtime.auction_alert_service import AuctionAlertService
 
             candidate_date = self.calendar.prev(market_date)
-            payload = AuctionAlertService(DataManager(TUSHARE_TOKEN, CACHE_DIR)).build(candidate_date, market_date)
+            bundle = DailyCollectionPlan().bundle(market_date)
+            if not bundle:
+                self._save_auction_state({"status": "error", "job": "auction", "market_date": market_date,
+                    "message": "当日冻结采集输入缺失，竞价任务不重建候选池或补取行情",
+                    "next_retry_at": (self._now() + timedelta(minutes=1)).isoformat(timespec="seconds")})
+                return
+            candidate_date = bundle["candidate_date"]
+            reader = ReadOnlyMarketData(frozen=bundle)
+            service = AuctionAlertService(reader)
+            service._candidates = lambda _date: bundle["inputs"].get("candidates") or []
+            payload = service.build(candidate_date, market_date)
             groups: Dict[str, int] = {}
             for row in payload.get("rows") or []:
                 name = str(row.get("category") or "数据不足")

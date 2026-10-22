@@ -262,7 +262,7 @@ def test_internal_scheduler_registers_both_jobs(monkeypatch):
         status = scheduler.status()
         tags = {tag for job in status["jobs"] for tag in job["tags"]}
         assert status["running"] is True
-        assert tags == {"auction", "daily"}
+        assert tags == {"auction", "daily", "preopen"}
     finally:
         scheduler.stop()
 

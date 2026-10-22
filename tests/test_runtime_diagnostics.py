@@ -93,7 +93,7 @@ def test_no_runtime_record_is_not_proof_of_no_signal():
     value = attach_runtime_diagnostics(report(replay_confirmed=True, missing=False))
     runtime = value["stocks"][0]["runtime_diagnostic"]
     assert runtime["state"] == "no_runtime_evidence"
-    assert runtime["replay_discrepancy"] == ""
+    assert runtime["replay_discrepancy"] == "replay_confirmed_without_runtime_evidence"
 
 
 def test_cancelled_latest_state_does_not_erase_earlier_delivery():

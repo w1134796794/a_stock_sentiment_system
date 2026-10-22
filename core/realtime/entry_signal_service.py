@@ -1,4 +1,4 @@
-"""Minute-based realtime entry confirmation shared by intraday views."""
+"""Snapshot-first realtime entries with a shared minute-confirmation fallback."""
 from __future__ import annotations
 
 import json
@@ -66,7 +66,7 @@ def entry_mode_text(mode: str) -> str:
 
 
 class RealtimeEntrySignalService:
-    """Evaluate current candidates with the same minute rules as the backtest."""
+    """Prefer live snapshots; retain the shared minute evaluator as fallback."""
 
     def __init__(
         self,
@@ -81,6 +81,7 @@ class RealtimeEntrySignalService:
         snapshot_signal_service: Any = None,
         quote_service: Any = None,
         board_feedback_repository: Any = None,
+        frozen_bundle=None,
     ) -> None:
         self.dm = data_manager
         self.quote_service = quote_service
@@ -103,6 +104,14 @@ class RealtimeEntrySignalService:
         self._lock = RLock()
         self.board_feedback_repository = board_feedback_repository
         self._feedback_inputs = None
+        self.frozen_bundle = frozen_bundle
+
+    def _frozen(self, market_date):
+        frozen = getattr(self, "frozen_bundle", None)
+        if frozen and frozen.get("market_date") == market_date:
+            return frozen
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        return PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
 
     def evaluate(
         self,
@@ -111,50 +120,72 @@ class RealtimeEntrySignalService:
         *,
         market_date: str,
         execution: Optional[Dict[str, Any]] = None,
+        on_evaluated=None,
     ) -> Dict[str, Dict[str, Any]]:
         # UI diagnostics and live matching can request different market dates.
         with self._lock:
-            return self._evaluate_batch(rows, quotes, market_date=market_date, execution=execution)
+            return self._evaluate_batch(rows, quotes, market_date=market_date, execution=execution,
+                                        on_evaluated=on_evaluated)
 
-    def _evaluate_batch(self, rows, quotes, *, market_date, execution=None):
+    def _evaluate_batch(self, rows, quotes, *, market_date, execution=None, on_evaluated=None):
         from core.utils.stock_eligibility import new_entry_exclusion
         source_rows = [dict(row or {}) for row in rows or [] if not new_entry_exclusion(row or {})]
         market_date = str(market_date or "").replace("-", "")[:8]
         if not market_date:
             return {}
+        bundle = None
         if self.evaluator is self._automatic_evaluator:
             from core.operations.preopen_evidence import PreopenEvidenceStore
             from core.signals.production_rules import minute_evaluator
             from risk.risk_config import RiskConfig
-            bundle = PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
+            bundle = self._frozen(market_date)
             key = (market_date, bundle['bundle_id'] if bundle else 'unfrozen')
             if key != self._evaluator_day_key:
                 risk = RiskConfig.from_dict(bundle['inputs']['risk_config']) if bundle and bundle['inputs'].get('risk_config') else RiskConfig.load()
                 self.evaluator = self._automatic_evaluator = minute_evaluator(risk)
                 self._evaluator_day_key = key
+        if type(self.sector_breadth) is RealtimeSectorBreadthProvider:
+            if self.evaluator is not self._automatic_evaluator:
+                from core.operations.preopen_evidence import PreopenEvidenceStore
+                bundle = self._frozen(market_date)
+            self.sector_breadth._batch_frozen_context = (market_date, bundle)
 
         frames: Dict[str, pd.DataFrame] = {}
+        minute_read_ms = {}
+        lazy_minutes = type(self.sector_breadth) is RealtimeSectorBreadthProvider
         for row in source_rows:
             code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
-            if code and code not in frames:
+            if code and code not in frames and not lazy_minutes:
+                started = monotonic()
                 frames[code] = self._minute_frame(code, market_date)
+                minute_read_ms[code] = round((monotonic() - started) * 1000, 3)
 
+        started = monotonic()
         previous = self._previous_daily_map(market_date)
+        previous_read_ms = round((monotonic() - started) * 1000, 3)
+        started = monotonic()
         if getattr(self.evaluator, "board_feedback_policy", {}).get("enabled"):
             codes = [normalize_stock_code(row.get("code") or row.get("stock_code"), add_suffix=False)
                      for row in source_rows]
             self._feedback_inputs = self._load_feedback_inputs(market_date, codes)
+        feedback_read_ms = round((monotonic() - started) * 1000, 3)
         out: Dict[str, Dict[str, Any]] = {}
         for row in source_rows:
             code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
             if not code:
                 continue
+            if code not in frames:
+                started = monotonic()
+                frames[code] = self._minute_frame(code, market_date)
+                minute_read_ms[code] = round((monotonic() - started) * 1000, 3)
+            quote_started = monotonic()
             if self.quote_service is not None:
                 try:
                     quotes[code] = dict(self.quote_service.get_quote(code) or {})
                 except Exception:
                     quotes[code] = {}
             quote = dict(quotes.get(code) or {})
+            quote_read_ms = round((monotonic() - quote_started) * 1000, 3)
             frame = frames.get(code, pd.DataFrame())
             out[code] = self._evaluate_one(
                 row,
@@ -167,16 +198,47 @@ class RealtimeEntrySignalService:
                 source_rows,
                 execution or {},
             )
+            out[code].setdefault("evaluation_timing", {}).update({
+                "minute_read_ms": minute_read_ms.get(code), "quote_read_ms": quote_read_ms,
+                "batch_previous_read_ms": previous_read_ms, "batch_feedback_read_ms": feedback_read_ms})
+            if on_evaluated is not None:
+                try:
+                    on_evaluated(row, quote, out[code])
+                except Exception as exc:
+                    from loguru import logger
+                    logger.exception("Per-stock confirmation enqueue failed")
+                    out[code]["notification_enqueue_error"] = type(exc).__name__
         return out
 
     def _evaluate_one(
         self, row, quote, frame, frames, quotes, previous, market_date, all_rows, execution,
     ):
+        started = monotonic()
         payload = self._evaluate_entry(row, quote, frame, frames, quotes, previous,
                                        market_date, all_rows, execution)
         code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
         # Optional factor evidence must not replace the executable entry decision.
         payload["board_feedback"] = self._board_feedback_context(code, market_date)
+        from core.realtime.trading_session import shanghai_now
+        from datetime import datetime
+        finished = shanghai_now()
+        try:
+            receipt = shanghai_now(datetime.fromisoformat(str(quote.get("received_at") or "")))
+            receipt_age = round((finished - receipt).total_seconds(), 3)
+        except (ValueError, TypeError):
+            receipt_age = None
+        payload.setdefault("evaluation_timing", {}).update({"finished_at": finished.isoformat(timespec="milliseconds"),
+                                        "quote_age_at_completion_seconds": receipt_age,
+                                        "duration_ms": round((monotonic() - started) * 1000, 3)})
+        payload.setdefault("condition_checks", {}).update({
+            "strategy_mode_allowed": payload.get("strategy_mode_allowed"),
+            "quote_fresh": not bool(quote.get("is_stale")),
+            "quote_received_at": quote.get("received_at") or "",
+            "last_available_minute": str(frame.iloc[-1]["time"]) if not frame.empty else ""})
+        if not getattr(self, "record_execution_timing", True):
+            payload.pop("evaluation_timing", None)
+            payload["condition_checks"]["quote_fresh"] = None
+            payload["condition_checks"]["basis"] = "historical_prefix_not_live_receipt"
         return payload
 
     def _evaluate_entry(
@@ -259,12 +321,14 @@ class RealtimeEntrySignalService:
             fraction, _ = self.amount_profiles.expected_fraction(previous_amount, time_text)
             return fraction
 
+        sector_started = monotonic()
         sector_checker, sector_detail = self._sector_checker(
             row, code, all_rows, frames, quotes, market_date,
         )
+        sector_prepare_ms = round((monotonic() - sector_started) * 1000, 3)
         evaluate = self.evaluator.evaluate_strategy if structural else self.evaluator.evaluate
         strategy_args = {"execution": {**execution, "structures": structures}} if structural else {}
-        evaluated = evaluate(
+        minute_args = dict(
             **strategy_args,
             mode=mode,
             bars=frame,
@@ -285,35 +349,54 @@ class RealtimeEntrySignalService:
             structure=structures.get(mode, {}),
             confirmation_deadline=resolve_entry_deadline(execution, mode),
         )
-        if structural:
-            mode, decision = evaluated
-        else:
-            decision = evaluated
-        if mode in STRUCTURAL_MODES:
-            mode = next((key for key, label in STRUCTURAL_LABELS.items() if label == decision.signal), mode)
-        ticks = self._snapshot_frame(code, market_date)
-        if not ticks.empty and mode not in STRUCTURAL_MODES:
+        decision = None
+        primary_enabled = getattr(self, "snapshot_primary_enabled", True)
+        fallback_reason = ("structural_strategy_uses_minute_confirmation" if structural else
+                           "historical_minute_diagnostic_without_snapshots" if not primary_enabled else "")
+        decision_ms = 0.0
+        snapshot_started = monotonic()
+        if not structural and primary_enabled:
             try:
-                sector_state = sector_checker(str(ticks.iloc[-1].get("time") or ""))
-                snapshot_decision = self.snapshot_signals.evaluate(
+                decision, fallback_reason = self.snapshot_signals.evaluate_primary(
                     code=code,
                     trade_date=market_date,
                     mode=mode,
                     minute_bars=frame,
-                    snapshots=ticks,
+                    snapshots=self._snapshot_frame(code, market_date),
                     prev_close=pre_close,
                     open_gap=gap,
-                    sector_confirmed=sector_state,
+                    sector_sync=sector_checker,
                     is_leader=self._is_leader(row),
                     limit_price=_float(limit_up_price(pre_close, code, name)),
-                    minute_decision=decision,
-                    confirmation_policy=self.evaluator.confirmation_policy,
+                    evaluator=self.evaluator,
+                    previous_amount=previous_amount,
+                    expected_amount_fraction=expected_fraction if self.amount_profiles.available else None,
+                    profile_samples=profile_samples,
+                    auction_amount=_float(auction.get("竞价成交额")),
+                    auction_volume=_float(auction.get("竞价成交量")),
+                    previous_volume=_float(previous.get("vol_hand"), _float(previous.get("vol"))),
                     confirmation_deadline=resolve_entry_deadline(execution, mode, self.evaluator.deadline),
                 )
-                if snapshot_decision is not None:
-                    decision = snapshot_decision
-            except Exception:
-                pass
+            except Exception as exc:
+                from loguru import logger
+                logger.exception("Snapshot primary evaluation failed for {}", code)
+                decision = EntryDecision("data_insufficient", reason="快照主判断异常，保持观察",
+                    data_status="snapshot_error", data_completeness=0,
+                    condition_checks={"snapshot_error": type(exc).__name__})
+        snapshot_ms = round((monotonic() - snapshot_started) * 1000, 3)
+        if decision is None:
+            decision_started = monotonic()
+            evaluated = evaluate(**minute_args)
+            if structural:
+                mode, decision = evaluated
+                mode = next((key for key, label in STRUCTURAL_LABELS.items() if label == decision.signal), mode)
+            else:
+                decision = evaluated
+            decision_ms = round((monotonic() - decision_started) * 1000, 3)
+        decision.condition_checks.update({"source_policy": "snapshot_first" if primary_enabled else "minute_diagnostic",
+            "selected_source": "eltdx_snapshot" if str(decision.data_status).startswith("snapshot_") else "minute_fallback",
+            "fallback_reason": fallback_reason})
+        selection_checks = dict(decision.condition_checks)
         if not strategy_mode_allowed:
             decision, strength_detected = self._disallowed_mode_observation(
                 decision=decision,
@@ -327,6 +410,7 @@ class RealtimeEntrySignalService:
             strength_detected = decision.status in {
                 "filled", "confirmed", "signal_unfilled",
             }
+        decision.condition_checks.update({**selection_checks, **decision.condition_checks})
         payload = self._payload(
             decision,
             mode,
@@ -337,6 +421,8 @@ class RealtimeEntrySignalService:
             stats_context=row,
             opening_evidence=opening,
         )
+        payload["evaluation_timing"] = {"sector_prepare_ms": sector_prepare_ms,
+                                         "minute_decision_ms": decision_ms, "snapshot_ms": snapshot_ms}
         if mode in STRUCTURAL_MODES:
             payload["structure"] = structures.get(mode, {})
             payload["structural_stop"] = (structures.get(mode) or {}).get("protection")
@@ -359,7 +445,7 @@ class RealtimeEntrySignalService:
             if self.board_feedback_repository is None:
                 self.board_feedback_repository = BoardFeedbackRepository(
                     cache_dir=getattr(self.dm, "cache_dir", None), calendar=self.calendar)
-            frozen = PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
+            frozen = self._frozen(market_date)
             return self.board_feedback_repository.capture(
                 market_date, codes, frozen_inputs=frozen["inputs"] if frozen else None)
         except Exception as exc:
@@ -548,6 +634,7 @@ class RealtimeEntrySignalService:
             "signal_status_text": status_text,
             "signal": signal_name,
             "reason": decision.reason,
+            "condition_checks": decision.condition_checks,
             "strategy_mode_allowed": bool(strategy_mode_allowed),
             "strength_detected": bool(strength_detected),
             "confirm_time": decision.confirm_time,
@@ -562,7 +649,7 @@ class RealtimeEntrySignalService:
             "sector_detail": sector_detail or {},
             "sector_confirmation_version": (sector_detail or {}).get("sector_confirmation_version", ""),
             "data_status": decision.data_status,
-            "trigger_source": (
+            "trigger_source": decision.condition_checks.get("selected_source") or (
                 "eltdx_snapshot" if str(decision.data_status).startswith("snapshot_")
                 else "minute_fallback"
             ),
@@ -613,7 +700,7 @@ class RealtimeEntrySignalService:
 
     def _previous_daily_map(self, market_date: str) -> Dict[str, Dict[str, Any]]:
         from core.operations.preopen_evidence import PreopenEvidenceStore
-        frozen = PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date)
+        frozen = self._frozen(market_date)
         if frozen:
             return {normalize_stock_code(row.get("code") or row.get("ts_code") or "", add_suffix=False): row
                     for row in frozen["inputs"].get("daily_rows", [])}
@@ -672,6 +759,16 @@ class RealtimeEntrySignalService:
         market_date: str,
     ) -> Tuple[Any, Dict[str, Any]]:
         sectors = self._sectors(row)
+        if type(self.sector_breadth) is RealtimeSectorBreadthProvider:
+            try:
+                policy = self.evaluator.confirmation_policy
+                window = 6 if policy.mode == "legacy" else max(policy.pullback_window, policy.sustain_minutes) + 5
+                return self.sector_breadth.minute_checker(sectors, market_date, exclude_code=code,
+                                                          history_minutes=window)
+            except Exception as exc:
+                return lambda at_time: None, {"assessed": True, "data_completeness": 0.0,
+                    "reason": "板块闭合分钟留档读取失败", "error_type": type(exc).__name__,
+                    "sector_confirmation_source": "collector_closed_quote_minutes"}
         try:
             try:
                 state, detail = self.sector_breadth.evaluate(sectors, market_date, exclude_code=code)
@@ -773,10 +870,8 @@ class RealtimeEntrySignalService:
         if self.dm is not None:
             return self.dm
         try:
-            from config.settings import CACHE_DIR, TUSHARE_TOKEN
-            from core.data.data_manager_main import DataManager
-
-            self.dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+            from core.realtime.read_only_market import ReadOnlyMarketData
+            self.dm = ReadOnlyMarketData()
         except Exception:
             self.dm = None
         return self.dm

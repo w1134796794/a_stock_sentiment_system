@@ -73,6 +73,8 @@ def replay_request(payload, *, now=None):
 
 
 class _ReplayEntryService(RealtimeEntrySignalService):
+    record_execution_timing = False
+    snapshot_primary_enabled = False
     def __init__(self, previous, auctions, members, frames, profiles, opening_prices=None, *, evaluator=None,
                  opening_evidence=None, board_feedback_inputs=None, sector_quote_minutes=None):
         # Explicit adapters isolate the shared rule evaluator from live providers/stores.
@@ -224,7 +226,10 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
              "scripts/diagnose_intraday_signal.py", "core/realtime/sector_service.py", "core/realtime/sector_evidence.py",
              "core/signals/sector_sync.py", "core/realtime/sector_breadth.py", "core/signals/opening.py",
              "core/realtime/session_open_repository.py", "core/realtime/sector_quote_minutes.py", "core/signals/production_rules.py",
-             "core/signals/board_feedback.py", "core/realtime/board_feedback_repository.py", "risk/risk_config.py"]
+             "core/signals/board_feedback.py", "core/realtime/board_feedback_repository.py", "risk/risk_config.py",
+             "core/realtime/runtime_diagnostics.py", "core/operations/evidence.py",
+             "core/realtime/snapshot_signal_service.py", "core/realtime/read_only_market.py",
+             "core/realtime/collection_plan.py", "core/realtime/strategy_runtime.py"]
     versions = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
     return clean({"classification": "minute_rule_diagnostic", "market_date": date, "candidate_date": candidate_date,
                   "until": until, "profile": request["profile"], "generated_at": shanghai_now().isoformat(),

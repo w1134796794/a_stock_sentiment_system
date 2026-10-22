@@ -65,6 +65,7 @@ class RealtimeOverlayService:
         profile: str = "",
         limit: int = 20,
         persist: bool = False,
+        on_confirmed=None,
     ) -> Dict[str, Any]:
         candidate_date = str(trade_date or self._latest_date() or "")
         market_date = str(market_date or candidate_date)
@@ -104,14 +105,32 @@ class RealtimeOverlayService:
         codes = [r["code"] for r in rows if r.get("code")]
 
         quotes = self._quote_map(codes)
+        def publish_confirmation(candidate, quote, signal):
+            if on_confirmed is None or signal.get("signal_status") != "confirmed":
+                return
+            item = self._build_row(candidate_date, market_date, candidate, quote, signal)
+            for key in ("is_leader_observation", "leader_time_label", "pool_rank", "source_rank", "primary_role",
+                        "sector_status_score", "market_status_score", "continuity_score", "capital_recognition_score",
+                        "safety_score", "limit_progress", "limit_pct", "evidence", "sector_tags"):
+                if key in candidate:
+                    item[key] = candidate[key]
+            item.update({"strategy_name": candidate.get("strategy_name") or strategy_labels.get(item["strategy_id"]) or strategy["name"],
+                         "strategy_execution": dict(candidate.get("strategy_execution") or strategy["execution"]),
+                         "strategy_version": candidate.get("strategy_version") or strategy["version"]})
+            on_confirmed({"candidate_date": candidate_date, "market_date": market_date,
+                          "profile": strategy["id"], "strategy": strategy, "rows": [item],
+                          "evidence_bundle_id": frozen["bundle_id"] if frozen else ""})
         if self.entry_signal_service is None:
             signals = {}
         else:
             try:
                 signals = self.entry_signal_service.evaluate(
                     rows, quotes, market_date=market_date, execution=strategy["execution"],
+                    **({"on_evaluated": publish_confirmation} if on_confirmed is not None else {}),
                 )
             except TypeError:
+                if on_confirmed is not None:
+                    raise
                 # Lightweight third-party/test signal adapters may predate the strategy contract.
                 signals = self.entry_signal_service.evaluate(rows, quotes, market_date=market_date)
         overlay_rows = []
@@ -454,6 +473,9 @@ class RealtimeOverlayService:
             "entry_price": signal.get("entry_price"),
             "confirmation_policy": signal.get("confirmation_policy") or "legacy",
             "confirmation_reason": signal.get("confirmation_reason") or "",
+            "condition_checks": signal.get("condition_checks") or {},
+            "evaluation_timing": signal.get("evaluation_timing") or {},
+            "trigger_source": signal.get("trigger_source") or "minute_fallback",
             "initial_confirm_time": signal.get("initial_confirm_time") or "",
             "breakout_level": signal.get("breakout_level"),
             "structure": signal.get("structure") or {},

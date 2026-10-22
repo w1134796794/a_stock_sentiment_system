@@ -17,12 +17,13 @@ class RealtimeQuoteCache:
     META_KEY = "realtime:quotes:meta"
     COLLECTOR_HEALTH_KEY = "realtime:collector:health"
 
-    def __init__(self, backend: Any = None, snapshot_repository: Any = None, opening_repository: Any = None) -> None:
+    def __init__(self, backend: Any = None, snapshot_repository: Any = None, opening_repository: Any = None, journal=None) -> None:
         from config.settings import REALTIME_QUOTE_STALE_SECONDS, REALTIME_QUOTE_TTL_SECONDS
 
         self.backend = backend or get_shared_state_backend()
         self.snapshots = snapshot_repository or RealtimeSnapshotRepository()
         self.openings = opening_repository or SessionOpenRepository(backend=self.backend)
+        self.journal = journal
         self.stale_after_seconds = float(REALTIME_QUOTE_STALE_SECONDS)
         self.ttl_seconds = int(REALTIME_QUOTE_TTL_SECONDS)
 
@@ -108,8 +109,10 @@ class RealtimeQuoteCache:
         if not values:
             return {"ok": False, "count": 0, "rejected_codes": rejected_codes,
                     "message": "收到的报价早于已有报价，保留较新缓存"}
-        self.backend.set_many_json(values, self.ttl_seconds)
         trade_date = max(trade_dates) if trade_dates else now.strftime("%Y%m%d")
+        if self.journal is not None and snapshot_rows:
+            self.journal.append("snapshot", trade_date, snapshot_rows)
+        self.backend.set_many_json(values, self.ttl_seconds)
         self.snapshots.append_batch(trade_date, snapshot_rows)
         opening_error = ""
         try:
@@ -129,6 +132,8 @@ class RealtimeQuoteCache:
             "opening_evidence_error": opening_error,
         }
         self.backend.set_json(self.META_KEY, meta, self.ttl_seconds)
+        from core.realtime.market_events import publish_revision
+        publish_revision(self.backend, trade_date, kind="quotes")
         return {"ok": True, "count": len(values), "rejected_codes": rejected_codes, **meta}
 
     def read_batch(self, codes: Iterable[str]) -> Dict[str, Dict[str, Any]]:

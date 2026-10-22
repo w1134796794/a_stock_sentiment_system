@@ -1767,8 +1767,10 @@ async def _app_lifespan(_app: FastAPI):
 
     _get_holding_service()
     _get_analog_runtime().start()
-    _ensure_preopen_inputs()
-    _refresh_realtime_defaults(watchlist_only=True)
+    from config.settings import REALTIME_STRATEGY_EXTERNAL
+    if not REALTIME_STRATEGY_EXTERNAL:
+        _ensure_preopen_inputs()
+        _refresh_realtime_defaults(watchlist_only=True)
     _start_realtime_refresh_worker()
     _start_eltdx_collector_worker()
     AUTOMATION_SCHEDULER.start()
@@ -3390,6 +3392,10 @@ def _build_realtime_overlay_payload(
     limit: int = 20,
     stale_after_seconds: int = 90,
 ) -> Dict[str, Any]:
+    from config.settings import REALTIME_STRATEGY_EXTERNAL
+    if REALTIME_STRATEGY_EXTERNAL:
+        from core.realtime.strategy_runtime import stored_strategy_view
+        return stored_strategy_view(market_date or _realtime_market_date(), profile=profile or "decision_pool", limit=limit)
     service = RealtimeOverlayService(
         quote_service=_get_realtime_quote_service(stale_after_seconds=stale_after_seconds),
         entry_signal_service=_get_realtime_entry_signal_service(),
@@ -3416,6 +3422,13 @@ def _build_intraday_strength_payload(
     limit: int = 30,
     stale_after_seconds: int = 90,
 ) -> Dict[str, Any]:
+    from config.settings import REALTIME_STRATEGY_EXTERNAL
+    if REALTIME_STRATEGY_EXTERNAL:
+        from core.realtime.strategy_runtime import stored_strategy_view
+        value = stored_strategy_view(market_date or _realtime_market_date(), profile=profile, limit=limit)
+        if profile == "leader_pool" and lookback != 10:
+            value.update(ok=False, rows=[], counts={}, reason="独立策略只运行当日盘前冻结的近10日龙头池")
+        return value
     from core.realtime.leader_pool_service import IntradayStrengthService
 
     quote_date = market_date or _realtime_market_date()
@@ -3633,6 +3646,12 @@ def _ensure_preopen_inputs():
     candidate_date = _realtime_candidate_date(market_date)
     try:
         result = _freeze_preopen_for_minute(candidate_date, market_date, int(time.time() // 60))
+        if result.get("ok"):
+            from core.operations.preopen_evidence import PreopenEvidenceStore
+            from core.realtime.collection_plan import DailyCollectionPlan
+            bundle = PreopenEvidenceStore().load(candidate_date, market_date)
+            if bundle:
+                result["collection_plan_id"] = DailyCollectionPlan().freeze(bundle)["plan_id"]
         return result
     except Exception as exc:
         logger.warning("Preopen evidence capture failed: %s", exc)
@@ -3696,16 +3715,44 @@ def _build_production_execution_payload(trade_date, market_date):
     payload = RealtimeOverlayService(quote_service=_get_realtime_quote_service(),
         entry_signal_service=_get_realtime_entry_signal_service()).build_overlay(
         trade_date, market_date=market_date, candidates=production_candidates(inputs),
-        profile='production', limit=10000)
+        profile='production', limit=10000, on_confirmed=_enqueue_confirmed_payload)
     payload['ruleset_version'] = RULESET_VERSION
     return payload
 
 
+def _enqueue_confirmed_payload(payload):
+    from core.operations.ledger import stable_id
+    _prepare_signal_payload(payload)
+    ledger = _trading_ledger()
+    for row in payload.get("rows") or []:
+        if (row.get("confirm_status") or row.get("status")) != "confirmed":
+            continue
+        ledger.evidence(row["signal_id"], row["signal_evidence"])
+        ledger.event(stable_id(row["signal_id"], "confirmed_ready"), "signal",
+                     row["signal_evidence"], signal_id=row["signal_id"])
+    return _get_notification_outbox().enqueue(payload)
+
+
+@lru_cache(maxsize=1)
+def _get_notification_outbox():
+    from core.notifications.outbox import RealtimeNotificationOutbox
+    return RealtimeNotificationOutbox(_trading_ledger())
+
+
 def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
+    from config.settings import REALTIME_STRATEGY_EXTERNAL
+    if REALTIME_STRATEGY_EXTERNAL:
+        return
+    from uuid import uuid4
+    from core.realtime.trading_session import shanghai_now
+    cycle_started = time.monotonic()
+    cycle = {"id": uuid4().hex, "started_at": shanghai_now().isoformat(timespec="milliseconds"),
+             "jobs": []}
     if _data_generation_running():
         return
     market_date = _realtime_market_date()
     trade_date = _realtime_candidate_date(market_date)
+    cycle["market_date"] = market_date
     _ensure_preopen_inputs()
     # Publish one deduplicated watchlist. The built-in collector sends it to
     # eltdx in one batch; Web only warms its shared read cache.
@@ -3775,11 +3822,20 @@ def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
     ]
     for key, loader in jobs:
         try:
+            job_started = time.monotonic()
             payload = _REALTIME_PAYLOAD_CACHE.refresh(key, loader)
             if isinstance(payload, dict):
                 from core.operations.ledger import stable_id
 
                 _prepare_signal_payload(payload)
+                cycle["jobs"].append({"profile": payload.get("profile") or "decision_pool",
+                                      "evaluated_stocks": len(payload.get("rows") or []),
+                                      "stock_timings": [{"code": r.get("code"), **(r.get("evaluation_timing") or {})}
+                                                        for r in payload.get("rows") or []],
+                                      "build_ms": round((time.monotonic() - job_started) * 1000, 3)})
+                payload["runtime_cycle"] = {"id": cycle["id"], "started_at": cycle["started_at"],
+                    "elapsed_ms": round((time.monotonic() - cycle_started) * 1000, 3),
+                    "job": {k: v for k, v in cycle["jobs"][-1].items() if k != "stock_timings"}}
                 from core.operations.evidence import record_runtime_observations
                 record_runtime_observations(_trading_ledger(), payload)
                 if payload.get('profile') != 'production':
@@ -3802,40 +3858,17 @@ def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
                                     "signal", evidence, signal_id=signal_id):
                         ledger.evidence(signal_id, evidence)
                         logger.info("Realtime signal %s %s: %s", row.get("code"), status, row.get("reason"))
-                from core.notifications.notifier import NotificationService
+                # Durable enqueue is before analog enrichment and paper execution.
+                try:
+                    _get_notification_outbox().enqueue(payload)
+                except Exception as exc:
+                    logger.error("Realtime notification enqueue failed: %s", exc)
 
                 try:
                     _get_analog_runtime().attach(payload, enqueue=True)
                 except Exception as exc:
                     logger.warning("Analog enqueue failed; original signal continues: %s", exc)
 
-                try:
-                    NotificationService().notify_realtime_payload(payload)
-                    for row in payload.get("rows") or []:
-                        result = row.get("notification_result") or {}
-                        if row.get("notification_status") and row.get("signal_id"):
-                            outcome = {
-                                "code": row.get("code"), "side": "buy",
-                                "status": row["notification_status"],
-                                "sent": int(result.get("sent") or 0),
-                                "skip_reason": row.get("notification_skip_reason") or "",
-                                "all_delivered": bool(result.get("all_delivered")),
-                                "channels": [{key: channel.get(key) for key in (
-                                    "channel", "recipient", "ok", "deduplicated", "retry_pending",
-                                )} for channel in result.get("results") or []],
-                            }
-                            if ledger.event(stable_id(row["signal_id"], "notification_attempt", outcome),
-                                            "notification_attempt", outcome, signal_id=row["signal_id"]):
-                                logger.info("Realtime notification %s: %s %s", row.get("code"),
-                                            outcome["status"], outcome["skip_reason"])
-                        if int(result.get("sent") or 0) and row.get("signal_id"):
-                            signal_id = str(row["signal_id"])
-                            ledger.event(stable_id(signal_id, "notification", "buy"), "notification",
-                                         {"sent": result["sent"], "code": row.get("code"), "side": "buy",
-                                          "channel_results": result.get("results") or []}, signal_id=signal_id)
-                        row.pop("notification_result", None)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Realtime notification failed: %s", exc)
                 try:
                     paper_result = _get_paper_trading_service().process_realtime_payload(payload)
                     if paper_result.get("opened"):
@@ -3854,6 +3887,12 @@ def _refresh_realtime_defaults(*, watchlist_only: bool = False) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Position monitor refresh failed: %s", exc)
+    cycle["finished_at"] = shanghai_now().isoformat(timespec="milliseconds")
+    cycle["duration_ms"] = round((time.monotonic() - cycle_started) * 1000, 3)
+    try:
+        _trading_ledger().event(cycle["id"], "runtime_cycle", cycle)
+    except Exception as exc:
+        logger.warning("Realtime cycle audit failed: %s", exc)
 
 
 def _realtime_refresh_loop() -> None:
@@ -3872,11 +3911,16 @@ def _realtime_refresh_loop() -> None:
 
 
 def _start_realtime_refresh_worker() -> None:
+    from config.settings import REALTIME_STRATEGY_EXTERNAL
+    if REALTIME_STRATEGY_EXTERNAL:
+        logger.info("Realtime strategy is external; Web only reads published results")
+        return
     global _REALTIME_REFRESH_THREAD
     with _REALTIME_WORKER_LOCK:
         if _REALTIME_REFRESH_THREAD and _REALTIME_REFRESH_THREAD.is_alive():
             return
         _REALTIME_REFRESH_STOP.clear()
+        _get_notification_outbox().start()
         _REALTIME_REFRESH_THREAD = Thread(
             target=_realtime_refresh_loop,
             name="realtime-cache-refresh",
@@ -3892,12 +3936,18 @@ def _stop_realtime_refresh_worker() -> None:
     if thread and thread.is_alive():
         thread.join(timeout=3.0)
     _REALTIME_REFRESH_THREAD = None
+    if _get_notification_outbox.cache_info().currsize:
+        _get_notification_outbox().stop()
 
 
 def _start_eltdx_collector_worker() -> None:
     """Start the quote source so Web never depends on a manual command."""
     global _ELTDX_COLLECTOR, _ELTDX_COLLECTOR_THREAD
     from config.settings import ELTDX_EMBEDDED_COLLECTOR_ENABLED
+    from config.settings import REALTIME_STRATEGY_EXTERNAL
+    if REALTIME_STRATEGY_EXTERNAL:
+        logger.info("Market collection is external; Web will not start a collector thread")
+        return
 
     if not ELTDX_EMBEDDED_COLLECTOR_ENABLED:
         logger.info("Built-in eltdx collector is disabled by configuration")
@@ -4019,6 +4069,28 @@ def api_realtime_health(probe: bool = False) -> Any:
     return JSONResponse(payload)
 
 
+@app.get("/api/realtime/collection-plan")
+def api_realtime_collection_plan(market_date: Optional[str] = None):
+    from core.realtime.collection_plan import DailyCollectionPlan
+    from core.infrastructure.shared_state import get_shared_state_backend
+    from core.realtime.strategy_runtime import HEALTH_KEY
+    date = market_date or _realtime_market_date()
+    backend = get_shared_state_backend()
+    try:
+        plan = DailyCollectionPlan(backend=backend).load(date)
+        return JSONResponse({"ok": bool(plan), "market_date": date, "plan": plan,
+            "reason": "" if plan else "当日盘前采集名单尚未发布，采集与策略等待就绪",
+            "strategy": backend.get_json(HEALTH_KEY) or {},
+            "archive": backend.get_json("realtime:archive:health") or {},
+            "preopen": backend.get_json("task:automation_preopen:state") or {},
+            "storage": "redis" if backend.is_shared else "memory"})
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    except Exception:
+        logger.exception("Collection plan storage is unavailable")
+        return JSONResponse({"ok": False, "reason": "共享行情存储不可用，采集名单暂不可读"}, status_code=503)
+
+
 @app.get("/api/realtime/overlay")
 def api_realtime_overlay(
     date: Optional[str] = None,
@@ -4032,6 +4104,10 @@ def api_realtime_overlay(
     trade_date = date or _realtime_candidate_date(quote_date)
     normalized_limit = max(1, min(int(limit or 20), 100))
     normalized_stale = max(1, int(stale_after_seconds or 90))
+    from config.settings import REALTIME_STRATEGY_EXTERNAL
+    if REALTIME_STRATEGY_EXTERNAL:
+        from core.realtime.strategy_runtime import stored_strategy_view
+        return JSONResponse(stored_strategy_view(quote_date, profile=profile or "decision_pool", limit=normalized_limit))
     if persist:
         service = RealtimeOverlayService(
             quote_service=_get_realtime_quote_service(stale_after_seconds=normalized_stale),
@@ -4102,6 +4178,11 @@ def api_intraday_strength(
     )
     normalized_lookback = max(1, min(int(lookback or 5), 20))
     normalized_limit = max(1, min(int(limit or 30), 100))
+    from config.settings import REALTIME_STRATEGY_EXTERNAL
+    if REALTIME_STRATEGY_EXTERNAL:
+        value = _build_intraday_strength_payload(trade_date, market_date=quote_date, profile=profile,
+            lookback=normalized_lookback, limit=normalized_limit, stale_after_seconds=stale_after_seconds)
+        return JSONResponse(value)
 
     def load_payload():
         return _build_intraday_strength_payload(

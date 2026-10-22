@@ -76,6 +76,17 @@ def runtime_evidence(path: Path, table: str, date: str, codes: list[str]) -> dic
         rows = con.execute(f"SELECT * FROM {table} WHERE market_date=? AND {column} IN ({placeholders})",
                            [date, *codes]).fetchall()
         result = []
+        cycles = []
+        cycle_durations = []
+        if table == "signal_evidence" and con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_events'").fetchone():
+            cycles = [json.loads(row[0]) for row in con.execute(
+                "SELECT payload_json FROM trading_events WHERE kind='runtime_cycle' "
+                "AND json_extract(payload_json, '$.market_date')=? ORDER BY occurred_at DESC LIMIT 10", (date,))]
+            cycles.reverse()
+            cycle_durations = [float(row[0] or 0) for row in con.execute(
+                "SELECT json_extract(payload_json, '$.duration_ms') FROM trading_events WHERE kind='runtime_cycle' "
+                "AND json_extract(payload_json, '$.market_date')=?", (date,))]
         for source in rows:
             row = dict(source)
             field = "payload_json" if table == "realtime_signal_events" else "evidence_json"
@@ -86,12 +97,13 @@ def runtime_evidence(path: Path, table: str, date: str, codes: list[str]) -> dic
                 "quote_received_at", "sector_coverage", "sector_data_completeness", "notification_status",
                 "entry_mode", "opening_evidence", "entry_parameters", "quote_stale_seconds", "board_feedback",
                 "confirmation_policy", "confirmation_reason", "initial_confirm_time", "breakout_level",
+                "condition_checks", "evaluation_timing", "runtime_cycle", "trigger_source",
             )}
             if table == "signal_evidence" and con.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trading_events'").fetchone():
                 row["delivery_events"] = [dict(event) for event in con.execute(
                     "SELECT kind, occurred_at, payload_json FROM trading_events WHERE signal_id=? "
-                    "AND kind IN ('notification', 'notification_attempt') ORDER BY occurred_at", (row["signal_id"],)
+                    "AND kind IN ('notification', 'notification_attempt', 'notification_queued') ORDER BY occurred_at", (row["signal_id"],)
                 ).fetchall()]
             result.append(row)
         if table == "signal_evidence" and con.execute(
@@ -105,7 +117,12 @@ def runtime_evidence(path: Path, table: str, date: str, codes: list[str]) -> dic
                                "code": raw.get("code"), "profile": raw.get("profile"),
                                "status": raw.get("status"), "observed_at": item["observed_at"],
                                "evidence_kind": "runtime_observation", "evidence": raw, "delivery_events": []})
-    return {"status": "recorded" if result else "no_local_runtime_evidence", "rows": result}
+    durations = sorted(cycle_durations)
+    return {"status": "recorded" if result else "no_local_runtime_evidence", "rows": result,
+            "cycle_summary": {"recorded_cycles": len(durations),
+                "duration_p50_ms": durations[len(durations) // 2] if durations else None,
+                "duration_max_ms": max(durations) if durations else None,
+                "last_cycles": cycles[-10:], "scope": "all_background_cycles_for_market_date"}}
 
 
 def main() -> None:

@@ -45,7 +45,7 @@ def attach_runtime_diagnostics(report):
     for stock in report.get("stocks") or []:
         records = grouped.get(stock["code"], [])
         profiles, times, vetoes, attempts = set(), set(), set(), {}
-        observations = []
+        observations, queued = [], []
         confirmed = production_confirmed = delivered = delivered_in_window = False
         for row in records:
             evidence = row.get("evidence") or {}
@@ -55,7 +55,11 @@ def attach_runtime_diagnostics(report):
                                      "reason": evidence.get("trigger_reason") or evidence.get("reason") or "",
                                      "data_status": evidence.get("data_status") or "",
                                      "quote_received_at": evidence.get("quote_received_at") or "",
-                                     "quote_stale_seconds": evidence.get("quote_stale_seconds")})
+                                     "quote_stale_seconds": evidence.get("quote_stale_seconds"),
+                                     "profile": row.get("profile") or evidence.get("profile") or "",
+                                     "sector_detail": evidence.get("sector_detail") or {},
+                                     "condition_checks": evidence.get("condition_checks") or {},
+                                     "evaluation_timing": evidence.get("evaluation_timing") or {}})
             profile = str(evidence.get("profile") or row.get("profile") or "")
             profiles.add(profile or "unknown")
             status = evidence.get("status") or evidence.get("confirm_status") or row.get("status")
@@ -75,6 +79,8 @@ def attach_runtime_diagnostics(report):
                     continue
                 if not isinstance(payload, dict) or payload.get("side", "buy") != "buy":
                     continue
+                if event.get("kind") == "notification_queued":
+                    queued.append({"occurred_at": event.get("occurred_at"), **payload})
                 if event.get("kind") not in {"notification", "notification_attempt"}:
                     continue
                 if payload.get("code") and str(payload["code"]) != stock["code"]:
@@ -86,8 +92,11 @@ def attach_runtime_diagnostics(report):
                     attempts[key] = {"occurred_at": key[0], "status": payload.get("status") or "",
                                      "sent": _sent(payload.get("sent")),
                                      "reason": payload.get("skip_reason") or ""}
+                    attempts[key].update({k: payload[k] for k in
+                        ("submitted_at", "completed_at", "queue_wait_ms", "channels") if k in payload})
         ordered = sorted(attempts.values(), key=lambda event: event["occurred_at"])
         state = ("sent" if delivered else "attempt_not_sent" if ordered else
+                 "notification_queued" if queued else
                  "confirmed_no_delivery_record" if production_confirmed else
                  "observation_confirmed" if confirmed else "veto_recorded" if vetoes else
                  "recorded_without_confirmation" if records else "no_runtime_evidence")
@@ -97,12 +106,43 @@ def attach_runtime_diagnostics(report):
             missing = stock.get("status") == "missing_evidence" or any(
                 failure.get("code") == stock["code"] for failure in report.get("failures") or [])
             discrepancy = "replay_missing_evidence" if missing else "replay_result_differs"
+        replay_confirmed = bool(stock.get("first_confirm_time"))
+        comparison = {}
+        if replay_confirmed and not production_confirmed:
+            discrepancy = ("replay_confirmed_without_runtime_confirmation" if records else
+                           "replay_confirmed_without_runtime_evidence")
+            target = stock.get("first_evaluated_at") or stock["first_confirm_time"]
+            try:
+                cutoff = datetime.strptime(report["market_date"] + target, "%Y%m%d%H:%M:%S").replace(
+                    tzinfo=ZoneInfo("Asia/Shanghai"))
+                neighbors = []
+                for observation in observations:
+                    if observation["profile"] != "production":
+                        continue
+                    stamp = datetime.fromisoformat(observation["observed_at"])
+                    if stamp.tzinfo is None:
+                        stamp = stamp.replace(tzinfo=cutoff.tzinfo)
+                    delta = (stamp - cutoff).total_seconds()
+                    if abs(delta) <= 90:
+                        neighbors.append({**observation, "offset_seconds": round(delta, 3)})
+                before = [r for r in neighbors if r["offset_seconds"] <= 0]
+                after = [r for r in neighbors if r["offset_seconds"] > 0]
+                comparison = {"replay_observed_at": cutoff.isoformat(),
+                              "before": max(before, key=lambda r: r["offset_seconds"]) if before else None,
+                              "after": min(after, key=lambda r: r["offset_seconds"]) if after else None,
+                              "scope": "neighboring_records_not_exact_tick"}
+            except (ValueError, TypeError, KeyError):
+                comparison = {"scope": "invalid_replay_timestamp"}
+        stock["ever_confirmed"] = replay_confirmed
+        stock["closing_status"] = stock.get("status")
         stock["runtime_diagnostic"] = {
             "state": state, "record_count": len(records), "profiles": sorted(profiles),
             "confirmed": confirmed, "production_confirmed": production_confirmed,
             "confirm_times": sorted(times), "notification_sent": delivered,
             "notification_attempts": ordered, "veto_reasons": sorted(vetoes),
+            "notification_queued": queued,
             "replay_discrepancy": discrepancy,
+            "confirmation_comparison": comparison,
             "last_observation": max(observations, key=lambda item: item["observed_at"]) if observations else None,
         }
         counts[state] += 1
@@ -111,5 +151,6 @@ def attach_runtime_diagnostics(report):
         "confirmed_stocks": sum(bool(s["runtime_diagnostic"]["confirmed"]) for s in report.get("stocks") or []),
         "sent_stocks": counts["sent"],
         "scope": "selected_stocks_all_day_recorded_events",
+        "cycle_summary": (recorded.get("signal_ledger") or {}).get("cycle_summary") or {},
     }
     return report

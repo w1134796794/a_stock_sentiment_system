@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import RLock
 from time import monotonic
 from typing import Any, Dict, Iterable, Optional, Set, Tuple
@@ -41,7 +41,66 @@ class RealtimeSectorBreadthProvider:
         self._result_cache: Dict[Tuple[str, Tuple[str, ...]], Tuple[float, Optional[bool], Dict[str, Any]]] = {}
         self._last_sector_quote_detail: Dict[str, Any] = {}
         self._opening_history = {}
+        self._minute_context_cache = {}
+        self._batch_frozen_context = None
         self._lock = RLock()
+
+    def minute_checker(self, sectors, market_date, *, exclude_code="", history_minutes=25):
+        """Read collector evidence; never reconstruct history from Web polling."""
+        from core.realtime.sector_quote_minutes import SectorQuoteMinuteRepository
+        from core.operations.preopen_evidence import PreopenEvidenceStore
+        from core.signals.sector_sync import make_constituent_sync_checker
+        clock = shanghai_now()
+        boundary = clock.replace(second=0, microsecond=0)
+        names = tuple(sorted(set(sectors)))
+        context = self._batch_frozen_context
+        frozen = context[1] if context and context[0] == market_date else (
+            PreopenEvidenceStore().load(self.calendar.prev(market_date), market_date))
+        members = (RealtimeSectorService.confirmation_members(frozen["inputs"]) if frozen else
+                   {name: sorted(self._members(name, market_date)) for name in names})
+        codes = sorted({c for name in names for c in members.get(name, [])})
+        key = (market_date, tuple(codes), boundary.isoformat(), history_minutes)
+        with self._lock:
+            cached = self._minute_context_cache.get(key)
+        if cached is None or monotonic() - cached[0] > self.ttl_seconds:
+            minutes = [(boundary - timedelta(minutes=i)).strftime("%H:%M:%S") for i in range(history_minutes)]
+            points = SectorQuoteMinuteRepository().read_points(
+                market_date, codes, until=boundary.strftime("%H:%M:%S"), minutes=minutes)
+            with self._lock:
+                self._minute_context_cache = {k: v for k, v in self._minute_context_cache.items()
+                                              if k[0] == market_date and k[2] == key[2]}
+                self._minute_context_cache[key] = (monotonic(), points)
+        else:
+            points = cached[1]
+        previous, opening = {}, {}
+        if frozen:
+            previous = {str(r.get("code") or r.get("ts_code") or "").split(".")[0]: dict(r)
+                        for r in frozen["inputs"].get("daily_rows") or []}
+        for code, values in points.items():
+            latest = values[max(values)]
+            if latest.get("open_price"):
+                opening[code] = latest["open_price"]
+            if latest.get("pre_close"):
+                previous[code] = {"close": latest["pre_close"]}
+        prices = {code: {minute: row["price"] for minute, row in values.items()
+                         if (not row.get("open_price") or row["open_price"] == opening.get(code))
+                         and (not row.get("pre_close") or row["pre_close"] == (previous.get(code) or {}).get("close"))}
+                  for code, values in points.items()}
+        base, detail = make_constituent_sync_checker(code=exclude_code, names=names, members=members,
+            frames={}, previous=previous, opening_prices=opening, minute_prices=prices)
+
+        def checker(at_time):
+            minute = str(at_time)[:5] + ":00"
+            end = shanghai_now(datetime.strptime(market_date + minute, "%Y%m%d%H:%M:%S"))
+            if market_date != clock.strftime("%Y%m%d") or end > boundary:
+                detail.update({"assessed": True, "data_completeness": 0.0,
+                               "reason": "板块分钟尚未闭合或不是当前交易日"})
+                return None
+            state = base(minute)
+            detail.update({"observed_at": end.isoformat(), "sector_confirmation_source": "collector_closed_quote_minutes",
+                           "timestamp_semantics": "minute_end", "sampled_at": clock.isoformat()})
+            return state
+        return checker, detail
 
     def evaluate(self, sectors: Iterable[str], market_date: str, *, exclude_code: str = '') -> Tuple[Optional[bool], Dict[str, Any]]:
         names = tuple(sorted({str(name or "").strip() for name in sectors if str(name or "").strip()}))

@@ -140,10 +140,8 @@ class RealtimeQuoteService:
         if self.dm is not None:
             return self.dm
         try:
-            from config.settings import CACHE_DIR, TUSHARE_TOKEN
-            from core.data.data_manager_main import DataManager
-
-            self.dm = DataManager(TUSHARE_TOKEN, CACHE_DIR)
+            from core.realtime.read_only_market import ReadOnlyMarketData
+            self.dm = ReadOnlyMarketData()
             return self.dm
         except Exception as e:  # noqa: BLE001
             self._last_error = f"DataManager 初始化失败: {e}"

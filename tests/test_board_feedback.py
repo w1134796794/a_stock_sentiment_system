@@ -165,23 +165,25 @@ def profiles():
 
 @pytest.mark.parametrize("gap", [-.01, .02, .06])
 @pytest.mark.parametrize("known", [True, False])
-def test_optional_factor_never_replaces_minute_or_snapshot_confirmation(gap, known):
+@pytest.mark.parametrize("source", ["minute", "snapshot"])
+def test_optional_factor_never_replaces_minute_or_snapshot_confirmation(gap, known, source):
     evaluator = minute_evaluator(RiskConfig())
     calls = []
     def confirmed(**kwargs):
-        calls.append("minute")
-        return EntryDecision("confirmed", reason="minute confirmed", confirm_time="09:39:00")
+        calls.append(source)
+        return EntryDecision("confirmed", reason=f"{source} confirmed", confirm_time="09:39:00")
     evaluator.evaluate = confirmed
     service = _ReplayEntryService({}, {}, {}, {}, profiles(), evaluator=evaluator,
                                   board_feedback_inputs=inputs() if known else {})
+    service.snapshot_primary_enabled = source == "snapshot"
     service._snapshot_frame = lambda *a: pd.DataFrame([{"time": "09:39:58"}])
-    service.snapshot_signals = SimpleNamespace(evaluate=lambda **kw: calls.append("snapshot"))
+    service.snapshot_signals = SimpleNamespace(evaluate_primary=lambda **kw: (confirmed(**kw), ""))
     signal = service._evaluate_one({"code": CODE, "name": "Cuhua", "score": 100},
         quote(open_price=14.22 * (1 + gap)), pd.DataFrame(), {}, {}, {"close": 14.22},
         "20261016", [], {})
-    assert calls == ["minute", "snapshot"]
+    assert calls == [source]
     assert signal["signal_status"] == "confirmed"
-    assert signal["reason"] == "minute confirmed"
+    assert signal["reason"] == f"{source} confirmed"
     assert signal["data_status"] == "complete"
     assert signal["board_feedback"]["active"] is known
     assert signal["board_feedback"]["assessed"] is known
