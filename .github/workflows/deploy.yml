@@ -39,4 +39,10 @@ jobs:
 
             sudo systemctl restart a-stock
             sudo systemctl status a-stock --no-pager
+            if systemctl is-enabled --quiet a-stock-market.target; then
+              sudo systemctl restart a-stock-market.target
+              sudo systemctl status a-stock-collector a-stock-archiver a-stock-strategy --no-pager
+            else
+              echo "Market workers are not installed/enabled; Web restart does not start them."
+            fi
           EOF

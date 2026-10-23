@@ -1521,6 +1521,8 @@ sudo systemctl status a-stock
 
 systemd 已运行时，不要再手工执行 `python run_web.py`，否则会出现 8000 端口被占用。
 
+实时行情新架构还需一次性安装采集、归档、策略三个独立systemd服务。仅启动`a-stock`不会启动它们；安装后可统一开机自启、异常重启。安装命令及共享环境要求见[独立行情与策略运行](docs/20261023-independent-market-pipeline.md#linux开机自启)。
+
 确认 Redis 和共享目录稳定后，可将 `--workers 1` 调整为 `--workers 2`。程序会拒绝在未配置 `REDIS_URL` 时启动多 Worker，避免重复刷新行情和重复执行任务。2 GB 服务器建议最多 2 个 Worker，并且历史跑批期间保持 1 个。
 
 ### 20.3 目录权限

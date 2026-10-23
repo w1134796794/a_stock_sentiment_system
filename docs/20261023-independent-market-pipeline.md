@@ -62,3 +62,31 @@
 - 午休/非交易时段不运行买点判断。策略输入只使用盘前冻结版本，缺数时等待，不在线修复成员关系或重新筛选股票。
 
 本地诊断Web使用`--lifespan off`，不代表这些长期进程已部署或真实通知已启用。必须分别确认采集、归档、策略心跳及Redis连通性；不要只重启Web就认为新架构已运行。
+
+## Linux开机自启
+
+仓库原有GitHub Actions部署只重启`a-stock`。首次需要在服务器安装独立进程的systemd配置；以后系统重启自动拉起，部署流程也会重启已启用的`a-stock-market.target`。不需要每天手工启动，也不需要定时重启进程。
+
+先检查现有Web运行账号和配置，以下命令中的`astock`替换为实际账号，项目路径使用服务器真实路径：
+
+```bash
+systemctl show a-stock -p User -p WorkingDirectory -p EnvironmentFiles
+cd /opt/a_stock_sentiment_system
+sudo .venv/bin/python scripts/install_market_systemd.py --user astock --install --notifications
+sudo systemctl restart a-stock-market.target
+sudo systemctl status a-stock-collector a-stock-archiver a-stock-strategy --no-pager
+```
+
+安装命令仅写入服务配置并设置开机自启，不立即启动或重启；启动是下一条显式命令。不加`--install`仅在`outputs/systemd`生成预览文件；不加`--notifications`不发送真实通知，不启用模拟交易或持仓执行。
+
+三个服务使用同一项目目录、Python环境、运行账号和`.env`；可用`--python /absolute/venv/bin/python`及`--env-file /absolute/shared.env`指定已有环境。该环境文件须符合systemd的`KEY=value`格式，不使用`export`、shell命令或变量展开。Web若另有Environment配置，必须将Redis地址、前缀、数据目录、通知配置等同步至共享文件。`.env`应设置`REALTIME_STRATEGY_EXTERNAL=true`、`ELTDX_EMBEDDED_COLLECTOR_ENABLED=false`并重启Web，停止原有独立旧策略进程，避免新旧逻辑同时运行。运行账号须能读取代码/环境文件，写入数据、缓存和归档目录。脚本不修改目录所有者，也不自动安装Redis。
+
+```bash
+sudo systemctl restart a-stock-market.target
+sudo systemctl stop a-stock-market.target
+sudo journalctl -u a-stock-collector -u a-stock-archiver -u a-stock-strategy -f
+```
+
+`restart`统一重启三个进程；`stop`暂时停止，服务器重启仍自动恢复。永久停用使用`sudo systemctl disable --now a-stock-market.target`。单独重启某个进程可使用对应service名称。服务进程异常退出后5秒重启；进程仍存活但采集停滞时，仍需监控原有行情新鲜度、策略心跳和归档积压，不能把systemd的active当作行情健康。
+
+盘前任务仍由启用`AUTOMATION_ENABLED`的Web调度器在真实交易日09:00至09:25运行；这些systemd服务不会绕过冻结输入要求。若服务器在09:25之后才启动且没有当天名单，会等待并显示缺失原因，不在盘中补建。首次安装后还需核对`/api/realtime/collection-plan`中的名单、采集计划ID及各进程健康状态。
