@@ -300,9 +300,12 @@ class RealtimeSectorService:
     def confirmation_members(cls, inputs: Dict[str, Any]) -> Dict[str, List[str]]:
         """Use code-bound THS board evidence; never reinterpret old classifications."""
         codes = inputs.get("sector_codes") or {}
+        from core.realtime.listing_evidence import listing_exclusions
+        excluded = listing_exclusions(inputs)
         return {
             name: list(dict.fromkeys(normalize_stock_code(value, add_suffix=False) for value in values
-                                    if normalize_stock_code(value, add_suffix=False)))
+                                    if normalize_stock_code(value, add_suffix=False)
+                                    and normalize_stock_code(value, add_suffix=False) not in excluded))
             for name, values in (inputs.get("sector_members") or {}).items()
             if codes.get(name) and cls._valid_code_for_source(codes[name], "ths")
         }

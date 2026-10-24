@@ -42,6 +42,7 @@ class RealtimeQuoteCache:
         source: str,
         collector_id: str,
         snapshot_codes: Iterable[str] | None = None,
+        publish_event: bool = True,
     ) -> Dict[str, Any]:
         now = shanghai_now()
         values: Dict[str, Dict[str, Any]] = {}
@@ -97,6 +98,10 @@ class RealtimeQuoteCache:
                 if same_session else 0.0
             )
             normalized.update({
+                "sample_interval_seconds": (
+                    (shanghai_now(datetime.fromisoformat(item.received_at)) -
+                     shanghai_now(datetime.fromisoformat(old["received_at"]))).total_seconds()
+                    if same_session and old.get("received_at") and item.received_at else None),
                 "delta_volume": delta_volume,
                 "delta_amount": delta_amount,
                 "quality_ok": bool(
@@ -131,9 +136,16 @@ class RealtimeQuoteCache:
             "storage": self.storage,
             "opening_evidence_error": opening_error,
         }
+        intervals = sorted(v["sample_interval_seconds"] for v in values.values()
+                           if v.get("sample_interval_seconds") is not None)
+        meta["sample_intervals"] = {"count": len(intervals),
+            "p50_seconds": intervals[len(intervals) // 2] if intervals else None,
+            "p95_seconds": intervals[min(len(intervals) - 1, int(len(intervals) * .95))] if intervals else None,
+            "max_seconds": intervals[-1] if intervals else None}
         self.backend.set_json(self.META_KEY, meta, self.ttl_seconds)
         from core.realtime.market_events import publish_revision
-        publish_revision(self.backend, trade_date, kind="quotes")
+        if publish_event:
+            publish_revision(self.backend, trade_date, kind="quotes", codes=[v["code"] for v in values.values()])
         return {"ok": True, "count": len(values), "rejected_codes": rejected_codes, **meta}
 
     def read_batch(self, codes: Iterable[str]) -> Dict[str, Dict[str, Any]]:

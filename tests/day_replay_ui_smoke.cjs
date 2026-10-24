@@ -14,6 +14,8 @@ const report={run_id:id,market_date:'20261009',candidate_date:'20261008',until:'
   comparison:{comparable:true,reason:'同输入代码回归',changes:[{code:'002614',before:{status:'observe',reason:'旧代码阻断'},after:{status:'confirmed',reason:'规则通过',first_confirm_time:'09:46:00'}}]},
   stocks:[{code:'002614',name:'奥佳华',status:'observe',first_confirm_time:'09:46:00',first_evaluated_at:'09:47:00',reason:'<img src=x onerror=alert(1)> 仅分钟诊断',
     transitions:[{evaluated_at:'09:47:00',signal_status:'confirmed',confirm_time:'09:46:00',entry_time:'',reason:'满足分钟确认条件',data_status:'minute_fallback',sector_detail:{coverage:.75,confirmation_path:'open_rising_3m',open_gain_pct:.6,three_minute_change_pct:.2,trend_coverage:.75}}]}]};
+report.board_shadow={status:'missing_board_snapshots',market_date:'20261009',until:'10:30:00',rows:[],timeline:[],failures:[{evidence:'board_snapshot_missing',reason:'No historical board snapshot'}],reconciliation:{}};
+const shadow={...report.board_shadow,status:'shadow_only',synthetic:true,rows:[{code:'sh880001',status:'fresh_receipt',received_at:'2026-10-09T09:31:10+08:00',receipt_age_seconds:0,change_pct:2,open_gain_pct:1,observed_window_seconds:10,max_gap_seconds:10}],failures:[],timeline:[{code:'sh880001',evaluated_at:'2026-10-09T09:31:10+08:00',replayed:{status:'fresh_receipt'},captured:null,comparison_state:'missing_live_assessment'}],reconciliation:{missing_live_assessment:1}};
 (async()=>{
   const server=http.createServer((req,res)=>{
     let file;
@@ -34,7 +36,8 @@ const report={run_id:id,market_date:'20261009',candidate_date:'20261008',until:'
       let state={run_id:id,request,state:'running',started_epoch:Date.now()/1000,progress:{stage:'逐分钟确认回放',completed:1,total:4,code:'002614'}},posted;
       await page.route('**/api/intraday-replay**',route=>{
         const url=new URL(route.request().url());let data;
-        if(url.pathname.endsWith('/cancel')){state={...state,state:'cancelled',error:'用户取消诊断回放'};data={ok:true};}
+        if(url.pathname.startsWith('/api/intraday-replay/board-shadow/'))data={ok:true,data:shadow};
+        else if(url.pathname.endsWith('/cancel')){state={...state,state:'cancelled',error:'用户取消诊断回放'};data={ok:true};}
         else if(route.request().method()==='POST'){posted=route.request().postDataJSON();state={...state,state:'running'};data={ok:true,run_id:id};}
         else if(url.pathname==='/api/intraday-replay')data={ok:true,runs:[state]};
         else data={ok:true,data:url.searchParams.has('report')?report:state};
@@ -45,7 +48,12 @@ const report={run_id:id,market_date:'20261009',candidate_date:'20261008',until:'
       assert.equal(await page.locator('#dr-start').isDisabled(),true);
       await page.reload();await page.getByText('当前阶段 25.0%',{exact:false}).waitFor();
       state={...state,state:'done'};
-      await page.locator('#dr-summary').getByText('数据不完整',{exact:true}).waitFor();
+      await page.locator('#dr-stocks summary').getByText('回放结束：观察',{exact:true}).waitFor();
+      assert.match(await page.locator('#dr-board-report').innerText(),/缺少历史板块快照/);
+      await page.locator('#dr-board-start').click();
+      await page.locator('#dr-board-report').getByText('sh880001',{exact:true}).first().waitFor();
+      assert.match(await page.locator('#dr-board-report').innerText(),/合成样本/);
+      assert.match(await page.locator('#dr-board-report').innerText(),/非正式买点/);
       await page.locator('#dr-stocks summary').click();
       assert.equal(await page.locator('#dr-stocks img').count(),0);
       assert.match(await page.locator('#dr-stocks').innerText(),/09:46:00/);

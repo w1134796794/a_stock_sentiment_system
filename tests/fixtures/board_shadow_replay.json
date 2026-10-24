@@ -1,0 +1,19 @@
+{
+  "synthetic": true,
+  "inputs": {
+    "market_date": "20261023",
+    "parent": {"market_date": "20261023", "plan_id": "synthetic-parent"},
+    "plan": {"market_date": "20261023", "plan_id": "synthetic-board", "collection_plan_id": "synthetic-parent", "codes": ["sh880001"], "rows": []},
+    "points": [
+      {"synthetic": true, "code": "sh880001", "date": "20261023", "board_plan_id": "synthetic-board", "source": "eltdx_board_snapshot", "received_at": "2026-10-23T09:31:00+08:00", "last_price": 102, "open_price": 101, "pre_close": 100},
+      {"synthetic": true, "code": "sh880001", "date": "20261023", "board_plan_id": "synthetic-board", "source": "eltdx_board_snapshot", "received_at": "2026-10-23T09:31:10+08:00", "last_price": 103, "open_price": 101, "pre_close": 100},
+      {"synthetic": true, "code": "sh880001", "date": "20261023", "board_plan_id": "synthetic-board", "source": "eltdx_board_snapshot", "received_at": "2026-10-23T09:32:00+08:00", "last_price": 104, "open_price": 101, "pre_close": 100}
+    ]
+  },
+  "cases": [
+    {"name": "no_lookahead_before_first_observation", "until": "09:30:00", "expected": {"status": "missing_board_snapshots", "observed_points": 0, "board_status": "missing", "formal_signal": false, "notification_sent": false}},
+    {"name": "two_observed_snapshots", "until": "09:31:10", "expected": {"status": "shadow_only", "observed_points": 2, "board_status": "fresh_receipt", "formal_signal": false, "notification_sent": false}},
+    {"name": "stale_not_forward_filled", "until": "09:31:40", "expected": {"status": "shadow_only", "observed_points": 2, "board_status": "stale", "formal_signal": false, "notification_sent": false}},
+    {"name": "later_observation_becomes_available", "until": "09:32:00", "expected": {"status": "shadow_only", "observed_points": 3, "board_status": "fresh_receipt", "formal_signal": false, "notification_sent": false}}
+  ]
+}

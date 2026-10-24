@@ -54,4 +54,7 @@ def test_preview_has_no_systemctl_side_effects(tmp_path, monkeypatch):
 def test_deployment_restarts_market_only_when_installed():
     workflow = Path(".github/workflows/deploy.yml").read_text(encoding="utf-8")
     assert "systemctl is-enabled --quiet a-stock-market.target" in workflow
-    assert "sudo systemctl restart a-stock-market.target" in workflow
+    assert "sudo -n /usr/bin/systemctl restart a-stock-market.target" in workflow
+    assert "sudo systemctl status" not in workflow
+    assert "scripts/check_eltdx_runtime.py" in workflow
+    assert "--fixture tests/fixtures/board_shadow_replay.json" in workflow

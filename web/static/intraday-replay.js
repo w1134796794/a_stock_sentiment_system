@@ -80,6 +80,7 @@
     return value.runs;
   }
   function renderReport(r) {
+    renderBoardShadow(r.board_shadow);
     $('dr-summary').innerHTML = [['候选日 / 行情日',`${r.candidate_date} / ${r.market_date}`],['本次分钟回放曾确认',`${r.confirmed_stocks} / ${r.stocks.length}`],['缺证据项',r.failures.length],['当日全天通知发送记录',r.runtime_summary?`${r.runtime_summary.sent_stocks} / ${r.stocks.length}`:'--']].map(([label,v])=>`<div>${esc(label)}<strong>${esc(v)}</strong></div>`).join('');
     const cycles=r.runtime_summary?.cycle_summary;
     if(cycles?.recorded_cycles)$('dr-summary').insertAdjacentHTML('beforeend',`<div>真实后台循环<strong>${esc(cycles.recorded_cycles)}</strong></div><div>整轮耗时中位 / 最大（毫秒）<strong>${esc(cycles.duration_p50_ms)} / ${esc(cycles.duration_max_ms)}</strong></div>`);
@@ -103,6 +104,28 @@
     $('dr-download').classList.remove('hidden');
     $('dr-download').href = `/api/intraday-replay/${encodeURIComponent(r.run_id)}?report=true`;
   }
+  function renderBoardShadow(report) {
+    const section=$('dr-board-section'), target=$('dr-board-report');
+    section.classList.toggle('hidden',!report);
+    if(!report){target.textContent='';return;}
+    const state={shadow_only:'影子数据回放',missing_collection_plan:'缺少当天冻结采集计划',missing_board_plan:'缺少盘前板块对照计划',missing_board_snapshots:'缺少历史板块快照',invalid_evidence:'证据身份不符'};
+    const quoteState={missing:'缺失',stale:'过期',fresh_receipt:'接收新鲜'};
+    const comparison={matched:'一致',different:'不一致',missing_live_assessment:'缺采集时判定',version_mismatch:'判定版本不同'};
+    const audit=report.reconciliation||{};
+    target.innerHTML=`<p class="text-sm text-amber-300">${esc(state[report.status]||report.status)} · ${esc(report.market_date)} ${esc(report.until)}${report.synthetic?' · 合成样本':''} · 非正式买点</p>`+
+      `<p class="text-sm text-slate-400 mt-2">逐点对账：一致 ${esc(audit.matched||0)} · 不一致 ${esc(audit.different||0)} · 缺采集时判定 ${esc(audit.missing_live_assessment||0)} · 版本不同 ${esc(audit.version_mismatch||0)}</p>`+
+      table(['板块代码','截止状态','报价接收时间','接收年龄（秒）','相对昨收','相对开盘','观测跨度（秒）','最大间隔（秒）'],(report.rows||[]).map(row=>[row.code,quoteState[row.status]||row.status,row.received_at||'--',row.receipt_age_seconds??'--',percent(row.change_pct),percent(row.open_gain_pct),row.observed_window_seconds,row.max_gap_seconds??'--']))+
+      ((report.failures||[]).length?table(['板块代码','缺失或异常证据','原因'],report.failures.map(row=>[row.code||'--',row.evidence,row.reason])):'')+
+      `<details><summary>逐点回放与采集时判定 ${esc((report.timeline||[]).length)} 条</summary>${table(['板块代码','判定时间','采集时状态','回放状态','对账'],(report.timeline||[]).map(row=>[row.code,row.evaluated_at,quoteState[row.captured?.status]||'未记录',quoteState[row.replayed?.status]||'--',comparison[row.comparison_state]||row.comparison_state]))}</details>`;
+  }
+  $('dr-board-start').addEventListener('click',async()=>{
+    $('dr-board-start').disabled=true;$('dr-error').textContent='';
+    try{
+      const response=await api(`/api/intraday-replay/board-shadow/${encodeURIComponent($('dr-date').value)}?until=${encodeURIComponent($('dr-until').value)}`);
+      renderBoardShadow(response.data);
+    }catch(e){$('dr-error').textContent=e.message;}
+    finally{$('dr-board-start').disabled=false;}
+  });
   async function poll() {
     if (!runId || pending) return;
     pending = true;

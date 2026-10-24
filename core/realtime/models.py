@@ -181,6 +181,8 @@ class QuoteSnapshot:
             "source": self.source,
             "received_at": self.received_at,
             "stale_seconds": self.stale_seconds,
+            "sample_interval_seconds": (to_float(self.raw["sample_interval_seconds"])
+                                        if self.raw.get("sample_interval_seconds") is not None else None),
             "is_stale": self.is_stale,
         }
         if include_raw:

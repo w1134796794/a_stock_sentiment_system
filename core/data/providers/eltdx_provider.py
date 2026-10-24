@@ -10,6 +10,8 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 import re
 from time import monotonic
+from threading import RLock
+from collections import Counter
 from typing import Any, Optional
 
 import pandas as pd
@@ -19,14 +21,43 @@ from core.utils.stock_code_utils import StockCodeUtils
 from core.realtime.trading_session import shanghai_now
 
 
+class QuoteFailureState:
+    """Collector-scoped cooldowns shared across short-lived batch providers."""
+    def __init__(self, clock=monotonic):
+        self.clock, self.lock, self.entries = clock, RLock(), {}
+
+    def active(self, key):
+        with self.lock:
+            item = self.entries.get(key)
+            if item and item[0] > self.clock():
+                return item[1:]
+            self.entries.pop(key, None)
+        return None
+
+    def put(self, key, reason, category, seconds):
+        with self.lock:
+            self.entries = {k: v for k, v in self.entries.items() if v[0] > self.clock()}
+            self.entries[key] = (self.clock() + seconds, reason, category)
+
+
+def quote_failure_category(exc):
+    text = str(exc).lower()
+    if isinstance(exc, TimeoutError) or "timed out" in text or "timeout" in text:
+        return "timeout"
+    if "request failed" in text or "0x" in text:
+        return "protocol_request_failed"
+    return "transport_or_decode_error"
+
+
 class EltdxProvider:
     """Thin wrapper around ``eltdx.TdxClient`` with project-shaped outputs."""
 
-    def __init__(self, timeout: float = 3.0, host: Optional[str] = None):
+    def __init__(self, timeout: float = 3.0, host: Optional[str] = None, *, failure_state=None):
         self.timeout = timeout
         self.host = host
-        self._unavailable_snapshots: dict[str, tuple[float, str]] = {}
+        self.failure_state = failure_state or QuoteFailureState()
         self.last_quote_diagnostics: dict = {}
+        self.last_minute_diagnostics: dict = {}
 
     @staticmethod
     def available() -> bool:
@@ -64,9 +95,13 @@ class EltdxProvider:
                     result = client.get_auction_0925(code, self._parse_trade_date(trade_date))
                 else:
                     helper = getattr(client, "helpers", None)
-                    result = helper.get_auction_data(
-                        code, self._parse_trade_date(trade_date)
-                    ).snapshot_0925
+                    if hasattr(helper, "auction_data"):
+                        result = helper.auction_data(code, self._parse_trade_date(trade_date),
+                            include_series=False, include_quote=False).snapshot_0925
+                    else:
+                        result = helper.get_auction_data(
+                            code, self._parse_trade_date(trade_date)
+                        ).snapshot_0925
             return self._auction_0925_to_dict(result, ts_code, trade_date)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] auction 09:25 unavailable {ts_code} {trade_date}: {e}")
@@ -79,14 +114,25 @@ class EltdxProvider:
         ``get_history_minute(code, 'YYYY-MM-DD')``（eltdx>=0.4）。
         """
         code = self._to_tdx_code(ts_code)
+        started = monotonic()
         try:
             with self._client() as client:
-                if self._is_today(trade_date):
+                minutes = getattr(client, "minutes", None)
+                if minutes is not None:
+                    series = (minutes.today(code) if self._is_today(trade_date)
+                              else minutes.history(code, self._to_dash_date(trade_date)))
+                elif self._is_today(trade_date):
                     series = client.get_minute(code)
                 else:
                     series = client.get_history_minute(code, self._to_dash_date(trade_date))
-            return self._minute_series_to_frame(series, ts_code, trade_date)
+            frame = self._minute_series_to_frame(series, ts_code, trade_date)
+            self.last_minute_diagnostics = {"code": code, "ok": not frame.empty,
+                "category": "success" if not frame.empty else "empty_response",
+                "duration_ms": round((monotonic() - started) * 1000, 3)}
+            return frame
         except Exception as e:  # noqa: BLE001
+            self.last_minute_diagnostics = {"code": code, "ok": False, "category": quote_failure_category(e),
+                "duration_ms": round((monotonic() - started) * 1000, 3)}
             logger.debug(f"[EltdxProvider] minute bars unavailable {ts_code} {trade_date}: {e}")
             return pd.DataFrame()
 
@@ -117,31 +163,46 @@ class EltdxProvider:
         tdx_codes = [self._to_tdx_code(c) for c in codes]
         out: dict = {}
         failures = {}
+        categories, batches = {}, []
+        started = monotonic()
         try:
             with self._client() as client:
                 for i in range(0, len(tdx_codes), 80):
+                    batch_start = monotonic()
+                    batch_started_at = shanghai_now().isoformat(timespec="milliseconds")
+                    requested = tdx_codes[i:i + 80]
+                    batch_key = ("chunk", tuple(requested))
+                    blocked = self.failure_state.active(batch_key)
                     chunk = []
-                    for code in tdx_codes[i:i + 80]:
-                        unavailable = self._unavailable_snapshots.get(code)
-                        if unavailable and monotonic() < unavailable[0]:
-                            failures[code] = unavailable[1]
+                    for code in requested:
+                        unavailable = self.failure_state.active(("symbol", code)) or blocked
+                        if unavailable:
+                            failures[code], categories[code] = unavailable
                         else:
                             chunk.append(code)
                     snaps = []
                     while chunk:
                         try:
                             snaps = client.quotes.get_snapshots(chunk) or []
+                            if not snaps:
+                                failures.update({code: "empty_response" for code in chunk})
+                                categories.update({code: "empty_response" for code in chunk})
+                                self.failure_state.put(batch_key, "empty_response", "empty_response", 2)
                             break
                         except Exception as exc:
                             # eltdx names the missing record; isolate only that exact requested symbol.
                             match = re.fullmatch(r"snapshot record marker not found: ((?:sz|sh|bj)\d{6})", str(exc))
                             if not match or match[1] not in chunk:
                                 failures.update({code: str(exc) for code in chunk})
+                                category = quote_failure_category(exc)
+                                categories.update({code: category for code in chunk})
+                                self.failure_state.put(batch_key, str(exc), category, 2 if category == "timeout" else 5)
                                 logger.debug("[EltdxProvider] snapshot chunk unavailable: {}", exc)
                                 break
                             code = match[1]
                             failures[code] = str(exc)
-                            self._unavailable_snapshots[code] = (monotonic() + 300, str(exc))
+                            categories[code] = "symbol_record_missing"
+                            self.failure_state.put(("symbol", code), str(exc), "symbol_record_missing", 300)
                             chunk.remove(code)
                             logger.warning("[EltdxProvider] temporarily isolate missing snapshot {}: {}", code, exc)
                     received_at = shanghai_now()
@@ -150,13 +211,24 @@ class EltdxProvider:
                         if not code6 or code6 == "000000":
                             continue
                         out[code6] = self._normalize_quote_snapshot(s, received_at)
+                    batches.append({"requested_codes": requested, "received_count": len(snaps),
+                                    "started_at": batch_started_at,
+                                    "suppressed_count": len(requested) - len(chunk),
+                                    "completed_at": received_at.isoformat(timespec="milliseconds"),
+                                    "duration_ms": round((monotonic() - batch_start) * 1000, 3)})
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] batch quote snapshots unavailable ({len(codes)} codes): {e}")
             failures.update({code: str(e) for code in tdx_codes if code[-6:] not in out})
+            categories.update({code: quote_failure_category(e) for code in tdx_codes if code[-6:] not in out})
+        for code in tdx_codes:
+            if code[-6:] not in out and code not in categories:
+                categories[code] = "not_returned"
         self.last_quote_diagnostics = {
             "requested_count": len(codes), "returned_count": len(out),
             "missing_codes": [code for code in codes if StockCodeUtils.standardize_code(code, add_suffix=False) not in out],
             "failures": failures,
+            "failure_categories": dict(Counter(categories.values())), "code_failure_categories": categories,
+            "batches": batches, "duration_ms": round((monotonic() - started) * 1000, 3),
         }
         return out
 
@@ -212,6 +284,53 @@ class EltdxProvider:
         if isinstance(level, dict):
             return cls._float(level.get("price")), cls._float(level.get("volume"))
         return cls._float(getattr(level, "price", None)), cls._float(getattr(level, "volume", None))
+
+    def prepare_board_catalogue(self, *, category="全部") -> dict:
+        """Preopen only: catalogue rows are definitions, not successful quote counts."""
+        with self._client() as client:
+            table = client.helpers.board_quotes(category=category)
+        return {"prepared_date": table.prepared_date.strftime("%Y%m%d"),
+                "rows": [{"code": row.full_code, "name": row.board_name} for row in table.rows]}
+
+    def prepare_board_members(self, full_code: str) -> dict:
+        """Preopen membership audit; absence from the SDK list is not delisting proof."""
+        with self._client() as client:
+            table = client.helpers.board_member_quotes(full_code)
+        return {"prepared_date": table.prepared_date.strftime("%Y%m%d"),
+                "members": [str(row["code"]).zfill(6) for row in table.display_members],
+                "excluded_members": [dict(row) for row in table.excluded_members]}
+
+    def get_board_snapshots(self, full_codes) -> dict:
+        """Fetch frozen board identities without stock-code inference or preparation."""
+        import re
+        codes = list(dict.fromkeys(full_codes))
+        if any(not re.fullmatch(r"(?:sh|sz|bj)\d{6}", code) for code in codes):
+            raise ValueError("Board quotes require explicit market-prefixed codes")
+        rows, batches = {}, []
+        with self._client() as client:
+            for offset in range(0, len(codes), 80):
+                chunk = codes[offset:offset + 80]
+                started = monotonic()
+                try:
+                    snapshots = client.quotes.get_snapshots(chunk) or []
+                    received = shanghai_now()
+                    for snapshot in snapshots:
+                        full_code = str(getattr(snapshot, "full_code", ""))
+                        if full_code not in chunk:
+                            continue
+                        row = self._normalize_quote_snapshot(snapshot, received)
+                        row.pop("ts_code", None)
+                        row.update(code=full_code, date=received.strftime("%Y%m%d"),
+                                   source="eltdx_board_snapshot", exchange_timestamp_verified=False)
+                        rows[full_code] = row
+                    batches.append({"codes": chunk, "received_count": sum(c in rows for c in chunk),
+                                    "duration_ms": round((monotonic() - started) * 1000, 3)})
+                except Exception as exc:
+                    batches.append({"codes": chunk, "received_count": 0,
+                                    "category": quote_failure_category(exc),
+                                    "duration_ms": round((monotonic() - started) * 1000, 3)})
+        return {"rows": list(rows.values()), "batches": batches,
+                "missing_codes": [code for code in codes if code not in rows]}
 
     def get_kline(self, ts_code: str, period: str = "day", count: int = 120) -> pd.DataFrame:
         """Get K-line bars from eltdx.
@@ -325,7 +444,12 @@ class EltdxProvider:
             return {}
         price = raw.get("price")
         volume = raw.get("volume")
+        if raw.get("event_kind") is not None and (
+                raw["event_kind"] != "opening_match" or raw.get("time_label") != "09:25"):
+            return {}
         amount = raw.get("amount")
+        if amount is None:
+            amount = getattr(result, "trade_amount_yuan", None)
         return {
             "ts_code": StockCodeUtils.standardize_code(ts_code),
             "trade_date": trade_date,
@@ -334,7 +458,7 @@ class EltdxProvider:
             "volume": float(volume) if volume is not None else 0,
             "amount": float(amount) if amount is not None else 0,
             "side": raw.get("side"),
-            "status": raw.get("status"),
+            "status": raw.get("status", raw.get("status_raw")),
             "pages_used": raw.get("pages_used"),
             "source_mode": raw.get("source_mode"),
             "source": "eltdx",

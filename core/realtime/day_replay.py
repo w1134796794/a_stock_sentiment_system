@@ -229,7 +229,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
              "core/signals/board_feedback.py", "core/realtime/board_feedback_repository.py", "risk/risk_config.py",
              "core/realtime/runtime_diagnostics.py", "core/operations/evidence.py",
              "core/realtime/snapshot_signal_service.py", "core/realtime/read_only_market.py",
-             "core/realtime/collection_plan.py", "core/realtime/strategy_runtime.py"]
+             "core/realtime/collection_plan.py", "core/realtime/strategy_runtime.py",
+             "core/realtime/listing_evidence.py", "core/realtime/market_events.py"]
     versions = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
     return clean({"classification": "minute_rule_diagnostic", "market_date": date, "candidate_date": candidate_date,
                   "until": until, "profile": request["profile"], "generated_at": shanghai_now().isoformat(),
@@ -503,14 +504,15 @@ class DayReplayLoader:
         report["requested_codes_not_in_pool"] = sorted(set(request["codes"]) - set(selected))
         report["minute_sources"] = minute_sources
         report["sector_quote_minute_codes"] = sorted(sector_quote_minutes)
-        return report
+        from core.realtime.board_replay import attach_board_replay
+        return attach_board_replay(report, self.root)
 
 
 def replay_saved_inputs(inputs, progress=None):
     from core.signals.minute_amount_profile import MinuteAmountProfileRepository
     profiles = MinuteAmountProfileRepository()
     profiles._payload = inputs["amount_profile"]
-    return replay_minutes(request={**inputs["request"], "fetch_missing": False},
+    report = replay_minutes(request={**inputs["request"], "fetch_missing": False},
                           candidate_date=inputs["candidate_date"], rows=inputs["rows"],
                           frames={c: pd.DataFrame(rows) for c, rows in inputs["minutes"].items()},
                           previous=inputs["previous"], auctions=inputs["auctions"], members=inputs["members"],
@@ -522,6 +524,11 @@ def replay_saved_inputs(inputs, progress=None):
                           sector_quote_minutes=inputs.get("sector_quote_minutes") or {},
                           configuration_basis=inputs.get("configuration_basis") or "",
                           profiles=profiles, input_basis=inputs["input_basis"], bundle_id=inputs["bundle_id"], progress=progress)
+    if "board_shadow_inputs" in inputs:
+        from core.realtime.board_replay import replay_board_inputs
+        report["board_shadow"] = replay_board_inputs(inputs["board_shadow_inputs"])
+        report["replay_inputs"]["board_shadow_inputs"] = inputs["board_shadow_inputs"]
+    return report
 
 
 def compare_reports(before, after):

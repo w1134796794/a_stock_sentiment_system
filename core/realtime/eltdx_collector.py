@@ -58,6 +58,8 @@ class EltdxQuoteCollector:
             raise RuntimeError("服务器内置eltdx采集器需要 Redis；请检查 REDIS_URL")
         self.minute_cache = RealtimeMinuteCache()
         self.provider = EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None)
+        from core.data.providers.eltdx_provider import QuoteFailureState
+        self._constituent_failures = QuoteFailureState()
         self.calendar = TradeCalendar()
         self.minute_interval_seconds = max(
             int(minute_interval_seconds or ELTDX_MINUTE_SYNC_SECONDS), 30
@@ -76,6 +78,17 @@ class EltdxQuoteCollector:
         self.clock = lambda: shanghai_now(clock() if clock else None)
         self._session_started_at = self.clock().isoformat(timespec="milliseconds")
         self._last_success_at: datetime | None = None
+        from config.settings import ELTDX_BOARD_SHADOW_ENABLED, ELTDX_BOARD_POLL_SECONDS, ELTDX_BOARD_STALE_SECONDS
+        from core.realtime.board_plan import BoardCollectionPlan
+        from core.realtime.board_quote_store import BoardQuoteStore
+        from core.realtime.board_quote_lane import BoardQuoteLane
+        self.board_lane = BoardQuoteLane(BoardCollectionPlan(),
+            BoardQuoteStore(backend=self.quote_cache.backend, journal=self.journal,
+                            stale_seconds=ELTDX_BOARD_STALE_SECONDS, expected_interval=ELTDX_BOARD_POLL_SECONDS),
+            EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None),
+            enabled=ELTDX_BOARD_SHADOW_ENABLED, interval=ELTDX_BOARD_POLL_SECONDS, clock=self.clock,
+            owner=lambda: not self._stop and bool(getattr(self, "_active_lease", None))
+                          and self._active_lease.is_owner())
 
     def stop(self, *_args) -> None:
         self._stop = True
@@ -91,6 +104,8 @@ class EltdxQuoteCollector:
         return RealtimeWatchlistRepository.normalize(codes)
 
     def collect_once(self) -> dict:
+        if getattr(self, "board_lane", None) is not None and self.board_lane.enabled:
+            self.board_lane.schedule(self.plans.load(self.clock().strftime("%Y%m%d")))
         all_codes = self.targets()
         # Keep the execution lane independent of the thousands of sector members.
         codes = self.targets(minutes_only=True)
@@ -137,6 +152,7 @@ class EltdxQuoteCollector:
             result = self.quote_cache.write_batch(
                 rows_by_code.values(), source="eltdx_batch", collector_id=ELTDX_COLLECTOR_ID,
                 snapshot_codes=self.targets(minutes_only=True),
+                publish_event=False,
             )
             self._archive_sector_minutes(rows_by_code.values())
         except Exception as exc:  # noqa: BLE001
@@ -154,6 +170,10 @@ class EltdxQuoteCollector:
 
         self._consecutive_failures = 0 if result.get("ok") else self._consecutive_failures + 1
         self._capture_auctions(rows_by_code)
+        from core.realtime.market_events import publish_revision
+        if result.get("ok"):
+            publish_revision(self.quote_cache.backend, self.clock().strftime("%Y%m%d"),
+                             kind="quotes", codes=list(rows_by_code))
         if result.get("ok"):
             received = self.clock()
             if (self._last_success_at is None or self._last_success_at.date() != received.date()
@@ -170,6 +190,7 @@ class EltdxQuoteCollector:
         result["collection_plan_id"] = plan["plan_id"] if plan else ""
         result["archive"] = self.journal.health() if hasattr(self, "journal") else {}
         result["constituents"] = dict(self._constituent_health)
+        result["tdx_board_shadow"] = dict(self.board_lane.health) if getattr(self, "board_lane", None) else {}
         result["consecutive_failures"] = self._consecutive_failures
         self._record_health(result)
 
@@ -211,12 +232,15 @@ class EltdxQuoteCollector:
     def _sync_constituents(self, codes: list[str]) -> None:
         started = time.monotonic()
         count, failures = 0, 0
+        batches = []
         date = self.clock().strftime("%Y%m%d")
         lease = getattr(self, "_active_lease", None)
 
         def fetch(chunk):
-            provider = EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None)
-            return provider.get_quote_snapshots(chunk) or {}
+            provider = EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None,
+                                     failure_state=self._constituent_failures)
+            rows = provider.get_quote_snapshots(chunk) or {}
+            return rows, getattr(provider, "last_quote_diagnostics", {})
 
         chunks = [codes[i:i + 80] for i in range(0, len(codes), 80)]
         with ThreadPoolExecutor(max_workers=ELTDX_CONSTITUENT_WORKERS) as workers:
@@ -227,20 +251,27 @@ class EltdxQuoteCollector:
                         pending.cancel()
                     break
                 try:
-                    rows = future.result()
+                    rows, diagnostics = future.result()
+                    batches.append(diagnostics)
                     priority = set(self.targets(minutes_only=True))
                     rows = {code: row for code, row in rows.items() if code not in priority}
                     # Publish each received chunk immediately, with its original receipt times.
                     result = self.quote_cache.write_batch(rows.values(), source="eltdx_batch",
-                                                         collector_id=ELTDX_COLLECTOR_ID, snapshot_codes=[])
+                                                         collector_id=ELTDX_COLLECTOR_ID, snapshot_codes=[], publish_event=False)
                     count += int(result.get("count") or 0)
                     failures += len(futures[future]) - int(result.get("count") or 0)
                     self._archive_sector_minutes(rows.values())
+                    from core.realtime.market_events import publish_revision
+                    if result.get("ok"):
+                        publish_revision(self.quote_cache.backend, date, kind="quotes", codes=list(rows))
+                    logger.debug("板块采集批次: {}", {"market_date": date, "codes": futures[future],
+                        "diagnostics": diagnostics, "written_count": result.get("count", 0)})
                 except Exception as exc:
                     failures += len(futures[future])
                     logger.warning("板块报价分批采集失败: {}", exc)
         self._constituent_health = {"requested_count": len(codes), "count": count,
                                     "missing_count": failures,
+                                    "batches": batches,
                                     "duration_seconds": round(time.monotonic() - started, 3),
                                     "updated_at": self.clock().isoformat(timespec="milliseconds")}
 
@@ -268,7 +299,10 @@ class EltdxQuoteCollector:
         trade_date = self.clock().strftime("%Y%m%d")
         written = 0
         failures = 0
+        details = []
+        started = time.monotonic()
         for code in codes:
+            stock_started = time.monotonic()
             try:
                 frame = self.provider.get_minute_bars(code, trade_date)
                 if not frame.empty:
@@ -276,12 +310,19 @@ class EltdxQuoteCollector:
                         "received_at": self.clock().isoformat(), "bars": json.loads(frame.to_json(orient="records", date_format="iso"))}])
                 written += self.minute_cache.write(trade_date, code, frame)
                 failures += int(frame.empty)
+                details.append({"code": code, "rows": len(frame), "ok": not frame.empty,
+                                "source_diagnostics": dict(getattr(self.provider, "last_minute_diagnostics", {})),
+                                "duration_ms": round((time.monotonic() - stock_started) * 1000, 3)})
             except Exception as exc:  # noqa: BLE001
                 failures += 1
+                details.append({"code": code, "ok": False, "category": type(exc).__name__,
+                                "duration_ms": round((time.monotonic() - stock_started) * 1000, 3)})
                 logger.debug("eltdx分钟序列失败 {}/{}: {}", code, trade_date, exc)
         logger.info("eltdx分钟序列同步: 股票={} 行={} 失败={}", len(codes), written, failures)
+        self.quote_cache.backend.set_json("realtime:minute-sync:health", {"stocks": details,
+            "updated_at": self.clock().isoformat(), "duration_ms": round((time.monotonic() - started) * 1000, 3)}, 120)
         from core.realtime.market_events import publish_revision
-        publish_revision(self.quote_cache.backend, trade_date, kind="minutes")
+        publish_revision(self.quote_cache.backend, trade_date, kind="minutes", codes=codes)
 
     def _schedule_minute_sync(self, codes: list[str]) -> None:
         """Run minute history separately so snapshots keep their 3-second cadence."""
@@ -356,7 +397,8 @@ class EltdxQuoteCollector:
         trade_date = now.strftime("%Y%m%d")
         if not self.calendar.is_trade_date(trade_date):
             return False
-        return "09:15:00" <= now.strftime("%H:%M:%S") <= "15:05:00"
+        at = now.strftime("%H:%M:%S")
+        return "09:15:00" <= at <= "11:30:15" or "13:00:00" <= at <= "15:05:00"
 
 
 __all__ = ["EltdxQuoteCollector"]

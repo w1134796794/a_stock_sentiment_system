@@ -79,6 +79,7 @@ def attach_evidence(payload: dict[str, Any], *, frozen_bundle=None) -> dict[str,
             "entry_parameters": row.get("entry_parameters") or {},
             "condition_checks": row.get("condition_checks") or {},
             "evaluation_timing": row.get("evaluation_timing") or {},
+            "sample_interval_seconds": row.get("sample_interval_seconds"),
             "sector_observed_at": sector.get("observed_at") or "",
             "sector_coverage": round(sector_coverage, 4) if sector_coverage is not None else None,
             "sector_data_completeness": sector.get("data_completeness"),
@@ -142,6 +143,7 @@ def record_runtime_observations(ledger, payload, *, now=None):
             "sector_detail", "sector_coverage", "sector_data_completeness", "evidence_bundle_id", "config_version")}
         observation["condition_checks"] = evidence.get("condition_checks") or {}
         observation["evaluation_timing"] = evidence.get("evaluation_timing") or {}
+        observation["sample_interval_seconds"] = evidence.get("sample_interval_seconds")
         observation["runtime_cycle"] = payload.get("runtime_cycle") or {}
         observation.update({"observed_at": clock.isoformat(timespec="milliseconds"),
                             "evidence_kind": "runtime_observation"})

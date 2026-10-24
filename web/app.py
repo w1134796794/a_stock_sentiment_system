@@ -2210,6 +2210,22 @@ def api_intraday_replay_cancel(run_id: str) -> Any:
         return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
 
 
+@app.get("/api/intraday-replay/board-shadow/{market_date}")
+def api_board_shadow_replay(market_date: str, until: str = "15:01:00") -> Any:
+    from core.realtime.board_replay import cutoff_for, load_board_inputs, replay_board_inputs
+    from core.realtime.trading_session import shanghai_now
+    try:
+        cutoff = cutoff_for(market_date, until)
+        now = shanghai_now()
+        if market_date > now.strftime("%Y%m%d"):
+            raise ValueError("不能回放未来交易日")
+        if market_date == now.strftime("%Y%m%d") and cutoff > now:
+            until = now.strftime("%H:%M:%S")
+        return {"ok": True, "data": replay_board_inputs(load_board_inputs(WEB_DATA_DIR, market_date, until=until))}
+    except (ValueError, TypeError) as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+
+
 @app.get("/assistant", response_class=HTMLResponse)
 def assistant_page(request: Request, date: Optional[str] = None, capital: float = 100_000.0) -> Any:
     latest = date or _latest_date()

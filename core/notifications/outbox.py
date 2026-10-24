@@ -57,6 +57,8 @@ class RealtimeNotificationOutbox:
                 count += 1
                 self.ledger.event(stable_id(key, "queued", now), "notification_queued",
                     {"code": row.get("code"), "side": "buy", "queued_at": shanghai_now().isoformat(),
+                     "job_id": key, "confirmed_at": row.get("confirm_time"),
+                     "quote_received_at": row.get("received_at"), "evaluation_timing": row.get("evaluation_timing") or {},
                      "expires_epoch": now + self.max_age}, signal_id=signal_id)
         self._wake.set()
         return count
@@ -127,6 +129,8 @@ class RealtimeNotificationOutbox:
                 state, status, reason = "queued", "推送失败", "通知工作线程发送异常"
         completed = shanghai_now().isoformat(timespec="milliseconds")
         outcome = {"code": row.get("code"), "side": "buy", "status": status,
+                   "job_id": job["job_id"], "attempt": job["attempts"] + 1,
+                   "confirmed_at": row.get("confirm_time"), "quote_received_at": row.get("received_at"),
                    "sent": int(result.get("sent") or 0), "skip_reason": reason,
                    "dispatch_at": submitted if dispatched else "", "completed_at": completed,
                    "submitted_at": next((c["submitted_at"] for c in result.get("results") or [] if c.get("submitted_at")), ""),

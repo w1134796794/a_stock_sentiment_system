@@ -73,6 +73,9 @@ class StrategyRuntime:
         self._loaded_plan_id = ""
         self.outbox = None
         self._lease = None
+        self._last_rows = {}
+        self._seen_versions = {}
+        self._minute_boundary = ""
 
     def _load(self, date):
         from core.realtime.entry_signal_service import RealtimeEntrySignalService
@@ -106,6 +109,7 @@ class StrategyRuntime:
         self.rows = production_candidates(bundle["inputs"])
         allowed = {r["code"] for r in plan["rows"]}
         self.rows = [r for r in self.rows if r["code"] in allowed]
+        self._last_rows, self._seen_versions = {}, {}
         self._loaded_plan_id = plan["plan_id"]
 
     def _prepare(self, payload):
@@ -148,10 +152,21 @@ class StrategyRuntime:
         date = now.strftime("%Y%m%d")
         revision = self.backend.get_json(REVISION_KEY) or {}
         version = revision.get("id") if revision.get("market_date") == date else ""
-        if not force and version == self._version and date == self._date:
+        if (not force and version == self._version and date == self._date
+                and (not self._minute_boundary or self._minute_boundary == now.strftime("%Y%m%d%H%M"))):
             return None
         started = monotonic()
         self._load(date)
+        from core.realtime.market_events import code_versions
+        versions = code_versions(self.backend, date)
+        changed = {code for code in set(versions) | set(self._seen_versions)
+                   if versions.get(code) != self._seen_versions.get(code)}
+        boundary = now.strftime("%Y%m%d%H%M")
+        selected = affected_codes(self.rows, self.plan, changed,
+            full=force or not self._last_rows or not revision.get("scoped") or boundary != self._minute_boundary)
+        if not selected:
+            self._version, self._seen_versions = version, versions
+            return None
         quotes = self.quotes.refresh_quotes([r["code"] for r in self.rows])
         quote_map = {r["code"]: r for r in quotes.get("quotes") or []}
         projector = RealtimeOverlayService.__new__(RealtimeOverlayService)
@@ -161,6 +176,7 @@ class StrategyRuntime:
         def project(row, quote, signal):
             item = {**row, **projector._build_row(self.plan["candidate_date"], date, row, quote, signal)}
             item.update({"status": item["confirm_status"], "status_text": signal.get("signal_status_text") or "观察",
+                         "sample_interval_seconds": quote.get("sample_interval_seconds"),
                          "is_leader_observation": row.get("is_leader_observation", False),
                          "strategy_name": row.get("strategy_name") or "", "leader_score": row.get("leader_score"),
                          "last_leader_date": row.get("last_leader_date") or ""})
@@ -170,19 +186,27 @@ class StrategyRuntime:
             if signal.get("signal_status") == "confirmed":
                 self._record(self._prepare({**meta, "rows": [project(row, quote, signal)]}))
 
-        signals = self.signals.evaluate(self.rows, quote_map, market_date=date, on_evaluated=confirmed)
+        signals = self.signals.evaluate(self.rows, quote_map, market_date=date, on_evaluated=confirmed,
+                                       evaluate_codes=selected)
+        projected = {row["code"]: project(row, quote_map.get(row["code"], {}), signals.get(row["code"], {}))
+                     for row in self.rows if row["code"] in selected}
+        raw_rows = {**self._last_rows, **projected}
         payload = {**meta, "ok": True, "generated_at": shanghai_now(self.clock()).isoformat(),
                    "collection_plan_id": self.plan["plan_id"], "market_revision": version,
-                   "rows": [project(row, quote_map.get(row["code"], {}), signals.get(row["code"], {})) for row in self.rows]}
+                   "rows": [{**deepcopy(raw_rows[row["code"]]), "evaluation_reused": row["code"] not in selected}
+                            for row in self.rows]}
         payload = self._prepare(payload)
-        self._record(payload)
+        evaluated = {**payload, "rows": [r for r in payload["rows"] if r["code"] in selected]}
+        self._record(evaluated)
         self._completed += 1
         cycle = {"id": uuid4().hex, "market_date": date, "started_at": now.isoformat(),
                  "finished_at": shanghai_now(self.clock()).isoformat(), "duration_ms": round((monotonic() - started) * 1000, 3),
-                 "jobs": [{"profile": "production", "evaluated_stocks": len(payload["rows"]),
-                           "stock_timings": [{"code": r["code"], **r["evaluation_timing"]} for r in payload["rows"]]}]}
+                 "changed_codes": sorted(changed), "reused_stocks": len(payload["rows"]) - len(selected),
+                 "jobs": [{"profile": "production", "evaluated_stocks": len(selected),
+                           "stock_timings": [{"code": r["code"], **r["evaluation_timing"]} for r in evaluated["rows"]]}]}
         payload["runtime_cycle"] = {k: v for k, v in cycle.items() if k != "jobs"}
-        record_runtime_observations(self.ledger, payload)
+        evaluated["runtime_cycle"] = payload["runtime_cycle"]
+        record_runtime_observations(self.ledger, evaluated)
         self.ledger.event(cycle["id"], "runtime_cycle", cycle)
         from core.realtime.signal_event_repository import RealtimeSignalEventRepository
         view = RealtimeSignalEventRepository().merge_history(deepcopy(payload))
@@ -191,6 +215,7 @@ class StrategyRuntime:
             "market_date": date, "completed_cycles": self._completed, "duration_ms": cycle["duration_ms"],
             "market_revision": version, "plan_id": self.plan["plan_id"]}, 60)
         self._date, self._version = date, version
+        self._seen_versions, self._minute_boundary, self._last_rows = versions, boundary, raw_rows
         return payload
 
     def run(self, *, once=False):
@@ -225,8 +250,11 @@ class StrategyRuntime:
                 # Notification loss is harmless: every wake checks the stored revision.
                 if subscription:
                     subscription.get_message(timeout=1)
-                    while subscription.get_message(timeout=0):
-                        pass
+                    # Short, bounded debounce; this coalesces board chunks, not confirmations.
+                    self.stop_event.wait(0.1)
+                    for _ in range(256):
+                        if not subscription.get_message(timeout=0):
+                            break
                 else:
                     self.stop_event.wait(1)
         finally:
@@ -236,3 +264,14 @@ class StrategyRuntime:
                 self.outbox.stop()
             lease.release()
             self._lease = None
+
+
+def affected_codes(rows, plan, changed, *, full=False):
+    from core.realtime.collection_plan import collection_sector_names
+    priority = {row["code"] for row in rows}
+    # Preserve cross-candidate relative-strength dependencies on priority quotes.
+    if full or priority.intersection(changed):
+        return priority
+    members = {sector["name"]: set(sector["members"]) for sector in plan["sectors"]}
+    return {row["code"] for row in rows if any(
+        changed.intersection(members.get(name, set())) for name in collection_sector_names(row))}

@@ -30,6 +30,17 @@ def backend():
         value.client.close()
 
 
+def test_scoped_versions_survive_concurrent_producers_without_notifications(backend):
+    from concurrent.futures import ThreadPoolExecutor
+    from core.realtime.market_events import code_versions, publish_revision, version_key
+    date = shanghai_now().strftime("%Y%m%d")
+    codes = [f"{i:06d}" for i in range(1, 31)]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda code: publish_revision(backend, date, kind="quotes", codes=[code]), codes))
+    assert set(code_versions(backend, date)) == set(codes)
+    assert backend.client.ttl(backend._key(version_key(date))) > 0
+
+
 def test_real_sorted_set_hot_window_and_cross_process_notification(backend):
     from core.realtime.market_events import REVISION_KEY, CHANNEL
     clock = [shanghai_now()]
@@ -108,6 +119,31 @@ def test_real_strategy_task_lease_has_single_owner(backend, monkeypatch):
     restarted = TaskLease.acquire("realtime_strategy", 30)
     assert restarted is not None
     restarted.release()
+
+
+def test_board_shadow_uses_separate_redis_namespace_and_durable_archive(backend, tmp_path):
+    from datetime import datetime
+    from core.realtime.board_quote_store import BoardQuoteStore
+    from core.realtime.market_journal import MarketJournal
+    stamp = datetime.fromisoformat("2026-10-23T09:31:00+08:00")
+    date = stamp.strftime("%Y%m%d")
+    plan = {"market_date": date, "plan_id": "board-plan", "codes": ["sh880001"]}
+    journal = MarketJournal(tmp_path)
+    store = BoardQuoteStore(backend=backend, journal=journal, archive_root=tmp_path)
+    store.write(plan, [{"code": "sh880001", "date": date, "source": "eltdx_board_snapshot",
+        "last_price": 102, "pre_close": 100, "open_price": 101, "received_at": stamp.isoformat()}], now=stamp)
+    other = RedisStateBackend(URL, backend.prefix)
+    try:
+        reader = BoardQuoteStore(backend=other, archive_root=tmp_path)
+        assert reader.read(plan, now=stamp)["sh880001"]["status"] == "fresh_receipt"
+        assert other.get_json("realtime:quotes:latest:880001") is None
+        assert other.get_json("realtime:market:revision") is None
+        assert 0 < other.client.ttl(other._key(store.key(date, "sh880001"))) <= 180
+        assert journal.health()["pending"] == 1
+        assert journal.archive_once() == 1
+        assert len(reader.archived_points(date, until=stamp)) == 1
+    finally:
+        other.client.close()
 
 
 def test_independent_strategy_cli_consumes_only_prepared_redis_inputs(backend, tmp_path):

@@ -196,7 +196,8 @@ def freeze_preopen_inputs(candidate_date: str, market_date: str, *, web_data_dir
         def source_fingerprint():
             paths = set((root / "screening").rglob("*.json")) | set(artifact_paths.values())
             paths.update((profiles.path, profiles.base_profile_path, BASE_DIR / "config" / "risk_control.yaml",
-                          root / "config_overrides.json", root / "models" / "minute_amount_profiles.json"))
+                          root / "config_overrides.json", root / "models" / "minute_amount_profiles.json",
+                          root / "listing_evidence" / f"{market_date}.json"))
             return {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in paths if path.is_file()}
         before = source_fingerprint()
@@ -252,6 +253,12 @@ def freeze_preopen_inputs(candidate_date: str, market_date: str, *, web_data_dir
                   "factor_rows": records(factors), "sector_members": members, "sector_codes": mapping,
                   "artifacts": artifacts, "profiles": captured_profiles,
                   "risk_config": captured_risk, "source_fingerprint": before}
+        listing_path = root / "listing_evidence" / f"{market_date}.json"
+        if listing_path.is_file():
+            listing = json.loads(listing_path.read_text(encoding="utf-8"))
+            if listing.get("market_date") == market_date:
+                inputs["listing_evidence"] = listing
+                inputs["listing_as_of_date"] = market_date
         from core.signals.minute_amount_profile import MinuteAmountProfileRepository
         inputs["minute_amount_profile"] = MinuteAmountProfileRepository(root / "models" / "minute_amount_profiles.json").load()
         inputs["board_feedback_inputs"] = feedback_inputs(

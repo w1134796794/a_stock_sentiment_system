@@ -32,16 +32,17 @@ jobs:
             if [ ! -d ".venv" ]; then python3 -m venv .venv; fi
             . .venv/bin/activate
             pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+            python -X utf8 scripts/check_eltdx_runtime.py
+            python -X utf8 scripts/replay_board_shadow.py --fixture tests/fixtures/board_shadow_replay.json
 
-            # 调试：打印 systemctl 路径和 sudo 权限
-            which systemctl
-            sudo -l
-
-            sudo systemctl restart a-stock
-            sudo systemctl status a-stock --no-pager
+            sudo -n /usr/bin/systemctl restart a-stock
+            /usr/bin/systemctl status a-stock --no-pager
             if systemctl is-enabled --quiet a-stock-market.target; then
-              sudo systemctl restart a-stock-market.target
-              sudo systemctl status a-stock-collector a-stock-archiver a-stock-strategy --no-pager
+              if ! sudo -n /usr/bin/systemctl restart a-stock-market.target; then
+                echo "Deploy user needs NOPASSWD for /usr/bin/systemctl restart a-stock-market.target"
+                exit 1
+              fi
+              /usr/bin/systemctl status a-stock-collector a-stock-archiver a-stock-strategy --no-pager
             else
               echo "Market workers are not installed/enabled; Web restart does not start them."
             fi

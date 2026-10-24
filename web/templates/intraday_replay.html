@@ -11,6 +11,7 @@
   <label class="dr-codes">股票代码<input id="dr-codes" placeholder="全部候选，或 002614,603949"></label>
   <label class="dr-check"><input id="dr-fetch" type="checkbox">补取缺失行情</label>
   <button id="dr-start" type="submit">开始回放</button>
+  <button id="dr-board-start" type="button">板块影子回放</button>
   <button id="dr-cancel" type="button" disabled>取消</button>
 </form>
 <div class="dr-selects">
@@ -27,6 +28,7 @@
 <div id="dr-summary" class="dr-summary"></div>
 <section id="dr-evidence" class="dr-section hidden"><h2>证据与运行边界</h2><div id="dr-limits" class="text-sm text-amber-300"></div><div id="dr-failures"></div></section>
 <section id="dr-comparison" class="dr-section hidden"><h2>与基准对照</h2><div id="dr-changes"></div></section>
+<section id="dr-board-section" class="dr-section hidden"><h2>板块影子回放</h2><div id="dr-board-report"></div></section>
 <section class="dr-section"><h2>逐股诊断</h2><div id="dr-stocks"><div class="text-sm text-slate-500 py-6">暂无回放报告</div></div></section>
 <style>
   .dr-controls,.dr-selects {display:flex;flex-wrap:wrap;align-items:end;gap:12px;padding:16px 0;border-bottom:1px solid #334155}
@@ -45,11 +47,12 @@
   .dr-section table {border-collapse:collapse;width:100%;font-size:12px;min-width:650px}.dr-section th,.dr-section td {text-align:left;padding:9px 10px;border-bottom:1px solid #233148;vertical-align:top;white-space:normal;overflow-wrap:anywhere}
   .dr-section th {color:#94a3b8}.dr-table {overflow:auto;margin-top:12px}#dr-limits p {margin:6px 0;overflow-wrap:anywhere}
   #dr-stocks {padding-bottom:40px}#dr-stocks table {min-width:1050px}#dr-stocks th,#dr-stocks td {white-space:nowrap;overflow-wrap:normal}
+  #dr-board-report table {min-width:1000px}#dr-board-report th,#dr-board-report td {white-space:nowrap;overflow-wrap:normal}
   #dr-stocks .dr-condition-table table {min-width:0;table-layout:fixed}
   #dr-stocks .dr-condition-table th:nth-child(-n+2) {width:86px}
   #dr-stocks .dr-condition-table td:last-child {white-space:normal;overflow-wrap:anywhere}
   .dr-version {font-size:12px;color:#94a3b8;overflow-wrap:anywhere;padding-top:8px}
   @media(max-width:640px){.dr-controls label:not(.dr-check){flex:1 1 140px}.dr-controls input:not([type=checkbox]),.dr-controls select{width:100%}.dr-selects label{width:100%}.dr-selects select{width:100%}.dr-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
-<script src="/static/intraday-replay.js?v=20261021-optional-factor"></script>
+<script src="/static/intraday-replay.js?v=20261024-board-shadow"></script>
 {% endblock %}

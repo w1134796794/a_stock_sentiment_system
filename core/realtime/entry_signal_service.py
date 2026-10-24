@@ -121,13 +121,14 @@ class RealtimeEntrySignalService:
         market_date: str,
         execution: Optional[Dict[str, Any]] = None,
         on_evaluated=None,
+        evaluate_codes=None,
     ) -> Dict[str, Dict[str, Any]]:
         # UI diagnostics and live matching can request different market dates.
         with self._lock:
             return self._evaluate_batch(rows, quotes, market_date=market_date, execution=execution,
-                                        on_evaluated=on_evaluated)
+                                        on_evaluated=on_evaluated, evaluate_codes=evaluate_codes)
 
-    def _evaluate_batch(self, rows, quotes, *, market_date, execution=None, on_evaluated=None):
+    def _evaluate_batch(self, rows, quotes, *, market_date, execution=None, on_evaluated=None, evaluate_codes=None):
         from core.utils.stock_eligibility import new_entry_exclusion
         source_rows = [dict(row or {}) for row in rows or [] if not new_entry_exclusion(row or {})]
         market_date = str(market_date or "").replace("-", "")[:8]
@@ -173,6 +174,8 @@ class RealtimeEntrySignalService:
         for row in source_rows:
             code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
             if not code:
+                continue
+            if evaluate_codes is not None and code not in evaluate_codes:
                 continue
             if code not in frames:
                 started = monotonic()

@@ -80,6 +80,11 @@ class DailyCollectionPlan:
             if clock >= cutoff or not (bundle.get("health") or {}).get("ok"):
                 raise ValueError("Collection plan requires healthy preopen evidence before 09:25")
             inputs = bundle["inputs"]
+            if inputs.get("listing_evidence") and inputs["listing_evidence"].get("market_date") != date:
+                raise ValueError("Listing evidence must match collection market date")
+            from core.realtime.listing_evidence import listing_exclusions
+            excluded = listing_exclusions(inputs)
+            listing = inputs.get("listing_evidence") or {}
             leaders = ((inputs.get("leader_pools") or {}).get("10", {}).get("rows") or [])[:30]
             decisions = inputs.get("candidates") or []
             stocks = {}
@@ -87,6 +92,8 @@ class DailyCollectionPlan:
                 for row in rows:
                     code = normalize_stock_code(row.get("code") or row.get("stock_code"), add_suffix=False)
                     if len(code) != 6 or not code.isdigit():
+                        continue
+                    if code in excluded:
                         continue
                     item = stocks.setdefault(code, {"code": code, "name": row.get("name") or "",
                                                      "sources": [], "sectors": []})
@@ -96,6 +103,10 @@ class DailyCollectionPlan:
             if any(not row["sectors"] for row in stocks.values()):
                 raise ValueError("Stock sector/concept metadata missing before open")
             names = sorted({name for row in stocks.values() for name in row["sectors"]})
+            requested = {normalize_stock_code(r.get("code") or r.get("stock_code"), add_suffix=False)
+                         for r in [*leaders, *decisions]}
+            requested.update(normalize_stock_code(c, add_suffix=False) for name in names
+                             for c in (inputs.get("sector_members") or {}).get(name, []))
             from core.realtime.sector_service import RealtimeSectorService
             eligible_members = RealtimeSectorService.confirmation_members(inputs)
             sectors = [{"name": name, "code": (inputs.get("sector_codes") or {}).get(name) or "",
@@ -107,11 +118,17 @@ class DailyCollectionPlan:
             body = {"schema_version": 1, "market_date": date, "candidate_date": candidate,
                     "frozen_at": clock.isoformat(), "bundle_id": bundle["bundle_id"],
                     "inputs_hash": digest(bundle), "rows": list(stocks.values()), "sectors": sectors,
-                    "stock_count": len(stocks), "leader_count": len(leaders), "decision_count": len(decisions),
+                    "listing_exclusions": [value for code, value in excluded.items() if code in requested],
+                    "listing_evidence_complete": bool(listing.get("complete")),
+                    "stock_count": len(stocks),
+                    "leader_count": sum("leader_pool" in r["sources"] for r in stocks.values()),
+                    "decision_count": sum("decision_pool" in r["sources"] for r in stocks.values()),
                     "sector_member_count": len({c for s in sectors for c in s["members"]}),
                     "uncollected_holdings": sorted(holding_codes - stocks.keys()),
                     "warnings": [] if (inputs.get("minute_amount_profile") or {}).get("profiles") else ["历史分钟量能模型缺失，相应买点将保持观察"],
                     "hot_window_seconds": 180}
+            if not listing.get("complete"):
+                body["warnings"].append("上市状态证据不完整，未知状态成员保留；禁止按行情缺失推断退市")
             plan = {**body, "plan_id": digest(body)}
             atomic_write_json(self.root / f"{date}.inputs.json", bundle)
             atomic_write_json(path, plan, indent=2)
