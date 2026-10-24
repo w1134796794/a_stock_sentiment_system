@@ -35,7 +35,8 @@ class DayReplayJobs:
             if not self.path(baseline, "inputs.json").exists():
                 raise ValueError("基准报告不存在或尚未完成")
             captured = atomic_read_json(self.path(baseline, "inputs.json"))
-            if captured["request"] != {k:v for k,v in request.items() if k != "fetch_missing"}:
+            captured_request = {k: v for k, v in captured["request"].items() if k != "fetch_missing"}
+            if captured_request != {k:v for k,v in request.items() if k != "fetch_missing"}:
                 raise ValueError("对照必须保持基准日期、范围、股票与结束时间一致")
         with self.lock:
             if self.thread and self.thread.is_alive():

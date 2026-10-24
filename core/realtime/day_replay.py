@@ -38,6 +38,9 @@ def digest(value):
 
 
 def replay_request(payload, *, now=None):
+    replay_mode = payload.get("replay_mode") or "minute"
+    if replay_mode not in {"minute", "archived_snapshot"}:
+        raise ValueError("回放模式无效")
     clock = shanghai_now(now)
     date = str(payload.get("market_date") or clock.strftime("%Y%m%d")).replace("-", "")
     parsed = datetime.strptime(date, "%Y%m%d")
@@ -49,7 +52,8 @@ def replay_request(payload, *, now=None):
         raise ValueError("回放结束时间应在 09:30 至 15:01")
     if date == clock.strftime("%Y%m%d"):
         until = min(until, clock.strftime("%H:%M:%S"))
-    until = until[:5] + ":00"
+    if replay_mode == "minute":
+        until = until[:5] + ":00"
     if until < "09:30:00":
         raise ValueError("当天连续交易尚未开始")
     raw_codes = payload.get("codes") or []
@@ -68,8 +72,13 @@ def replay_request(payload, *, now=None):
     fetch = payload.get("fetch_missing", False)
     if not isinstance(fetch, bool):
         raise ValueError("fetch_missing 必须为布尔值")
-    return {"market_date": date, "until": until, "codes": sorted(set(raw_codes)),
+    if replay_mode == "archived_snapshot" and (fetch or lookback != 10):
+        raise ValueError("归档快照回放仅使用盘前冻结的10日龙头范围，禁止补取行情")
+    request = {"market_date": date, "until": until, "codes": sorted(set(raw_codes)),
             "profile": profile, "lookback": lookback, "fetch_missing": fetch}
+    if replay_mode != "minute":
+        request["replay_mode"] = replay_mode
+    return request
 
 
 class _ReplayEntryService(RealtimeEntrySignalService):
@@ -269,14 +278,16 @@ class DayReplayLoader:
         self.cache = Path(cache_dir or CACHE_DIR)
         self.database = Path(db_path or FACTOR_DB_PATH)
         self.dm = data_manager
-        self.calendar = calendar or TradeCalendar()
+        self.calendar = calendar
         self.minute_cache = minute_cache
-        from core.realtime.session_open_repository import SessionOpenRepository
-        self.openings = opening_repository or SessionOpenRepository(self.cache)
+        self.openings = opening_repository
         self.snapshot_repository = snapshot_repository
         self.opening_evidence = {}
 
     def _opening_evidence(self, date, codes, *, fetch_missing, until="23:59:59"):
+        if self.openings is None:
+            from core.realtime.session_open_repository import SessionOpenRepository
+            self.openings = SessionOpenRepository(self.cache)
         from core.signals.opening import positive_price
         from core.realtime.session_open_repository import quote_opening
         from core.realtime.quote_cache import RealtimeQuoteCache
@@ -342,6 +353,10 @@ class DayReplayLoader:
         return {code: row["open_price"] for code, row in records.items()}, source
 
     def run(self, request, progress=None, *, inputs_only=False, extra_codes=(), extra_rows=()):
+        if request.get("replay_mode") == "archived_snapshot":
+            from core.realtime.snapshot_replay import run_snapshot_replay
+            return run_snapshot_replay(self.root, request, progress)
+        self.calendar = self.calendar or TradeCalendar()
         date = request["market_date"]
         candidate = self.calendar.prev(date)
         if not candidate or candidate >= date:
@@ -509,6 +524,9 @@ class DayReplayLoader:
 
 
 def replay_saved_inputs(inputs, progress=None):
+    if inputs.get("replay_mode") == "archived_snapshot":
+        from core.realtime.snapshot_replay import replay_snapshot_inputs
+        return replay_snapshot_inputs(inputs, progress)
     from core.signals.minute_amount_profile import MinuteAmountProfileRepository
     profiles = MinuteAmountProfileRepository()
     profiles._payload = inputs["amount_profile"]

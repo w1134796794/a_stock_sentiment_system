@@ -52,7 +52,7 @@
       (source?`<p class="text-sm text-slate-400 mt-2">实际判断来源 ${esc(source==='eltdx_snapshot'?'eltdx快照主判断':'分钟兜底')}${selection.fallback_reason?` · ${esc(fallbackLabels[selection.fallback_reason]||selection.fallback_reason)}`:''}</p>`:'')+
       (timing?.finished_at?`<p class="text-sm text-slate-400 mt-2">逐股判定完成 ${esc(timing.finished_at)} · 判定 ${esc(timing.duration_ms)}毫秒 · 完成时报价年龄 ${esc(timing.quote_age_at_completion_seconds??'--')}秒</p>`:'')+
       (neighbors.length?`<details><summary>确认附近实际观测（非同一秒还原）</summary>${table(['实际观测','距回放观测秒数','状态','原因','板块宽度覆盖','历史配对覆盖'],neighbors.map(o=>[o.observed_at,o.offset_seconds,o.status,o.reason,percent((o.sector_detail?.current_coverage??o.sector_detail?.coverage??0)*100),percent((o.sector_detail?.trend_coverage??0)*100)]))}</details>`:'')+
-      (rows.length?`<details><summary>逐分钟条件明细</summary>${table(['回放观测','行情分钟','条件'],rows,'dr-condition-table')}</details>`:'');
+      (rows.length?`<details><summary>${stock.snapshot_count===undefined?'逐分钟':'逐次'}条件明细</summary>${table(['回放观测','行情时点','条件'],rows,'dr-condition-table')}</details>`:'');
   }
   function openingDetail(stock) {
     const o=stock.opening_evidence;
@@ -74,14 +74,17 @@
       const selected = $(id).value;
       $(id).innerHTML = `<option value="">${id === 'dr-runs' ? '选择报告' : '不对照'}</option>` + value.runs
         .filter(r => id === 'dr-runs' || r.state === 'done')
-        .map(r=>`<option value="${esc(r.run_id)}">${esc(r.request.market_date)} · ${esc(r.request.profile==='leader_pool'?'龙头池':'决策池')} · ${esc(new Date(r.started_epoch*1000).toLocaleTimeString('zh-CN'))} · ${esc(labels[r.state]||r.state)}</option>`).join('');
+        .map(r=>`<option value="${esc(r.run_id)}">${esc(r.request.market_date)} · ${r.request.replay_mode==='archived_snapshot'?'快照':'分钟'} · ${esc(r.request.profile==='leader_pool'?'龙头池':'决策池')} · ${esc(new Date(r.started_epoch*1000).toLocaleTimeString('zh-CN'))} · ${esc(labels[r.state]||r.state)}</option>`).join('');
       $(id).value = id === 'dr-runs' && runId ? runId : selected;
     }
     return value.runs;
   }
   function renderReport(r) {
     renderBoardShadow(r.board_shadow);
-    $('dr-summary').innerHTML = [['候选日 / 行情日',`${r.candidate_date} / ${r.market_date}`],['本次分钟回放曾确认',`${r.confirmed_stocks} / ${r.stocks.length}`],['缺证据项',r.failures.length],['当日全天通知发送记录',r.runtime_summary?`${r.runtime_summary.sent_stocks} / ${r.stocks.length}`:'--']].map(([label,v])=>`<div>${esc(label)}<strong>${esc(v)}</strong></div>`).join('');
+    const snapshot=r.replay_mode==='archived_snapshot';
+    signalLabels.confirmed=snapshot?'归档规则确认':'分钟规则确认';
+    $('dr-summary').innerHTML = [['候选日 / 行情日',`${r.candidate_date} / ${r.market_date}`],[snapshot?'归档快照回放曾确认':'本次分钟回放曾确认',`${r.confirmed_stocks} / ${r.stocks.length}`],['缺证据项',r.failures.length],[snapshot?'截止时点前通知发送记录':'当日全天通知发送记录',r.runtime_summary?`${r.runtime_summary.sent_stocks} / ${r.stocks.length}`:'--']].map(([label,v])=>`<div>${esc(label)}<strong>${esc(v)}</strong></div>`).join('');
+    if(snapshot)$('dr-summary').insertAdjacentHTML('beforeend',`<div>归档快照数<strong>${esc(r.archive_event_counts?.snapshot||0)}</strong></div><div>回放逻辑判定次数<strong>${esc(r.evaluation_count||0)}</strong></div>`);
     const cycles=r.runtime_summary?.cycle_summary;
     if(cycles?.recorded_cycles)$('dr-summary').insertAdjacentHTML('beforeend',`<div>真实后台循环<strong>${esc(cycles.recorded_cycles)}</strong></div><div>整轮耗时中位 / 最大（毫秒）<strong>${esc(cycles.duration_p50_ms)} / ${esc(cycles.duration_max_ms)}</strong></div>`);
     $('dr-evidence').classList.remove('hidden');
@@ -100,6 +103,10 @@
       spans[0].textContent=`回放结束：${signalLabels[stock.status]||stock.status}`;
       spans[1].textContent=`回放首次确认 ${stock.first_confirm_time||'--'} · 回放观测 ${stock.first_evaluated_at||'--'}`;
       summary.insertAdjacentHTML('afterend',confirmationComparison(stock)+openingDetail(stock)+factorDetail(stock)+runtimeDetail(stock));
+      if(snapshot){
+        summary.insertAdjacentHTML('afterend',`<p class="text-sm text-slate-400 mt-2">归档快照 ${esc(stock.snapshot_count||0)} · 空窗 ${esc(stock.gaps?.length||0)} 段 · 最近判定 ${esc(stock.last_evaluated_at||'--')}</p>`+
+          table(['判定时间','来源','兜底原因','快照数据状态'],(stock.transitions||[]).map(t=>[t.evaluated_at,({eltdx_snapshot:'快照主判断',minute_fallback:'分钟兜底',not_evaluated:'前置证据未通过'})[t.trigger_source]||'--',t.condition_checks?.fallback_reason||'--',t.data_status])));
+      }
     });
     $('dr-download').classList.remove('hidden');
     $('dr-download').href = `/api/intraday-replay/${encodeURIComponent(r.run_id)}?report=true`;
@@ -156,7 +163,7 @@
   $('replay-form').addEventListener('submit',async event=>{
     event.preventDefault(); clearTimeout(timer); $('dr-start').disabled=true; $('dr-error').textContent='';
     try {
-      const result = await api('/api/intraday-replay',{market_date:$('dr-date').value,profile:$('dr-profile').value,lookback:Number($('dr-lookback').value),until:$('dr-until').value,codes:$('dr-codes').value,fetch_missing:$('dr-fetch').checked,baseline_id:$('dr-baseline').value});
+      const result = await api('/api/intraday-replay',{replay_mode:$('dr-mode').value,market_date:$('dr-date').value,profile:$('dr-profile').value,lookback:Number($('dr-lookback').value),until:$('dr-until').value,codes:$('dr-codes').value,fetch_missing:$('dr-fetch').checked,baseline_id:$('dr-baseline').value});
       runId=result.run_id; localStorage.setItem('intraday-diagnostic-run',runId);
       for(const id of ['dr-evidence','dr-comparison','dr-download'])$(id).classList.add('hidden');
       $('dr-summary').innerHTML=''; $('dr-stocks').textContent='等待回放结果';
@@ -165,14 +172,23 @@
   });
   $('dr-runs').addEventListener('change',()=>{if(!$('dr-runs').value)return; clearTimeout(timer);runId=$('dr-runs').value;localStorage.setItem('intraday-diagnostic-run',runId);poll();});
   $('dr-cancel').addEventListener('click',async()=>{try{await api(`/api/intraday-replay/${runId}/cancel`,{});$('dr-current').textContent='取消已请求，等待当前取数完成';}catch(e){$('dr-error').textContent=e.message;}});
-  $('dr-profile').addEventListener('change',()=>{$('dr-lookback').disabled=$('dr-profile').value!=='leader_pool';});
+  function updateMode(){
+    const snapshot=$('dr-mode').value==='archived_snapshot';
+    $('dr-fetch').disabled=snapshot;
+    if(snapshot){$('dr-fetch').checked=false;$('dr-lookback').value='10';}
+    $('dr-lookback').disabled=snapshot||$('dr-profile').value!=='leader_pool';
+    $('dr-until').step=snapshot?'1':'60';
+  }
+  $('dr-profile').addEventListener('change',updateMode);
+  $('dr-mode').addEventListener('change',updateMode);
   $('dr-baseline').addEventListener('change',()=>{
     const baseline=savedRuns.find(r=>r.run_id===$('dr-baseline').value);
     if(!baseline)return;
     const r=baseline.request;
+    $('dr-mode').value=r.replay_mode||'minute';
     $('dr-date').value=r.market_date;$('dr-profile').value=r.profile;$('dr-lookback').value=String(r.lookback);
-    $('dr-until').value=r.until.slice(0,5);$('dr-codes').value=r.codes.join(',');
-    $('dr-lookback').disabled=r.profile!=='leader_pool';
+    $('dr-until').value=r.until;$('dr-codes').value=r.codes.join(',');
+    updateMode();
   });
   refreshRuns().then(runs=>{
     const saved=localStorage.getItem('intraday-diagnostic-run');

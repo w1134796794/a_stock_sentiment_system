@@ -71,7 +71,8 @@ class EltdxQuoteCollector:
         self._constituent_lock = Lock()
         self._constituent_health = {}
         from core.realtime.sector_quote_minutes import SectorQuoteMinuteRepository
-        self.sector_minutes = SectorQuoteMinuteRepository(backend=self.quote_cache.backend)
+        self.sector_minutes = SectorQuoteMinuteRepository(backend=self.quote_cache.backend,
+            journal=self.journal, clock=lambda: self.clock())
         self._consecutive_failures = 0
         self._stop = False
         self._cycles = 0

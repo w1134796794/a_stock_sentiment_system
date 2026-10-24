@@ -21,6 +21,42 @@ def _float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def closed_quote_checker(*, names, market_date, code, members, previous, points, clock):
+    """Shared live/replay interpretation of already-visible closed quote minutes."""
+    from core.signals.sector_sync import make_constituent_sync_checker
+
+    boundary = clock.replace(second=0, microsecond=0)
+    previous = dict(previous)
+    opening = {}
+    for member, values in points.items():
+        if not values:
+            continue
+        latest = values[max(values)]
+        if latest.get("open_price"):
+            opening[member] = latest["open_price"]
+        if latest.get("pre_close"):
+            previous[member] = {"close": latest["pre_close"]}
+    prices = {member: {minute: row["price"] for minute, row in values.items()
+                       if (not row.get("open_price") or row["open_price"] == opening.get(member))
+                       and (not row.get("pre_close") or row["pre_close"] == (previous.get(member) or {}).get("close"))}
+              for member, values in points.items()}
+    base, detail = make_constituent_sync_checker(code=code, names=names, members=members,
+        frames={}, previous=previous, opening_prices=opening, minute_prices=prices)
+
+    def checker(at_time):
+        minute = str(at_time)[:5] + ":00"
+        end = shanghai_now(datetime.strptime(market_date + minute, "%Y%m%d%H:%M:%S"))
+        if market_date != clock.strftime("%Y%m%d") or end > boundary:
+            detail.update({"assessed": True, "data_completeness": 0.0,
+                           "reason": "板块分钟尚未闭合或不是当前交易日"})
+            return None
+        state = base(minute)
+        detail.update({"observed_at": end.isoformat(), "sector_confirmation_source": "collector_closed_quote_minutes",
+                       "timestamp_semantics": "minute_end", "sampled_at": clock.isoformat()})
+        return state
+    return checker, detail
+
+
 class RealtimeSectorBreadthProvider:
     def __init__(
         self,
@@ -49,7 +85,6 @@ class RealtimeSectorBreadthProvider:
         """Read collector evidence; never reconstruct history from Web polling."""
         from core.realtime.sector_quote_minutes import SectorQuoteMinuteRepository
         from core.operations.preopen_evidence import PreopenEvidenceStore
-        from core.signals.sector_sync import make_constituent_sync_checker
         clock = shanghai_now()
         boundary = clock.replace(second=0, microsecond=0)
         names = tuple(sorted(set(sectors)))
@@ -72,35 +107,12 @@ class RealtimeSectorBreadthProvider:
                 self._minute_context_cache[key] = (monotonic(), points)
         else:
             points = cached[1]
-        previous, opening = {}, {}
+        previous = {}
         if frozen:
             previous = {str(r.get("code") or r.get("ts_code") or "").split(".")[0]: dict(r)
                         for r in frozen["inputs"].get("daily_rows") or []}
-        for code, values in points.items():
-            latest = values[max(values)]
-            if latest.get("open_price"):
-                opening[code] = latest["open_price"]
-            if latest.get("pre_close"):
-                previous[code] = {"close": latest["pre_close"]}
-        prices = {code: {minute: row["price"] for minute, row in values.items()
-                         if (not row.get("open_price") or row["open_price"] == opening.get(code))
-                         and (not row.get("pre_close") or row["pre_close"] == (previous.get(code) or {}).get("close"))}
-                  for code, values in points.items()}
-        base, detail = make_constituent_sync_checker(code=exclude_code, names=names, members=members,
-            frames={}, previous=previous, opening_prices=opening, minute_prices=prices)
-
-        def checker(at_time):
-            minute = str(at_time)[:5] + ":00"
-            end = shanghai_now(datetime.strptime(market_date + minute, "%Y%m%d%H:%M:%S"))
-            if market_date != clock.strftime("%Y%m%d") or end > boundary:
-                detail.update({"assessed": True, "data_completeness": 0.0,
-                               "reason": "板块分钟尚未闭合或不是当前交易日"})
-                return None
-            state = base(minute)
-            detail.update({"observed_at": end.isoformat(), "sector_confirmation_source": "collector_closed_quote_minutes",
-                           "timestamp_semantics": "minute_end", "sampled_at": clock.isoformat()})
-            return state
-        return checker, detail
+        return closed_quote_checker(names=names, market_date=market_date, code=exclude_code,
+                                    members=members, previous=previous, points=points, clock=clock)
 
     def evaluate(self, sectors: Iterable[str], market_date: str, *, exclude_code: str = '') -> Tuple[Optional[bool], Dict[str, Any]]:
         names = tuple(sorted({str(name or "").strip() for name in sectors if str(name or "").strip()}))

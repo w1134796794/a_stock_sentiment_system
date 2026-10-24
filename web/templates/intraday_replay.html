@@ -4,6 +4,7 @@
 {% block header_extra %}<a href="/intraday" class="text-sm text-emerald-300">返回盘中转强</a>{% endblock %}
 {% block content %}
 <form id="replay-form" class="dr-controls">
+  <label>回放依据<select id="dr-mode"><option value="minute">分钟规则诊断</option><option value="archived_snapshot">归档快照驱动</option></select></label>
   <label>行情日<input id="dr-date" type="text" pattern="[0-9]{8}" maxlength="8" value="{{ market_date }}" required></label>
   <label>候选范围<select id="dr-profile"><option value="leader_pool">近期龙头池</option><option value="decision_pool">生产决策池</option></select></label>
   <label>龙头回看<select id="dr-lookback"><option value="5">近5日</option><option value="10" selected>近10日</option><option value="20">近20日</option></select></label>
@@ -54,5 +55,5 @@
   .dr-version {font-size:12px;color:#94a3b8;overflow-wrap:anywhere;padding-top:8px}
   @media(max-width:640px){.dr-controls label:not(.dr-check){flex:1 1 140px}.dr-controls input:not([type=checkbox]),.dr-controls select{width:100%}.dr-selects label{width:100%}.dr-selects select{width:100%}.dr-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
-<script src="/static/intraday-replay.js?v=20261024-board-shadow"></script>
+<script src="/static/intraday-replay.js?v=20261024-snapshot-replay"></script>
 {% endblock %}

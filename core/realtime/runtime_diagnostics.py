@@ -36,6 +36,26 @@ def attach_runtime_diagnostics(report):
     """Recorded delivery is evidence, not permission to trade or replay a push."""
     grouped = {}
     recorded = report.get("recorded_runtime") or {}
+    snapshot_mode = report.get("replay_mode") == "archived_snapshot"
+    if snapshot_mode:
+        clipped = {}
+        for name, source in recorded.items():
+            rows = []
+            for row in source.get("rows") or []:
+                if row.get("evidence_kind") == "runtime_observation":
+                    if _in_replay_window(row.get("observed_at"), report):
+                        rows.append(row)
+                else:
+                    deliveries = [event for event in row.get("delivery_events") or []
+                                  if _in_replay_window(event.get("occurred_at"), report)]
+                    if deliveries:
+                        # signal_evidence is an upserted summary. Retain only its
+                        # immutable delivery events, never backdate its final status.
+                        rows.append({"code": row.get("stock_code") or row.get("code"),
+                                     "evidence_kind": "delivery_ledger_only", "evidence": {},
+                                     "delivery_events": deliveries})
+            clipped[name] = {"status": source.get("status"), "rows": rows, "scope": "recorded_before_cutoff"}
+        recorded = report["recorded_runtime"] = clipped
     for source in recorded.values():
         for row in source.get("rows") or []:
             code = str(row.get("stock_code") or row.get("code") or "")
@@ -73,6 +93,8 @@ def attach_runtime_diagnostics(report):
             if reason:
                 vetoes.add(str(reason))
             for event in row.get("delivery_events") or []:
+                if snapshot_mode and not _in_replay_window(event.get("occurred_at"), report):
+                    continue
                 try:
                     payload = json.loads(event.get("payload_json") or "{}")
                 except (ValueError, TypeError):
@@ -113,8 +135,9 @@ def attach_runtime_diagnostics(report):
                            "replay_confirmed_without_runtime_evidence")
             target = stock.get("first_evaluated_at") or stock["first_confirm_time"]
             try:
-                cutoff = datetime.strptime(report["market_date"] + target, "%Y%m%d%H:%M:%S").replace(
-                    tzinfo=ZoneInfo("Asia/Shanghai"))
+                cutoff = (datetime.fromisoformat(stock["first_evaluated_at_iso"]) if stock.get("first_evaluated_at_iso") else
+                          datetime.strptime(report["market_date"] + target, "%Y%m%d%H:%M:%S").replace(
+                              tzinfo=ZoneInfo("Asia/Shanghai")))
                 neighbors = []
                 for observation in observations:
                     if observation["profile"] != "production":
@@ -150,7 +173,7 @@ def attach_runtime_diagnostics(report):
         "states": dict(counts), "record_count": sum(len(rows) for rows in grouped.values()),
         "confirmed_stocks": sum(bool(s["runtime_diagnostic"]["confirmed"]) for s in report.get("stocks") or []),
         "sent_stocks": counts["sent"],
-        "scope": "selected_stocks_all_day_recorded_events",
+        "scope": "selected_stocks_recorded_before_cutoff" if snapshot_mode else "selected_stocks_all_day_recorded_events",
         "cycle_summary": (recorded.get("signal_ledger") or {}).get("cycle_summary") or {},
     }
     return report

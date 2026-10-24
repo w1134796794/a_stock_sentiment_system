@@ -14,7 +14,7 @@ from core.signals.opening import positive_price
 
 
 class SectorQuoteMinuteRepository:
-    def __init__(self, cache_dir=None, *, backend=None):
+    def __init__(self, cache_dir=None, *, backend=None, journal=None, clock=None):
         from config.settings import CACHE_DIR, REALTIME_QUOTE_STALE_SECONDS
         self.root = Path(cache_dir or CACHE_DIR) / "stock" / "sector_quote_minutes"
         self.backend = backend or get_shared_state_backend()
@@ -22,6 +22,8 @@ class SectorQuoteMinuteRepository:
         self._pending = {}
         self._history = {}
         self._lock = RLock()
+        self.journal = journal
+        self.clock = clock or shanghai_now
 
     @staticmethod
     def _key(date, code):
@@ -77,6 +79,15 @@ class SectorQuoteMinuteRepository:
                                 [(code, minute, row["received_at"], json.dumps(row))
                                  for (_, code, minute), row in closed.items()])
             self._write_shared(date, closed)
+            if self.journal is not None:
+                published = shanghai_now(self.clock()).isoformat()
+                by_code = {}
+                for (_, code, _), row in closed.items():
+                    by_code.setdefault(code, []).append(row)
+                self.journal.append("sector_minutes", date, [
+                    {"code": code, "date": date, "received_at": published,
+                     "source": "collector_closed_quote_minutes", "points": points}
+                    for code, points in by_code.items()])
             for key in closed:
                 del self._pending[key]
             return len(closed)
