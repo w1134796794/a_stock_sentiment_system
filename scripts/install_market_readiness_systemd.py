@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -31,8 +32,8 @@ After=network-online.target
 [Service]
 Type=oneshot
 User={user}
-WorkingDirectory={systemd_path(root)}
-EnvironmentFile={systemd_path(root + "/.env")}
+WorkingDirectory={root}
+EnvironmentFile={root}/.env
 Environment=PYTHONUNBUFFERED=1
 ExecStart={systemd_path(root + "/.venv/bin/python")} -X utf8 {systemd_path(root + "/scripts/check_market_readiness.py")} --output-dir {systemd_path(root + "/outputs/market-readiness")}
 TimeoutStartSec=600
@@ -65,6 +66,20 @@ WantedBy=timers.target
     return {SERVICE: service, TIMER: timer}
 
 
+def verify_units(units):
+    """Check complete units before publishing them, not only calendar expressions."""
+    with TemporaryDirectory(prefix="a-stock-readiness-") as directory:
+        paths = []
+        for name, content in units.items():
+            path = Path(directory) / name
+            path.write_text(content, encoding="utf-8", newline="\n")
+            path.chmod(0o644)
+            paths.append(str(path))
+        result = subprocess.run(["systemd-analyze", "verify", *paths], capture_output=True, text=True, check=False)
+        if result.returncode or result.stderr.strip():
+            raise RuntimeError("Readiness unit verification failed:\n" + result.stdout + result.stderr)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--user", required=True)
@@ -87,6 +102,7 @@ def main(argv=None):
             or not os.access(root / ".venv/bin/python", os.X_OK)
         ):
             parser.error("Existing project, .env and virtualenv Python are required")
+        verify_units(units)
         destination = Path("/etc/systemd/system")
     destination.mkdir(parents=True, exist_ok=True)
     for name, content in units.items():

@@ -51,8 +51,17 @@ systemctl list-timers a-stock-readiness.timer --all --no-pager
 ```
 
 Installation enables the timer for boot but does not start it or change market workers.
+The installer verifies both complete units with `systemd-analyze verify` before replacing installed files.
 Starting the timer schedules future checks; it does not restart the collector/archiver/strategy.
 No new sudo privilege for `deploy` is required. Install the timer once as root.
+
+If an earlier install reports `unit a-stock-readiness.service to trigger not loaded`,
+check `systemctl status a-stock-readiness.service --no-pager` for the actual load error.
+The original installer incorrectly quoted `WorkingDirectory` and `EnvironmentFile`; unlike
+`ExecStart` arguments, these directive values need literal absolute paths without surrounding quotes.
+This also prevents the environment file from being silently ignored. The installer rejects parser
+warnings even when `systemd-analyze` returns zero. After updating the code, rerun
+the installer above, then `systemctl enable --now a-stock-readiness.timer`.
 
 Schedule in **Asia/Shanghai**:
 
