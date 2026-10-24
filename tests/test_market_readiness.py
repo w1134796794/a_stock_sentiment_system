@@ -449,3 +449,25 @@ def test_cli_missing_frozen_inputs_returns_failure_without_creating_sources(tmp_
     report = json.loads((tmp_path / "reports/latest.json").read_text(encoding="utf-8"))
     assert report["status"] == "not_ready" and report["whole_day_replay_ready"] is False
     assert not (tmp_path / "absent").exists() and not (tmp_path / "absent.db").exists()
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_cli_uses_configured_production_calendar_not_untracked_data_copy(tmp_path, monkeypatch, capsys, absolute):
+    from scripts.check_market_readiness import main
+
+    production = calendar(tmp_path).rename(tmp_path / "trade_calendar.csv")
+    monkeypatch.setattr("config.settings.BASE_DIR", tmp_path)
+    monkeypatch.setattr("config.settings.TRADE_CALENDAR_FILE", production if absolute else production.name)
+    monkeypatch.setattr("core.realtime.trading_session.shanghai_now", lambda *a: at("20261024", "16:00:00"))
+    monkeypatch.setattr(
+        "core.realtime.market_readiness.RedisAuditReader.__init__",
+        lambda *a, **kw: pytest.fail("Holiday must not connect to Redis"),
+    )
+    other = tmp_path / "other-cwd"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    assert main(["--output-dir", str(tmp_path / "reports")]) == 0
+    report = json.loads((tmp_path / "reports/latest.json").read_text(encoding="utf-8"))
+    assert report["status"] == "skipped_non_trading_day"
+    assert report["calendar_path"] == str(production.resolve())
+    assert not (tmp_path / "data").exists()

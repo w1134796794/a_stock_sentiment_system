@@ -18,11 +18,13 @@ if str(ROOT) not in sys.path:
 
 def main(argv=None):
     from config.settings import (
+        BASE_DIR,
         ELTDX_BOARD_SHADOW_ENABLED,
         HOLDING_DB_PATH,
         REALTIME_QUOTE_STALE_SECONDS,
         REDIS_KEY_PREFIX,
         REDIS_URL,
+        TRADE_CALENDAR_FILE,
         WEB_DATA_DIR,
     )
     from core.infrastructure.atomic_json import atomic_write_json
@@ -34,7 +36,10 @@ def main(argv=None):
     parser.add_argument("--phase", choices=("auto", "preopen", "live", "break", "postclose"), default="auto")
     parser.add_argument("--data-root", type=Path, default=WEB_DATA_DIR)
     parser.add_argument("--ledger", type=Path, default=HOLDING_DB_PATH)
-    parser.add_argument("--calendar", type=Path, default=ROOT / "data/trade_calendar.csv")
+    calendar_default = Path(TRADE_CALENDAR_FILE)
+    if not calendar_default.is_absolute():
+        calendar_default = Path(BASE_DIR) / calendar_default
+    parser.add_argument("--calendar", type=Path, default=calendar_default)
     parser.add_argument("--output-dir", type=Path, help="Reports are written only to this optional directory")
     parser.add_argument("--no-systemd", action="store_true", help="Do not read Linux service states")
     parser.add_argument("--offline", action="store_true", help="Historical replay checks only; do not connect to Redis")

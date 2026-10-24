@@ -11,7 +11,10 @@ never schema creation or repair; SQLite may maintain its standard WAL/SHM coordi
 in existing database directories. Do not use `immutable=1` against live WAL databases:
 it could hide committed events still in the WAL. Source tables and business payloads remain unchanged.
 
-The script reads the real `data/trade_calendar.csv`. Unknown dates or missing calendars fail closed;
+The script reads the same `config.settings.TRADE_CALENDAR_FILE` as production (currently the
+Git-tracked `trade_calendar.csv` at the project root, not an untracked `data/` copy). Relative
+configuration paths are resolved under `BASE_DIR`; `--calendar` explicitly overrides the audit source.
+The report records `calendar_path`. Unknown dates or missing calendars fail closed;
 there is no weekday approximation. Confirmed holidays return `skipped_non_trading_day` with exit code 0.
 
 ## Manual Checks

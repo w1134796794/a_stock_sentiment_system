@@ -241,6 +241,7 @@ def audit_market(
     report = {
         "classification": "market_data_readiness_v1",
         "market_date": date,
+        "calendar_path": str(Path(calendar_path).resolve()),
         "phase": phase,
         "generated_at": now.isoformat(),
         "read_only": True,
