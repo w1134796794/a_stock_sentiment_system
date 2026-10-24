@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}行情证据{% endblock %}
+{% block page_title %}行情证据{% endblock %}
+{% block header_extra %}<a href="/intraday" class="text-sm text-emerald-300">盘中转强</a>{% if is_admin %}<a href="/intraday/replay" class="text-sm text-emerald-300 ml-4">诊断回放</a>{% endif %}{% endblock %}
+{% block content %}
+<section class="card rounded-xl border border-slate-800 p-4 mb-4">
+  <p class="text-sm text-slate-400 mb-3">查看竞价、成交和盘口的已采集证据。当前仅用于观察，不改变买点或仓位。</p>
+  <form id="me-form" class="flex flex-wrap gap-3 items-end">
+    <label>行情日<input id="me-date" class="block bg-slate-900 border border-slate-700 rounded p-2" pattern="[0-9]{8}" maxlength="8" value="{{ market_date }}" required></label>
+    <label>股票代码<input id="me-code" class="block bg-slate-900 border border-slate-700 rounded p-2" pattern="[0-9]{6}" maxlength="6" placeholder="输入六位代码" required></label>
+    <button class="border border-emerald-600 rounded px-4 py-2" type="submit">查看证据</button>
+  </form>
+  <p id="me-status" class="text-sm text-slate-400 mt-3" role="status">请输入股票代码。</p>
+</section>
+<section class="card rounded-xl border border-slate-800 p-4 mb-4"><h2 class="font-bold mb-3">竞价、成交与盘口</h2><div id="me-live" class="overflow-x-auto"></div><div id="me-depth" class="overflow-x-auto mt-3"></div><svg id="me-auction-chart" viewBox="0 0 600 140" role="img" aria-label="已采集竞价价格曲线" hidden></svg></section>
+<section class="card rounded-xl border border-slate-800 p-4 mb-4"><h2 class="font-bold mb-3">公司资料与历史行情</h2><p class="text-xs text-slate-500 mb-2">资料按抓取版本保存；发布时间未验证时，不用于历史买点判断。资金流为通达信口径。</p><div id="me-research" class="overflow-x-auto"></div></section>
+<section class="card rounded-xl border border-slate-800 p-4 mb-4"><h2 class="font-bold mb-3">板块证据</h2><button type="button" id="me-boards-button" class="border border-slate-700 rounded px-3 py-1">查看当日板块对照</button><div id="me-boards" class="overflow-x-auto mt-3"></div></section>
+{% if is_admin %}
+<section class="card rounded-xl border border-slate-800 p-4 mb-4"><h2 class="font-bold mb-3">采集诊断</h2><button type="button" id="me-diagnostics-button" class="border border-slate-700 rounded px-3 py-1">读取采集状态</button><div id="me-diagnostics" class="mt-3"></div><div id="me-jobs" class="overflow-x-auto mt-3"></div></section>
+<section class="card rounded-xl border border-slate-800 p-4 mb-4"><h2 class="font-bold mb-3">原始数据分页</h2><div class="flex flex-wrap gap-2"><select id="me-raw-kind" class="bg-slate-900 border border-slate-700 rounded p-2"><option value="live:trade_batch">实时成交明细</option><option value="live:auction_series">竞价过程</option><option value="live:depth">独立盘口</option><option value="money_flow">资金流</option><option value="company_profile">公司资料</option><option value="announcements">公告</option><option value="finance_report">财报</option><option value="topics">题材</option><option value="bars_raw">不复权行情</option><option value="corporate_actions">权息</option></select><button type="button" id="me-raw-button" class="border border-slate-700 rounded px-3">读取</button><button type="button" id="me-prev">上一页</button><button type="button" id="me-next">下一页</button></div><p id="me-page" class="text-xs text-slate-500 my-2"></p><pre id="me-raw" class="text-xs whitespace-pre-wrap break-all max-h-96 overflow-auto"></pre></section>
+<section class="card rounded-xl border border-slate-800 p-4"><h2 class="font-bold mb-3">离线对照报告</h2><p class="text-xs text-slate-500 mb-2">A 为现有规则，B 只观察新增证据，C 为实验过滤；确认不等于成交或收益。</p><button type="button" id="me-experiments-button" class="border border-slate-700 rounded px-3 py-1">读取已保存报告</button><div id="me-experiments" class="overflow-x-auto mt-3"></div></section>
+{% endif %}
+<script src="/static/market-evidence.js" defer></script>
+{% endblock %}

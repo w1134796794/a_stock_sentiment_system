@@ -136,6 +136,8 @@ def main() -> int:
             progress["heartbeat_at"] = datetime.now().isoformat(timespec="seconds")
             _write(args.result, progress)
             backtest = _run_auto_backtest(trade_date, args.capital, args.result)
+        from core.realtime.research_automation import run_optional_research
+        research = run_optional_research(trade_date)
         payload = {
             "status": "done",
             "job": "daily",
@@ -150,6 +152,7 @@ def main() -> int:
             },
             "journal": journal,
             "backtest": backtest,
+            "eltdx_research": research,
         }
         _write(args.result, payload)
         return 0 if payload["pipeline_ok"] else 2

@@ -128,6 +128,15 @@ ELTDX_RETRY_BACKOFF_SECONDS = max(
 ELTDX_MINUTE_SYNC_SECONDS = max(
     30, int(os.getenv("ELTDX_MINUTE_SYNC_SECONDS", "60"))
 )
+# Optional observational evidence lanes. They never alter production decisions.
+ELTDX_AUCTION_EVIDENCE_ENABLED = os.getenv("ELTDX_AUCTION_EVIDENCE_ENABLED", "false").lower() in {"1", "true", "yes"}
+ELTDX_TRADE_EVIDENCE_ENABLED = os.getenv("ELTDX_TRADE_EVIDENCE_ENABLED", "false").lower() in {"1", "true", "yes"}
+ELTDX_DEPTH_EVIDENCE_ENABLED = os.getenv("ELTDX_DEPTH_EVIDENCE_ENABLED", "false").lower() in {"1", "true", "yes"}
+ELTDX_EVIDENCE_POLL_SECONDS = max(5.0, float(os.getenv("ELTDX_EVIDENCE_POLL_SECONDS", "5")))
+ELTDX_EVIDENCE_WORKERS = min(2, max(1, int(os.getenv("ELTDX_EVIDENCE_WORKERS", "2"))))
+ELTDX_TRADE_MAX_PAGES = min(100, max(1, int(os.getenv("ELTDX_TRADE_MAX_PAGES", "3"))))
+ELTDX_EVIDENCE_MAX_PENDING = max(1, int(os.getenv("ELTDX_EVIDENCE_MAX_PENDING", "10000")))
+ELTDX_EVIDENCE_MIN_FREE_MB = max(1, int(os.getenv("ELTDX_EVIDENCE_MIN_FREE_MB", "512")))
 ELTDX_HOST = os.getenv("ELTDX_HOST", "").strip()
 ELTDX_COLLECTOR_ID = (
     os.getenv("ELTDX_COLLECTOR_ID", "eltdx-auto").strip() or "eltdx-auto"

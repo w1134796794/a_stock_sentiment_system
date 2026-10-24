@@ -439,3 +439,22 @@ def test_sector_publish_archive_records_visibility_after_shared_write(tmp_path):
     assert payload["received_at"] == stamp("09:36:03")
     assert payload["points"][0]["time"] == "09:36:00"
     assert backend.get_json(repo._key(DATE, "000002")) is not None
+
+
+def test_supplemental_evidence_saved_with_inputs_never_changes_buy_rules():
+    from core.realtime.market_evidence import EvidenceResult, fingerprint
+    inputs = sample()
+    baseline = replay_snapshot_inputs(inputs)
+    value = EvidenceResult('auction_series', '000001', DATE, received_at=stamp('09:36:00'),
+                           rows=[{'event_time': stamp('09:24:00')}]).envelope(plan_id=inputs['plan']['plan_id'])
+    value['observation_id'] = fingerprint(value)
+    marker = dict(code='000001', received_at=stamp('09:36:03'), published_at=stamp('09:36:03'),
+                  market_date=DATE, capture_mode='live', collection_plan_id=inputs['plan']['plan_id'],
+                  observation_id=value['observation_id'])
+    inputs['evidence_events'] = [
+        dict(event_id='observation',kind='auction_series',code='000001',received_at=value['received_at'],payload=value),
+        dict(event_id='publication',kind='evidence_publication',code='000001',received_at=marker['received_at'],payload=marker)]
+    report = replay_snapshot_inputs(inputs)
+    assert report['stocks'] == baseline['stocks']
+    assert report['supplemental_evidence']['event_counts'] == {'auction_series': 1}
+    assert not report['supplemental_evidence']['strategy_affected']

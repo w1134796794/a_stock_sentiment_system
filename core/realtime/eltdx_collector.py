@@ -91,6 +91,19 @@ class EltdxQuoteCollector:
             owner=lambda: not self._stop and bool(getattr(self, "_active_lease", None))
                           and self._active_lease.is_owner())
 
+        from config import settings
+        from core.realtime.evidence_lane import EvidenceLane
+        from core.realtime.evidence_store import EvidenceStore
+        self.evidence_lane = EvidenceLane(
+            EvidenceStore(self.journal, self.quote_cache.backend),
+            lambda: EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None),
+            clock=self.clock, owner=lambda: not self._stop and bool(getattr(self, "_active_lease", None))
+                and self._active_lease.is_owner(),
+            auctions=settings.ELTDX_AUCTION_EVIDENCE_ENABLED, trades=settings.ELTDX_TRADE_EVIDENCE_ENABLED,
+            depth=settings.ELTDX_DEPTH_EVIDENCE_ENABLED, interval=settings.ELTDX_EVIDENCE_POLL_SECONDS,
+            workers=settings.ELTDX_EVIDENCE_WORKERS, max_pages=settings.ELTDX_TRADE_MAX_PAGES,
+            max_pending=settings.ELTDX_EVIDENCE_MAX_PENDING, min_free_mb=settings.ELTDX_EVIDENCE_MIN_FREE_MB)
+
     def stop(self, *_args) -> None:
         self._stop = True
 
@@ -107,6 +120,8 @@ class EltdxQuoteCollector:
     def collect_once(self) -> dict:
         if getattr(self, "board_lane", None) is not None and self.board_lane.enabled:
             self.board_lane.schedule(self.plans.load(self.clock().strftime("%Y%m%d")))
+        if getattr(self, "evidence_lane", None) is not None:
+            self.evidence_lane.schedule(self.plans.load(self.clock().strftime("%Y%m%d")))
         all_codes = self.targets()
         # Keep the execution lane independent of the thousands of sector members.
         codes = self.targets(minutes_only=True)
@@ -283,6 +298,7 @@ class EltdxQuoteCollector:
                              "dated_collection_plan", "durable_market_spool", "snapshot_hot_window_v2", "market_revisions"],
             "collector_id": ELTDX_COLLECTOR_ID,
             "source": "eltdx_batch",
+            "evidence": dict(self.evidence_lane.health) if getattr(self, "evidence_lane", None) else {},
             "lease_owned": bool(getattr(self, "_lease_owned", False)),
             "updated_at": self.clock().isoformat(timespec="milliseconds"),
             "session_started_at": self._session_started_at,

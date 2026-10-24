@@ -83,6 +83,8 @@ class BoardCollectionPlan:
                         "ths_count": len(ths), "tdx_count": len(tdx), "intersection_count": len(common),
                         "jaccard": len(common) / len(ths | tdx) if ths | tdx else 0,
                         "ths_only": sorted(ths - tdx), "tdx_only": sorted(tdx - ths),
+                        "ths_members": sorted(ths), "tdx_members": sorted(tdx),
+                        "membership_hash": digest({"ths": sorted(ths), "tdx": sorted(tdx)}),
                         "tdx_excluded_members": detail["excluded_members"]})
                     selected.add(code)
                 rows.append({"ths_name": name, "ths_code": sector["code"],

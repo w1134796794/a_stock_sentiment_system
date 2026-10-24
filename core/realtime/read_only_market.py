@@ -35,6 +35,21 @@ class ReadOnlyMarketData:
         path = self.cache_dir / "stock" / "all_daily" / f"{date}.csv"
         return pd.read_csv(path, dtype={"code": str, "ts_code": str}) if path.exists() else pd.DataFrame()
 
+    def get_market_evidence(self, code, date, kind, *, now=None, stale_seconds=15):
+        """Observational data only. Reading this never repairs or fetches evidence."""
+        from core.realtime.evidence_store import EvidenceStore
+        from core.realtime.market_evidence import EVIDENCE_KINDS, timestamp
+        from core.realtime.trading_session import shanghai_now
+        if kind not in EVIDENCE_KINDS - {"evidence_publication", "evidence_quality"}:
+            raise ValueError("Unsupported observational evidence kind")
+        code6 = normalize_stock_code(code, add_suffix=False)
+        row = self.provider.cache.backend.get_json(EvidenceStore.key(date, code6, kind))
+        if not row:
+            return {}
+        age = (shanghai_now(now) - timestamp(row["received_at"])).total_seconds()
+        return {**row, "age_seconds": age, "is_stale": not 0 <= age <= stale_seconds,
+                "formal_eligible": False}
+
     def get_auction_data(self, code, date):
         code6 = normalize_stock_code(code, add_suffix=False)
         value = self.provider.cache.backend.get_json(f"realtime:auction:{date}:{code6}")

@@ -44,6 +44,8 @@ class RealtimeQuoteCache:
         snapshot_codes: Iterable[str] | None = None,
         publish_event: bool = True,
     ) -> Dict[str, Any]:
+        from config.settings import ELTDX_DEPTH_EVIDENCE_ENABLED
+
         now = shanghai_now()
         values: Dict[str, Dict[str, Any]] = {}
         snapshot_rows: List[Dict[str, Any]] = []
@@ -63,6 +65,8 @@ class RealtimeQuoteCache:
             normalized = item.to_dict(include_raw=False)
             normalized["collector_id"] = collector_id
             normalized["schema_version"] = 1
+            if ELTDX_DEPTH_EVIDENCE_ENABLED and "depth" in payload:
+                normalized["depth"] = payload["depth"]
             prepared.append((item, normalized))
             if item.date:
                 trade_dates.add(str(item.date).replace("-", "")[:8])
@@ -168,6 +172,7 @@ class RealtimeQuoteCache:
                 out[code] = item.to_dict(include_raw=False) | {
                     "collector_id": raw.get("collector_id", ""),
                     "schema_version": raw.get("schema_version", 1),
+                    **({"depth": raw["depth"]} if "depth" in raw else {}),
                 }
         return out
 

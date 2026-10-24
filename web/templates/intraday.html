@@ -4,6 +4,7 @@
 {% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">候选 <span id="page-candidate-date">{{ candidate_date or '--' }}</span> · 行情 <span id="page-market-date">{{ market_date or '--' }}</span> · 只看买点、失效和行动</div>{% endblock %}
 
 {% block header_extra %}
+  <a href="/market-evidence" class="text-sm text-emerald-300 border border-slate-700 rounded-md px-3 py-1.5">行情证据</a>
   {% if is_admin %}<a href="/intraday/replay" class="text-sm text-emerald-300 border border-slate-700 rounded-md px-3 py-1.5">诊断回放</a>{% endif %}
   {% if dates %}
   <label class="text-sm text-slate-400">候选日</label>
@@ -268,6 +269,7 @@
         ${row.board_feedback && (row.board_feedback.active || row.board_feedback.assessed === false) ? `<div class="is-action is-factor-warning"><b>风险因子 · 三板负反馈：</b>${esc(row.board_feedback.active ? '命中' : '未评估')} · ${esc(row.board_feedback.reason || '--')}${Number(row.board_feedback.score_adjustment)<0 ? ` · 强度扣分 ${esc(-Number(row.board_feedback.score_adjustment))}` : ''}</div>` : ''}
         ${row.was_confirmed_today ? `<div class="is-reason"><b>确认记录：</b>${esc(row.first_confirmed_at || row.confirm_time || '--')}${row.current_status_text ? ` · 当前${esc(row.current_status_text)}` : ''}</div>` : ''}
         <div class="is-action"><b>当前行动：</b>${esc(row.action || '继续观察')}</div>
+        <a class="text-xs text-emerald-300" href="/market-evidence?code=${encodeURIComponent(row.code)}&market_date=${encodeURIComponent(j.market_date || initialMarketDate)}">查看竞价、盘口与成交证据</a>
       </article>`).join('');
   }
 

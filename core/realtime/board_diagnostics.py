@@ -44,6 +44,7 @@ def board_shadow_report(parent, plan, store, *, now=None, interval=10, member_st
                          "average_change_pct": sum(observed) / len(observed) if observed else None,
                          "earliest_received_at": min(timestamps) if timestamps else "",
                          "latest_received_at": max(timestamps) if timestamps else ""},
+                     "membership_version": plan["plan_id"],
                      "time_alignment": "independent_latest_observations_not_formal_resonance"})
     return {**base, "status": "shadow_only", "market_date": parent["market_date"], "rows": rows,
             "board_plan_id": plan["plan_id"], "warnings": plan["warnings"]}

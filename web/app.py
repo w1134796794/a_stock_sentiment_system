@@ -5031,3 +5031,10 @@ app.include_router(
         WorkbenchService(_mobile_read_service)
     )
 )
+
+
+# Observational evidence: reads only, never resolves missing market data online.
+from web.evidence_router import evidence_router
+from core.realtime.evidence_views import EvidenceViews
+from core.infrastructure.shared_state import get_shared_state_backend as _evidence_backend
+app.include_router(evidence_router(lambda: EvidenceViews(WEB_DATA_DIR, _evidence_backend()), templates, _realtime_market_date))

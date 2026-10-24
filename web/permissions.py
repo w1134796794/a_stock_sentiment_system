@@ -300,7 +300,7 @@ PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "limitup": ("/data/limitup", "/api/v1/mobile/limitup"),
     "lhb": ("/data/lhb", "/api/v1/mobile/lhb"),
     "dragon": ("/dragon", "/api/leader-pool", "/api/v1/mobile/leaders"),
-    "intraday": ("/intraday", "/api/intraday-strength", "/api/intraday-replay"),
+    "intraday": ("/intraday", "/api/intraday-strength", "/api/intraday-replay", "/market-evidence", "/api/market-evidence"),
     "realtime": ("/realtime", "/api/realtime", "/api/v1/mobile/realtime"),
     "portfolio": ("/portfolio", "/api/portfolio", "/backtest", "/api/backtest"),
     "strategy_evaluation": ("/strategy-evaluation", "/api/operations/experiments"),

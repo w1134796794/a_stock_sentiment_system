@@ -17,6 +17,9 @@ from typing import Any, Optional
 import pandas as pd
 from loguru import logger
 
+from core.data.providers.eltdx_evidence import EltdxEvidenceMixin
+from core.data.providers.eltdx_research import EltdxResearchMixin
+from core.realtime.market_evidence import normalize_depth
 from core.utils.stock_code_utils import StockCodeUtils
 from core.realtime.trading_session import shanghai_now
 
@@ -49,7 +52,7 @@ def quote_failure_category(exc):
     return "transport_or_decode_error"
 
 
-class EltdxProvider:
+class EltdxProvider(EltdxEvidenceMixin, EltdxResearchMixin):
     """Thin wrapper around ``eltdx.TdxClient`` with project-shaped outputs."""
 
     def __init__(self, timeout: float = 3.0, host: Optional[str] = None, *, failure_state=None):
@@ -68,19 +71,17 @@ class EltdxProvider:
             return False
 
     def get_auction_series(self, ts_code: str, trade_date: str) -> pd.DataFrame:
-        """Get current call-auction series, usually useful during 09:15-09:25.
-
-        eltdx exposes live auction series rather than arbitrary historical
-        series. ``trade_date`` is kept in the signature for DataManager
-        consistency and for cache naming.
-        """
+        """Get auction snapshots for the requested date; history requires a date-aware API."""
         code = self._to_tdx_code(ts_code)
         try:
             with self._client() as client:
-                if hasattr(client, "get_call_auction"):
+                if hasattr(client, "auctions"):
+                    series = client.auctions.series(code, self._to_dash_date(trade_date))
+                    self._validate_evidence_identity(series, ts_code, trade_date)
+                elif self._is_today(trade_date):
                     series = client.get_call_auction(code)
                 else:
-                    series = client.auctions.series(code)
+                    raise NotImplementedError("Legacy auction API cannot query historical dates")
             return self._auction_series_to_frame(series, ts_code, trade_date)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] auction series unavailable {ts_code} {trade_date}: {e}")
@@ -267,6 +268,7 @@ class EltdxProvider:
             "source_time_raw": getattr(snapshot, "time_raw", None),
             "received_at": received_at.isoformat(timespec="milliseconds"),
             "source": "eltdx_batch",
+            "depth": normalize_depth(snapshot),
         }
 
     @staticmethod

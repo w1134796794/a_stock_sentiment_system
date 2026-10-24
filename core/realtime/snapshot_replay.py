@@ -19,6 +19,7 @@ from core.infrastructure.atomic_json import atomic_read_json
 from core.realtime.collection_plan import digest as plan_digest
 from core.realtime.day_replay import clean, digest
 from core.realtime.entry_signal_service import RealtimeEntrySignalService
+from core.realtime.market_evidence import EVIDENCE_KINDS
 from core.realtime.models import QuoteSnapshot, normalize_stock_code
 from core.realtime.snapshot_signal_service import SnapshotSignalService
 from core.realtime.trading_session import shanghai_now
@@ -52,6 +53,7 @@ def load_snapshot_inputs(root, request, *, progress=None):
         "plan": None,
         "bundle": None,
         "events": [],
+        "evidence_events": [],
         "load_failures": [],
         "replay_mode": "archived_snapshot",
     }
@@ -86,7 +88,7 @@ def load_snapshot_inputs(root, request, *, progress=None):
                 for index, source in enumerate(con.execute(sql, parameters)):
                     if progress and index % 1000 == 0:
                         progress({"stage": "读取归档快照", "completed": index, "total": 0})
-                    if source["kind"] not in KINDS:
+                    if source["kind"] not in KINDS | EVIDENCE_KINDS:
                         continue
                     try:
                         stamp = aware(source["received_at"])
@@ -110,8 +112,10 @@ def load_snapshot_inputs(root, request, *, progress=None):
             failures.append({"evidence": "unreadable_archive", "reason": f"{path.name}: {exc}"})
     if conflicts:
         failures.append({"evidence": "conflicting_event_ids", "reason": str(len(conflicts))})
+    result["evidence_events"] = [row for key, row in seen.items()
+                                 if key not in conflicts and row["kind"] not in KINDS]
     result["events"] = sorted(
-        (row for key, row in seen.items() if key not in conflicts),
+        (row for key, row in seen.items() if key not in conflicts and row["kind"] in KINDS),
         key=lambda row: (aware(row["received_at"]), row["event_id"]),
     )
     return result
@@ -326,6 +330,10 @@ def replay_snapshot_inputs(inputs, progress=None):
         for row in rows
         if row["code"] in selected
     }
+    from core.realtime.evidence_replay import replay_evidence
+    report["supplemental_evidence"] = replay_evidence(
+        inputs.get("evidence_events") or [], date=date, until=end.isoformat(),
+        plan_id=plan["plan_id"], codes=selected, embedded_snapshots=inputs.get("events") or [])
     report["stocks"] = list(stocks.values())
     if not stocks:
         report["failures"].append({"evidence": "empty_frozen_scope", "reason": "冻结采集名单中没有所选候选"})

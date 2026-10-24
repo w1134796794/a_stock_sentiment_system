@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}当天诊断回放{% endblock %}
 {% block page_title %}当天诊断回放{% endblock %}
-{% block header_extra %}<a href="/intraday" class="text-sm text-emerald-300">返回盘中转强</a>{% endblock %}
+{% block header_extra %}<a href="/intraday" class="text-sm text-emerald-300">返回盘中转强</a> <a href="/market-evidence" class="text-sm text-emerald-300 ml-4">行情证据</a>{% endblock %}
 {% block content %}
 <form id="replay-form" class="dr-controls">
   <label>回放依据<select id="dr-mode"><option value="minute">分钟规则诊断</option><option value="archived_snapshot">归档快照驱动</option></select></label>
@@ -55,5 +55,6 @@
   .dr-version {font-size:12px;color:#94a3b8;overflow-wrap:anywhere;padding-top:8px}
   @media(max-width:640px){.dr-controls label:not(.dr-check){flex:1 1 140px}.dr-controls input:not([type=checkbox]),.dr-controls select{width:100%}.dr-selects label{width:100%}.dr-selects select{width:100%}.dr-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
+<section class="card border border-slate-800 rounded-xl p-4 mb-4"><h2 class="font-bold mb-2">新增证据对照</h2><p class="text-xs text-slate-500">以下为截止时刻已可见的观察证据，不改变本次原买点结果。</p><div id="dr-supplemental"></div></section>
 <script src="/static/intraday-replay.js?v=20261024-snapshot-replay"></script>
 {% endblock %}

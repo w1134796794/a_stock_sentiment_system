@@ -80,6 +80,13 @@
     return value.runs;
   }
   function renderReport(r) {
+    const supplemental=$('dr-supplemental');
+    if (supplemental) {
+      const evidence=r.supplemental_evidence;
+      supplemental.innerHTML=evidence ? table(['股票','证据','质量','接收时间','新鲜度'],
+        (evidence.evidence||[]).map(x=>[esc(x.code),esc(x.kind),esc(x.quality_status),esc(x.received_at),x.is_stale?'已过期':'--'])) : '本报告没有新增证据。';
+    }
+
     renderBoardShadow(r.board_shadow);
     const snapshot=r.replay_mode==='archived_snapshot';
     signalLabels.confirmed=snapshot?'归档规则确认':'分钟规则确认';

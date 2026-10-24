@@ -23,6 +23,8 @@ class MarketJournal:
                 kind TEXT NOT NULL, market_date TEXT NOT NULL, code TEXT NOT NULL,
                 received_at TEXT NOT NULL, payload TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0)""")
             con.execute("CREATE INDEX IF NOT EXISTS pending_market_events ON market_events(archived,seq)")
+            con.execute("""CREATE TABLE IF NOT EXISTS evidence_cursors (
+                cursor_key TEXT PRIMARY KEY, payload TEXT NOT NULL)""")
 
     @contextmanager
     def connect(self):
@@ -36,7 +38,7 @@ class MarketJournal:
         finally:
             con.close()
 
-    def append(self, kind, date, rows):
+    def append(self, kind, date, rows, *, cursor=None):
         datetime.strptime(str(date), "%Y%m%d")
         values = []
         for row in rows:
@@ -49,7 +51,15 @@ class MarketJournal:
         with self.connect() as con:
             con.executemany("""INSERT OR IGNORE INTO market_events
                 (event_id,kind,market_date,code,received_at,payload) VALUES (?,?,?,?,?,?)""", values)
+            if cursor is not None:
+                con.execute("INSERT OR REPLACE INTO evidence_cursors VALUES (?, ?)",
+                            (cursor[0], json.dumps(cursor[1], allow_nan=False)))
         return len(values)
+
+    def evidence_cursor(self, key):
+        with self.connect() as con:
+            row = con.execute("SELECT payload FROM evidence_cursors WHERE cursor_key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else {}
 
     def archive_once(self, limit=1000):
         with self.connect() as con:
