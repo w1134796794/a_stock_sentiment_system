@@ -59,8 +59,11 @@ If an earlier install reports `unit a-stock-readiness.service to trigger not loa
 check `systemctl status a-stock-readiness.service --no-pager` for the actual load error.
 The original installer incorrectly quoted `WorkingDirectory` and `EnvironmentFile`; unlike
 `ExecStart` arguments, these directive values need literal absolute paths without surrounding quotes.
-This also prevents the environment file from being silently ignored. The installer rejects parser
-warnings even when `systemd-analyze` returns zero. After updating the code, rerun
+This also prevents the environment file from being silently ignored. The installer rejects its own
+unit warnings and unclassified diagnostics even when `systemd-analyze` returns zero. Known-source
+warnings from unrelated installed system units (for example snapd/cloudmonitor) are printed but do
+not block a successful verification. Any nonzero verifier exit still blocks installation.
+After updating the code, rerun
 the installer above, then `systemctl enable --now a-stock-readiness.timer`.
 
 Schedule in **Asia/Shanghai**:

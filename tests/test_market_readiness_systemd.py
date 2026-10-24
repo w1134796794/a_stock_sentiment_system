@@ -27,6 +27,49 @@ def test_unit_verification_rejects_ignored_directive_warnings(monkeypatch):
         verify_units(render_units("/opt/a-stock", "deploy"))
 
 
+HOST_WARNINGS = (
+    "/lib/systemd/system/snapd.service:23: Unknown key name 'RestartMode' in section 'Service', ignoring.\n"
+    "/etc/systemd/system/cloudmonitor.service:8: Unit configured to use KillMode=none. This is unsafe.\n"
+    "/etc/systemd/system/cloudmonitor.service:9: PIDFile= references a path below legacy directory /var/run/.\n"
+)
+
+
+def test_unrelated_host_warnings_do_not_block_valid_units(monkeypatch, capsys):
+    from subprocess import CompletedProcess
+
+    monkeypatch.setattr(
+        "scripts.install_market_readiness_systemd.subprocess.run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 0, "", HOST_WARNINGS),
+    )
+    verify_units(render_units("/opt/a-stock", "deploy"))
+    assert "Unrelated host unit warnings" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "code,diagnostic",
+    [
+        (1, HOST_WARNINGS),
+        (
+            0,
+            HOST_WARNINGS
+            + "/tmp/a-stock-readiness-x/a-stock-readiness.service:8: WorkingDirectory= path is not absolute",
+        ),
+        (0, HOST_WARNINGS + "/etc/systemd/system/a-stock-readiness.service:8: WorkingDirectory= path is not absolute"),
+        (0, HOST_WARNINGS + "/etc/systemd/system/a-stock-readiness.service.d/override.conf:2: Unknown key name"),
+        (0, HOST_WARNINGS + "Unknown unclassified verifier warning"),
+    ],
+)
+def test_host_noise_never_hides_own_errors_or_nonzero_exit(monkeypatch, code, diagnostic):
+    from subprocess import CompletedProcess
+
+    monkeypatch.setattr(
+        "scripts.install_market_readiness_systemd.subprocess.run",
+        lambda *args, **kwargs: CompletedProcess(args[0], code, "", diagnostic),
+    )
+    with pytest.raises(RuntimeError, match="Readiness unit verification failed"):
+        verify_units(render_units("/opt/a-stock", "deploy"))
+
+
 @pytest.mark.skipif(
     sys.platform != "linux" or not shutil.which("systemd-analyze"), reason="Requires Linux systemd parser"
 )

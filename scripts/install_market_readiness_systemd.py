@@ -76,8 +76,22 @@ def verify_units(units):
             path.chmod(0o644)
             paths.append(str(path))
         result = subprocess.run(["systemd-analyze", "verify", *paths], capture_output=True, text=True, check=False)
-        if result.returncode or result.stderr.strip():
+        # The parser also loads installed dependency units. Their warnings are not ours.
+        unrelated, blocking = [], []
+        for line in result.stderr.splitlines():
+            if not line.strip():
+                continue
+            source = re.match(r"^(/(?:etc|lib|usr/lib|usr/local/lib|run)/systemd/system/[^:\r\n]+):", line)
+            parts = PurePosixPath(source.group(1)).parts if source else ()
+            own_unit = any(part in units or part.removesuffix(".d") in units for part in parts)
+            (unrelated if source and not own_unit else blocking).append(line)
+        if result.returncode or blocking:
             raise RuntimeError("Readiness unit verification failed:\n" + result.stdout + result.stderr)
+        if unrelated:
+            print(
+                "Unrelated host unit warnings (readiness verification passed):\n" + "\n".join(unrelated),
+                file=sys.stderr,
+            )
 
 
 def main(argv=None):
