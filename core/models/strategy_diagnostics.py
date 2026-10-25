@@ -1,6 +1,8 @@
 """Per-strategy data, training and runtime diagnostics."""
 from __future__ import annotations
 
+from core.data.minute_cache_files import minute_cache_exists
+
 import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
@@ -259,7 +261,7 @@ class StrategyDiagnosticsService:
         for code in codes:
             suffix = "SH" if code.startswith(("5", "6", "9")) else "BJ" if code.startswith(("4", "8")) else "SZ"
             ts_code = f"{code}.{suffix}"
-            minute += int((minute_dir / f"{ts_code}_{entry_date}.csv").exists())
+            minute += int(minute_cache_exists(minute_dir / f"{ts_code}_{entry_date}.csv"))
             auction += int((auction_dir / f"{ts_code}_{entry_date}.json").exists())
         total = len(codes)
         return {

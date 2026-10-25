@@ -1,6 +1,8 @@
 """Independent signal trades and incrementally matured, availability-gated labels."""
 from __future__ import annotations
 
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv, write_minute_csv
+
 import json
 import hashlib
 import copy
@@ -40,15 +42,15 @@ class CaseDataSource:
             return self.frames[key]
         folder = getattr(self.dm, "stock_dir", None)
         path = Path(folder) / "tick" / f"{code}_{date}.csv" if folder else None
-        raw = pd.read_csv(path) if path and path.exists() else pd.DataFrame()
+        raw = read_minute_csv(path) if path and minute_cache_exists(path) else pd.DataFrame()
         _, status = validate_minutes(raw, date, full_session=True)
         if status != "complete" and self.fetch_missing:
-            if path and path.exists():
+            if path and minute_cache_exists(path):
                 provider = self.dm._get_eltdx_provider()
                 replacement = provider.get_minute_bars(code, date) if provider else pd.DataFrame()
                 _, refreshed = validate_minutes(replacement, date, full_session=True)
                 if refreshed == "complete":
-                    replacement.to_csv(path, index=False)
+                    write_minute_csv(replacement, path)
                     raw = replacement
             else:
                 raw = self.dm.get_stock_tick(code, date)

@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv
+
 from backtest.minute_entry import ENTRY_WEAK, normalize_minute_bars
 from backtest.trade_calendar import TradeCalendar
 from config.settings import APP_DB_PATH, CACHE_DIR, HOLDING_DB_PATH
@@ -160,7 +162,7 @@ def main() -> None:
         if args.runtime_only:
             stocks.append({"code": code, "status": "not_evaluated"})
             continue
-        raw = pd.read_csv(path) if path.exists() else pd.DataFrame()
+        raw = read_minute_csv(path) if minute_cache_exists(path) else pd.DataFrame()
         from core.signals.opening import opening_context
         opening = opening_context(opening_rows.get(code, {}), previous.get(code, {}))
         stocks.append({"code": code, "minute_path": str(path),

@@ -6,6 +6,7 @@
 3. 计算收益和回撤
 4. 生成回测报告
 """
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv
 import pandas as pd
 import numpy as np
 import json
@@ -2168,8 +2169,8 @@ class BacktestEngine:
         stock_dir_value = getattr(self.dm, "stock_dir", None)
         cache_file = Path(stock_dir_value) / "tick" / f"{ts_code}_{date}.csv" if stock_dir_value else None
         try:
-            if cache_file is not None and cache_file.exists():
-                frame = pd.read_csv(cache_file)
+            if cache_file is not None and minute_cache_exists(cache_file):
+                frame = read_minute_csv(cache_file)
                 from core.data.minute_quality import inspect_minute_bars
 
                 if not inspect_minute_bars(frame, str(date), expected_code=ts_code)["valid"]:

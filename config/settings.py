@@ -47,6 +47,9 @@ def _env_path(name: str, default: Path) -> Path:
 CACHE_DIR = _env_path("CACHE_DIR", DATA_DIR / "cache")
 # 当日盘后接口并非收盘瞬间全部发布。默认 18:00 后才允许把当日取数
 # 视为正式盘后数据；历史交易日不受此限制。
+# Optional gzip for newly fetched minute CSV; existing compressed files remain
+# readable regardless of this switch. Historical maintenance never removes rows.
+MINUTE_CACHE_COMPRESSION = os.getenv("MINUTE_CACHE_COMPRESSION", "false").lower() in {"true", "1", "yes"}
 POST_CLOSE_DATA_READY_TIME = (
     os.getenv("POST_CLOSE_DATA_READY_TIME", "18:00").strip() or "18:00"
 )
