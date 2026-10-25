@@ -5,7 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}管理控制台{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/app.css?v=20260806" />
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link rel="stylesheet" href="/static/product-navigation.css?v=20261025-1" />
+  <script src="/static/lucide.min.js" defer></script>
+  <script src="/static/product-navigation.js?v=20261025-1" defer></script>
+  <script src="/static/decision-pool.js?v=20261025-1" defer></script>
+  <link rel="stylesheet" href="/static/review-panels.css?v=20261025-1">
+  <script src="/static/review-panels.js?v=20261025-1" defer></script>
+  <script src="/static/htmx.min.js?v=1.9.12"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <style>
@@ -62,45 +68,48 @@
 <body class="bg-slate-950 text-slate-100">
   {% set current_user = request.state.user %}
   {% set is_admin = current_user and current_user.get('role') == 'admin' %}
+  {% if product_navigation is defined and request.url is defined %}
+    {% set product_nav = product_navigation(current_user, request.url.path, date|default(none), request.query_params if 'query_string' in request.scope else {}) %}
+  {% else %}
+    {% set product_nav = {'modules': [], 'current': none, 'date': ''} %}
+  {% endif %}
   <div class="flex h-screen overflow-hidden">
     {# ===== 侧边导航（Codex++ 风格） ===== #}
     <aside id="app-sidebar" class="app-sidebar w-56 shrink-0 border-r border-slate-800 bg-slate-950/95 flex flex-col">
-      <div class="px-4 py-4 flex items-center gap-2.5 border-b border-slate-800">
-        <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-300 font-bold">情</span>
-        <div class="leading-tight">
+      <div class="brand-head px-4 py-4 flex items-center gap-2.5 border-b border-slate-800">
+        <span class="brand-mark inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-300 font-bold">情</span>
+        <div class="brand-copy leading-tight">
           <div class="font-bold tracking-tight">A股短线系统</div>
           <div class="text-[11px] text-slate-500">{{ '管理控制台' if is_admin else '只读看板' }}</div>
         </div>
+        <button id="sidebar-collapse" class="sidebar-collapse" type="button" title="收起侧栏" aria-label="收起侧栏" aria-expanded="true" aria-controls="app-sidebar"><i data-lucide="panel-left-close"></i></button>
       </div>
       <nav class="flex-1 overflow-y-auto p-2 space-y-0.5" id="side-nav">
-        {% for group in visible_menu_groups(current_user) %}
-          {% if group.get('label') %}<div class="nav-group">{{ group.get('label') }}</div>{% endif %}
-          {% for item in group.get('items', []) %}
-          <a class="nav-link" href="{{ item.get('href') }}" data-prefix="{{ item.get('prefix') or item.get('href') }}" {% if item.get('exact') %}data-exact{% endif %}>
-            {{ item.get('icon') | safe }}
-            <span>{{ item.get('label') }}</span>
+        {% for item in product_nav.modules %}
+          <a class="nav-link product-module-link {{ 'active' if item.active else '' }}" href="{{ item.href }}" data-module="{{ item.key }}" title="{{ item.label }}" {% if item.active %}aria-current="page"{% endif %}>
+            <i data-lucide="{{ item.icon }}"></i>
+            <span>{{ item.label }}</span>
           </a>
-          {% endfor %}
         {% endfor %}
       </nav>
-      <div class="px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500 space-y-2">
-        <div class="flex items-center gap-2">
+      <div class="sidebar-account px-4 py-3 border-t border-slate-800 text-[11px] text-slate-500 space-y-2">
+        <div class="account-identity flex items-center gap-2">
           <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
           <span>{{ current_user.get('label') if current_user else '未登录' }} · {{ current_user.get('username') if current_user else '' }}</span>
         </div>
-        <a href="/logout" class="inline-flex items-center text-slate-400 hover:text-emerald-300">退出登录</a>
+        <a href="/logout" title="退出登录" aria-label="退出登录" class="sidebar-logout inline-flex items-center text-slate-400 hover:text-emerald-300"><i data-lucide="log-out"></i><span>退出登录</span></a>
       </div>
     </aside>
 
     {# ===== 主区域 ===== #}
-    <div class="app-content flex-1 min-w-0 flex flex-col">
+    <div class="app-content flex-1 min-w-0 flex flex-col" data-product-module="{{ product_nav.current.key if product_nav.current else '' }}">
       <header class="shrink-0 border-b border-slate-800 bg-slate-950/85 backdrop-blur">
         <div class="app-header px-6 py-3 flex items-center gap-4">
           <button id="mobile-nav-button" class="mobile-nav-button" type="button" title="打开菜单" aria-label="打开菜单" aria-expanded="false">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
           <div class="min-w-0">
-            <h1 class="text-lg font-bold tracking-tight truncate">{% block page_title %}{% endblock %}</h1>
+            <h1 class="text-lg font-bold tracking-tight truncate">{% if product_nav.current %}<span class="module-header-name">{{ product_nav.current.label }}</span><span class="module-header-divider">/</span>{% endif %}{% block page_title %}{% endblock %}</h1>
             {% block page_subtitle %}{% endblock %}
           </div>
           <div class="flex-1"></div>
@@ -115,6 +124,16 @@
           </button>
         </div>
       </header>
+      {% if product_nav.current and product_nav.current.tabs|length > 1 %}
+      <div class="module-navigation-band">
+        <nav class="module-tabs" aria-label="{{ product_nav.current.label }}视图">
+          {% for tab in product_nav.current.tabs %}
+          <a href="{{ tab.href }}" class="module-tab {{ 'active' if tab.active else '' }}" {% if tab.active %}aria-current="page"{% endif %}>{{ tab.label }}</a>
+          {% endfor %}
+        </nav>
+        {% if product_nav.date and product_nav.current.key in ['workspace', 'market'] %}<span class="module-date">{{ '名单日' if product_nav.current.key == 'workspace' else '交易日' }} <b>{{ product_nav.date }}</b></span>{% endif %}
+      </div>
+      {% endif %}
       <main class="app-main flex-1 overflow-y-auto px-6 py-5" id="main-scroll">
         {% block content %}{% endblock %}
       </main>
@@ -131,13 +150,6 @@
 
   <script>
     (function () {
-      const path = location.pathname;
-      document.querySelectorAll('#side-nav .nav-link').forEach(a => {
-        const prefix = a.dataset.prefix;
-        const exact = a.hasAttribute('data-exact');
-        const hit = exact ? (path === '/' ) : (path === prefix || path.startsWith(prefix + '/') || path.startsWith(prefix));
-        if (hit) a.classList.add('active');
-      });
       const sidebar = document.getElementById('app-sidebar');
       const button = document.getElementById('mobile-nav-button');
       const backdrop = document.getElementById('mobile-nav-backdrop');

@@ -14,6 +14,8 @@ requests>=2.31.0
 # eltdx独立采集；Web与策略只读Redis。升级部署前核对上游使用授权。
 adata>=2.9.5
 eltdx==3.3.0
+# Local AxData SDK for explicit backfill only; the upstream package requires Python 3.11+.
+axdata==0.1.4; python_version >= "3.11"
 # 环境变量管理（.env 文件，缺失时 settings.py 会优雅降级）
 python-dotenv>=1.0.0
 # 生产环境共享实时缓存、任务状态和分布式锁；未配置 REDIS_URL 时不连接服务。

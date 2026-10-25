@@ -256,10 +256,10 @@ class BacktestEngine:
     基于每日交易计划进行历史回测
     """
 
-    def __init__(self, data_manager, config: BacktestConfig = None):
+    def __init__(self, data_manager, config: BacktestConfig = None, *, frozen_context=None):
         self.dm = data_manager
         self.config = config or BacktestConfig()
-        self.calendar = TradeCalendar()
+        self.calendar = frozen_context['calendar'] if frozen_context is not None else TradeCalendar()
         self.trade_history: List[TradeRecord] = []
         self.daily_nav: List[Dict] = []  # 每日净值
         self.current_positions: Dict[str, Dict] = {}  # 当前持仓
@@ -299,11 +299,15 @@ class BacktestEngine:
         self._production_rows = {}
         self._production_profiles = {}
         if self.config.production_rules:
-            from core.screening.strategy_profiles import StrategyProfileRepository
-            profiles = StrategyProfileRepository().frozen()
-            self._production_profiles = {p['id']: profiles.get_profile(p['id']) for p in profiles.list_profiles()}
             from risk.risk_config import RiskConfig
-            self._production_risk = RiskConfig.load()
+            if frozen_context is not None:
+                self._production_profiles = deepcopy(frozen_context['profiles'])
+                self._production_risk = RiskConfig.from_dict(frozen_context['risk_config'])
+            else:
+                from core.screening.strategy_profiles import StrategyProfileRepository
+                profiles = StrategyProfileRepository().frozen()
+                self._production_profiles = {p['id']: profiles.get_profile(p['id']) for p in profiles.list_profiles()}
+                self._production_risk = RiskConfig.load()
         self.entry_attempts: List[Dict[str, Any]] = []
         self.entry_candidate_count: int = 0
         self.amount_profiles = MinuteAmountProfileRepository()
@@ -553,8 +557,10 @@ class BacktestEngine:
         from core.signals.production_rules import RULESET_VERSION
         holdings = [{"code": c, "sector_names": p.get('resonance_sectors') or ''}
                     for c, p in self.current_positions.items()]
-        loader = DayReplayLoader(data_manager=self.dm, calendar=self.calendar,
-            cache_dir=getattr(self.dm, 'cache_dir', None))
+        loader = getattr(self.dm, 'production_loader', None)
+        if loader is None:
+            loader = DayReplayLoader(data_manager=self.dm, calendar=self.calendar,
+                cache_dir=getattr(self.dm, 'cache_dir', None))
         fetch_missing = bool(getattr(self.dm, 'allow_remote_minutes', getattr(self.dm, 'allow_remote_history', True)))
         def evidence_progress(item):
             if self._replay_progress:
@@ -565,7 +571,9 @@ class BacktestEngine:
                             inputs_only=True, extra_codes=self.current_positions, extra_rows=holdings)
         self._production_inputs = inputs
         inputs['date'] = str(date)
-        frozen_config = inputs.get('input_basis') == 'preopen_frozen'
+        frozen_config = inputs.get('input_basis') == 'preopen_frozen' or inputs.get('execution_frozen') is True
+        if 'minute_amount_profile' in inputs:
+            self.amount_profiles._payload = deepcopy(inputs['minute_amount_profile'])
         from core.signals.production_rules import minute_evaluator
         from risk.risk_config import RiskConfig
         self.minute_evaluator = minute_evaluator(
@@ -609,7 +617,8 @@ class BacktestEngine:
                     "sector_codes": inputs['sector_codes'], "opening_price_source": inputs['opening_price_source']}
         from core.signals.production_rules import entry_parameters
         manifest['entry_parameters'] = entry_parameters(self.minute_evaluator)
-        manifest['configuration_basis'] = 'preopen_frozen' if frozen_config and inputs.get('risk_config') else 'run_config'
+        manifest['configuration_basis'] = ('preopen_frozen' if inputs.get('input_basis') == 'preopen_frozen'
+                                           else 'research_frozen' if inputs.get('execution_frozen') else 'run_config')
         manifest['input_hash'] = digest({**manifest, 'rows': inputs['rows'], 'previous': inputs['previous'],
             'board_feedback_inputs': inputs.get('board_feedback_inputs', {}),
             'opening_prices': inputs['opening_prices'], 'members': inputs['members'],
@@ -1106,7 +1115,7 @@ class BacktestEngine:
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f"[{date}] {code} 竞价数据预取失败: {exc}")
                 self._auction_rows[key] = {}
-        self._sector_peers = self._load_sector_peer_codes(date, sector_map)
+        self._sector_peers = self._load_sector_peer_codes(date, sector_map) if self.minute_evaluator.confirmation_policy.require_sector else {}
         peer_codes = sorted({peer for peers in self._sector_peers.values() for peer in peers})
         peer_loaded = 0
         for peer in peer_codes:
@@ -1175,6 +1184,21 @@ class BacktestEngine:
         return output
 
     def _sector_sync_checker(self, plan: pd.Series, date: str, stock_code: str):
+        if not self.minute_evaluator.confirmation_policy.require_sector:
+            from core.signals.sector_trend import make_trend_checker
+            inputs = getattr(self, "_production_inputs", {}) or {}
+            checker, evidence = make_trend_checker(
+                set(normalize_sector_names(plan.get('共振板块') or plan.get('所属板块'))),
+                inputs.get("board_trend_inputs") or {}, date=str(date),
+                weight=self.minute_evaluator.confirmation_policy.sector_score_weight)
+            key = (str(date), stock_code)
+            self._sector_evidence[key] = evidence
+            snapshots = self._sector_evidence_snapshots[key] = {}
+            def observe_trend(at_time):
+                state = checker(at_time)
+                snapshots[str(at_time)] = deepcopy(evidence)
+                return state
+            return observe_trend
         if self.config.production_rules:
             from core.signals.sector_sync import constituent_minute_prices, make_constituent_sync_checker
             from core.signals.opening import sector_reference_rows
@@ -2082,7 +2106,7 @@ class BacktestEngine:
                 checker = self._sector_sync_checker(pd.Series({'共振板块': position.get('resonance_sectors') or ''}), date, stock_code)
                 state = checker(str(row.time))
                 sector = {**self._sector_evidence[(str(date), stock_code)], 'state': state}
-                if state is None and position.get('resonance_sectors') and self.config.replay_missing_evidence_policy != 'legacy':
+                if self.minute_evaluator.confirmation_policy.require_sector and state is None and position.get('resonance_sectors') and self.config.replay_missing_evidence_policy != 'legacy':
                     self._raise_replay_evidence([{'trade_date': date, 'code': stock_code,
                         'scope': 'holding', 'evidence': 'holding_sector_minutes',
                         'reason': '持仓板块分钟证据不足', 'action': 'blocked', 'sector_evidence': sector}])

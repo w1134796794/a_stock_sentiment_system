@@ -31,6 +31,7 @@ class InternalScheduler:
     def __init__(self) -> None:
         self.enabled = _env_bool("AUTOMATION_ENABLED", True)
         self.daily_time = os.getenv("AUTOMATION_DAILY_TIME", "20:00").strip() or "20:00"
+        self.strategy_time = os.getenv("AUTOMATION_STRATEGY_TIME", "20:15").strip() or "20:15"
         self.auction_time = os.getenv("AUTOMATION_AUCTION_TIME", "09:25:10").strip() or "09:25:10"
         self.auto_backtest = _env_bool("AUTOMATION_AUTO_BACKTEST", True)
         self.capital = float(os.getenv("AUTOMATION_CAPITAL", "100000") or 100000)
@@ -38,6 +39,7 @@ class InternalScheduler:
         self.calendar = TradeCalendar()
         self.state = TaskStateStore("automation")
         self.daily_state = TaskStateStore("automation_daily")
+        self.strategy_state = TaskStateStore("automation_postclose_strategy")
         self.auction_state = TaskStateStore("automation_auction")
         self.preopen_state = TaskStateStore("automation_preopen")
         self.preopen_time = os.getenv("AUTOMATION_PREOPEN_TIME", "09:00").strip() or "09:00"
@@ -69,6 +71,7 @@ class InternalScheduler:
             # ZoneInfo 的上海时间判断，避免服务器系统时区影响盘中/盘后任务。
             self.scheduler.every().second.do(self._recover_due_auction_job).tag("auction")
             self.scheduler.every().minute.do(self._recover_due_daily_job).tag("daily")
+            self.scheduler.every().minute.do(lambda: self._recover_due_daily_job("strategy")).tag("strategy")
             self.scheduler.every().minute.do(self._recover_due_preopen_job).tag("preopen")
             self._stop.clear()
             self._catchup_checked = False
@@ -76,7 +79,7 @@ class InternalScheduler:
             self._thread.start()
             if not self.state.load():
                 self.state.save({"status": "idle", "message": "内置定时任务运行中"})
-            logger.info(f"[Automation] 已启动：竞价 {self.auction_time}，每日流水线 {self.daily_time}")
+            logger.info(f"[Automation] 已启动：竞价 {self.auction_time}，独立取数 {self.daily_time}，独立策略 {self.strategy_time}")
 
     def stop(self) -> None:
         self._stop.set()
@@ -98,11 +101,14 @@ class InternalScheduler:
             "enabled": self.enabled,
             "running": bool(self._thread and self._thread.is_alive()),
             "daily_time": self.daily_time,
+            "strategy_time": self.strategy_time,
+            "latest_strategy": self.strategy_state.load(),
             "auction_time": self.auction_time,
             "preopen_time": self.preopen_time,
             "preopen": self.preopen_state.load(),
             "timezone": self.timezone_name,
-            "auto_backtest": self.auto_backtest,
+            "auto_backtest": False,
+            "legacy_auto_backtest_setting": self.auto_backtest,
             "capital": self.capital,
             "catch_up_enabled": self.catch_up_enabled,
             "max_daily_attempts": self.max_daily_attempts,
@@ -174,7 +180,7 @@ class InternalScheduler:
             thread.start()
             return True
 
-    def _recover_due_daily_job(self) -> bool:
+    def _recover_due_daily_job(self, phase="postclose") -> bool:
         if self._stop.is_set():
             return False
         now = self._now()
@@ -183,16 +189,19 @@ class InternalScheduler:
             # Never rewrite yesterday's live inputs or compete for DuckDB during trading.
             return False
         try:
-            hour, minute = (int(part) for part in self.daily_time.split(":"))
+            run_time = self.strategy_time if phase == "strategy" else self.daily_time
+            hour, minute = (int(part) for part in run_time.split(":"))
             due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         except (TypeError, ValueError):
             logger.error(f"[Automation] 每日任务时间格式无效: {self.daily_time}")
             return False
         trade_date = now.strftime("%Y%m%d")
-        latest = self.daily_state.load()
+        phase_store = self.strategy_state if phase == "strategy" else self.daily_state
+        state_prefix = "automation_postclose_strategy" if phase == "strategy" else "automation_daily"
+        latest = phase_store.load()
         if not latest:
             legacy = self.state.load()
-            latest = legacy if legacy.get("job") == "daily" else {}
+            latest = legacy if phase == "postclose" and legacy.get("job") == "daily" else {}
         today_due = now >= due and self.calendar.is_trade_date(trade_date)
         if not self.catch_up_enabled:
             if not today_due:
@@ -204,7 +213,7 @@ class InternalScheduler:
             start = max(min(start, end), floor)
             selected = None
             for date in self.calendar.get_trade_dates(start, end):
-                saved = TaskStateStore(f"automation_daily_{date}").load()
+                saved = TaskStateStore(f"{state_prefix}_{date}").load()
                 if not saved and str(latest.get("trade_date") or "") == date:
                     saved = latest
                 if saved.get("status") == "done" and saved.get("pipeline_ok"):
@@ -234,7 +243,15 @@ class InternalScheduler:
                     return False
             except ValueError:
                 pass
-        dispatched = self._dispatch_job("daily", lambda date=trade_date: self._daily_job(date))
+        if phase == "strategy":
+            from config.settings import FACTOR_DB_PATH, WEB_DATA_DIR
+            from core.etl.stage_status import fetch_status
+            if not fetch_status(trade_date, db_path=FACTOR_DB_PATH, web_data_dir=WEB_DATA_DIR).get("ready"):
+                self.strategy_state.save({"status": "waiting_data", "trade_date": trade_date,
+                    "message": "等待独立盘后采集完成，策略不补取行情"})
+                return False
+        dispatched = self._dispatch_job("strategy" if phase == "strategy" else "daily",
+            lambda date=trade_date: self._daily_job(date, phase=phase))
         if dispatched:
             logger.warning(
                 f"[Automation] 检测到 {trade_date} 每日流水线未完成，"
@@ -324,16 +341,28 @@ class InternalScheduler:
             return False
         return self._dispatch_job("auction", self._auction_job)
 
-    def _daily_job(self, trade_date: str = "") -> None:
+    def _daily_job(self, trade_date: str = "", *, phase="postclose") -> None:
         trade_date = trade_date or self._now().strftime("%Y%m%d")
+        prefix = "automation_postclose_strategy" if phase == "strategy" else "automation_daily"
+        latest_store = self.strategy_state if phase == "strategy" else self.daily_state
+        dated_store = TaskStateStore(f"{prefix}_{trade_date}")
+
+        def save(payload):
+            if phase == "postclose":
+                self._save_daily_state(payload)
+            else:
+                merged = {**dated_store.load(), **payload, "phase": phase}
+                dated_store.save(merged)
+                latest_store.save(merged)
+
         if not self.calendar.is_trade_date(trade_date):
-            self._save_daily_state({"status": "skipped", "job": "daily", "trade_date": trade_date, "message": "非交易日，已跳过"})
+            save({"status": "skipped", "job": "daily", "trade_date": trade_date, "message": "非交易日，已跳过"})
             return
-        lease = TaskLease.acquire(f"automatic-daily-{trade_date}", self.daily_timeout + 300)
+        lease = TaskLease.acquire(f"automatic-{phase}-{trade_date}", self.daily_timeout + 300)
         if lease is None:
             logger.info(f"[Automation] {trade_date} 每日任务已由其他进程执行")
             return
-        previous = TaskStateStore(f"automation_daily_{trade_date}").load() or self.daily_state.load()
+        previous = dated_store.load() or latest_store.load()
         if (previous.get("trade_date") == trade_date
                 and previous.get("status") == "done" and previous.get("pipeline_ok")):
             lease.release()
@@ -342,7 +371,7 @@ class InternalScheduler:
             int(previous.get("attempt") or 0) + 1
             if str(previous.get("trade_date") or "") == trade_date else 1
         )
-        self._save_daily_state({
+        save({
             "status": "running", "job": "daily", "trade_date": trade_date,
             "attempt": attempt,
             "started_at": self._now().isoformat(timespec="seconds"),
@@ -352,7 +381,7 @@ class InternalScheduler:
             from config.settings import BASE_DIR, WEB_DATA_DIR
             from core.notifications.notifier import NotificationService
 
-            result_path = Path(WEB_DATA_DIR) / "automation" / f"daily_{trade_date}.json"
+            result_path = Path(WEB_DATA_DIR) / "automation" / f"{phase}_{trade_date}.json"
             result_path.unlink(missing_ok=True)
             command = [
                 sys.executable,
@@ -360,6 +389,7 @@ class InternalScheduler:
                 "faulthandler",
                 str(Path(BASE_DIR) / "scripts" / "automation_daily_worker.py"),
                 "--date", trade_date,
+                "--phase", phase,
                 "--capital", str(self.capital),
                 "--result", str(result_path),
             ]
@@ -368,9 +398,7 @@ class InternalScheduler:
                 # attempts preserve successful sources and only refill gaps
                 # such as a delayed ths_daily partition.
                 command.append("--repair-existing")
-            if self.auto_backtest:
-                command.append("--auto-backtest")
-            log_path = Path(BASE_DIR) / "logs" / f"automation_{trade_date}.log"
+            log_path = Path(BASE_DIR) / "logs" / f"automation_{phase}_{trade_date}.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8") as stream:
                 process = subprocess.Popen(
@@ -381,7 +409,7 @@ class InternalScheduler:
                     env={**os.environ, "PYTHONFAULTHANDLER": "1"},
                     start_new_session=(os.name != "nt"),
                 )
-                exit_code, guard_error = self._wait_worker(process, result_path)
+                exit_code, guard_error = self._wait_worker(process, result_path, save_state=save)
             payload = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else {
                 "status": "error",
                 "job": "daily",
@@ -399,38 +427,20 @@ class InternalScheduler:
                 ).isoformat(timespec="seconds")
             else:
                 payload["next_retry_at"] = ""
-            self._save_daily_state(payload)
+            save(payload)
             if payload.get("status") != "done" or not payload.get("pipeline_ok"):
                 message = str(payload.get("message") or self._exit_code_message(exit_code))
                 logger.error(f"[Automation] {trade_date} 隔离任务失败: {message}; 日志: {log_path}")
                 NotificationService().send(
                     "每日数据生成失败",
                     f"{trade_date}：{message}；日志：{log_path}",
-                    event_key=f"daily-error:{trade_date}",
+                    event_key=f"daily-error:{phase}:{trade_date}",
                 )
                 return
-            journal = payload.get("journal") or {}
-            backtest = payload.get("backtest") or {}
-            if self.auto_backtest and not backtest.get("ok"):
-                logger.warning(
-                    f"[Automation] {trade_date} 主流水线成功，但自动回测失败: "
-                    f"{backtest.get('reason', '未知原因')}"
-                )
-            backtest_text = (
-                f"近3个月回测胜率{backtest.get('win_rate_pct', '--')}%，"
-                f"最大回撤{backtest.get('max_drawdown_pct', '--')}%。"
-                if backtest.get("ok")
-                else f"自动回测未完成：{backtest.get('reason', '已跳过')}。"
-            )
-            NotificationService().send(
-                "每日复盘数据已生成",
-                f"{trade_date} 五阶段流水线完成；候选{journal.get('candidate_count', 0)}只。"
-                f"{backtest_text}",
-                event_key=f"daily-complete:{trade_date}",
-            )
+            logger.info("[Automation] {} {} 完成，不串联下一阶段", trade_date, phase)
         except Exception as exc:  # noqa: BLE001
             logger.exception(f"[Automation] {trade_date} 每日任务失败: {exc}")
-            self._save_daily_state({
+            save({
                 "status": "error", "job": "daily", "trade_date": trade_date,
                 "message": str(exc), "finished_at": self._now().isoformat(timespec="seconds"),
                 "attempt": attempt,
@@ -441,13 +451,13 @@ class InternalScheduler:
             try:
                 from core.notifications.notifier import NotificationService
 
-                NotificationService().send("每日数据生成失败", f"{trade_date}：{exc}", event_key=f"daily-error:{trade_date}")
+                NotificationService().send("每日数据生成失败", f"{trade_date} {phase}：{exc}", event_key=f"daily-error:{phase}:{trade_date}")
             except Exception:
                 pass
         finally:
             lease.release()
 
-    def _wait_worker(self, process: subprocess.Popen, result_path: Path) -> tuple[int, str]:
+    def _wait_worker(self, process: subprocess.Popen, result_path: Path, *, save_state=None) -> tuple[int, str]:
         """Monitor timeout, RSS and heartbeat without loading worker data in Web."""
         started = time.monotonic()
         while process.poll() is None:
@@ -461,7 +471,7 @@ class InternalScheduler:
             if result_path.exists():
                 try:
                     payload = json.loads(result_path.read_text(encoding="utf-8"))
-                    self._save_daily_state({**payload, "worker_rss_mb": round(rss_mb, 1)})
+                    (save_state or self._save_daily_state)({**payload, "worker_rss_mb": round(rss_mb, 1)})
                 except (OSError, json.JSONDecodeError):
                     pass
             time.sleep(5.0)
@@ -521,10 +531,10 @@ class InternalScheduler:
         if lease is None:
             return
         try:
-            from core.realtime.read_only_market import ReadOnlyMarketData
-            from core.realtime.collection_plan import DailyCollectionPlan
             from core.notifications.notifier import NotificationService
             from core.realtime.auction_alert_service import AuctionAlertService
+            from core.realtime.collection_plan import DailyCollectionPlan
+            from core.realtime.read_only_market import ReadOnlyMarketData
 
             candidate_date = self.calendar.prev(market_date)
             bundle = DailyCollectionPlan().bundle(market_date)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 
-RULESET_VERSION = "production_shared_v10_independent_market"
+RULESET_VERSION = "production_shared_v11_stock_confirmation_board_trend_score"
 
 
 def number(value, default=0.0):
@@ -128,6 +128,9 @@ def candidate_strength(row):
     breadth = number((row.get("sector_detail") or {}).get("breadth"))
     breadth = breadth * 100 if 0 < breadth <= 1 else breadth
     sector_bonus = max(min((breadth - 50) / 20, 3), -3) if breadth else 0
+    if row.get("sector_trend") is not None or (row.get("sector_detail") or {}).get("sector_required") is False:
+        from core.signals.sector_trend import trend_adjustment
+        sector_bonus = trend_adjustment(row)
     from core.signals.board_feedback import feedback_score_adjustment
     unadjusted = max(0, min(100, base + mode_bonus + group_bonus + sector_bonus))
     return round(max(0, unadjusted + feedback_score_adjustment(row.get("board_feedback"))), 2)

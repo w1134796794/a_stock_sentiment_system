@@ -30,7 +30,9 @@ def minutes(close=11.0, pre_close=10.0, **kwargs):
 
 
 def fallback(rows, frames, quotes=None, provider=None):
+    from backtest.minute_entry import MinuteEntryEvaluator
     service = RealtimeEntrySignalService.__new__(RealtimeEntrySignalService)
+    service.evaluator = MinuteEntryEvaluator()
     service.sector_breadth = provider or SimpleNamespace(
         evaluate=lambda *args: (None, {}),
         _members=lambda name, date: {"000002", "000003", "000004", "000005"}

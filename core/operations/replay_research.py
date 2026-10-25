@@ -181,6 +181,9 @@ class FrozenCalendar:
     def get_trade_dates(self, start: str, end: str) -> list[str]:
         return [d for d in self.dates if start <= d <= end]
 
+    def is_trade_date(self, date: str) -> bool:
+        return date in self.dates
+
     def prev(self, date: str) -> str:
         earlier = [d for d in self.dates if d < date]
         if not earlier:

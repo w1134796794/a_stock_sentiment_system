@@ -78,6 +78,8 @@ class RiskConfig:
     entry_pullback_max_volume_ratio: float = 0.8
     entry_max_vwap_distance: float = 0.02
     entry_max_breakout_extension: float = 0.015
+    entry_sector_mode: str = "trend_score"
+    sector_trend_score_weight: float = 5.0
     three_board_feedback_enabled: bool = True
     three_board_feedback_limit_fraction: float = 0.50
     three_board_feedback_score_penalty: float = 20.0
@@ -146,6 +148,7 @@ class RiskConfig:
         # Never retroactively assign a new scoring weight to an old saved config.
         kwargs.setdefault("three_board_feedback_score_penalty", 0.0)
         kwargs.setdefault("entry_confirmation_mode", "legacy")
+        kwargs.setdefault("entry_sector_mode", "breadth_required")
         # Fixed take-profit was removed in favour of trailing exits. Old web
         # overrides can still contain this key, so treat it as a silent legacy
         # migration instead of logging the same warning on every config load.

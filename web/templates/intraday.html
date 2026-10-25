@@ -92,6 +92,7 @@
   .is-metric strong { display:block; font-size:.85rem; color:#e2e8f0; font-weight:800; overflow-wrap:anywhere; }
   .is-reason { margin-top:.75rem; color:#cbd5e1; font-size:.82rem; line-height:1.45; }
   .is-action { margin-top:.55rem; color:#fbbf24; font-size:.78rem; line-height:1.35; }
+  .is-trend-factor { color:#94a3b8; }
   .is-up { color:#ff6b6b !important; }
   .is-down { color:#34d399 !important; }
   .is-muted { color:#64748b !important; }
@@ -218,7 +219,7 @@
       document.getElementById('collection-rows').innerHTML = (plan?.rows || []).map(row=>
         `<tr class="border-t border-slate-800"><td class="p-2">${esc(row.name)} <span class="mono">${esc(row.code)}</span></td><td class="p-2">${esc(row.sources.map(s=>sourceName[s]||s).join('、'))}</td><td class="p-2 break-words">${esc(row.sectors.join('、'))}</td></tr>`).join('');
       document.getElementById('collection-sectors').textContent = plan
-        ? `板块证据成分股 ${plan.sector_member_count} · 未纳入采集的持仓 ${(plan.uncollected_holdings || []).join('、') || '无'}${(plan.warnings || []).length ? ' · ' + plan.warnings.join('；') : ''}` : '';
+        ? `${plan.sector_confirmation_mode === 'trend_score' ? '板块口径：自身趋势评分 · 成分股实时采集：关闭' : '板块证据成分股 ' + plan.sector_member_count} · 未纳入采集的持仓 ${(plan.uncollected_holdings || []).join('、') || '无'}${(plan.warnings || []).length ? ' · ' + plan.warnings.join('；') : ''}` : '';
     } catch (e) {
       document.getElementById('collection-summary').textContent = '名单读取失败';
     }
@@ -266,6 +267,7 @@
           <div class="is-metric"><span>${activeProfile === 'decision_pool' ? '建议仓位' : '龙头阶段'}</span><strong>${esc(row.suggested_position || row.position_advice || row.lifecycle_state || '--')}</strong></div>
         </div>
         <div class="is-reason"><b>确认依据：</b>${esc(row.reason || '等待分钟买点确认')}</div>
+        ${row.sector_trend ? `<div class="is-action is-trend-factor"><b>板块趋势评分：</b>${row.sector_trend.assessed ? `${Number(row.sector_trend.score_adjustment)>=0?'+':''}${Number(row.sector_trend.score_adjustment).toFixed(2)}` : '未评估 · 0'} · ${esc(row.sector_trend.reason || '--')}</div>` : ''}
         ${row.board_feedback && (row.board_feedback.active || row.board_feedback.assessed === false) ? `<div class="is-action is-factor-warning"><b>风险因子 · 三板负反馈：</b>${esc(row.board_feedback.active ? '命中' : '未评估')} · ${esc(row.board_feedback.reason || '--')}${Number(row.board_feedback.score_adjustment)<0 ? ` · 强度扣分 ${esc(-Number(row.board_feedback.score_adjustment))}` : ''}</div>` : ''}
         ${row.was_confirmed_today ? `<div class="is-reason"><b>确认记录：</b>${esc(row.first_confirmed_at || row.confirm_time || '--')}${row.current_status_text ? ` · 当前${esc(row.current_status_text)}` : ''}</div>` : ''}
         <div class="is-action"><b>当前行动：</b>${esc(row.action || '继续观察')}</div>

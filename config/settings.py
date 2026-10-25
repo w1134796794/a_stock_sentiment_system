@@ -117,6 +117,9 @@ ELTDX_POLL_INTERVAL_SECONDS = max(
     2.0, float(os.getenv("ELTDX_POLL_INTERVAL_SECONDS", "3"))
 )
 ELTDX_TIMEOUT_SECONDS = max(1.0, float(os.getenv("ELTDX_TIMEOUT_SECONDS", "5")))
+# Only explicit historical acquisition opts in; strategies/replays remain storage-only.
+HISTORY_AXDATA_FIRST = os.getenv("HISTORY_AXDATA_FIRST", "true").strip().lower() in {"1", "true", "yes"}
+HISTORY_AXDATA_ROOT = _env_path("HISTORY_AXDATA_ROOT", WEB_DATA_DIR / "axdata" / "data")
 ELTDX_CONSTITUENT_WORKERS = min(max(1, int(os.getenv("ELTDX_CONSTITUENT_WORKERS", "4"))), 8)
 ELTDX_BOARD_SHADOW_ENABLED = os.getenv("ELTDX_BOARD_SHADOW_ENABLED", "false").lower() in {"1", "true", "yes"}
 ELTDX_BOARD_POLL_SECONDS = max(5.0, float(os.getenv("ELTDX_BOARD_POLL_SECONDS", "10")))

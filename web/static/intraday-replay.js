@@ -42,7 +42,7 @@
     const rows=(stock.transitions||[]).flatMap(t=>{
       const point=t.condition_checks?.latest;
       if(!point)return [];
-      return [[t.evaluated_at,point.minute,Object.entries(point.checks||{}).map(([key,value])=>`${conditionNames[key]||key}: ${value===null?'未评估':value===true?'通过':value===false?'未通过':value}`).join('；')]];
+      return [[t.evaluated_at,point.minute,Object.entries(point.checks||{}).filter(([key])=>key!=='sector_required').map(([key,value])=>key==='sector'&&point.checks.sector_required===false?`板块方向（评分项）: ${value===null?'未评估':value?'走强':'偏弱'}`:`${conditionNames[key]||key}: ${value===null?'未评估':value===true?'通过':value===false?'未通过':value}`).join('；')]];
     });
     const timing=stock.runtime_diagnostic?.last_observation?.evaluation_timing;
     const selection=stock.runtime_diagnostic?.last_observation?.condition_checks;
@@ -62,10 +62,12 @@
     return `<p class="text-sm text-slate-400 mt-2">开盘 ${esc(value(o.open_price))} · 昨收参考 ${esc(value(o.pre_close))} · 开盘涨跌 ${esc(percent(o.open_gap==null?null:o.open_gap*100))} · 来源 ${esc(sources[o.opening_source]||o.opening_source||'未取得')}</p>`;
   }
   function factorDetail(stock) {
+    const trend=stock.sector_trend||stock.last_signal?.sector_trend;
+    const trendHtml=trend?`<p class="text-sm text-slate-400 mt-2">板块趋势评分：${trend.assessed?esc((Number(trend.score_adjustment)>=0?'+':'')+Number(trend.score_adjustment).toFixed(2)):'未评估 · 0'} · ${esc(trend.reason||'--')}</p>`:'';
     const factor=stock.board_feedback||stock.last_signal?.board_feedback;
-    if(!factor||factor.role!=='risk_factor'||(!factor.active&&factor.assessed!==false))return '';
+    if(!factor||factor.role!=='risk_factor'||(!factor.active&&factor.assessed!==false))return trendHtml;
     const adjustment=Number(factor.score_adjustment||0);
-    return `<p class="text-sm text-amber-300 mt-2 dr-factor-warning">风险因子 · 三板负反馈：${esc(factor.active?'命中':'未评估')} · ${esc(factor.reason||'--')}${adjustment<0?` · 强度扣分 ${esc(-adjustment)}`:''}</p>`;
+    return trendHtml+`<p class="text-sm text-amber-300 mt-2 dr-factor-warning">风险因子 · 三板负反馈：${esc(factor.active?'命中':'未评估')} · ${esc(factor.reason||'--')}${adjustment<0?` · 强度扣分 ${esc(-adjustment)}`:''}</p>`;
   }
   async function refreshRuns() {
     const value = await api('/api/intraday-replay');

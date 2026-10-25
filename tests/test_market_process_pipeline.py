@@ -22,7 +22,7 @@ DAY = "20261023"
 PREOPEN = datetime(2026, 10, 23, 9, 0)
 
 
-def bundle():
+def bundle(sector_mode="breadth_required"):
     def row(i):
         return {"code": f"{i:06d}", "name": f"stock{i}", "resonance_sectors": "board",
                 "concept_tags": ["concept"]}
@@ -30,7 +30,7 @@ def bundle():
         "health": {"ok": True}, "inputs": {
             "leader_pools": {"10": {"rows": [row(i) for i in range(1, 31)]}},
             "candidates": [row(i) for i in range(31, 36)], "profiles": [],
-            "risk_config": asdict(RiskConfig()), "holdings": [{"code": "600000"}],
+            "risk_config": asdict(RiskConfig(entry_sector_mode=sector_mode)), "holdings": [{"code": "600000"}],
             "artifacts": {"fetch": {"fetched_at": "2026-10-22T18:00:00+08:00"}},
             "sector_codes": {"board": "885001", "concept": "885002"},
             "sector_members": {"board": ["000001", "000002", "600001"], "concept": ["600002"]},

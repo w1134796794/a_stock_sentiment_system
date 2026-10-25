@@ -27,7 +27,7 @@ def event(kind, code, receipt, **values):
     }
 
 
-def sample(until="09:36:03"):
+def sample(until="09:36:03", sector_mode="breadth_required"):
     from risk.risk_config import RiskConfig
 
     row = {
@@ -42,7 +42,7 @@ def sample(until="09:36:03"):
         "candidate_date": "20261021",
         "bundle_id": "synthetic",
         "inputs": {
-            "risk_config": RiskConfig().to_dict(),
+            "risk_config": RiskConfig(entry_sector_mode=sector_mode).to_dict(),
             "candidates": [row],
             "sector_codes": {"test": "881001"},
             "sector_members": {"test": ["000001", "000002", "000003"]},

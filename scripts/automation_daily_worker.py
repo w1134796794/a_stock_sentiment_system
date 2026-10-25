@@ -83,6 +83,8 @@ def main() -> int:
     parser.add_argument("--capital", type=float, default=100000.0)
     parser.add_argument("--result", type=Path, required=True)
     parser.add_argument("--auto-backtest", action="store_true")
+    parser.add_argument("--phase", choices=("postclose", "strategy", "legacy"), default="postclose",
+                        help="采集与策略分别执行；legacy 仅供显式兼容调用")
     parser.add_argument(
         "--repair-existing",
         action="store_true",
@@ -97,6 +99,26 @@ def main() -> int:
     }
     _write(args.result, progress)
     try:
+        if args.phase != "legacy":
+            from core.infrastructure.shared_state import TaskLease
+            lease = TaskLease.acquire("post_close_pipeline", 600)
+            if lease is None:
+                raise RuntimeError("已有盘后数据写入或计算任务运行，等待下一次独立调度")
+            try:
+                if args.phase == "postclose":
+                    from scripts.collect_postclose import collect
+                    result = collect(trade_date, force_refresh=not args.repair_existing, skip_existing=False)
+                    stages = {"fetch": bool(result.ok)}
+                else:
+                    from scripts.postclose_strategy import run_strategy
+                    stages = run_strategy(trade_date)
+                _write(args.result, {**progress, "status": "done", "phase": args.phase,
+                    "pipeline_ok": all(stages.values()), "stages": stages,
+                    "finished_at": datetime.now().isoformat(timespec="seconds"),
+                    "notification_sent": False, "account_modified": False})
+                return 0
+            finally:
+                lease.release()
         from core.reports.daily_journal import DailyJournalService
         from main import SentimentSystem
 

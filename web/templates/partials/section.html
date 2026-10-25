@@ -4,11 +4,13 @@
     <div class="text-xs text-slate-500 mono">
       {% if section.kind == 'decision_pool' %}
         可执行 {{ section.tab_count }} · 暂不参与 {{ section.groups[2].rows|length }}
+      {% elif section.name in ['热点概念', '主线主题'] %}{{ section.rows|length }} 个主题
+      {% elif section.name == '涨停梯队' %}{{ section.rows|length }} 只股票
       {% elif section.blocks %}{{ section.blocks|length }} 表{% else %}{{ section.rows|length }} 行 · {{ section.columns|length }} 列{% endif %}
     </div>
   </div>
 
-  {% if section.summary %}
+  {% if section.summary and section.name not in ['涨停梯队', '概念连板梯队'] %}
   <div class="mb-3 text-sm text-slate-300 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2 leading-relaxed">
     {{ section.summary }}
   </div>
@@ -167,50 +169,7 @@
 
   {# ---------- 涨停梯队：按连板数分层（高度板在上） ---------- #}
   {% macro render_echelon_boards(rows) %}
-  {% if not rows %}
-    <div class="text-slate-500 text-sm py-4">无数据</div>
-  {% else %}
-    {% set lv = namespace(seen=[]) %}
-    {% for r in rows %}
-      {% set b = r.get('连板数') %}
-      {% if b is not none and b not in lv.seen %}{% set lv.seen = lv.seen + [b] %}{% endif %}
-    {% endfor %}
-    <div class="ech-wrap">
-      {% for level in lv.seen | sort(reverse=true) %}
-      <div class="ech-tier">
-        <div class="ech-tier-head">
-          <span class="ech-badge ech-b{{ level if level <= 5 else 5 }}">{{ level }}<small>板</small></span>
-          {% set ns2 = namespace(n=0) %}
-          {% for r in rows %}{% if r.get('连板数') == level %}{% set ns2.n = ns2.n + 1 %}{% endif %}{% endfor %}
-          <span class="ech-tier-n">{{ ns2.n }} 家</span>
-        </div>
-        <div class="ech-cards">
-          {% for r in rows %}
-          {% if r.get('连板数') == level %}
-          {% set zb = r.get('炸板次数') or 0 %}
-          <a class="ech-card{% if zb > 0 %} zha{% endif %}"
-             href="{{ r.get('_detail_url') }}"
-             title="查看 {{ r.get('股票名称') }} 日K线">
-            <div class="ech-card-top">
-              <span class="ech-name">{{ r.get('股票名称') }}</span>
-              <span class="ech-pct mono">{{ r.get('涨幅%') | num2 }}<small>%</small></span>
-            </div>
-            <div class="ech-card-sub">
-              <span class="ech-code mono">{{ r.get('股票代码') }}</span>
-              <span class="ech-ind">{{ r.get('行业') }}</span>
-            </div>
-            <div class="ech-card-foot">
-              <span class="mono">{{ r.get('首次涨停时间') }}</span>
-              {% if zb > 0 %}<span class="ech-zha">炸 {{ zb }}</span>{% endif %}
-            </div>
-          </a>
-          {% endif %}
-          {% endfor %}
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  {% endif %}
+    {% include "partials/limitup_review.html" %}
   {% endmacro %}
 
   {# ---------- 概念连板梯队：概念卡片 ---------- #}
@@ -446,11 +405,13 @@
   {% endmacro %}
 
   {% macro render_decision_pool(section) %}
+    <div data-decision-pool>
     <div class="dp-toolbar">
       <div class="dp-active">
         <span class="dp-regime">{{ section.market_regime_label }}</span>
         <span class="dp-caption">今日适用策略</span>
-        {% for name in section.active_strategy_names %}<span class="dp-strategy">{{ name }}</span>{% endfor %}
+        <button type="button" class="dp-strategy" data-dp-filter="" aria-pressed="true">全部</button>
+        {% for name in section.active_strategy_names %}<button type="button" class="dp-strategy" data-dp-filter="{{ name }}" aria-pressed="false">{{ name }}</button>{% endfor %}
       </div>
       {% if section.hidden_strategy_names %}
       <details class="dp-hidden">
@@ -459,24 +420,26 @@
       </details>
       {% endif %}
     </div>
+    <div class="dp-filter-status" data-dp-status role="status" aria-live="polite"></div>
     {% for group in section.groups %}
       {% set collapsed = group.key == 'inactive' %}
       {% if collapsed %}<details class="dp-group dp-group--inactive"><summary class="dp-group-head">{% else %}<section class="dp-group"><div class="dp-group-head">{% endif %}
         <span><b>{{ group.name }}</b><small>{{ group.meaning }}</small></span>
-        <span class="dp-count mono">{{ group.rows|length }}</span>
+        <span class="dp-count mono" data-dp-count>{{ group.rows|length }}</span>
       {% if collapsed %}</summary>{% else %}</div>{% endif %}
 
       {% if group.rows %}
       <div class="dp-grid">
         {% for row in group.rows %}
-        <article class="dp-card dp-card--{{ group.key }}">
+        <article class="dp-card dp-card--{{ group.key }}" data-dp-strategies="{{ (row.get('命中策略') or [])|tojson|forceescape }}">
           <header class="dp-card-head">
-            <span><b>{{ row.get('name') or row.get('股票名称') or row.get('code') }}</b><small class="mono">{{ row.get('code') }}</small></span>
+            <span>{% if row.get('_detail_url') %}<a class="dp-stock-link" href="{{ row.get('_detail_url') }}#daily-view" title="查看日K与分时行情"><b>{{ row.get('name') or row.get('股票名称') or row.get('code') }}</b><small class="mono">{{ row.get('code') }}</small></a>{% else %}<b>{{ row.get('name') or row.get('股票名称') or row.get('code') }}</b><small class="mono">{{ row.get('code') }}</small>{% endif %}</span>
             <span class="dp-head-badges">
               <span class="dp-grade dp-grade--{{ row.get('规则等级')|lower }}">规则 {{ row.get('规则等级') }}</span>
               <span class="dp-action">{{ row.get('行动分组') }}</span>
             </span>
           </header>
+          {% if row.get('_detail_url') %}<div class="dp-chart-links"><a href="{{ row.get('_detail_url') }}#daily-view">日K</a><a href="{{ row.get('_detail_url') }}#intraday-view">分时</a></div>{% endif %}
           <div class="dp-conclusion">{{ row.get('一句话结论') }}</div>
           <dl class="dp-six">
             <div><dt>策略共识</dt><dd><b class="mono">{{ row.get('策略共识显示') }}</b><span>{{ row.get('命中策略')|join('、') }}</span></dd></div>
@@ -497,17 +460,21 @@
         </article>
         {% endfor %}
       </div>
+      <div class="dp-empty" data-dp-empty hidden>该分组没有命中此策略的股票</div>
       {% else %}
       <div class="dp-empty">今日没有进入“{{ group.name }}”的股票</div>
       {% endif %}
 
       {% if collapsed %}</details>{% else %}</section>{% endif %}
     {% endfor %}
+    </div>
   {% endmacro %}
 
   {% set _view = view | default('table') %}
   {% if section.kind == 'decision_pool' %}
     {{ render_decision_pool(section) }}
+  {% elif section.name in ['热点概念', '主线主题'] %}
+    {% include "partials/sector_review.html" %}
   {% elif _view == 'smart' %}
     {{ render_smart(section.columns, section.rows, section.name) }}
   {% else %}
@@ -537,6 +504,7 @@
   .dp-regime { color:#6ee7b7; background:rgba(16,185,129,.12); font-weight:700; }
   .dp-caption { color:#64748b; font-size:.75rem; margin-left:.2rem; }
   .dp-strategy { color:#cbd5e1; font-size:.75rem; background:rgba(15,23,42,.7); }
+  button.dp-strategy{cursor:pointer;min-height:30px}button.dp-strategy:hover,button.dp-strategy[aria-pressed=true]{color:#8ee6bc;border-color:#54c9a3;background:#12372f}button.dp-strategy:focus-visible,.dp-stock-link:focus-visible,.dp-chart-links a:focus-visible{outline:2px solid #6ee7b7;outline-offset:3px}.dp-filter-status{font-size:12px;color:#94a3b8;margin-bottom:10px}.dp-filter-status:empty{display:none}.dp-stock-link:hover b{color:#6ee7b7;text-decoration:underline}.dp-chart-links{display:flex;gap:14px;margin-top:8px;font-size:12px;color:#7dd3fc}.dp-chart-links a:hover{text-decoration:underline}[data-decision-pool] [hidden]{display:none!important}
   .dp-hidden { color:#64748b; font-size:.75rem; text-align:right; }
   .dp-hidden summary { cursor:pointer; color:#94a3b8; }
   .dp-hidden div { margin-top:.35rem; max-width:32rem; line-height:1.6; }

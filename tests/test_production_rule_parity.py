@@ -21,7 +21,7 @@ def sector_inputs():
                 previous={c: {'close': 10} for c in codes}, opening_prices={c: 9 for c in codes})
 
 
-def test_backtest_and_day_diagnostic_use_latest_sector_policy():
+def test_backtest_and_day_diagnostic_share_explicit_legacy_constituent_policy():
     inputs = sector_inputs()
     shared, detail = make_constituent_sync_checker(**inputs)
     assert shared('09:36:00') is True
@@ -31,7 +31,7 @@ def test_backtest_and_day_diagnostic_use_latest_sector_policy():
     engine._minute_frames = {('20261014', c): f for c, f in inputs['frames'].items()}
     historical = engine._sector_sync_checker(pd.Series({'共振板块': 'test'}), '20261014', '000001')
     service = _ReplayEntryService(inputs['previous'], {}, inputs['members'], inputs['frames'],
-                                  SimpleNamespace(), inputs['opening_prices'])
+                                  SimpleNamespace(), inputs['opening_prices'], evaluator=engine.minute_evaluator)
     diagnostic, observed = service._sector_checker({'sector_names': ['test']}, '000001', [], {}, {}, '20261014')
     assert historical('09:36:00') is diagnostic('09:36:00') is True
     assert observed['sector_sync_policy_version'] == detail['sector_sync_policy_version']

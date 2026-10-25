@@ -414,6 +414,9 @@ class RealtimeEntrySignalService:
                 "filled", "confirmed", "signal_unfilled",
             }
         decision.condition_checks.update({**selection_checks, **decision.condition_checks})
+        if not self.evaluator.confirmation_policy.require_sector:
+            sector_checker(decision.confirm_time or str(quote.get("time") or "15:00:00"))
+            decision.condition_checks["sector_required"] = False
         payload = self._payload(
             decision,
             mode,
@@ -426,6 +429,8 @@ class RealtimeEntrySignalService:
         )
         payload["evaluation_timing"] = {"sector_prepare_ms": sector_prepare_ms,
                                          "minute_decision_ms": decision_ms, "snapshot_ms": snapshot_ms}
+        if not self.evaluator.confirmation_policy.require_sector:
+            payload["sector_trend"] = sector_detail.get("trend_factor", {})
         if mode in STRUCTURAL_MODES:
             payload["structure"] = structures.get(mode, {})
             payload["structural_stop"] = (structures.get(mode) or {}).get("protection")
@@ -593,6 +598,8 @@ class RealtimeEntrySignalService:
         ) if signal_name else {}
         sector_complete = float((sector_detail or {}).get("data_completeness") or 0.0)
         data_completeness = min(float(decision.data_completeness), sector_complete or float(decision.data_completeness))
+        if (sector_detail or {}).get("sector_required") is False:
+            data_completeness = float(decision.data_completeness)
         confidence = ConfidenceService.assess(
             calibrated_probability=stats.get("success_probability", 0.5),
             expected_return=stats.get("expected_return", 0.0),
@@ -762,6 +769,8 @@ class RealtimeEntrySignalService:
         market_date: str,
     ) -> Tuple[Any, Dict[str, Any]]:
         sectors = self._sectors(row)
+        if not self.evaluator.confirmation_policy.require_sector:
+            return self._trend_checker(sectors, market_date)
         if type(self.sector_breadth) is RealtimeSectorBreadthProvider:
             try:
                 policy = self.evaluator.confirmation_policy
@@ -842,6 +851,25 @@ class RealtimeEntrySignalService:
     @staticmethod
     def _sectors(row: Dict[str, Any]) -> set[str]:
         return sector_names_from_row(row)
+
+    def _trend_checker(self, sectors, market_date):
+        from core.signals.sector_trend import BoardTrendReader, make_trend_checker
+        weight = self.evaluator.confirmation_policy.sector_score_weight
+        inputs = getattr(self, "board_trend_inputs", None)
+        if inputs is not None:
+            key = (market_date, id(inputs), tuple(sorted(sectors)), weight)
+            cached = getattr(self, "_trend_checkers", {})
+            if key not in cached:
+                cached[key] = make_trend_checker(sectors, inputs, date=market_date, weight=weight,
+                                                 clock=getattr(self, "clock", None))
+                self._trend_checkers = cached
+            return cached[key]
+        try:
+            if not hasattr(self, "_board_trend_reader"):
+                self._board_trend_reader = BoardTrendReader()
+            return self._board_trend_reader.checker(sectors, market_date, weight)
+        except Exception:
+            return make_trend_checker(sectors, {}, date=market_date, weight=weight)
 
     @staticmethod
     def _metric(row: Dict[str, Any], name: str, default: float = 0.0) -> float:

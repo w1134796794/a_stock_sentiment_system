@@ -16,11 +16,11 @@
 {% endblock %}
 
 {% block content %}
-<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/static/lightweight-charts.min.js?v=4.2.3"></script>
 
 <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
   <section class="space-y-4 min-w-0">
-    <div class="card border border-slate-800 rounded-xl p-4">
+    <div id="intraday-view" class="card border border-slate-800 rounded-xl p-4">
       <div class="flex items-center justify-between mb-3">
         <div>
           <h2 class="font-bold">分时走势</h2>
@@ -32,7 +32,7 @@
       <div id="intraday-empty" class="hidden text-sm text-slate-500 py-12 text-center">暂无分时数据</div>
     </div>
 
-    <div class="card border border-slate-800 rounded-xl p-4">
+    <div id="daily-view" class="card border border-slate-800 rounded-xl p-4">
       <div class="flex items-center justify-between mb-3">
         <div>
           <h2 class="font-bold">日K走势</h2>

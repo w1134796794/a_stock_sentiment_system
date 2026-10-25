@@ -81,4 +81,6 @@ def test_etl_daily_pipeline_writes_snapshot_and_screening(tmp_path, monkeypatch)
     assert research.ok
     assert archives == []
     pipeline.run_screening("20260616", "20260615")
+    assert archives == []
+    pipeline.run_screening("20260616", "20260615", archive_cases=True)
     assert len(archives) == 1

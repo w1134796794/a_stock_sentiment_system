@@ -1,0 +1,15 @@
+<div class="lr-wrap ech-wrap" data-limitup-review>
+  <div class="review-tools"><label class="review-search"><span>搜索股票</span><input type="search" data-lr-search placeholder="名称、代码或行业" aria-label="搜索涨停股票"></label><label class="review-check"><input type="checkbox" data-lr-cons>仅看连板</label><label>炸板<select data-lr-risk aria-label="炸板筛选"><option value="">不限</option><option value="yes">有炸板</option><option value="no">无炸板记录</option></select></label><span data-lr-count>{{ rows|length }} 只</span></div>
+  {% set levels = namespace(values=[]) %}{% for row in rows %}{% if row.get('连板数') is not none and row.get('连板数') not in levels.values %}{% set levels.values = levels.values + [row.get('连板数')] %}{% endif %}{% endfor %}
+  {% for level in levels.values|sort(reverse=true) %}
+  {% set tier = namespace(count=0) %}{% for row in rows %}{% if row.get('连板数') == level %}{% set tier.count = tier.count + 1 %}{% endif %}{% endfor %}
+  <details class="lr-tier" data-lr-tier data-default-open="{{ 'true' if level > 1 else 'false' }}" {% if level > 1 %}open{% endif %}>
+    <summary><span class="lr-height"><strong class="mono">{{ level }}</strong>板</span><span class="lr-tier-name">{{ '高度梯队' if loop.first and level > 1 else '首板池' if level == 1 else '连板梯队' }}</span><span class="lr-tier-count" data-lr-tier-count>{{ tier.count }} 只</span><span class="lr-expand">展开 / 收起</span></summary>
+    <div class="lr-columns"><span>股票 / 代码</span><span>行业</span><span>首次封板</span><span>炸板次数</span><span>涨幅</span></div>
+    {% for row in rows %}{% if row.get('连板数') == level %}
+    <a class="lr-row" href="{{ row.get('_detail_url') }}" data-lr-row data-level="{{ level }}" data-risk="{{ row.get('炸板次数') if row.get('炸板次数') is not none else '' }}" data-search="{{ row.get('股票名称') }} {{ row.get('股票代码') }} {{ row.get('行业') }}" title="查看{{ row.get('股票名称') }}行情">
+      <span class="lr-stock"><b>{{ row.get('股票名称') }}</b><small class="mono">{{ row.get('股票代码') }}</small></span><span class="lr-industry">{{ row.get('行业') or '--' }}</span><span class="mono lr-time">{{ row.get('首次涨停时间') or '--' }}</span><span class="lr-risk mono {{ 'has-risk' if (row.get('炸板次数') or 0) > 0 else '' }}">{{ row.get('炸板次数') if row.get('炸板次数') is not none else '--' }}</span><span class="lr-change mono">{{ row.get('涨幅%')|num2 }}%</span>
+    </a>{% endif %}{% endfor %}
+  </details>{% endfor %}
+  <div class="review-empty" data-lr-empty {% if rows %}hidden{% endif %}>当前没有匹配的涨停股票</div>
+</div>

@@ -190,7 +190,8 @@ class SnapshotSignalService:
             gates.append("amount_pace_allowed")
         if evaluator.confirmation_policy.mode == "volume_price":
             gates.append("local_volume_allowed")
-        if not bool(sector):
+        checks["sector_required"] = evaluator.confirmation_policy.require_sector
+        if evaluator.confirmation_policy.require_sector and not bool(sector):
             return stop("缺少真实板块指数或成分股宽度，保持观察" if sector is None else "板块同步走强条件尚未满足",
                         data_status="snapshot_missing_sector" if sector is None else "snapshot_observing")
         failed = [field for field in gates if not checks[field]]
@@ -200,13 +201,13 @@ class SnapshotSignalService:
                       "amount_pace_allowed": "同分钟量能进度", "local_volume_allowed": "快照局部放量"}
             return stop("等待" + "、".join(labels[field] for field in failed))
         base = EntryDecision("confirmed", MODE_LABELS[mode], breakout_level=level,
-            open_gap_pct=open_gap, amount_pace=pace or 0, sector_confirmed=True,
+            open_gap_pct=open_gap, amount_pace=pace or 0, sector_confirmed=bool(sector),
             profile_samples=profile_samples, confirmation_policy=evaluator.confirmation_policy.mode,
             confirmation_reason="连续真实快照独立确认，不等待分钟收盘确认",
             condition_checks={"latest": {"minute": latest_time, "checks": dict(checks)},
                 "confirmation": {"minute": latest_time, "checks": dict(checks)}, "source_policy": "snapshot_first"})
         result = self.evaluate(code=code, trade_date=trade_date, mode=mode, minute_bars=minutes,
-            snapshots=ticks, prev_close=prev_close, open_gap=open_gap, sector_confirmed=True,
+            snapshots=ticks, prev_close=prev_close, open_gap=open_gap, sector_confirmed=sector,
             is_leader=is_leader, limit_price=limit_price, minute_decision=base,
             confirmation_deadline=deadline, confirmation_policy=evaluator.confirmation_policy,
             snapshot_vwap=vwap, primary=True)
@@ -318,7 +319,7 @@ class SnapshotSignalService:
                 bool((prices >= prev_close).all())
                 and above_vwap
                 and current > key_level
-                and sector_ok
+                and (sector_ok or not policy.require_sector)
                 and has_turnover
             )
             reason = "连续快照收复昨收、站稳VWAP并突破前5分钟高点"
@@ -326,7 +327,7 @@ class SnapshotSignalService:
             triggered = (
                 above_vwap
                 and current > key_level
-                and sector_ok
+                and (sector_ok or not policy.require_sector)
                 and has_turnover
             )
             reason = "连续快照站稳VWAP并突破前5分钟高点"
@@ -335,7 +336,7 @@ class SnapshotSignalService:
                 is_leader
                 and above_vwap
                 and current >= key_level
-                and sector_ok
+                and (sector_ok or not policy.require_sector)
                 and has_turnover
             )
             reason = "龙头高开后获得连续快照成交确认"
@@ -368,7 +369,7 @@ class SnapshotSignalService:
                     missing.append("连续站稳VWAP")
                 if current <= key_level or (policy.mode == "volume_price" and not above_key):
                     missing.append("站稳确认关键价" if policy.mode == "volume_price" else "突破前5分钟高点")
-                if not sector_ok:
+                if policy.require_sector and not sector_ok:
                     missing.append("板块同步走强")
                 if not has_turnover:
                     missing.append("近15秒真实成交")

@@ -175,8 +175,10 @@ def test_sector_quotes_only_fill_observed_minutes_and_use_quote_reference():
     assert detail["missing_minute_codes"] == sorted(points)
 
     from core.realtime.day_replay import _ReplayEntryService
+    from backtest.minute_entry import MinuteEntryEvaluator
     service = _ReplayEntryService({}, {}, {"sector": list(points)}, {}, SimpleNamespace(),
-        {c: 10 for c in points}, opening_evidence={c: {"pre_close": 10} for c in points}, sector_quote_minutes=points)
+        {c: 10 for c in points}, opening_evidence={c: {"pre_close": 10} for c in points}, sector_quote_minutes=points,
+        evaluator=MinuteEntryEvaluator())
     replay_checker, replay_detail = service._sector_checker({"sector_names": ["sector"]}, "002242", [], {}, {}, DATE)
     assert replay_checker("09:36:00") is True
     assert replay_detail["missing_previous_close_codes"] == []

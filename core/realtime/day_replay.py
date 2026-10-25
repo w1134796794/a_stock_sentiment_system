@@ -6,6 +6,7 @@ import json
 import math
 import re
 from collections import Counter
+from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -85,7 +86,7 @@ class _ReplayEntryService(RealtimeEntrySignalService):
     record_execution_timing = False
     snapshot_primary_enabled = False
     def __init__(self, previous, auctions, members, frames, profiles, opening_prices=None, *, evaluator=None,
-                 opening_evidence=None, board_feedback_inputs=None, sector_quote_minutes=None):
+                 opening_evidence=None, board_feedback_inputs=None, sector_quote_minutes=None, board_trend_inputs=None):
         # Explicit adapters isolate the shared rule evaluator from live providers/stores.
         super().__init__(evaluator=evaluator, amount_profile_repository=profiles,
                          signal_stats_repository=SimpleNamespace(get=lambda *a, **kw: {}),
@@ -100,6 +101,7 @@ class _ReplayEntryService(RealtimeEntrySignalService):
         self.opening_evidence = opening_evidence or {}
         self.sector_minutes = {}
         self._feedback_inputs = board_feedback_inputs or {}
+        self.board_trend_inputs = board_trend_inputs or {}
 
     def _auction(self, code, market_date):
         return self.auctions.get(code, {})
@@ -108,6 +110,8 @@ class _ReplayEntryService(RealtimeEntrySignalService):
         return pd.DataFrame()
 
     def _sector_checker(self, row, code, all_rows, frames, quotes, market_date):
+        if not self.evaluator.confirmation_policy.require_sector:
+            return self._trend_checker(self._sectors(row), market_date)
         from core.signals.sector_sync import make_constituent_sync_checker
         from core.signals.opening import sector_reference_rows
         return make_constituent_sync_checker(
@@ -120,7 +124,7 @@ class _ReplayEntryService(RealtimeEntrySignalService):
 def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=None,
                    members=None, sector_codes=None, opening_prices=None, opening_price_source="",
                    opening_evidence=None, risk_config=None, board_feedback_inputs=None,
-                   configuration_basis="", sector_quote_minutes=None,
+                   configuration_basis="", sector_quote_minutes=None, board_trend_inputs=None,
                    profiles=None, input_basis="research", bundle_id="", progress=None):
     """Run the actual entry service against growing prefixes, with no live effects."""
     from core.signals.minute_amount_profile import MinuteAmountProfileRepository
@@ -139,7 +143,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
     configuration_basis = configuration_basis or ("provided_config" if risk_config is not None else "current_config_not_frozen")
     service = _ReplayEntryService(previous, auctions or {}, members or {}, normalized, profiles, opening_prices,
                                   evaluator=minute_evaluator(risk), opening_evidence=opening_evidence,
-                                  board_feedback_inputs=board_feedback_inputs, sector_quote_minutes=sector_quote_minutes)
+                                  board_feedback_inputs=board_feedback_inputs, sector_quote_minutes=sector_quote_minutes,
+                                  board_trend_inputs=board_trend_inputs)
     stocks, failures = [], []
     for index, source in enumerate(rows):
         row = dict(source)
@@ -205,7 +210,7 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
                               "minutes_total": len(available)})
             stock.update({"status": signal["signal_status"], "reason": signal["reason"], "last_signal": clean(signal)})
             sector_detail = signal.get("sector_detail") or {}
-            if (sector_detail.get("assessed") or signal.get("data_status") == "missing_sector") and sector_detail.get("data_completeness", 0) < 1:
+            if service.evaluator.confirmation_policy.require_sector and (sector_detail.get("assessed") or signal.get("data_status") == "missing_sector") and sector_detail.get("data_completeness", 0) < 1:
                 failures.append({"date": date, "code": code, "evidence": "sector_minutes",
                                  "reason": sector_detail.get("reason") or "板块分钟证据不足",
                                  "coverage": sector_detail.get("coverage", 0),
@@ -226,6 +231,7 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
               "configuration_basis": configuration_basis,
               "board_feedback_inputs": board_feedback_inputs or {},
               "sector_quote_minutes": sector_quote_minutes or {},
+              "board_trend_inputs": board_trend_inputs or {},
               "amount_profile": profiles.load(),
               "minutes": {c: json.loads(f.to_json(orient="records")) for c, f in sorted(frames.items())}}
     root = Path(__file__).resolve().parents[2]
@@ -240,6 +246,7 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
              "core/realtime/snapshot_signal_service.py", "core/realtime/read_only_market.py",
              "core/realtime/collection_plan.py", "core/realtime/strategy_runtime.py",
              "core/realtime/listing_evidence.py", "core/realtime/market_events.py"]
+    files += ["core/signals/sector_trend.py", "core/realtime/board_plan.py", "core/realtime/board_quote_store.py"]
     versions = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
     return clean({"classification": "minute_rule_diagnostic", "market_date": date, "candidate_date": candidate_date,
                   "until": until, "profile": request["profile"], "generated_at": shanghai_now().isoformat(),
@@ -284,7 +291,7 @@ class DayReplayLoader:
         self.snapshot_repository = snapshot_repository
         self.opening_evidence = {}
 
-    def _opening_evidence(self, date, codes, *, fetch_missing, until="23:59:59"):
+    def _opening_evidence(self, date, codes, *, fetch_missing, until="23:59:59", progress=None):
         if self.openings is None:
             from core.realtime.session_open_repository import SessionOpenRepository
             self.openings = SessionOpenRepository(self.cache)
@@ -343,6 +350,17 @@ class DayReplayLoader:
                 accept_daily(frame, "stock_daily_silver_open")
             except Exception:
                 pass
+        if wanted - records.keys() and fetch_missing and getattr(self.dm, "prefer_axdata_history", False):
+            missing = [code for code in codes if code not in records]
+            for index, code in enumerate(missing):
+                if progress:
+                    progress({"stage": "补取真实开盘价", "completed": index, "total": len(missing), "code": code})
+                try:
+                    frame = self.dm.get_stock_daily(code, date, date)
+                    source = "axdata_daily_open_posthoc" if not frame.empty and "source" in frame and frame["source"].eq("axdata").all() else "stock_daily_open_posthoc"
+                    accept_daily(frame, source)
+                except Exception:
+                    pass
         if wanted - records.keys() and fetch_missing and callable(getattr(self.dm, "get_all_stocks_daily", None)):
             try:
                 accept_daily(self.dm.get_all_stocks_daily(date), "tushare_daily_open_posthoc")
@@ -352,7 +370,7 @@ class DayReplayLoader:
         source = "+".join(sorted({row["source"] for row in records.values()})) or "missing_real_session_open"
         return {code: row["open_price"] for code, row in records.items()}, source
 
-    def run(self, request, progress=None, *, inputs_only=False, extra_codes=(), extra_rows=()):
+    def run(self, request, progress=None, *, inputs_only=False, extra_codes=(), extra_rows=(), pool_inputs=None, rule_risk=None):
         if request.get("replay_mode") == "archived_snapshot":
             from core.realtime.snapshot_replay import run_snapshot_replay
             return run_snapshot_replay(self.root, request, progress)
@@ -361,9 +379,17 @@ class DayReplayLoader:
         candidate = self.calendar.prev(date)
         if not candidate or candidate >= date:
             raise ValueError("无法确定前一交易日；不能使用当天盘后候选")
-        frozen = PreopenEvidenceStore(self.root).load(candidate, date)
+        frozen = (PreopenEvidenceStore(self.root).load(candidate, date) if pool_inputs is None else
+                  {"inputs": pool_inputs["inputs"], "bundle_id": pool_inputs["bundle_id"]} if pool_inputs.get("bundle_id") else None)
         inputs = frozen["inputs"] if frozen else {}
-        if request["profile"] == "production":
+        from risk.risk_config import RiskConfig
+        risk = RiskConfig.from_dict(rule_risk or inputs.get("risk_config")) if rule_risk or inputs.get("risk_config") else RiskConfig.load()
+        breadth_required = risk.entry_sector_mode == "breadth_required"
+        if pool_inputs is not None:
+            if pool_inputs.get("candidate_date") != candidate or pool_inputs.get("market_date") != date:
+                raise ValueError("历史池名单与行情交易日不匹配")
+            rows = deepcopy(pool_inputs["rows"])
+        elif request["profile"] == "production":
             if not frozen:
                 from config.settings import SNAPSHOT_DIR
                 snapshot = Path(SNAPSHOT_DIR) / f'{candidate}.json'
@@ -417,7 +443,7 @@ class DayReplayLoader:
         sector_codes = inputs.get("sector_codes") or {}
         members = {name: [normalize_stock_code(c, add_suffix=False) for c in verified_members.get(name, [])]
                    for name in names}
-        if not frozen:
+        if not frozen and breadth_required:
             if request["fetch_missing"] and self.dm is None:
                 from core.data.data_manager_main import DataManager
                 from config.settings import TUSHARE_TOKEN
@@ -427,8 +453,13 @@ class DayReplayLoader:
                                             allow_remote=request["fetch_missing"], as_of_date=candidate)
             members = {name: prepared["sector_members"].get(name, []) for name in names}
             sector_codes = prepared["sector_codes"]
-        codes = sorted({normalize_stock_code(r.get("code"), add_suffix=False) for r in rows}
-                       | {c for group in members.values() for c in group} | set(extra_codes))
+        if not breadth_required:
+            members, sector_codes = {}, {}
+        from core.signals.sector_trend import archived_trend_inputs
+        board_trend_inputs = archived_trend_inputs(self.root, date) if not breadth_required else {}
+        primary = {normalize_stock_code(r.get("code"), add_suffix=False) for r in rows} | set(extra_codes)
+        # Pool securities must not wait behind thousands of sector constituents.
+        codes = sorted(primary) + sorted({c for group in members.values() for c in group} - primary)
         from core.realtime.board_feedback_repository import BoardFeedbackRepository
         feedback_codes = [normalize_stock_code(row.get("code"), add_suffix=False) for row in context_rows]
         feedback_codes.extend(extra_codes)
@@ -439,12 +470,31 @@ class DayReplayLoader:
             from core.data.data_manager_main import DataManager
             from config.settings import TUSHARE_TOKEN
             self.dm = DataManager(TUSHARE_TOKEN, self.cache)
-        opening_prices, opening_price_source = self._opening_evidence(
-            date, codes, fetch_missing=request["fetch_missing"], until=request["until"])
         from core.realtime.sector_quote_minutes import SectorQuoteMinuteRepository
         sector_quote_minutes = SectorQuoteMinuteRepository(self.cache).read_prices(date, codes, until=request["until"])
+        acquisition = {"success": 0, "failed": 0, "skipped": 0, "pool_success": 0,
+                       "pool_skipped": 0, "pool_total": len(primary),
+                       "total": len(codes), "failures": [], "skips": []}
+        skipped_codes = set()
         for index, code in enumerate(codes):
+            if progress:
+                progress({"stage": "补取池内分钟" if code in primary else "补取板块成分分钟",
+                          "completed": index, "code": code, **{k: v for k, v in acquisition.items() if k not in {"failures", "skips"}}})
             ts_code = normalize_stock_code(code, add_suffix=True)
+            if request["fetch_missing"]:
+                from core.data.data_manager_suspension import suspension_status
+                status = suspension_status(self.dm, code, date, allow_remote=False)
+                if status.get("state") == "full_day" and status.get("trade_date") == date:
+                    skipped_codes.add(code)
+                    acquisition["skipped"] += 1
+                    acquisition["pool_skipped"] += int(code in primary)
+                    result = {"code": code, "valid": False, "rows": 0, "source": status.get("source"),
+                              "state": "full_day", "reason": status.get("reason") or "已有证据确认全天停牌"}
+                    acquisition["skips"].append(result)
+                    if progress:
+                        progress({"stage": "跳过已确认全天停牌", "completed": index + 1, "code": code,
+                                  "last_result": result, **{k: v for k, v in acquisition.items() if k not in {"failures", "skips"}}})
+                    continue
             path = self.cache / "stock" / "tick" / f"{ts_code}_{date}.csv"
             frame = pd.read_csv(path, dtype={"ts_code": str, "code": str}) if path.exists() else pd.DataFrame()
             cutoff = datetime.strptime(date + request["until"], "%Y%m%d%H:%M:%S")
@@ -466,19 +516,46 @@ class DayReplayLoader:
                 except Exception:
                     frame = pd.DataFrame()
             # Invalid constituents are absent, not interpolated or forward filled.
-            if inspect_minute_bars(frame, date, expected_code=code, require_full_day=False, now=cutoff)["valid"]:
+            checked = inspect_minute_bars(frame, date, expected_code=code, require_full_day=False, now=cutoff)
+            reason, source = checked["reason"], minute_sources[code]
+            if checked["valid"]:
                 frames[code] = frame
-            elif any(normalize_stock_code(r.get("code"), add_suffix=False) == code for r in rows):
-                frames[code] = frame
+                acquisition["success"] += 1
+                acquisition["pool_success"] += int(code in primary)
+                if "source" in frame and not frame.empty:
+                    source = "+".join(sorted(set(frame["source"].dropna().astype(str)))) or source
+            else:
+                acquisition["failed"] += 1
+                report = getattr(self.dm, "get_minute_quality_report", lambda *_: {})(ts_code, date) or {}
+                reason = report.get("reason") or reason
+                acquisition["failures"].append({"code": code, "reason": reason, "attempts": report.get("attempts", [])})
+                if code in primary:
+                    frames[code] = frame
+            result = {"code": code, "valid": checked["valid"], "rows": len(frame), "source": source, "reason": reason}
+            if request["fetch_missing"] and (code in primary or not checked["valid"] or (index + 1) % 50 == 0):
+                from loguru import logger
+                logger.info("[历史补数] {} {} {}/{} rows={} source={} reason={}", date, code, index + 1,
+                            len(codes), len(frame), source, reason or "通过")
             if progress:
-                progress({"stage": "检查分钟与成分股证据", "completed": index + 1, "total": len(codes), "code": code})
-        for row in rows:
+                progress({"stage": "补取池内分钟" if code in primary else "补取板块成分分钟",
+                          "completed": index + 1, "code": code, "last_result": result,
+                          **{k: v for k, v in acquisition.items() if k not in {"failures", "skips"}}})
+        if progress:
+            progress({"stage": "读取真实开盘价", "completed": 0, "total": len(codes)})
+        opening_prices, opening_price_source = self._opening_evidence(
+            date, [c for c in codes if c not in skipped_codes], fetch_missing=request["fetch_missing"],
+            until=request["until"], progress=progress)
+        for index, row in enumerate(rows):
             code = normalize_stock_code(row.get("code"), add_suffix=False)
+            if progress:
+                progress({"stage": "补取竞价证据", "completed": index, "total": len(rows), "code": code})
+            if code in skipped_codes:
+                continue
             ts_code = normalize_stock_code(code, add_suffix=True)
             path = self.cache / "stock" / "auction" / f"{ts_code}_{date}.json"
             if path.exists():
                 cached = json.loads(path.read_text(encoding="utf-8"))
-                if cached.get("数据源") in {"eltdx", "eltdx_0925", "eltdx_open", "minute_tick"}:
+                if cached.get("数据源") in {"eltdx", "eltdx_0925", "eltdx_open", "minute_tick", "axdata_0925"}:
                     auctions[code] = cached
             elif request["fetch_missing"]:
                 try:
@@ -492,13 +569,17 @@ class DayReplayLoader:
                     "opening_evidence": self.opening_evidence,
                     "board_feedback_inputs": board_feedback_inputs,
                     "sector_quote_minutes": sector_quote_minutes,
-                    "risk_config": inputs.get("risk_config"),
+                    "risk_config": risk.to_dict(),
+                    "board_trend_inputs": board_trend_inputs,
+                    "minute_amount_profile": inputs.get("minute_amount_profile") if frozen else None,
+                    "minute_acquisition": acquisition,
                     "input_basis": "preopen_frozen" if frozen else "research_candidates_not_frozen"}
         report = replay_minutes(request=request, candidate_date=candidate, rows=rows, frames=frames,
                                 previous=previous, auctions=auctions, members=members,
                                 sector_codes=sector_codes,
                                 opening_prices=opening_prices, opening_price_source=opening_price_source,
-                                opening_evidence=self.opening_evidence, risk_config=inputs.get("risk_config"),
+                                opening_evidence=self.opening_evidence, risk_config=risk.to_dict(),
+                                board_trend_inputs=board_trend_inputs,
                                 board_feedback_inputs=board_feedback_inputs,
                                 sector_quote_minutes=sector_quote_minutes,
                                 configuration_basis="preopen_frozen" if inputs.get("risk_config") else "current_config_not_frozen",
@@ -537,6 +618,7 @@ def replay_saved_inputs(inputs, progress=None):
                           sector_codes=inputs.get("sector_codes") or {},
                           opening_prices=inputs.get("opening_prices") or {},
                           opening_price_source=inputs.get("opening_price_source") or "",
+                          board_trend_inputs=inputs.get("board_trend_inputs") or {},
                           opening_evidence=inputs.get("opening_evidence") or {}, risk_config=inputs.get("risk_config"),
                           board_feedback_inputs=inputs.get("board_feedback_inputs") or {},
                           sector_quote_minutes=inputs.get("sector_quote_minutes") or {},

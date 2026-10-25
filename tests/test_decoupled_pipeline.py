@@ -264,6 +264,10 @@ def test_stage_controllers_are_independent():
 def test_pipeline_stage_pages_render(path, view, heading, api):
     request = Request({"type": "http", "method": "GET", "path": path, "headers": []})
     response = view(request)
+    if path == "/fetch":
+        assert response.status_code == 303
+        assert response.headers["location"] == "/market-collection?tab=postclose"
+        return
     body = response.body.decode("utf-8")
 
     assert heading in body

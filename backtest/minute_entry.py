@@ -142,9 +142,10 @@ def normalize_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
         return data
     weighted = data["close"] * data["volume"]
     cum_volume = data["volume"].cumsum()
-    approximate_vwap = weighted.cumsum() / cum_volume.replace(0, pd.NA)
+    approximate_vwap = weighted.cumsum() / cum_volume.where(cum_volume.ne(0))
     accurate = ~data["amount_is_estimated"].cummax() & data["volume_shares"].notna().cummin()
-    calculated_vwap = (data["amount"].cumsum() / data["volume_shares"].cumsum().replace(0, pd.NA)).where(accurate, approximate_vwap)
+    cum_shares = data["volume_shares"].cumsum()
+    calculated_vwap = (data["amount"].cumsum() / cum_shares.where(cum_shares.ne(0))).where(accurate, approximate_vwap)
     source_avg = pd.to_numeric(data.get("avg_price"), errors="coerce") if "avg_price" in data.columns else None
     if source_avg is not None:
         source_avg = source_avg.where(source_avg.gt(0) & source_avg.lt(float("inf")))
@@ -239,6 +240,8 @@ class MinuteEntryEvaluator:
             "status": decision.status, "reason": decision.reason})
 
     def _record_checks(self, row, **checks):
+        if not self.confirmation_policy.require_sector:
+            checks["sector_required"] = False
         trace = _condition_trace.get()
         if trace is not None:
             trace.append({"minute": str(row["time"]), "checks": checks})
@@ -375,7 +378,7 @@ class MinuteEntryEvaluator:
                 float(row["close"]) >= prev_close
                 and float(row["close"]) >= float(row["vwap"])
                 and float(row["high"]) > opening_high
-                and sector_ok
+                and (sector_ok or not self.confirmation_policy.require_sector)
                 and self.min_amount_pace <= pace <= self.max_amount_pace
             )
             self._record_checks(row, previous_close=float(row["close"]) >= prev_close,
@@ -401,7 +404,7 @@ class MinuteEntryEvaluator:
                     quality_denial = decision
                     continue
                 return decision
-        if not sector_observed:
+        if self.confirmation_policy.require_sector and not sector_observed:
             return EntryDecision(
                 "data_insufficient", "弱转强", "缺少真实板块指数或成分股宽度，保持观察",
                 open_gap_pct=gap, data_status="missing_sector", data_completeness=0.55,
@@ -452,7 +455,7 @@ class MinuteEntryEvaluator:
                 amount_pace=pace if math.isfinite(pace) else None,
                 amount_pace_allowed=(self.min_amount_pace if auction_available else max(self.min_amount_pace, 1.0)) <= pace <= self.max_amount_pace,
                 sector=sector_state, auction_available=auction_available)
-            sector_check_passed = sector_ok if sector_observed else False
+            sector_check_passed = sector_ok or not self.confirmation_policy.require_sector
             if trigger and sector_check_passed and self.min_amount_pace <= pace <= self.max_amount_pace:
                 history = scan.loc[:index]
                 hold_minutes = int((history["close"] >= history["vwap"]).sum())
@@ -473,14 +476,14 @@ class MinuteEntryEvaluator:
                     reason = "竞价明细缺失，按突破前5分钟高点、站稳VWAP和分钟量能确认"
                 if confirmed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2):
                     if not sector_observed:
-                        reason += "（缺少板块确认）"
+                        reason += "（缺少板块确认）" if self.confirmation_policy.require_sector else "（板块趋势未评估）"
                     decision = self._next_minute_fill(
                         data, index, signal, reason,
                         gap, pace, sector_ok, limit_price, live=live,
                         profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
                         false_break_count=false_breaks, pullback_quality=pullback_quality,
                         active_buy_ratio=float(row.get("active_buy_ratio")) if pd.notna(row.get("active_buy_ratio")) else 0.0,
-                        data_completeness=0.75 if not sector_observed else 1.0,
+                        data_completeness=0.75 if self.confirmation_policy.require_sector and not sector_observed else 1.0,
                         breakout_level=(vwap if self.confirmation_policy.mode == "volume_price"
                                         and auction_available and float(row["close"]) <= opening_high else opening_high),
                         protection_price=float(first_five["low"].min()) * 0.999
@@ -493,7 +496,7 @@ class MinuteEntryEvaluator:
                         quality_denial = decision
                         continue
                     return decision
-        if not sector_observed:
+        if self.confirmation_policy.require_sector and not sector_observed:
             return EntryDecision(
                 "data_insufficient", "强势延续", "缺少真实板块指数或成分股宽度，保持观察",
                 open_gap_pct=gap, data_status="missing_sector", data_completeness=0.55,
@@ -531,18 +534,18 @@ class MinuteEntryEvaluator:
             sector_ok = bool(sector_state)
             self._record_checks(row, leader=is_leader, vwap=float(row["close"]) >= float(row["vwap"]),
                 breakout=float(row["high"]) > opening_high, sector=sector_state)
-            sector_check_passed = sector_ok if sector_observed else False
+            sector_check_passed = sector_ok or not self.confirmation_policy.require_sector
             if sector_check_passed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2) and (
                 float(row["high"]) > opening_high
                 or (limit_price > 0 and float(row["high"]) >= limit_price * 0.998)
             ):
                 reason = "龙头高开后继续突破"
                 if not sector_observed:
-                    reason += "（缺少板块确认）"
+                    reason += "（缺少板块确认）" if self.confirmation_policy.require_sector else "（板块趋势未评估）"
                 decision = self._next_minute_fill(
                     data, index, "高开加速", reason, gap, 0.0,
                     sector_ok, limit_price, unfilled_when_locked=True, live=live,
-                    data_completeness=0.75 if not sector_observed else 1.0,
+                    data_completeness=0.75 if self.confirmation_policy.require_sector and not sector_observed else 1.0,
                     breakout_level=opening_high,
                     protection_price=float(first_five["low"].min()) * 0.999
                     if self.confirmation_policy.mode == "volume_price" else 0.0,
@@ -552,7 +555,7 @@ class MinuteEntryEvaluator:
                     quality_denial = decision
                     continue
                 return decision
-        if not sector_observed:
+        if self.confirmation_policy.require_sector and not sector_observed:
             return EntryDecision(
                 "data_insufficient", "高开加速", "缺少真实板块指数或成分股宽度，保持观察",
                 open_gap_pct=gap, data_status="missing_sector", data_completeness=0.60,

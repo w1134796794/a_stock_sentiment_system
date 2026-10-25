@@ -109,8 +109,10 @@ def test_old_frozen_classifications_cannot_confirm_live_breadth(tmp_path, monkey
 
 
 def test_candidate_peer_fallback_cannot_confirm_an_unverified_classification():
+    from backtest.minute_entry import MinuteEntryEvaluator
     from core.realtime.entry_signal_service import RealtimeEntrySignalService
     service = object.__new__(RealtimeEntrySignalService)
+    service.evaluator = MinuteEntryEvaluator()
     service.sector_breadth = SimpleNamespace(evaluate=lambda *a:(None,{}), _members=lambda *a:set())
     frames = {c:pd.DataFrame([{"time":"09:36:00","close":11,"pre_close":10}])
               for c in ("000002","600000")}
@@ -138,7 +140,7 @@ def test_saved_replay_cannot_reintroduce_700_or_unbound_members(sector_code, exp
         frames={"000001":bars,"000002":bars.assign(code="000002"),"600000":bars.assign(code="600000")},
         previous={c:{"close":10} for c in ("000001","000002","600000")},
         members={"电池":["000002","600000"]},sector_codes={"电池":sector_code},
-        opening_prices={"000001":10},
+        opening_prices={"000001":10}, risk_config={"entry_sector_mode": "breadth_required"},
         profiles=SimpleNamespace(available=False,load=lambda:{},expected_fraction=lambda *a:(None,0)))
     inputs = result["replay_inputs"]
     if not sector_code:
@@ -256,9 +258,10 @@ def test_replay_does_not_report_unchecked_sector_as_missing_evidence():
 
 
 def test_replay_distinguishes_missing_closes_from_missing_minutes():
+    from backtest.minute_entry import MinuteEntryEvaluator
     raw = pd.DataFrame([{"time":"09:36:00","open":10,"high":10,"low":10,"close":10,"volume":100}])
     profiles = SimpleNamespace(available=False,load=lambda:{},expected_fraction=lambda *a:(None,0))
-    service = _ReplayEntryService({}, {}, {"电池":["600000","000002"]}, {"600000":raw}, profiles)
+    service = _ReplayEntryService({}, {}, {"电池":["600000","000002"]}, {"600000":raw}, profiles, evaluator=MinuteEntryEvaluator())
     checker, detail = service._sector_checker({"sector_names":["电池"]},"000001",[],{},{},"20261013")
     assert checker("09:36:00") is None
     assert detail["missing_minute_codes"] == ["000002"]

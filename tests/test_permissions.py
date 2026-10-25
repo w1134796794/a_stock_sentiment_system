@@ -42,6 +42,13 @@ def test_role_permission_matrix_controls_menu_and_route(isolated_auth_db):
     assert can_access_path(viewer, "/data/lhb/20260626") is True
     assert can_access_path(viewer, "/run") is False
     assert can_access_path(viewer, "/fetch") is False
+    assert can_access_path(viewer, "/market-backfill") is False
+    assert can_access_path(admin, "/market-backfill") is True
+    assert "fetch" in _visible_keys(admin)
+    assert can_access_path(admin, "/market-collection") is True
+    assert can_access_path(viewer, "/market-collection") is False
+    assert "market_backfill" not in _visible_keys(admin)
+    assert "market_backfill" not in _visible_keys(viewer)
     assert can_access_path(viewer, "/screening-run") is False
     assert can_access_path(viewer, "/strategies") is False
     assert can_access_path(admin, "/strategies") is True

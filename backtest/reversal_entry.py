@@ -75,7 +75,7 @@ def evaluate_structure(evaluator, *, mode, data, structure, deadline, gap,
         sector = sector_sync(time) if sector_sync else None
         if sector is None:
             sector_missing = True
-        if not sector:
+        if evaluator.confirmation_policy.require_sector and not sector:
             continue
         reason = f"{label}：关键价{anchor:.2f}，放量突破承接高点，结构保护{protection:.2f}"
         following = data.iloc[index+1:]
@@ -86,7 +86,7 @@ def evaluate_structure(evaluator, *, mode, data, structure, deadline, gap,
             if elapsed != 60:
                 return result("signal_unfilled", "确认后下一分钟缺失，不能假定成交", time)
         decision = evaluator._next_minute_fill(data, index, label, reason, gap,
-                                              float(row.volume/prior.volume.mean()), True,
+                                              float(row.volume/prior.volume.mean()), bool(sector),
                                               limit_price, unfilled_when_locked=True, live=live,
                                               breakout_level=max(anchor, float(prior.high.max())),
                                               protection_price=protection, sector_sync=sector_sync)
@@ -97,7 +97,7 @@ def evaluate_structure(evaluator, *, mode, data, structure, deadline, gap,
                                 or decision.entry_time > deadline):
             return result("signal_unfilled", "下一分钟价格超出结构买入范围或截止时间", time)
         return decision
-    if sector_missing:
+    if evaluator.confirmation_policy.require_sector and sector_missing:
         return result("data_insufficient", "结构已出现，板块实时证据不足，继续观察")
     if quality_denial is not None:
         return quality_denial

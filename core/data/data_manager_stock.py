@@ -27,6 +27,28 @@ logger = loguru.logger
 class StockDataManager(SuspensionDataManager):
     """个股数据管理器"""
 
+    def _get_axdata_provider(self):
+        if not getattr(self, "prefer_axdata_history", False) or not getattr(self, "allow_remote_history", True):
+            return None
+        from config.settings import MARKET_DATA_NODE_ROLE
+
+        if MARKET_DATA_NODE_ROLE == "server":
+            return None
+        if not getattr(self, "_axdata_checked", False):
+            from config.settings import HISTORY_AXDATA_ROOT
+            from core.data.providers.axdata_provider import AxDataProvider
+
+            self._axdata_checked = True
+            self._axdata_provider = None
+            if AxDataProvider.available():
+                try:
+                    self._axdata_provider = AxDataProvider(data_root=HISTORY_AXDATA_ROOT)
+                except Exception as exc:
+                    logger.warning(f"[历史补数] AxData 初始化失败: {type(exc).__name__}；继续原有来源")
+            else:
+                logger.warning("[历史补数] AxData 未安装或 Python 版本不兼容；继续原有来源")
+        return self._axdata_provider
+
     def _get_realtime_quote_provider(self):
         provider = getattr(self, "_realtime_quote_provider", None)
         if provider is not None:
@@ -189,7 +211,7 @@ class StockDataManager(SuspensionDataManager):
                 return pd.read_csv(cache_file, parse_dates=['trade_date'])
 
         covered, prefetched = self._get_stock_daily_from_prefetch(code, start_date, end_date)
-        if covered:
+        if covered and (not prefetched.empty or not getattr(self, "prefer_axdata_history", False)):
             return prefetched
 
         if not getattr(self, "allow_remote_history", True):
@@ -201,6 +223,16 @@ class StockDataManager(SuspensionDataManager):
                 "当前调用禁止按需请求 Tushare；请先生成对应交易日数据"
             )
             return pd.DataFrame()
+
+        if start_date == end_date:
+            try:
+                provider = self._get_axdata_provider()
+                frame = provider.get_daily_bars(canonical, str(start_date)) if provider else pd.DataFrame()
+                if not frame.empty:
+                    frame.to_csv(cache_files[0], index=False)
+                    return frame
+            except Exception as exc:
+                logger.warning(f"[历史补数] AxData 日线未通过 {canonical} {start_date}: {type(exc).__name__}")
 
         try:
             if self.ts_pro:
@@ -421,7 +453,10 @@ class StockDataManager(SuspensionDataManager):
             except Exception as e:
                 attempts.append({"source": "cache", "reason": f"缓存读取失败: {e}"})
         if getattr(self, "allow_remote_minutes", getattr(self, "allow_remote_history", True)):
-            for source, getter in (("eltdx", self._get_eltdx_provider), ("Ashare", self._get_ashare_provider)):
+            providers = [("eltdx", self._get_eltdx_provider), ("Ashare", self._get_ashare_provider)]
+            if getattr(self, "prefer_axdata_history", False):
+                providers.insert(0, ("axdata", self._get_axdata_provider))
+            for source, getter in providers:
                 try:
                     provider = getter()
                     if provider is None:
@@ -493,7 +528,7 @@ class StockDataManager(SuspensionDataManager):
 
         # 仅信任「真实/精确」来源的缓存；兜底或不可靠来源(日线兜底、过期的当日竞价序列)
         # 一律忽略并重取，装好 eltdx 后自动自愈。
-        trusted_sources = {'eltdx', 'eltdx_0925', 'eltdx_open', 'minute_tick'}
+        trusted_sources = {'eltdx', 'eltdx_0925', 'eltdx_open', 'minute_tick', 'axdata_0925'}
         if cache_file.exists():
             try:
                 with open(cache_file, 'r', encoding='utf-8') as f:
@@ -502,6 +537,19 @@ class StockDataManager(SuspensionDataManager):
                     return cached
             except Exception as e:
                 logger.warning(f"读取竞价数据缓存失败: {e}")
+
+        try:
+            provider = self._get_axdata_provider()
+            snapshot = provider.get_auction_0925(ts_code, trade_date) if provider else {}
+            if snapshot:
+                result = {'开盘价': snapshot['price'], '竞价成交量': snapshot['volume'],
+                          '竞价成交额': snapshot['amount'], '价格趋势': [], '数据源': 'axdata_0925',
+                          '接口': 'stock_auction_result_history_tdx', '补取时间': snapshot['captured_at']}
+                with cache_file.open('w', encoding='utf-8') as stream:
+                    json.dump(result, stream, ensure_ascii=False)
+                return result
+        except Exception as exc:
+            logger.warning(f"[历史补数] AxData 竞价未通过 {ts_code} {trade_date}: {type(exc).__name__}")
 
         try:
             eltdx_provider = self._get_eltdx_provider()

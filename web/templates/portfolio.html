@@ -12,7 +12,6 @@
 {% endblock %}
 
 {% block content %}
-<nav class="pf-modes" aria-label="账户功能"><a href="/portfolio" class="{{ 'active' if not historical_view else '' }}">模拟交易</a><a href="/portfolio/backtest" class="{{ 'active' if historical_view else '' }}">历史回测</a></nav>
 <section class="pf-account-bar" aria-label="模拟账户">
   <div class="pf-auto-status"><span></span><strong>{{ '历史分钟估计' if historical_view else '激进交易已开启' }}</strong><small>每只约{{ '%.0f'|format(paper_position_pct) }}%，最多{{ paper_max_positions }}只；满仓时新信号强{{ '%.0f'|format(paper_rotation_min_edge) }}分以上自动换出弱持仓</small></div>
   {% if is_admin %}
@@ -21,13 +20,16 @@
     <label>{{ '开始日期' if historical_view else '首次开始日' }}<input id="replay-start" value="" maxlength="8" placeholder="{{ 'YYYYMMDD' if historical_view else '自动接力' }}"></label>
     <label>结束日期<input id="replay-end" value="{{ latest_trade_date }}" maxlength="8" placeholder="YYYYMMDD"></label>
     <button id="start-replay" class="pf-button {{ 'hidden' if historical_view else '' }}" type="button" title="接续默认模拟账户的下一交易日，保留持仓和手工成交">补跑至结束日</button>
-    <button id="start-rebuild" class="pf-button {{ '' if historical_view else 'hidden' }}" type="button" title="按最新共享规则生成独立账户，保留原有账户">开始独立回测</button>
+    <button id="start-rebuild" class="pf-button hidden" type="button" title="旧版独立历史重建">开始独立回测</button>
     <button id="adopt-backtest" class="pf-danger hidden" type="button">采用结果并替换模拟账户</button>
-    <label class="pf-replay-option {{ '' if historical_view else 'hidden' }}" title="仅用于独立历史重建；默认账户接力仍严格检查全部证据"><input id="rebuild-skip-candidates" type="checkbox">跳过缺证据候选，持仓缺证据仍停止</label>
+    <label class="pf-replay-option hidden"><input id="rebuild-skip-candidates" type="checkbox">跳过缺证据候选，持仓缺证据仍停止</label>
     <span id="replay-status">读取账户检查点中…</span>
   </div>
   {% endif %}
 </section>
+{% if historical_view and is_admin %}
+{% include "partials/history_workflow.html" %}
+{% endif %}
 {% if is_admin %}
 <section id="replay-progress-panel" class="pf-replay-progress hidden" aria-label="回放运行进度" aria-busy="false">
   <div class="pf-progress-head"><strong id="replay-run-state" role="status" aria-live="polite"></strong><span id="replay-percent" class="mono"></span></div>

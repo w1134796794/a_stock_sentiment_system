@@ -20,8 +20,8 @@ def calendar(root):
     return path
 
 
-def healthy_inputs(root):
-    values = sample()
+def healthy_inputs(root, sector_mode="breadth_required"):
+    values = sample(sector_mode=sector_mode)
     values["bundle"]["health"] = {"ok": True}
     values["plan"]["inputs_hash"] = digest(values["bundle"])
     values["plan"]["plan_id"] = digest({k: v for k, v in values["plan"].items() if k != "plan_id"})

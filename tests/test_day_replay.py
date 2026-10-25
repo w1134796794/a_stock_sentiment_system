@@ -71,11 +71,12 @@ def test_bad_minutes_are_reported_not_guessed(kind):
 
 
 def test_sector_checker_requires_same_minute_real_peers_not_target_itself():
+    from backtest.minute_entry import MinuteEntryEvaluator
     frames = {"000001": bars(), "000002": bars("000002"), "000003": bars("000003")}
     for code in ("000002", "000003"):
         frames[code]["close"] = 10.1
     frames = {c: normalize_minute_bars(f) for c, f in frames.items()}
-    service = _ReplayEntryService({c:{"close":10} for c in frames}, {}, {"电池":list(frames)}, frames, profile())
+    service = _ReplayEntryService({c:{"close":10} for c in frames}, {}, {"电池":list(frames)}, frames, profile(), evaluator=MinuteEntryEvaluator())
     checker, detail = service._sector_checker({"sector_names":["电池"]}, "000001", [], {}, {}, "20261009")
     assert checker("09:36:00") is True
     assert detail["observed_members"] == 2

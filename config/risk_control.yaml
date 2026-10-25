@@ -46,6 +46,8 @@ entry_pullback_tolerance: 0.002
 entry_pullback_max_volume_ratio: 0.8
 entry_max_vwap_distance: 0.02
 entry_max_breakout_extension: 0.015
+entry_sector_mode: trend_score  # breadth_required retains the old research contract
+sector_trend_score_weight: 5.0
 three_board_feedback_enabled: true
 three_board_feedback_limit_fraction: 0.50  # D4 close loss / daily price-limit ratio
 three_board_feedback_score_penalty: 20.0  # Trial deduction on a 0-100 strength score, not an entry veto.

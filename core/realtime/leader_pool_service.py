@@ -1075,6 +1075,8 @@ class IntradayStrengthService:
             from core.signals.board_feedback import feedback_score_adjustment
             turn_score = round(max(0.0, min(100.0, turn_score)), 2)
             adjustment = feedback_score_adjustment(row.get("board_feedback"))
+            from core.signals.sector_trend import trend_adjustment
+            sector_adjustment = trend_adjustment(row)
             row.update({
                 "status": status,
                 "status_text": {
@@ -1084,7 +1086,7 @@ class IntradayStrengthService:
                     "cancelled": "取消",
                 }.get(status, "继续观察"),
                 "turn_score_before_feedback": turn_score,
-                "turn_score": round(max(0.0, turn_score + adjustment), 2),
+                "turn_score": round(max(0.0, min(100.0, turn_score + adjustment + sector_adjustment)), 2),
                 "leader_score": screening_score,
                 "pool_rank": index,
                 "source_rank": row.get("screening_rank"),
@@ -1174,6 +1176,8 @@ class IntradayStrengthService:
         from core.signals.board_feedback import feedback_score_adjustment
         turn_score = round(max(0.0, min(100.0, turn_score)), 2)
         adjustment = feedback_score_adjustment(signal.get("board_feedback"))
+        from core.signals.sector_trend import trend_adjustment
+        sector_adjustment = trend_adjustment(signal)
         return {
             **pool_row,
             "status": status,
@@ -1186,7 +1190,8 @@ class IntradayStrengthService:
                 "cancelled": "取消",
             }.get(status, "继续观察"),
             "turn_score_before_feedback": turn_score,
-            "turn_score": round(max(0.0, turn_score + adjustment), 2),
+            "turn_score": round(max(0.0, min(100.0, turn_score + adjustment + sector_adjustment)), 2),
+            "sector_trend": signal.get("sector_trend"),
             "reason": reason,
             "entry_mode": mode,
             "entry_mode_text": signal.get("entry_mode_text") or entry_mode_text(mode),

@@ -17,8 +17,12 @@ class ConfirmationPolicy:
     pullback_max_volume_ratio: float = 0.8
     max_vwap_distance: float = 0.02
     max_breakout_extension: float = 0.015
+    require_sector: bool = True
+    sector_score_weight: float = 5.0
 
     def __post_init__(self):
+        if type(self.require_sector) is not bool or not math.isfinite(self.sector_score_weight) or not 0 <= self.sector_score_weight <= 20:
+            raise ValueError("Invalid sector confirmation/scoring policy")
         if self.mode not in {"legacy", "close_breakout", "sustain", "pullback", "volume_price"}:
             raise ValueError("Unknown confirmation policy")
         if any(type(x) is not int or x < 1 for x in (self.sustain_minutes, self.pullback_window)):
@@ -44,6 +48,8 @@ def policy_from_config(config):
     frozen = getattr(config, "entry_confirmation_policy", None)
     if frozen is not None:
         return ConfirmationPolicy(**frozen)
+    if getattr(config, "entry_sector_mode", "breadth_required") not in {"trend_score", "breadth_required"}:
+        raise ValueError("Unknown sector policy")
     return ConfirmationPolicy(**{
         "mode": getattr(config, "entry_confirmation_mode", "legacy"),
         "sustain_minutes": getattr(config, "entry_sustain_minutes", 2),
@@ -54,6 +60,8 @@ def policy_from_config(config):
         "pullback_max_volume_ratio": getattr(config, "entry_pullback_max_volume_ratio", 0.8),
         "max_vwap_distance": getattr(config, "entry_max_vwap_distance", 0.02),
         "max_breakout_extension": getattr(config, "entry_max_breakout_extension", 0.015),
+        "require_sector": getattr(config, "entry_sector_mode", "breadth_required") == "breadth_required",
+        "sector_score_weight": getattr(config, "sector_trend_score_weight", 5.0),
     })
 
 
@@ -133,9 +141,9 @@ def _volume_price_index(data, index, *, level, protection, deadline, policy, sec
             if denial:
                 return at, "quality_rejected", denial
             state = sector_sync(str(row.time)) if sector_sync else None
-            if state is None:
+            if policy.require_sector and state is None:
                 return at, "data_insufficient", "最终确认时点缺少板块证据"
-            if state is not True:
+            if policy.require_sector and state is not True:
                 return at, "quality_rejected", "最终确认时点板块未同步"
             reason = (f"局部放量{ratio:.2f}倍，连续{policy.sustain_minutes}根分钟收盘站稳" if sustained else
                       f"缩量回踩关键价后再放量{local_ratio:.2f}倍突破")
@@ -198,9 +206,9 @@ def confirmation_index(data, index, *, level, protection, deadline, policy, sect
                 and float(row.low) >= level * (1 - policy.pullback_tolerance))
         if ready:
             state = sector_sync(str(row.time)) if sector_sync else None
-            if state is None:
+            if policy.require_sector and state is None:
                 return at, "data_insufficient", "最终确认时点缺少板块证据"
-            if state is not True:
+            if policy.require_sector and state is not True:
                 return at, "quality_rejected", "最终确认时点板块未同步"
             return at, "ready", "连续分钟站稳" if policy.mode == "sustain" else "回踩关键价后再次突破"
     return index, "quality_rejected", "确认窗口内未完成回踩再突破"

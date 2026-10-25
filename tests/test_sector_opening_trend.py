@@ -117,12 +117,13 @@ def test_live_stale_quotes_cannot_complete_new_path(monkeypatch):
 
 
 def test_replay_uses_true_open_not_first_minute_close_and_never_future_prices():
+    from backtest.minute_entry import MinuteEntryEvaluator
     bars=pd.DataFrame([{'time':f'09:{31+i:02d}:00','close':9.05+i*.02,'open':9.05+i*.02,
         'high':9.05+i*.02,'low':9.05+i*.02,'volume':100} for i in range(10)])
     frames={c:bars.copy() for c in ('000002','600000')}
     profiles=SimpleNamespace(available=False,load=lambda:{},expected_fraction=lambda *a:(None,0))
     service=_ReplayEntryService({c:{'close':10} for c in frames},{},{'电池':list(frames)},frames,profiles,
-        opening_prices={c:9 for c in frames})
+        opening_prices={c:9 for c in frames}, evaluator=MinuteEntryEvaluator())
     checker,detail=service._sector_checker({'sector_names':['电池']},'000001',[],{},{},'20261014')
     assert checker('09:32:00') is False
     assert checker('09:36:00') is True

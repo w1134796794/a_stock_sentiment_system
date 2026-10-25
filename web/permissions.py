@@ -191,9 +191,9 @@ MENU_GROUPS: List[Dict[str, Any]] = [
             },
             {
                 "key": "fetch",
-                "label": "盘后取数",
-                "href": "/fetch",
-                "prefix": "/fetch",
+                "label": "行情采集中心",
+                "href": "/market-collection",
+                "prefix": "/market-collection",
                 "roles": ADMIN_ONLY,
                 "icon": _icon('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>'),
             },
@@ -257,6 +257,8 @@ ADMIN_PAGE_PREFIXES = (
     "/intraday/replay",
     "/admin",
     "/fetch",
+    "/market-backfill",
+    "/market-collection",
     "/run",
     "/screening-run",
     "/config",
@@ -285,7 +287,7 @@ ADMIN_GET_API_PREFIXES = (
 
 # These capabilities remain administrator-only regardless of database settings.
 FORCED_ADMIN_KEYS = frozenset({
-    "users", "permissions", "fetch", "run", "screening_run", "strategies", "strategy_lab", "strategy_evaluation", "config", "factors", "logs"
+    "users", "permissions", "fetch", "market_backfill", "run", "screening_run", "strategies", "strategy_lab", "strategy_evaluation", "config", "factors", "logs"
 })
 
 PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
@@ -307,7 +309,7 @@ PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "drawdown": ("/drawdown",),
     "users": ("/admin/users", "/api/admin/users"),
     "permissions": ("/admin/permissions", "/api/admin/permissions"),
-    "fetch": ("/fetch", "/api/fetch"),
+    "fetch": ("/fetch", "/api/fetch", "/market-collection", "/market-backfill", "/api/admin/market-collection"),
     "run": ("/run", "/api/run", "/api/etl/artifacts"),
     "screening_run": ("/screening-run", "/api/screening-run", "/api/pipeline/artifacts"),
     "strategies": ("/strategies", "/api/strategies"),

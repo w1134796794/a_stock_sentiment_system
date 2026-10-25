@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ category.label }} · {{ date }}{% endblock %}
 {% block page_title %}{{ category.label }}{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date }} · 数据浏览</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ date }} · 盘后归档</div>{% endblock %}
 
 {% block header_extra %}
   {% if dates %}
   <label class="text-sm text-slate-400">交易日</label>
-  <select onchange="location.href='/data/{{ cat }}/'+this.value"
+  <select aria-label="交易日" onchange="location.href='/data/{{ cat }}/'+this.value"
           class="mono bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-emerald-500">
     {% for d in dates %}
       <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
@@ -16,12 +16,24 @@
 {% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="/static/data-focus.css?v=20261025-1">
+<div class="data-focus-page">
 {% if snapshot is none %}
-  <div class="card border border-slate-800 rounded-xl p-10 text-center">
+  <div class="data-focus-empty">
     <div class="text-xl font-semibold mb-1">没有找到 {{ date }} 的快照</div>
     <div class="text-slate-400">请确认该日已生成数据。</div>
   </div>
 {% else %}
+{% if highlights %}
+<section class="data-focus-summary" aria-label="{{ highlights.label }}摘要">
+  <div class="data-focus-conclusion"><span class="data-focus-label">{{ highlights.label }}</span><h2>{{ highlights.headline }}</h2><p>{{ highlights.detail }}</p></div>
+  <div class="data-focus-metrics">
+    {% for label, value, basis in highlights.metrics %}
+    <div><span>{{ label }}</span><strong class="mono">{{ value }}</strong><small>{{ basis }}</small></div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 {# 各分类的展示视图：
    strategy/sector → detail 主从卡；limitup → echelon 梯队；
    capital/review  → smart 智能混搭（卡片/热力表/主从按 section 自动选）；其余 → table。 #}
@@ -29,8 +41,8 @@
                 else ('detail' if cat in ['strategy', 'sector']
                 else ('smart' if cat in ['capital'] else 'table')) %}
 <div class="space-y-4">
-  <nav id="data-tabs" class="card border border-slate-800 rounded-xl p-2 flex flex-wrap gap-1.5">
-    {% set ns = namespace(first=true, any=false) %}
+  <nav id="data-tabs" class="data-subtabs" aria-label="{{ category.label }}明细分类">
+    {% set ns = namespace(first=true, any=false, selected=none) %}
     {% for s in sections %}
       {% if (s.name in category.names) or (s.category == cat) or (category.signals and s.kind == 'signals') %}
       {% set ns.any = true %}
@@ -39,10 +51,11 @@
         hx-get="/report/{{ date }}/section/{{ loop.index0 }}?view={{ view_q }}"
         hx-target="#section-panel" hx-swap="innerHTML"
         onclick="setActiveTab(this)"
-        {% if ns.first %}hx-trigger="load, click"{% endif %}>
+        aria-pressed="{{ 'true' if ns.first else 'false' }}">
         <span>{{ s.name }}</span>
         <span class="dtab-count mono">{{ s.tab_count if s.tab_count is defined else s.rows|length }}</span>
       </button>
+      {% if ns.first %}{% set ns.selected = s %}{% endif %}
       {% set ns.first = false %}
       {% endif %}
     {% endfor %}
@@ -50,8 +63,10 @@
       <div class="px-3 py-2 text-sm text-slate-500">该分类当日暂无数据</div>
     {% endif %}
   </nav>
-  <div id="section-panel" class="card border border-slate-800 rounded-xl p-4 min-h-[260px] overflow-hidden">
-    <div class="text-slate-500 text-sm">{% if ns.any %}加载中…{% else %}选择上方分类查看明细…{% endif %}</div>
+  <div id="section-panel" class="data-focus-panel min-h-[260px] overflow-hidden">
+    {% if ns.selected %}
+      {% with section=ns.selected, view=view_q %}{% include "partials/section.html" %}{% endwith %}
+    {% else %}<div class="data-focus-empty">该分类当日暂无归档数据</div>{% endif %}
   </div>
 </div>
 
@@ -71,9 +86,11 @@
 </style>
 <script>
   function setActiveTab(btn) {
-    document.querySelectorAll('#data-tabs .dtab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#data-tabs .dtab').forEach(b => {b.classList.remove('active'); b.setAttribute('aria-pressed', 'false');});
     btn.classList.add('active');
+    btn.setAttribute('aria-pressed', 'true');
   }
 </script>
 {% endif %}
+</div>
 {% endblock %}

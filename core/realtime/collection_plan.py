@@ -80,6 +80,8 @@ class DailyCollectionPlan:
             if clock >= cutoff or not (bundle.get("health") or {}).get("ok"):
                 raise ValueError("Collection plan requires healthy preopen evidence before 09:25")
             inputs = bundle["inputs"]
+            from risk.risk_config import RiskConfig
+            sector_mode = RiskConfig.from_dict(inputs.get("risk_config") or {}).entry_sector_mode
             if inputs.get("listing_evidence") and inputs["listing_evidence"].get("market_date") != date:
                 raise ValueError("Listing evidence must match collection market date")
             from core.realtime.listing_evidence import listing_exclusions
@@ -100,7 +102,7 @@ class DailyCollectionPlan:
                     if source not in item["sources"]:
                         item["sources"].append(source)
                     item["sectors"] = sorted(set(item["sectors"]) | collection_sector_names(row))
-            if any(not row["sectors"] for row in stocks.values()):
+            if sector_mode == "breadth_required" and any(not row["sectors"] for row in stocks.values()):
                 raise ValueError("Stock sector/concept metadata missing before open")
             names = sorted({name for row in stocks.values() for name in row["sectors"]})
             requested = {normalize_stock_code(r.get("code") or r.get("stock_code"), add_suffix=False)
@@ -112,10 +114,11 @@ class DailyCollectionPlan:
             sectors = [{"name": name, "code": (inputs.get("sector_codes") or {}).get(name) or "",
                         "members": sorted(eligible_members.get(name) or [])} for name in names]
             unresolved = [r["name"] for r in sectors if not r["code"] or not r["members"]]
-            if unresolved:
+            if unresolved and sector_mode == "breadth_required":
                 raise ValueError("Preopen sector identities/members missing: " + ",".join(unresolved))
             holding_codes = {normalize_stock_code(r.get("code"), add_suffix=False) for r in inputs.get("holdings") or []}
             body = {"schema_version": 1, "market_date": date, "candidate_date": candidate,
+                    "sector_confirmation_mode": sector_mode,
                     "frozen_at": clock.isoformat(), "bundle_id": bundle["bundle_id"],
                     "inputs_hash": digest(bundle), "rows": list(stocks.values()), "sectors": sectors,
                     "listing_exclusions": [value for code, value in excluded.items() if code in requested],

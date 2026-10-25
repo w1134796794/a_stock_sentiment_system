@@ -84,10 +84,11 @@ class BoardQuoteStore:
                 "sample_interval_seconds": (stamp - prior_stamp).total_seconds() if prior_stamp else None,
             }
             accepted.append(row)
+            retention = 200 if plan.get("scoring_version") else 180
             values[key] = [
                 point
                 for point in history
-                if 0 <= (stamp - shanghai_now(datetime.fromisoformat(point["received_at"]))).total_seconds() <= 180
+                if 0 <= (stamp - shanghai_now(datetime.fromisoformat(point["received_at"]))).total_seconds() <= retention
             ]
             values[key] = (values[key] + [row])[-200:]
             row["capture_evaluated_at"] = clock.isoformat()

@@ -30,10 +30,15 @@ def main():
     if not calendar.is_trade_date(args.market_date):
         raise RuntimeError("非交易日，不生成采集名单")
     candidate = calendar.prev(args.market_date)
+    saved_plan = DailyCollectionPlan().load(args.market_date)
+    if saved_plan:
+        print(json.dumps({"existing": True, "plan_id": saved_plan["plan_id"],
+                          "market_date": args.market_date}, ensure_ascii=False))
+        return
     store = PreopenEvidenceStore()
     existing = store.load(candidate, args.market_date)
     if not existing:
-        from config.settings import WEB_DATA_DIR, SNAPSHOT_DIR
+        from config.settings import SNAPSHOT_DIR, WEB_DATA_DIR
         required = [Path(WEB_DATA_DIR) / "fetch_status" / f"fetch_{candidate}.json",
                     Path(WEB_DATA_DIR) / "factor_status" / f"factors_{candidate}.json",
                     Path(WEB_DATA_DIR) / "screening" / "decision_pool" / f"decision_pool_{candidate}.json",
@@ -47,18 +52,31 @@ def main():
     if not result.get("ok"):
         raise RuntimeError(json.dumps(result, ensure_ascii=False))
     bundle = store.load(candidate, args.market_date)
+    from risk.risk_config import RiskConfig
+    if RiskConfig.from_dict(bundle["inputs"].get("risk_config") or {}).entry_sector_mode == "breadth_required":
+        from core.realtime.sector_evidence import prepare_preopen_sector_evidence
+        prepared = prepare_preopen_sector_evidence(candidate, args.market_date)
+        if not prepared.get("ok"):
+            raise RuntimeError("旧版宽度口径的盘前板块证据未就绪：" + str(prepared))
+        bundle = store.load(candidate, args.market_date)
     plan = DailyCollectionPlan().freeze(bundle)
     board_summary = None
-    if args.tdx_boards:
-        from config.settings import ELTDX_TIMEOUT_SECONDS, ELTDX_HOST
+    if args.tdx_boards or plan.get("sector_confirmation_mode") == "trend_score":
+        from config.settings import ELTDX_HOST, ELTDX_TIMEOUT_SECONDS
         from core.data.providers.eltdx_provider import EltdxProvider
         from core.realtime.board_plan import BoardCollectionPlan
         hints = json.loads(args.board_mappings.read_text(encoding="utf-8-sig")) if args.board_mappings else {}
-        boards = BoardCollectionPlan().prepare(plan,
-            EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None), hints=hints, clock=shanghai_now)
-        board_summary = {"plan_id": boards["plan_id"], "board_count": len(boards["codes"]),
-                         "unmapped_count": sum(not row["candidates"] for row in boards["rows"]),
-                         "formal_eligible": False, "warnings": boards["warnings"]}
+        try:
+            boards = BoardCollectionPlan().prepare(plan,
+                EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None), hints=hints, clock=shanghai_now)
+            board_summary = {"plan_id": boards["plan_id"], "board_count": len(boards["codes"]),
+                             "score_mapping_count": sum(bool(row.get("score_eligible")) for row in boards["rows"]),
+                             "unmapped_count": sum(not row["candidates"] for row in boards["rows"]),
+                             "formal_eligible": False, "warnings": boards["warnings"]}
+        except Exception as exc:
+            if args.tdx_boards:
+                raise
+            board_summary = {"status": "unassessed", "reason": type(exc).__name__, "formal_eligible": False}
     summary = plan if args.full else {**plan, "sectors": [
         {"name": row["name"], "code": row["code"], "member_count": len(row["members"])} for row in plan["sectors"]]}
     if board_summary is not None:

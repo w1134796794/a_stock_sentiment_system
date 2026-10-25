@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}行情采集中心{% endblock %}
+{% block page_title %}行情采集中心{% endblock %}
+{% block header_extra %}<a href="/portfolio/backtest" class="text-sm text-emerald-300">历史回测 ↗</a>{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/collection-center.css?v=20261025-1">
+<div id="collection-center">
+  <div class="mc-heading">
+    <div><div class="mc-eyebrow">数据运营</div><h2>行情采集中心</h2></div>
+    <div class="mc-heading-right"><span class="mc-storage" id="mc-storage">数据状态待检查</span><span class="mc-updated" id="mc-updated">--</span>
+      <button id="mc-refresh" class="mc-icon" title="刷新采集状态" aria-label="刷新采集状态"><i data-lucide="refresh-cw"></i></button></div>
+  </div>
+  <nav class="mc-tabs" role="tablist" aria-label="行情采集阶段">
+    <button role="tab" id="mc-tab-postclose" aria-controls="mc-panel-data" aria-selected="true" data-tab="postclose"><i data-lucide="moon"></i><span>盘后</span><small>日线与基础数据</small></button>
+    <button role="tab" id="mc-tab-preopen" aria-controls="mc-panel-data" aria-selected="false" data-tab="preopen" tabindex="-1"><i data-lucide="sunrise"></i><span>盘前</span><small>名单与板块整合</small></button>
+    <button role="tab" id="mc-tab-intraday" aria-controls="mc-panel-data" aria-selected="false" data-tab="intraday" tabindex="-1"><i data-lucide="radio"></i><span>盘中</span><small>快照与增量归档</small></button>
+    <button role="tab" id="mc-tab-backfill" aria-controls="mc-panel-backfill" aria-selected="false" data-tab="backfill" tabindex="-1"><i data-lucide="database-backup"></i><span>补数</span><small>历史两池分时</small></button>
+  </nav>
+  <div id="mc-error" role="alert" hidden></div>
+  <section id="mc-panel-data" role="tabpanel" aria-labelledby="mc-tab-postclose">
+    <div class="mc-toolbar"><div class="mc-phase-title"><h3 id="mc-phase-title">盘后取数</h3><span id="mc-phase-schedule">日线 · 基础资料 · 板块 · 资金</span></div>
+      <label class="mc-date-label">交易日<input type="date" id="mc-date" aria-label="采集交易日"></label></div>
+    <div class="mc-focus" id="mc-focus" data-tone="neutral">
+      <div class="mc-focus-icon"><i data-lucide="database"></i></div>
+      <div class="mc-focus-content"><span class="mc-overline" id="mc-overline">所选交易日</span><h3 id="mc-status-title">正在读取采集状态</h3><p id="mc-status-detail">--</p></div>
+      <button class="mc-primary" id="mc-action" disabled><i data-lucide="download"></i><span>开始盘后取数</span></button>
+    </div>
+    <div class="mc-metrics" id="mc-metrics" aria-label="采集关键指标"></div>
+    <div class="mc-section-heading"><h3 id="mc-table-title">数据源检查</h3><span id="mc-table-meta"></span></div>
+    <div class="mc-table-wrap" id="mc-table" aria-live="polite"></div>
+    <details class="mc-details" id="mc-batch-details"><summary><span>批量盘后取数</span><span>按交易日区间</span></summary>
+      <form id="mc-batch-form" class="mc-batch-form">
+        <label>开始日期<input type="date" id="mc-batch-start" aria-label="批量取数开始日期" required></label>
+        <label>结束日期<input type="date" id="mc-batch-end" aria-label="批量取数结束日期" required></label>
+        <button class="mc-primary" type="submit" id="mc-batch-action"><i data-lucide="download"></i><span>开始批量取数</span></button>
+      </form>
+    </details>
+    <details class="mc-details" id="mc-task-details"><summary><span>采集任务与日志</span><span id="mc-task-state">暂无任务</span></summary>
+      <div id="mc-task-meta"></div><pre id="mc-log">暂无采集日志</pre></details>
+  </section>
+  <section id="mc-panel-backfill" role="tabpanel" aria-labelledby="mc-tab-backfill" hidden>
+    <div class="mc-toolbar"><div class="mc-phase-title"><h3>历史分时补数</h3><span>历史龙头池 · 决策池 · 已生成名单</span></div></div>
+<form id="backfill-dates" class="backfill-dates" onsubmit="return false">
+  <label>开始日期<input id="replay-start" maxlength="8" inputmode="numeric" pattern="[0-9]{8}" placeholder="YYYYMMDD" aria-label="补数开始日期"></label>
+  <label>结束日期<input id="replay-end" maxlength="8" inputmode="numeric" pattern="[0-9]{8}" placeholder="YYYYMMDD" aria-label="补数结束日期"></label>
+  <div class="mc-backfill-scope"><i data-lucide="list-checks"></i><span>仅读取历史池名单<strong>不重新选股，不自动运行回测</strong></span></div>
+</form>
+{% include "partials/history_workflow.html" %}
+  </section>
+</div>
+<script src="/static/collection-center.js?v=20261025-1"></script>
+{% endblock %}

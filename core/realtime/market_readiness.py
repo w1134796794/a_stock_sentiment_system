@@ -259,7 +259,7 @@ def audit_market(
         "notes": [
             "Readiness checks evidence availability, not whether a stock should be bought.",
             "Intraday archive checks cover a recent window; only postclose checks cover the full session.",
-            "No history is backfilled. TDX board shadow evidence does not replace formal THS evidence.",
+            "No history is backfilled. Mapped TDX trend scores do not prove THS constituent breadth.",
         ],
     }
 
@@ -335,6 +335,8 @@ def audit_market(
     from core.signals.production_rules import production_candidates
 
     members = RealtimeSectorService.confirmation_members(inputs)
+    breadth_required = (inputs.get("risk_config") or {}).get("entry_sector_mode", "breadth_required") == "breadth_required"
+    report["sector_confirmation_mode"] = "breadth_required" if breadth_required else "trend_score"
     rows = {row["code"]: row for row in production_candidates(inputs) if row["code"] in codes}
     report["active_strategy_codes"] = sorted(rows)
     daily = {
@@ -362,7 +364,11 @@ def audit_market(
         not invalid_groups,
         "同花顺绑定及清理退市后的完整成分分母",
         details={"missing": invalid_groups},
+        warning=not breadth_required,
     )
+    if not breadth_required:
+        expected_members = {}
+        report["notes"].append("Board trend is optional scoring; missing breadth or board scores do not veto stock confirmation.")
     if service_states is not None and phase in {"preopen", "live"}:
         check(
             "systemd_workers",
@@ -568,7 +574,7 @@ def audit_market(
                     }
                 )
         minute += timedelta(minutes=1)
-    for code in codes:
+    for code in (codes if breadth_required else []):
         gaps = missing_sector[code]
         check(
             f"sector:{code}",

@@ -82,6 +82,8 @@ logger = logging.getLogger(__name__)
 BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.globals["visible_menu_groups"] = visible_menu_groups
+from web.navigation import product_navigation
+templates.env.globals["product_navigation"] = product_navigation
 reader = SnapshotReader(SNAPSHOT_DIR)
 _REALTIME_QUOTE_SERVICE = None
 _REALTIME_SECTOR_SERVICE = None
@@ -1052,6 +1054,7 @@ def _factor_sector_rows(
     date: str,
     limit: int = 20,
     limit_up_rows: Optional[List[Dict[str, Any]]] = None,
+    review: bool = False,
 ) -> List[Dict[str, Any]]:
     fetch_limit = max(int(limit) * 80, 1000)
     try:
@@ -1072,16 +1075,15 @@ def _factor_sector_rows(
                 FROM factor_sector_wide
                 WHERE trade_date = ?
                 ORDER BY rank ASC, mainline_score DESC
-                LIMIT ?
-                """,
-                [str(date), fetch_limit],
+                """ + ("" if review else " LIMIT ?"),
+                [str(date)] + ([] if review else [fetch_limit]),
             ).fetchdf()
     except Exception:
         return []
     rows = df.to_dict(orient="records") if df is not None and not df.empty else []
     _enrich_sector_rows(rows)
     named = [row for row in rows if _allowed_hot_sector(row)]
-    selected = (named or rows)[: int(limit)]
+    selected = (named or rows) if review else (named or rows)[: int(limit)]
     limit_up_counts = _limit_up_sector_counts(limit_up_rows or [])
     for i, row in enumerate(selected, start=1):
         row["rank"] = i
@@ -1089,8 +1091,15 @@ def _factor_sector_rows(
         sector_name = str(row.get("sector_name") or row.get("板块名称") or "").strip()
         count = limit_up_counts.get(sector_code)
         if count is None:
-            count = limit_up_counts.get(sector_name, 0)
-        row["limit_up_count"] = int(count)
+            count = limit_up_counts.get(sector_name)
+        if review and count is None and row.get("membership_available") in (True, 1, "1"):
+            count = row.get("limit_up_count")
+        from web.sector_review import number
+        count = number(count)
+        row["limit_up_count"] = int(count) if count is not None else (None if review else 0)
+    if review:
+        from web.sector_review import hotspots
+        return hotspots(selected, limit=limit)
     return selected
 
 
@@ -1158,79 +1167,15 @@ def _mainline_theme_rows(date: str, limit: int = 10, lookback: int = 10) -> List
     _enrich_sector_rows(current_rows)
     _enrich_sector_rows(hist_rows)
 
-    import pandas as pd  # type: ignore
-
-    current = pd.DataFrame([row for row in current_rows if _allowed_hot_sector(row)])
-    hist = pd.DataFrame([row for row in hist_rows if _allowed_hot_sector(row)])
-    if current.empty or hist.empty:
+    from datetime import datetime, timedelta
+    from backtest.trade_calendar import TradeCalendar
+    from web.sector_review import mainlines
+    calendar = TradeCalendar()
+    if not calendar.is_real:
         return []
-
-    for col in ("pct_chg", "amount_yuan"):
-        hist[col] = pd.to_numeric(hist.get(col), errors="coerce").fillna(0.0)
-    for col in ("mainline_score", "momentum_score", "amount_score", "amount_ratio_score", "persistence_score"):
-        current[col] = pd.to_numeric(current.get(col), errors="coerce").fillna(0.0)
-
-    hist["daily_momentum_score"] = hist["pct_chg"].map(lambda v: _score_between(v, -5.0, 8.0))
-    hist["daily_amount_score"] = hist.groupby("trade_date")["amount_yuan"].rank(pct=True).fillna(0.0) * 100.0
-    hist["daily_heat_score"] = hist["daily_momentum_score"] * 0.65 + hist["daily_amount_score"] * 0.35
-    hist["daily_heat_rank"] = hist.groupby("trade_date")["daily_heat_score"].rank(method="dense", ascending=False)
-
-    rows: List[Dict[str, Any]] = []
-    for _, cur in current.iterrows():
-        code = str(cur.get("sector_code") or "")
-        name = str(cur.get("sector_name") or "")
-        h = hist[hist["sector_code"].astype(str) == code].sort_values("trade_date")
-        if h.empty:
-            continue
-        recent = h.tail(int(lookback))
-        current_score = float(cur.get("mainline_score") or 0.0)
-        persistence_score = float(cur.get("persistence_score") or 0.0)
-        amount_ratio_score = float(cur.get("amount_ratio_score") or 0.0)
-        hot_days = int((recent["pct_chg"] > 0).sum())
-        strong_days = int((recent["pct_chg"] >= 1.5).sum())
-        top50_days = int((recent["daily_heat_rank"] <= 50).sum())
-        cum_pct = float(recent["pct_chg"].sum())
-        avg_pct_5 = float(recent.tail(5)["pct_chg"].mean()) if not recent.tail(5).empty else 0.0
-
-        continuity_score = min(100.0, top50_days / 3.0 * 100.0)
-        hot_score = min(100.0, hot_days / 6.0 * 100.0)
-        strength_score = min(100.0, strong_days / 3.0 * 100.0)
-        trend_score = _score_between(cum_pct, -5.0, 15.0)
-        theme_score = (
-            current_score * 0.25
-            + persistence_score * 0.25
-            + continuity_score * 0.20
-            + trend_score * 0.15
-            + amount_ratio_score * 0.10
-            + strength_score * 0.05
-        )
-
-        # 主线至少需要“持续证据”或“多日红盘”，不能只因当日排名靠前入选。
-        if not (top50_days >= 2 or hot_days >= 5 or persistence_score >= 75.0):
-            continue
-        if current_score < 45.0:
-            continue
-
-        rows.append({
-            "板块名称": name,
-            "板块代码": code,
-            "板块类型": _sector_type_label(cur.get("sector_type") or ""),
-            "主线主题评分": round(theme_score, 2),
-            "当日主线评分": round(current_score, 2),
-            "近10日上榜天数": top50_days,
-            "近10日红盘天数": hot_days,
-            "近10日强势天数": strong_days,
-            "近10日累计涨幅%": round(cum_pct, 2),
-            "5日均涨幅%": round(avg_pct_5, 2),
-            "量能评分": round(amount_ratio_score, 2),
-            "持续性评分": round(persistence_score, 2),
-        })
-
-    rows.sort(key=lambda x: (float(x.get("主线主题评分") or 0), int(x.get("近10日上榜天数") or 0)), reverse=True)
-    selected = rows[: int(limit)]
-    for i, row in enumerate(selected, start=1):
-        row["排名"] = i
-    return selected
+    start = (datetime.strptime(date, "%Y%m%d") - timedelta(days=60)).strftime("%Y%m%d")
+    expected = calendar.get_trade_dates(start, date)[-int(lookback):]
+    return mainlines(current_rows, hist_rows, as_of=date, expected_dates=expected, limit=limit)
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -1468,6 +1413,14 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
     if screening_sections:
         prepared = [section for section in prepared if not _is_screening_section(section)]
         prepared[0:0] = screening_sections
+    for section in prepared:
+        if section.get("kind") != "decision_pool":
+            continue
+        for group in section.get("groups") or []:
+            for row in group.get("rows") or []:
+                code = _normalize_stock_code(row.get("code") or row.get("股票代码"))
+                if len(code) == 6 and code.isdigit():
+                    row["_detail_url"] = f"/stock/{code}?date={quote(str(date))}&context_date={quote(str(date))}"
     _enrich_candidate_indicator_sections(prepared, date)
 
     limit_section = _build_limitup_section(date)
@@ -1475,9 +1428,10 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
         date,
         limit=20,
         limit_up_rows=(limit_section or {}).get("rows") or [],
+        review=True,
     )
     mainline_rows = _mainline_theme_rows(date, limit=20)
-    if hotspot_rows or mainline_rows:
+    if hotspot_rows or mainline_rows or any(s.get("name") in ("热点概念", "主线主题") for s in prepared):
         sector_columns = [
             "sector_name", "sector_code", "sector_type",
             "mainline_score", "rank", "limit_up_count", "momentum_score", "amount_score",
@@ -1491,20 +1445,20 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
         found_hot = False
         found_mainline = False
         for section in prepared:
-            if section.get("name") == "热点概念" and hotspot_rows:
-                section["columns"] = [c for c in sector_columns if c in hotspot_rows[0]]
-                section["rows"] = hotspot_rows[:10]
+            if section.get("name") == "热点概念":
+                section["columns"] = [c for c in sector_columns if hotspot_rows and c in hotspot_rows[0]]
+                section["rows"] = hotspot_rows
                 found_hot = True
-            elif section.get("name") == "主线主题" and mainline_rows:
-                section["columns"] = [c for c in mainline_columns if c in mainline_rows[0]]
-                section["rows"] = mainline_rows[:10]
+            elif section.get("name") == "主线主题":
+                section["columns"] = [c for c in mainline_columns if mainline_rows and c in mainline_rows[0]]
+                section["rows"] = mainline_rows
                 found_mainline = True
         if hotspot_rows and not found_hot:
             prepared.insert(0, {
                 "name": "热点概念",
                 "kind": "table",
                 "columns": [c for c in sector_columns if c in hotspot_rows[0]],
-                "rows": hotspot_rows[:10],
+                "rows": hotspot_rows,
             })
         if mainline_rows and not found_mainline:
             insert_at = 1 if hotspot_rows else 0
@@ -1512,7 +1466,7 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
                 "name": "主线主题",
                 "kind": "table",
                 "columns": [c for c in mainline_columns if c in mainline_rows[0]],
-                "rows": mainline_rows[:10],
+                "rows": mainline_rows,
             })
     else:
         for section in prepared:
@@ -1549,6 +1503,8 @@ def _prepare_sections(sections: List[Dict[str, Any]], date: str) -> List[Dict[st
                         insert_at = i + 1
                         break
                 prepared.insert(insert_at, concept_section)
+    priority = {"主线主题": 0, "热点概念": 1}
+    prepared.sort(key=lambda section: priority.get(section.get("name"), 2))
     return prepared
 
 
@@ -2722,7 +2678,7 @@ def _pipeline_stage_page(request: Request, stage: str) -> Any:
 
 @app.get("/fetch", response_class=HTMLResponse)
 def fetch_page(request: Request) -> Any:
-    return _pipeline_stage_page(request, "fetch")
+    return RedirectResponse("/market-collection?tab=postclose", status_code=303)
 
 
 @app.get("/run", response_class=HTMLResponse)
@@ -3647,14 +3603,11 @@ def _postclose_gate_for_date(trade_date: str, market_date: str, minute_bucket: i
 
 @lru_cache(maxsize=8)
 def _freeze_preopen_for_minute(candidate_date: str, market_date: str, minute_bucket: int):
-    from core.operations.preopen_evidence import freeze_preopen_inputs
-    result = freeze_preopen_inputs(candidate_date, market_date)
-    if result.get("ok"):
-        from core.realtime.sector_evidence import prepare_preopen_sector_evidence
-        result["sector_preparation"] = prepare_preopen_sector_evidence(candidate_date, market_date)
-    if not result.get("ok"):
-        logger.warning("Preopen evidence unavailable for %s/%s: %s", candidate_date, market_date, result)
-    return result
+    from core.realtime.collection_plan import DailyCollectionPlan
+    plan = DailyCollectionPlan().load(market_date)
+    if not plan or plan.get("candidate_date") != candidate_date:
+        return {"ok": False, "reason": "等待独立盘前采集任务准备当日名单"}
+    return {"ok": True, "collection_plan_id": plan["plan_id"]}
 
 
 def _ensure_preopen_inputs():
@@ -3662,12 +3615,6 @@ def _ensure_preopen_inputs():
     candidate_date = _realtime_candidate_date(market_date)
     try:
         result = _freeze_preopen_for_minute(candidate_date, market_date, int(time.time() // 60))
-        if result.get("ok"):
-            from core.operations.preopen_evidence import PreopenEvidenceStore
-            from core.realtime.collection_plan import DailyCollectionPlan
-            bundle = PreopenEvidenceStore().load(candidate_date, market_date)
-            if bundle:
-                result["collection_plan_id"] = DailyCollectionPlan().freeze(bundle)["plan_id"]
         return result
     except Exception as exc:
         logger.warning("Preopen evidence capture failed: %s", exc)
@@ -4844,6 +4791,7 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
             },
         )
     snapshot = _load_prepared_snapshot(date)
+    from web.page_highlights import data_highlights
     return templates.TemplateResponse(
         request,
         "data_browse.html",
@@ -4854,6 +4802,7 @@ def data_browse(request: Request, cat: str, date: str) -> Any:
             "dates": _list_dates(),
             "sections": (snapshot or {}).get("sections", []),
             "snapshot": snapshot,
+            "highlights": data_highlights(cat, (snapshot or {}).get("sections", [])),
         },
     )
 
@@ -5038,3 +4987,9 @@ from web.evidence_router import evidence_router
 from core.realtime.evidence_views import EvidenceViews
 from core.infrastructure.shared_state import get_shared_state_backend as _evidence_backend
 app.include_router(evidence_router(lambda: EvidenceViews(WEB_DATA_DIR, _evidence_backend()), templates, _realtime_market_date))
+
+from core.portfolio.history_workflow import HistoryWorkflows
+from web.history_router import history_router
+app.include_router(history_router(lambda: HistoryWorkflows(Path(WEB_DATA_DIR) / 'history_workflows'), templates))
+from web.collection_router import collection_router
+app.include_router(collection_router(templates))

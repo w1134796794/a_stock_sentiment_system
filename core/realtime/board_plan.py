@@ -1,4 +1,4 @@
-"""Preopen TDX/THS comparisons. Every mapping remains shadow-only."""
+"""Preopen TDX/THS comparisons; verified proxies may supply optional trend scores."""
 from __future__ import annotations
 
 import re
@@ -87,14 +87,23 @@ class BoardCollectionPlan:
                         "membership_hash": digest({"ths": sorted(ths), "tdx": sorted(tdx)}),
                         "tdx_excluded_members": detail["excluded_members"]})
                     selected.add(code)
+                ranked = sorted(comparisons, key=lambda item: item["jaccard"], reverse=True)
+                verified = bool(ranked and ranked[0]["jaccard"] >= 0.8
+                                and (len(ranked) == 1 or ranked[0]["jaccard"] > ranked[1]["jaccard"]))
                 rows.append({"ths_name": name, "ths_code": sector["code"],
+                             "score_eligible": verified,
+                             "score_code": ranked[0]["code"] if verified else "",
+                             "score_mapping_basis": "preopen_membership_overlap_ge_0.8" if verified else "unverified",
                              "status": "unmapped" if not comparisons else "requires_review",
                              "candidate_basis": "explicit_hint" if name in hints else "exact_name_candidate",
                              "candidates": comparisons, "formal_eligible": False})
             body = {"schema_version": 1, "market_date": date, "collection_plan_id": parent["plan_id"],
                     "captured_at": preopen().isoformat(), "mapping_hints": hints,
+                    "scoring_version": "mapped_board_trend_score_v1" if parent.get("sector_confirmation_mode") == "trend_score" else "",
                     "catalogue_hash": digest(catalogue), "sdk_prepared_date": catalogue["prepared_date"],
-                    "codes": sorted(selected), "rows": rows, "formal_eligible": False,
+                    "codes": sorted({r["score_code"] for r in rows if r.get("score_eligible")})
+                             if parent.get("sector_confirmation_mode") == "trend_score" else sorted(selected),
+                    "rows": rows, "formal_eligible": False,
                     "warnings": ["TDX and THS definitions are not interchangeable; name matches are candidates only",
                                  "SDK prepared_date does not prove all resource files are fresh"]}
             value = {**body, "plan_id": digest(body)}

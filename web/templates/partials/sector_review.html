@@ -1,0 +1,28 @@
+{% set mainline = section.name == '主线主题' %}
+<div class="sr-root" data-sector-review>
+  <div class="review-tools"><label class="review-search"><span>搜索板块</span><input type="search" data-sr-search placeholder="名称或代码" aria-label="搜索{{ section.name }}"></label>
+    {% if mainline %}<label>状态<select data-sr-state aria-label="主线状态筛选"><option value="">全部状态</option><option>持续主线</option><option>轮动观察</option><option>数据不足</option></select></label>{% endif %}
+    <span class="review-scope">复盘口径 v2 · 不影响正式策略</span><span data-sr-count>{{ section.rows|length }} 个主题</span>
+  </div>
+  <div class="sr-table-head"><span>排名 / 板块主题</span><span>{{ '主线评分' if mainline else '当日热度' }}</span><span>{{ '相对强度' if mainline else '当日动量' }}</span><span>{{ '量能持续' if mainline else '量能变化' }}</span><span>{{ '持续证据' if mainline else '涨停家数' }}</span><span>状态</span></div>
+  {% for row in section.rows %}
+  {% set score = row.get('_review_score') %}
+  {% set state = row.get('_review_status') or '旧归档口径' %}
+  <details class="sr-row" data-sr-row data-search="{{ row.get('sector_name') or row.get('板块名称') }} {{ row.get('sector_code') or row.get('板块代码') }}" data-state="{{ state }}" {% if loop.first %}open{% endif %}>
+    <summary class="sr-summary">
+      <span class="sr-identity"><span class="sr-rank mono">{{ row.get('_review_rank') or loop.index }}</span><span><strong>{{ row.get('sector_name') or row.get('板块名称') }}</strong><small class="mono">{{ row.get('sector_code') or row.get('板块代码') }}{% if row.get('_review_aliases') %} · 相近名称 {{ row.get('_review_aliases')|length }}{% endif %}</small></span></span>
+      <span class="sr-score mono">{{ score|num2 if score is not none else '--' }}<small>覆盖 {{ row.get('_review_score_coverage', '--') }}%</small></span>
+      <span class="sr-cell mono">{% if mainline %}{{ row.get('_review_excess_pct')|num2 }}%<small>同期概念中位数基准</small>{% else %}{{ row.get('momentum_score')|num2 if row.get('momentum_score') is not none else '--' }}<small>动量得分</small>{% endif %}</span>
+      <span class="sr-cell mono">{% if mainline %}{{ row.get('_review_amount_ratio')|num2 if row.get('_review_amount_ratio') is not none else '--' }}<small>近3日 / 前3日中位数</small>{% else %}{{ row.get('amount_ratio_score')|num2 if row.get('amount_ratio_score') is not none else '--' }}<small>量能变化得分</small>{% endif %}</span>
+      <span class="sr-cell mono">{% if mainline %}{{ row.get('近10日上榜天数', '--') }} / {{ row.get('_review_days', '--') }}<small>当日前20%天数</small>{% else %}{{ row.get('limit_up_count') if row.get('limit_up_count') is not none else '--' }}<small>原始涨停证据</small>{% endif %}</span>
+      <span class="review-state" data-state="{{ state }}">{{ state }}</span>
+    </summary>
+    <div class="sr-proof">
+      <div class="sr-breakdown">{% for part in row.get('_review_parts') or [] %}<div><span>{{ part.name }} <small>{{ (part.weight * 100)|int }}%</small></span>{% if part.score is not none %}<progress max="100" value="{{ part.score }}"></progress><b class="mono">{{ part.score|num2 }}</b>{% else %}<span class="sr-missing">未评估</span>{% endif %}</div>{% endfor %}</div>
+      <div class="sr-evidence">{% if mainline %}<span>历史覆盖 <b>{{ row.get('_review_days', '--') }} / {{ row.get('_review_expected_days', '--') }} 日</b></span><span>区间复合涨幅 <b>{{ row.get('近10日累计涨幅%')|num2 }}%</b></span>{% endif %}<span>原因子主线分 <b>{{ row.get('mainline_score')|num2 if row.get('mainline_score') is not none else '--' }}</b></span></div>
+      {% if row.get('_review_aliases') %}<div class="sr-aliases">相近名称仅折叠展示，成分与评分不合并：{% for alias in row['_review_aliases'] %}<span>{{ alias.name }} <small class="mono">{{ alias.code }}</small> {{ alias.score|num2 }}</span>{% endfor %}</div>{% endif %}
+    </div>
+  </details>
+  {% endfor %}
+  <div class="review-empty" data-sr-empty {% if section.rows %}hidden{% endif %}>当前没有满足条件的板块证据</div>
+</div>

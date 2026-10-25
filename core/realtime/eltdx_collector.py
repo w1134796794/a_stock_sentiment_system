@@ -83,11 +83,13 @@ class EltdxQuoteCollector:
         from core.realtime.board_plan import BoardCollectionPlan
         from core.realtime.board_quote_store import BoardQuoteStore
         from core.realtime.board_quote_lane import BoardQuoteLane
+        from risk.risk_config import RiskConfig
+        trend_scoring = RiskConfig.load().entry_sector_mode == "trend_score"
         self.board_lane = BoardQuoteLane(BoardCollectionPlan(),
             BoardQuoteStore(backend=self.quote_cache.backend, journal=self.journal,
                             stale_seconds=ELTDX_BOARD_STALE_SECONDS, expected_interval=ELTDX_BOARD_POLL_SECONDS),
             EltdxProvider(timeout=ELTDX_TIMEOUT_SECONDS, host=ELTDX_HOST or None),
-            enabled=ELTDX_BOARD_SHADOW_ENABLED, interval=ELTDX_BOARD_POLL_SECONDS, clock=self.clock,
+            enabled=ELTDX_BOARD_SHADOW_ENABLED or trend_scoring, interval=ELTDX_BOARD_POLL_SECONDS, clock=self.clock,
             owner=lambda: not self._stop and bool(getattr(self, "_active_lease", None))
                           and self._active_lease.is_owner())
 
@@ -113,7 +115,7 @@ class EltdxQuoteCollector:
         if not plan:
             return list(self.fixed_codes)  # Explicit CLI diagnostics only; never expand from stale watchlists.
         codes = [row["code"] for row in plan["rows"]]
-        if not minutes_only:
+        if not minutes_only and plan.get("sector_confirmation_mode", "breadth_required") == "breadth_required":
             codes.extend(c for sector in plan["sectors"] for c in sector["members"])
         return RealtimeWatchlistRepository.normalize(codes)
 

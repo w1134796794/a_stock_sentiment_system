@@ -19,6 +19,7 @@ const report = {
       notification_attempts:[{occurred_at:'2026-10-15T09:39:01',status:'sent',reason:'<img src=x onerror=alert(1)>'}],
       veto_reasons:[],replay_discrepancy:'replay_missing_evidence'}},
     {code:'601811',name:'新华文轩',status:'observe',reason:'缺少板块证据',transitions:[],
+      sector_trend:{role:'score_only',assessed:true,score_adjustment:-5,reason:'板块自身趋势偏弱 <img src=x onerror=alert(1)>'},
       board_feedback:{role:'risk_factor',active:true,assessed:true,factor_value:1,score_adjustment:-20,reason:'第4日强负反馈'},
       opening_evidence:{open_price:24,pre_close:23.25,open_gap:.032258,opening_source:'eltdx_open_archive'},
       runtime_diagnostic:{state:'attempt_not_sent',confirm_times:['09:47:00'],profiles:['production'],
@@ -26,7 +27,8 @@ const report = {
         notification_attempts:[{occurred_at:'2026-10-15T09:48:01',status:'blocked',reason:'collector_stale'}],
         veto_reasons:['采集器门禁'],replay_discrepancy:'replay_missing_evidence'}},
     {code:'002242',name:'九阳股份',status:'confirmed',reason:'独立分钟买点确认',first_confirm_time:'09:36:00',transitions:[
-      {evaluated_at:'09:37:00',signal_status:'confirmed',condition_checks:{latest:{minute:'09:36:00',checks:{sector:true,amount_pace_allowed:false,previous_close:true}}}}],
+      {evaluated_at:'09:37:00',signal_status:'confirmed',condition_checks:{latest:{minute:'09:36:00',checks:{sector:null,sector_required:false,amount_pace_allowed:false,previous_close:true}}}}],
+      sector_trend:{role:'score_only',assessed:false,score_adjustment:0,reason:'缺少连续板块自身行情'},
       board_feedback:{role:'risk_factor',active:false,assessed:false,factor_value:null,score_adjustment:0,reason:'历史因子未评估'},
       runtime_diagnostic:{state:'no_runtime_evidence',confirm_times:[],profiles:[],
         notification_attempts:[],veto_reasons:[],replay_discrepancy:'replay_confirmed_without_runtime_evidence'}}],
@@ -86,6 +88,8 @@ const report = {
       assert.match(await second.innerText(),/开盘 24.00.*昨收参考 23.25.*来源 eltdx按日归档/);
       assert.match(await second.innerText(),/实际判断来源 分钟兜底.*快照采集空窗/);
       assert.match(await second.locator('.dr-factor-warning').innerText(),/命中.*强度扣分 20/);
+      assert.match(await second.innerText(),/板块趋势评分：-5.00/);
+      assert.equal(await second.locator('img').count(),0);
       const unknown=page.locator('#dr-stocks > details').nth(2);
       await unknown.locator(':scope > summary').click();
       assert.equal(await unknown.locator('p.text-emerald-300').count(),0);
@@ -96,6 +100,7 @@ const report = {
       assert.match(await unknown.innerText(),/回放曾确认，但缺少原始运行证据/);
       await unknown.locator(':scope > details > summary').click();
       assert.match(await unknown.innerText(),/成交进度范围: 未通过/);
+      assert.match(await unknown.innerText(),/板块方向（评分项）: 未评估/);
       assert.match(await page.locator('#dr-summary').innerText(),/真实后台循环/);
       await unknown.screenshot({path:path.join(output,`replay-conditions-${width}.png`)});
       await page.locator('#dr-failures details > summary').click();
@@ -112,6 +117,8 @@ const report = {
       assert.match(await page.locator('.is-reason').first().innerText(),/独立分钟买点确认/);
       assert.match(await page.locator('.is-factor-warning').first().innerText(),/命中.*强度扣分 20/);
       assert.match(await page.locator('.is-factor-warning').nth(1).innerText(),/未评估/);
+      assert.match(await page.locator('.is-card').first().innerText(),/板块趋势评分：-5.00/);
+      assert.match(await page.locator('.is-card').nth(1).innerText(),/板块趋势评分：未评估 · 0/);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
       assert.deepEqual(errors,[]);
       await page.screenshot({path:path.join(output,`intraday-factor-${width}.png`),fullPage:true});

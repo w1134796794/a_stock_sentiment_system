@@ -284,7 +284,7 @@ class ETLDailyPipeline:
         profile: str = "default",
         strategy_ids: Optional[List[str]] = None,
         primary_strategy: str = "",
-        archive_cases: bool = True,
+        archive_cases: bool = False,
     ) -> ETLDailyResult:
         """Run screening and snapshots from local factor tables only."""
         from core.etl.stage_status import factor_status, require_stage
@@ -531,22 +531,8 @@ class ETLDailyPipeline:
         if archive_cases:
             self._archive_signal_cases(trade_date, result)
 
-        try:
-            from backtest.trade_calendar import TradeCalendar
-            from core.operations.preopen_evidence import freeze_preopen_inputs
-            frozen = freeze_preopen_inputs(
-                trade_date, TradeCalendar().next(trade_date), web_data_dir=self.web_data_dir,
-                db_path=self.duckdb_path, snapshot_dir=self.snapshot_dir,
-            )
-            if frozen.get("ok"):
-                from core.realtime.sector_evidence import prepare_preopen_sector_evidence
-                frozen["sector_preparation"] = prepare_preopen_sector_evidence(
-                    trade_date, TradeCalendar().next(trade_date), web_data_dir=self.web_data_dir,
-                    db_path=self.duckdb_path, data_manager=self.dm)
-            logger.info(f"[PreopenEvidence] {trade_date}: {frozen}")
-        except Exception as exc:
-            result.warnings.append(f"开盘前证据冻结失败: {exc}")
-            logger.warning(f"[PreopenEvidence] {trade_date}: {exc}")
+        # Collection/freeze belongs to the independent preopen collector.
+        # A successful screening run must never trigger remote evidence repair.
 
         logger.info(
             f"[选股策略] 完成: ok={result.ok}, "

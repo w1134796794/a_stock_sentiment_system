@@ -300,10 +300,16 @@ class RunController:
 
     # ---- 内部实现 -----------------------------------------------------
     def _run_isolated_factor_process(self, date: Optional[str]) -> None:
-        """Run one factor partition outside the Web process so RSS is reclaimed per day."""
+        """Run acquisition or factors outside Web; each process owns one stage."""
         from config.settings import BASE_DIR
 
-        command = [sys.executable, str(Path(BASE_DIR) / "main.py"), "--mode", "factors"]
+        command = ([sys.executable, "-X", "utf8", str(Path(BASE_DIR) / "scripts" / "collect_postclose.py")]
+                   if self.stage == "fetch" else
+                   [sys.executable, str(Path(BASE_DIR) / "main.py"), "--mode", "factors"])
+        if self.stage == "fetch" and self.options.get("force_refresh"):
+            command.append("--force-refresh")
+        if self.stage == "fetch" and self.options.get("skip_existing") is False:
+            command.append("--no-skip-existing")
         if date:
             command.extend(["--date", str(date)])
         env = dict(os.environ)
@@ -326,7 +332,7 @@ class RunController:
             self.buffer.append_line(line.rstrip("\r\n"))
         return_code = process.wait()
         if return_code != 0:
-            raise RuntimeError(f"因子子进程退出码 {return_code}")
+            raise RuntimeError(f"{self.stage_label}子进程退出码 {return_code}")
 
     def _worker(self, date: Optional[str], options: Optional[Dict[str, Any]] = None) -> None:
         import loguru
@@ -346,7 +352,7 @@ class RunController:
             self.buffer.append_line(
                 f"=== 开始{self.stage_label} · 日期={date or '今日(自动取最近交易日)'} ==="
             )
-            if self.stage == "factors":
+            if self.stage in {"fetch", "factors"}:
                 self._run_isolated_factor_process(date)
             else:
                 from main import SentimentSystem  # 惰性导入重依赖
@@ -406,7 +412,7 @@ class RunController:
             if not trade_dates:
                 raise RuntimeError("区间内没有可运行的交易日，请检查日期范围。")
 
-            system = None if self.stage == "factors" else SentimentSystem()
+            system = None if self.stage in {"fetch", "factors"} else SentimentSystem()
             for idx, trade_date in enumerate(trade_dates, 1):
                 date_started = time.monotonic()
                 heartbeat_stop = threading.Event()
@@ -427,7 +433,7 @@ class RunController:
                 self.buffer.append_line("")
                 self.buffer.append_line(f"--- [{idx}/{len(trade_dates)}] {trade_date} 开始 ---")
                 try:
-                    if self.stage == "factors":
+                    if self.stage in {"fetch", "factors"}:
                         self._run_isolated_factor_process(trade_date)
                     else:
                         getattr(system, self.stage_method)(trade_date, **dict(options or {}))

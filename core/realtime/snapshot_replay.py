@@ -70,6 +70,8 @@ def load_snapshot_inputs(root, request, *, progress=None):
     except (OSError, ValueError, TypeError, KeyError) as exc:
         failures.append({"evidence": "invalid_collection_inputs", "reason": str(exc)})
         return result
+    from core.signals.sector_trend import archived_trend_inputs
+    result["board_trend_inputs"] = archived_trend_inputs(root, date)
     seen, conflicts = {}, set()
     # The archiver commits the daily DB before deleting the spool row. Reading
     # the spool first avoids losing events that move during this read-only scan.
@@ -162,6 +164,7 @@ class ArchiveEntryService(RealtimeEntrySignalService):
         self.ticks, self.auctions, self.frames = {}, {}, {}
         self.sector_points = sector_points
         self._feedback_inputs = bundle["inputs"].get("board_feedback_inputs") or {}
+        self.board_trend_inputs = {}
         from core.realtime.sector_service import RealtimeSectorService
 
         self.members = RealtimeSectorService.confirmation_members(bundle["inputs"])
@@ -182,6 +185,8 @@ class ArchiveEntryService(RealtimeEntrySignalService):
         return self.auctions.get(code, {})
 
     def _sector_checker(self, row, code, all_rows, frames, quotes, market_date):
+        if not self.evaluator.confirmation_policy.require_sector:
+            return self._trend_checker(self._sectors(row), market_date)
         from core.realtime.sector_breadth import closed_quote_checker
 
         policy = self.evaluator.confirmation_policy
@@ -253,6 +258,9 @@ def replay_snapshot_inputs(inputs, progress=None):
         "backtest/reversal_entry.py",
         "core/signals/production_rules.py",
         "core/signals/sector_sync.py",
+        "core/signals/sector_trend.py",
+        "core/realtime/board_plan.py",
+        "core/realtime/board_quote_store.py",
         "core/signals/opening.py",
         "core/signals/sector_confirmation.py",
         "core/signals/minute_amount_profile.py",
@@ -341,6 +349,10 @@ def replay_snapshot_inputs(inputs, progress=None):
     now = [shanghai_now(datetime.strptime(date + "09:15:00", "%Y%m%d%H:%M:%S"))]
     sector_points = {}
     service = ArchiveEntryService(bundle, lambda: now[0], sector_points)
+    from core.signals.production_rules import RULESET_VERSION, entry_parameters
+    report["ruleset_version"] = RULESET_VERSION
+    report["entry_parameters"] = entry_parameters(service.evaluator)
+    service.board_trend_inputs = inputs.get("board_trend_inputs") or {}
     service.snapshot_signals.max_snapshot_age_seconds = float(policy["snapshot_stale_seconds"])
     report["replay_policy"] = policy
     quotes, source_counts, last_keys, last_receipts = {}, defaultdict(Counter), {}, {}
