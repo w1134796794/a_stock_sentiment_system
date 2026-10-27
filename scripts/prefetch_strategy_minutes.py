@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv
+
 from config.settings import CACHE_DIR, FACTOR_DB_PATH, TUSHARE_TOKEN
 from core.data import DataManager
 from core.factors.strategy_training import STRATEGY_TRAINING_SPECS, StrategyMinuteTrainingBuilder
@@ -143,10 +145,10 @@ def build_requirements(
 
 def _minute_cached(cache_dir: Path, trade_date: str, ts_code: str) -> bool:
     path = cache_dir / "stock" / "tick" / f"{ts_code}_{trade_date}.csv"
-    if not path.exists():
+    if not minute_cache_exists(path):
         return False
     try:
-        return inspect_minute_bars(pd.read_csv(path), trade_date, expected_code=ts_code)["valid"]
+        return inspect_minute_bars(read_minute_csv(path), trade_date, expected_code=ts_code)["valid"]
     except (OSError, ValueError, pd.errors.ParserError):
         return False
 

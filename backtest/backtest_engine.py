@@ -6,6 +6,7 @@
 3. 计算收益和回撤
 4. 生成回测报告
 """
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv
 import pandas as pd
 import numpy as np
 import json
@@ -69,6 +70,9 @@ class BacktestConfig:
     weak_entry_min_gap: float = -0.03
     weak_entry_max_gap: float = 0.01
     continuation_max_gap: float = 0.05
+    acceleration_opening_minutes: int = 1
+    continuation_opening_minutes: int = 3
+    weak_opening_minutes: int = 5
     entry_min_amount_pace: float = 0.80
     entry_max_amount_pace: float = 3.00
     continuation_min_auction_volume_ratio: float = 0.008
@@ -161,6 +165,9 @@ class BacktestConfig:
             weak_entry_min_gap=float(risk_config.weak_entry_min_gap),
             weak_entry_max_gap=float(risk_config.weak_entry_max_gap),
             continuation_max_gap=float(risk_config.continuation_max_gap),
+            acceleration_opening_minutes=risk_config.acceleration_opening_minutes,
+            continuation_opening_minutes=risk_config.continuation_opening_minutes,
+            weak_opening_minutes=risk_config.weak_opening_minutes,
             entry_min_amount_pace=float(risk_config.entry_min_amount_pace),
             entry_max_amount_pace=float(risk_config.entry_max_amount_pace),
             continuation_min_auction_volume_ratio=float(risk_config.continuation_min_auction_volume_ratio),
@@ -317,6 +324,9 @@ class BacktestEngine:
             weak_min_gap=self.config.weak_entry_min_gap,
             weak_max_gap=self.config.weak_entry_max_gap,
             continuation_max_gap=self.config.continuation_max_gap,
+            acceleration_opening_minutes=self.config.acceleration_opening_minutes,
+            continuation_opening_minutes=self.config.continuation_opening_minutes,
+            weak_opening_minutes=self.config.weak_opening_minutes,
             min_amount_pace=self.config.entry_min_amount_pace,
             max_amount_pace=self.config.entry_max_amount_pace,
             min_auction_volume_ratio=self.config.continuation_min_auction_volume_ratio,
@@ -1331,6 +1341,10 @@ class BacktestEngine:
             '高开加速条件尚未全部满足': 'acceleration_signal_pending',
             '10:00前未出现龙头加速确认': 'acceleration_confirmation_timeout',
         }
+        for minutes in range(1, 6):
+            detailed_reasons[f'等待开盘前{minutes}分钟完成'] = 'incomplete_opening_window'
+            detailed_reasons[f'等待完整开盘前{minutes}分钟结构'] = 'incomplete_opening_window'
+            detailed_reasons[f'跌破开盘前{minutes}分钟低点'] = 'broke_opening_low'
         if reason_code in {'rejected', 'cancelled', 'observing', 'data_insufficient', 'signal_unfilled'}:
             reason_code = detailed_reasons.get(reason_text, reason_code)
         key = (str(date), stock_code)
@@ -2168,8 +2182,8 @@ class BacktestEngine:
         stock_dir_value = getattr(self.dm, "stock_dir", None)
         cache_file = Path(stock_dir_value) / "tick" / f"{ts_code}_{date}.csv" if stock_dir_value else None
         try:
-            if cache_file is not None and cache_file.exists():
-                frame = pd.read_csv(cache_file)
+            if cache_file is not None and minute_cache_exists(cache_file):
+                frame = read_minute_csv(cache_file)
                 from core.data.minute_quality import inspect_minute_bars
 
                 if not inspect_minute_bars(frame, str(date), expected_code=ts_code)["valid"]:

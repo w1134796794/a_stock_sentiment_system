@@ -1,6 +1,8 @@
 """Historical intraday amount curves grouped by stock liquidity."""
 from __future__ import annotations
 
+from core.data.minute_cache_files import iter_minute_files, read_minute_csv, read_minute_bytes
+
 import hashlib
 import json
 from datetime import datetime, timedelta
@@ -68,9 +70,9 @@ class MinuteAmountProfileTrainer:
     def train(self) -> Dict[str, Any]:
         samples = []
         totals = []
-        for path in self.cache_dir.glob("*.csv"):
+        for path in iter_minute_files(self.cache_dir):
             try:
-                frame = pd.read_csv(path, usecols=lambda column: column in {"time", "amount", "close", "volume"})
+                frame = read_minute_csv(path, usecols=lambda column: column in {"time", "amount", "close", "volume"})
             except Exception:
                 continue
             if frame.empty or "time" not in frame.columns:
@@ -99,13 +101,13 @@ class MinuteAmountProfileTrainer:
             raise ValueError("Historical profile dates are invalid")
         samples, totals, sources = [], [], []
         allowed = {str(code).split(".")[0].zfill(6) for code in codes} if codes is not None else None
-        for path in sorted(self.cache_dir.glob("*.csv")):
+        for path in sorted(iter_minute_files(self.cache_dir)):
             canonical, separator, date = path.stem.rpartition("_")
             if not separator or len(date) != 8 or not date.isdigit() or not start_date <= date <= end_date:
                 continue
             if allowed is not None and canonical.split(".")[0].zfill(6) not in allowed:
                 continue
-            raw = path.read_bytes()
+            raw = read_minute_bytes(path)
             try:
                 frame = pd.read_csv(BytesIO(raw))
                 if not inspect_minute_bars(frame, date, expected_code=canonical)["valid"]:
@@ -185,7 +187,7 @@ def validate_historical_profile(payload: dict, cache_dir: Path, replay_start: st
         if (Path(name).name != name or not name.endswith(f"_{date}.csv") or len(date) != 8
                 or not date.isdigit() or date >= replay_start or name in files):
             raise ValueError("Future, duplicate or invalid historical profile source")
-        raw = (Path(cache_dir) / name).read_bytes()
+        raw = read_minute_bytes(Path(cache_dir) / name)
         if hashlib.sha256(raw).hexdigest() != source.get("sha256"):
             raise ValueError("Historical profile source changed; retrain before freezing")
         canonical = name.removesuffix(f"_{date}.csv")

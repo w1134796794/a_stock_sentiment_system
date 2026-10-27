@@ -177,7 +177,8 @@ def test_optional_factor_never_replaces_minute_or_snapshot_confirmation(gap, kno
                                   board_feedback_inputs=inputs() if known else {})
     service.snapshot_primary_enabled = source == "snapshot"
     service._snapshot_frame = lambda *a: pd.DataFrame([{"time": "09:39:58"}])
-    service.snapshot_signals = SimpleNamespace(evaluate_primary=lambda **kw: (confirmed(**kw), ""))
+    service.snapshot_signals = SimpleNamespace(evaluate_primary=lambda **kw: (confirmed(**kw), ""),
+                                              consecutive_ticks=2, max_snapshot_age_seconds=8)
     signal = service._evaluate_one({"code": CODE, "name": "Cuhua", "score": 100},
         quote(open_price=14.22 * (1 + gap)), pd.DataFrame(), {}, {}, {"close": 14.22},
         "20261016", [], {})

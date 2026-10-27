@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 import pytest
 
-from backtest.minute_entry import ENTRY_WEAK, EntryDecision, MinuteEntryEvaluator, normalize_minute_bars
+from backtest.minute_entry import ENTRY_ACCELERATION, ENTRY_CONTINUATION, ENTRY_WEAK, EntryDecision, MinuteEntryEvaluator, normalize_minute_bars
 from core.infrastructure.shared_state import MemoryStateBackend
 from core.realtime.snapshot_signal_service import SnapshotSignalService
 from core.realtime.trading_session import realtime_session_status
@@ -45,6 +45,22 @@ def test_pre_structure_low_does_not_cancel_later_signal():
     early.update(time='09:34:00', received_at='2026-10-22T09:34:00', last_price=9.0)
     decision, _ = primary(snapshots=pd.concat([pd.DataFrame([early]), frame], ignore_index=True))
     assert decision.status == 'confirmed'
+
+
+@pytest.mark.parametrize('mode,count,gap', [(ENTRY_ACCELERATION, 1, .06), (ENTRY_CONTINUATION, 3, .02), (ENTRY_WEAK, 5, -.01)])
+@pytest.mark.parametrize('after', [False, True])
+def test_protection_boundary_follows_each_configured_opening_window(mode, count, gap, after):
+    frame = ticks()
+    frame['open_price'] = 10 * (1 + gap)
+    low = frame.iloc[0].to_dict()
+    low_time = f'09:{30 + count}:{30 if after else 0:02d}'
+    low.update(time=low_time, received_at='2026-10-22T' + low_time, last_price=9.0)
+    decision, fallback = primary(mode=mode, open_gap=gap, is_leader=True,
+        snapshots=pd.concat([pd.DataFrame([low]), frame], ignore_index=True))
+    assert not fallback
+    checks = decision.condition_checks['latest']['checks']
+    assert checks['protection_window_start'] == f'09:{30 + count}:00'
+    assert checks['protection'] is not after
 
 
 @pytest.mark.parametrize('kind', ['minute_price_point', 'unknown'])

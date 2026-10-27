@@ -254,6 +254,8 @@ def test_real_worker_reads_frozen_plan_and_publishes_missing_data_without_networ
     now = datetime(2026, 10, 23, 9, 36)
     monkeypatch.setattr(runtime, "shanghai_now", lambda value=None: shanghai_now(value or now))
     worker = runtime.StrategyRuntime(backend=backend, plans=plans, ledger=TradingLedger(tmp_path / "ledger.sqlite3"), clock=lambda: now)
+    from core.realtime.debug_journal import IntradayDebugJournal
+    worker.debug_journal = IntradayDebugJournal(tmp_path / "debug", enabled=True, clock=lambda: now)
     backend.set_json(REVISION_KEY, {"market_date": DAY, "id": "v1"})
     payload = worker.run_once()
     assert len(payload["rows"]) == 35
@@ -261,6 +263,11 @@ def test_real_worker_reads_frozen_plan_and_publishes_missing_data_without_networ
     assert not payload["execution_audit"]["not_executed_codes"]
     assert sum(row['strategy_id'] == 'decision_pool' for row in payload['execution_audit']['rows']) == 5
     assert all(row["confirm_status"] == "observe" for row in payload["rows"])
+    with sqlite3.connect(tmp_path / "debug" / f"{DAY}.sqlite3") as con:
+        stages = dict(con.execute("SELECT stage,count(*) FROM debug_events GROUP BY stage"))
+    assert stages["evaluation"] == 35
+    assert stages["health_gate"] == 35
+    assert stages["cycle"] == 1
     assert worker.run_once() is None
     leader = runtime.stored_strategy_view(DAY, profile="leader_pool", backend=backend)
     decisions = runtime.stored_strategy_view(DAY, profile="decision_pool", backend=backend)

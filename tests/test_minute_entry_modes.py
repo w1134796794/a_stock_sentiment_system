@@ -137,7 +137,7 @@ def test_continuation_requires_auction_volume_and_fills_next_minute():
     assert rejected.status == "cancelled"
     assert filled.filled is True
     assert filled.signal == "强势延续"
-    assert filled.entry_time == "09:36:00"
+    assert filled.entry_time == "09:35:00"
 
 
 def test_near_limit_open_without_confirmation_remains_observation():

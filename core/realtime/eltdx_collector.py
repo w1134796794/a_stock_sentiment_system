@@ -48,8 +48,9 @@ class EltdxQuoteCollector:
         clock=None,
     ) -> None:
         self.fixed_codes = RealtimeWatchlistRepository.normalize(fixed_codes)
+        self.clock = lambda: shanghai_now(clock() if clock else None)
         self.watchlists = RealtimeWatchlistRepository()
-        self.journal = MarketJournal()
+        self.journal = MarketJournal(clock=self.clock)
         self.quote_cache = RealtimeQuoteCache(journal=self.journal)
         self.plans = DailyCollectionPlan(backend=self.quote_cache.backend)
         if require_shared and self.quote_cache.storage != "redis":
@@ -76,7 +77,7 @@ class EltdxQuoteCollector:
         self._consecutive_failures = 0
         self._stop = False
         self._cycles = 0
-        self.clock = lambda: shanghai_now(clock() if clock else None)
+        self._prepared_day = ""
         self._session_started_at = self.clock().isoformat(timespec="milliseconds")
         self._last_success_at: datetime | None = None
         from config.settings import ELTDX_BOARD_SHADOW_ENABLED, ELTDX_BOARD_POLL_SECONDS, ELTDX_BOARD_STALE_SECONDS
@@ -120,6 +121,18 @@ class EltdxQuoteCollector:
         return RealtimeWatchlistRepository.normalize(codes)
 
     def collect_once(self) -> dict:
+        if isinstance(getattr(self, "journal", None), MarketJournal):
+            date = self.clock().strftime("%Y%m%d")
+            if getattr(self, "_prepared_day", "") != date:
+                workers = [getattr(self, "_minute_sync_thread", None), getattr(self, "_constituent_thread", None),
+                           getattr(getattr(self, "board_lane", None), "_thread", None),
+                           getattr(getattr(self, "evidence_lane", None), "_thread", None)]
+                if any(worker is not None and worker.is_alive() for worker in workers):
+                    return {"ok": False, "message": "等待旧日行情任务结束后切换交易日"}
+                from core.realtime.day_lifecycle import RealtimeDayLifecycle
+                self._day_cleanup = RealtimeDayLifecycle(self.journal, backend=self.quote_cache.backend,
+                                                         clock=self.clock).start_day(date)
+                self._prepared_day = date
         if getattr(self, "board_lane", None) is not None and self.board_lane.enabled:
             self.board_lane.schedule(self.plans.load(self.clock().strftime("%Y%m%d")))
         if getattr(self, "evidence_lane", None) is not None:
@@ -178,12 +191,12 @@ class EltdxQuoteCollector:
             result = {
                 "ok": False,
                 "count": 0,
-                "message": f"实时缓存写入失败: {exc}",
+                "message": f"行情持久化或实时缓存写入失败: {exc}",
                 "consecutive_failures": self._consecutive_failures,
                 "preserved_previous_quotes": True,
             }
             self._record_health(result)
-            logger.warning("eltdx行情已取得但实时缓存写入失败，将继续重试: {}", exc)
+            logger.warning("eltdx行情已取得但持久化或缓存写入失败，将继续重试: {}", exc)
             return result
 
         self._consecutive_failures = 0 if result.get("ok") else self._consecutive_failures + 1
@@ -207,6 +220,7 @@ class EltdxQuoteCollector:
         plan = self.plans.load(self.clock().strftime("%Y%m%d")) if hasattr(self, "plans") else None
         result["collection_plan_id"] = plan["plan_id"] if plan else ""
         result["archive"] = self.journal.health() if hasattr(self, "journal") else {}
+        result["day_cleanup"] = getattr(self, "_day_cleanup", {})
         result["constituents"] = dict(self._constituent_health)
         result["tdx_board_shadow"] = dict(self.board_lane.health) if getattr(self, "board_lane", None) else {}
         result["consecutive_failures"] = self._consecutive_failures

@@ -301,11 +301,27 @@ def test_real_record_reconciliation_excludes_later_confirmations_and_deliveries(
 def test_new_archive_kind_round_trips_with_visibility_time(tmp_path):
     values = sample()
     journal = write_inputs(tmp_path, values)
-    assert journal.archive_once() == len(values["events"])
+    assert journal.archive_once() == 9  # Five minute versions, two sector events, two snapshots.
     loaded = load_snapshot_inputs(tmp_path, values["request"])
     assert replay_snapshot_inputs(loaded)["stocks"][0]["ever_confirmed"]
     with sqlite3.connect(journal.path) as con:
         assert con.execute("SELECT count(*) FROM market_events").fetchone()[0] == 0
+
+
+def test_replay_does_not_use_snapshot_before_it_was_persisted(tmp_path):
+    values = sample()
+    journal = write_inputs(tmp_path, values)
+    later = datetime.fromisoformat(stamp("09:36:13"))
+    with sqlite3.connect(journal.path) as con:
+        con.execute("UPDATE market_events SET persisted_ts=? WHERE kind='snapshot' AND received_at=?",
+                    (later.timestamp(), stamp("09:36:03")))
+    early = load_snapshot_inputs(tmp_path, values["request"])
+    assert sum(e["kind"] == "snapshot" for e in early["events"]) == 1
+    loaded = load_snapshot_inputs(tmp_path, {**values["request"], "until": "09:36:20"})
+    delayed = next(e for e in loaded["events"] if e["kind"] == "snapshot" and e["received_at"] == stamp("09:36:03"))
+    assert delayed["visible_at"] == stamp("09:36:13")
+    assert delayed["payload"]["received_at"] == stamp("09:36:03")
+    assert not replay_snapshot_inputs(loaded)["stocks"][0]["ever_confirmed"]
 
 
 def test_snapshot_job_keeps_baseline_inputs_without_reloading_archives(tmp_path):
@@ -340,7 +356,7 @@ def test_archive_spool_duplicate_is_not_replayed_twice(tmp_path):
         con.execute("CREATE TABLE market_events(event_id TEXT,kind TEXT,code TEXT,received_at TEXT,payload TEXT)")
         con.execute("INSERT INTO market_events VALUES (?,?,?,?,?)", row)
     loaded = load_snapshot_inputs(tmp_path, values["request"])
-    assert len(loaded["events"]) == len(values["events"])
+    assert len(loaded["events"]) == 9
     assert replay_snapshot_inputs(loaded)["stocks"][0]["snapshot_count"] == 2
 
 
@@ -370,6 +386,7 @@ def write_inputs(root, values):
 
     journal = MarketJournal(root / "market_archive")
     for e in values["events"]:
+        journal.clock = lambda event=e: datetime.fromisoformat(event["received_at"])
         journal.append(e["kind"], DATE, [e["payload"]])
     return journal
 
@@ -379,7 +396,7 @@ def test_archive_and_pending_spool_are_readonly_deduplicated_and_baseline_is_fro
     journal = write_inputs(tmp_path, values)
     assert journal.archive_once(limit=2) == 2
     loaded = load_snapshot_inputs(tmp_path, values["request"])
-    assert len(loaded["events"]) == len(values["events"])
+    assert len(loaded["events"]) == 9
     before = replay_snapshot_inputs(loaded)
     journal.append(
         "snapshot", DATE, [{**values["events"][-1]["payload"], "received_at": stamp("09:36:04"), "time": "09:36:04"}]
@@ -388,7 +405,7 @@ def test_archive_and_pending_spool_are_readonly_deduplicated_and_baseline_is_fro
     assert before["input_hash"] == after["input_hash"]
     assert before["stocks"] == after["stocks"]
     with sqlite3.connect(journal.path) as con:
-        assert con.execute("SELECT count(*) FROM market_events").fetchone()[0] == 4
+        assert con.execute("SELECT count(*) FROM market_events").fetchone()[0] == 8
 
 
 def test_corrupt_archive_is_explicit_not_created_or_repaired(tmp_path):

@@ -1,6 +1,8 @@
 """Isolated minute-rule diagnostics. Never authorise live trades or delivery."""
 from __future__ import annotations
 
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv
+
 import hashlib
 import json
 import math
@@ -496,7 +498,7 @@ class DayReplayLoader:
                                   "last_result": result, **{k: v for k, v in acquisition.items() if k not in {"failures", "skips"}}})
                     continue
             path = self.cache / "stock" / "tick" / f"{ts_code}_{date}.csv"
-            frame = pd.read_csv(path, dtype={"ts_code": str, "code": str}) if path.exists() else pd.DataFrame()
+            frame = read_minute_csv(path, dtype={"ts_code": str, "code": str}) if minute_cache_exists(path) else pd.DataFrame()
             cutoff = datetime.strptime(date + request["until"], "%Y%m%d%H:%M:%S")
             quality = inspect_minute_bars(frame, date, expected_code=code, require_full_day=False, now=cutoff)
             minute_sources[code] = "local_csv"

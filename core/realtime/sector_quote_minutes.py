@@ -6,11 +6,13 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
+from contextlib import nullcontext
 
 from core.infrastructure.shared_state import get_shared_state_backend
 from core.realtime.models import normalize_stock_code
 from core.realtime.trading_session import shanghai_now
 from core.signals.opening import positive_price
+from core.infrastructure.file_mutex import file_mutex
 
 
 class SectorQuoteMinuteRepository:
@@ -33,7 +35,12 @@ class SectorQuoteMinuteRepository:
         clock = shanghai_now(now)
         date = clock.strftime("%Y%m%d")
         boundary = clock.replace(second=0, microsecond=0)
-        with self._lock:
+        lifecycle = file_mutex(self.journal.lifecycle_lock) if self.journal is not None else nullcontext()
+        with self._lock, lifecycle:
+            if self.journal is not None:
+                marker = self.journal.root / "active_day.json"
+                if marker.exists() and date < json.loads(marker.read_text())["market_date"]:
+                    raise ValueError("拒绝写入已清理的旧日板块分钟")
             self._pending = {key: value for key, value in self._pending.items() if key[0] == date}
             for raw in rows:
                 code = normalize_stock_code(raw.get("code"), add_suffix=False)
@@ -78,7 +85,6 @@ class SectorQuoteMinuteRepository:
                                 "WHERE excluded.received_at>quote_minutes.received_at",
                                 [(code, minute, row["received_at"], json.dumps(row))
                                  for (_, code, minute), row in closed.items()])
-            self._write_shared(date, closed)
             if self.journal is not None:
                 published = shanghai_now(self.clock()).isoformat()
                 by_code = {}
@@ -88,6 +94,7 @@ class SectorQuoteMinuteRepository:
                     {"code": code, "date": date, "received_at": published,
                      "source": "collector_closed_quote_minutes", "points": points}
                     for code, points in by_code.items()])
+            self._write_shared(date, closed)
             for key in closed:
                 del self._pending[key]
             return len(closed)

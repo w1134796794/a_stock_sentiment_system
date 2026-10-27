@@ -11,6 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv
+
 import duckdb
 from core.infrastructure.duckdb_access import connect as duckdb_connect
 import pandas as pd
@@ -336,7 +338,7 @@ def execute(root, start, end, calendar, *, fetch, skip_candidates):
         canonical = StockCodeUtils.standardize_code(code, add_suffix=True)
         file = Path(CACHE_DIR) / "stock/tick" / f"{canonical}_{date}.csv"
         try:
-            valid = file.exists() and inspect_minute_bars(pd.read_csv(file), date, expected_code=canonical)["valid"]
+            valid = minute_cache_exists(file) and inspect_minute_bars(read_minute_csv(file), date, expected_code=canonical)["valid"]
         except (ValueError, OSError):
             valid = False
         if not valid:

@@ -13,10 +13,10 @@
 - 快照保护位只使用开盘结构完成后的真实分钟低价、实际观察到的快照成交价，不再使用日内累计 `low_price`。
 - 策略在内存保留已观察低点，独立运行时另存 Redis `realtime:protection:v2:<date>:<code>:<mode>:<boundary>`，有效期两日。热窗口退出及策略进程重启不会抹掉已记录的破位；日期、股票、模式和窗口隔离。
 - 记录 `protection_window_start`、`protection_price`、`post_structure_low`、`first_break_at`、`session_low_used=false`。
-- 快照判定版本标记升级为 `eltdx_snapshot_primary_v2_temporal_protection`，共享规则版本升级为 v12，旧日志不改写成新版本。
+- 快照判定版本标记升级为 `eltdx_snapshot_primary_v2_temporal_protection`，共享规则版本升级为 v13，旧日志不改写成新版本。
 - 这些字段描述已观察证据，不宣称能恢复从未采集的历史轨迹。完整原始归档仍是精确回放的依据。Redis 丢失且历史分钟也不完整时，不能凭当前快照宣称复原了当天所有价格。
 
-当前本地版本的标准模式沿用五分钟结构；没有把服务器日志中的其他版本参数硬编码进来，也没有为追求速度直接使用未完成分钟。
+部署合并时保留远端已上线的可配置开盘窗口：高开加速默认一分钟、强势延续三分钟、弱转强五分钟。保护位边界跟随对应窗口，没有为追求速度直接使用未完成分钟。
 
 ## 信号时间
 
@@ -69,3 +69,5 @@
 测试记录：扩大后的相关链路测试 398 项通过、7 项跳过。首轮全仓库测试尝试未完整结束，另定位到 `test_runtime_estimate_is_frozen_with_winners_losers` 的 AttributeError：analog_runtime 创建的 BacktestEngine 缺少 minute_evaluator。
 
 后续已修复该错误：仅计算版本哈希时允许没有分钟评估器，从传入配置解析负反馈策略；已有冻结策略时优先使用冻结值，不初始化完整引擎或访问行情/日历。新增版本一致性、配置开关、冻结优先级及 OOS 策略解析回归，相似案例与负反馈相关测试共 130 项通过。未重新宣称全仓库测试通过。
+
+部署前同步远端持久化行情、诊断日志、只读 API 和可配置开盘窗口后，相关回归共 645 项通过、7 项跳过；影子回放固定夹具自检通过。同步修正了测试夹具的 SQLite 连接释放、快照 mock 参数和 Windows 下不适用的 POSIX 权限断言，Linux 权限校验保留。以上是离线验证，不代表已完成真实盘中验收。

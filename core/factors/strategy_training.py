@@ -1,6 +1,8 @@
 """Strategy-specific training samples built from auditable minute fills."""
 from __future__ import annotations
 
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv
+
 import json
 from collections import Counter, OrderedDict
 from dataclasses import dataclass
@@ -320,7 +322,7 @@ class StrategyMinuteTrainingBuilder:
             return cached
         path = self.tick_dir / f"{ts_code}_{trade_date}.csv"
         try:
-            frame = pd.read_csv(path) if path.exists() else pd.DataFrame()
+            frame = read_minute_csv(path) if minute_cache_exists(path) else pd.DataFrame()
         except Exception:
             frame = pd.DataFrame()
         self._cache_put(self._tick_cache, key, frame)

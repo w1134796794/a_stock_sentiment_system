@@ -1,6 +1,8 @@
 """Frozen, account-isolated replay comparisons; never publish production weights."""
 from __future__ import annotations
 
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv, read_minute_bytes
+
 import hashlib
 import json
 import math
@@ -518,7 +520,7 @@ class ReplayResearch:
             training_dir = directory / "amount_profile_sources"
             training_dir.mkdir()
             for source in profile["historical_training"]["sources"]:
-                raw = (Path(stock_dir) / "tick" / source["file"]).read_bytes()
+                raw = read_minute_bytes(Path(stock_dir) / "tick" / source["file"])
                 if hashlib.sha256(raw).hexdigest() != source["sha256"]:
                     raise ValueError("历史模型训练源在冻结期间改变")
                 (training_dir / source["file"]).write_bytes(raw)
@@ -555,7 +557,7 @@ class ReplayResearch:
                         auction = data_manager.get_auction_data(canonical, date)
                     else:
                         tick = Path(stock_dir) / "tick" / f"{canonical}_{date}.csv"
-                        minutes = pd.read_csv(tick) if tick.exists() else None
+                        minutes = read_minute_csv(tick) if minute_cache_exists(tick) else None
                         file = Path(stock_dir) / "auction" / f"{canonical}_{date}.json"
                         auction = json.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
                         if auction.get("数据源") not in {"eltdx", "eltdx_0925", "eltdx_open", "minute_tick"}:

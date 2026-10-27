@@ -13,6 +13,8 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from core.data.minute_cache_files import minute_cache_exists, read_minute_csv
+
 
 def resume_execution(args):
     import pandas as pd
@@ -65,7 +67,7 @@ def resume_execution(args):
         if date >= datetime.now().strftime('%Y%m%d'):
             break
         minute_file = Path(CACHE_DIR) / 'stock' / 'tick' / f'{ts_code}_{date}.csv'
-        raw = pd.read_csv(minute_file) if minute_file.exists() else pd.DataFrame()
+        raw = read_minute_csv(minute_file) if minute_cache_exists(minute_file) else pd.DataFrame()
         if args.fetch_holding_minutes and not inspect_minute_bars(raw, date, expected_code=code)['valid']:
             dm.allow_remote_minutes = True
             try:
@@ -267,7 +269,7 @@ def main():
                 if date >= datetime.now().strftime('%Y%m%d'):
                     break
                 path = Path(CACHE_DIR) / 'stock' / 'tick' / f'{engine._standardize_stock_code(code)}_{date}.csv'
-                raw = pd.read_csv(path) if path.exists() else pd.DataFrame()
+                raw = read_minute_csv(path) if minute_cache_exists(path) else pd.DataFrame()
                 if args.fetch_holding_minutes and not inspect_minute_bars(raw, date, expected_code=code)['valid']:
                     dm.allow_remote_minutes = True
                     try:

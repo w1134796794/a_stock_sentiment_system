@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 
-RULESET_VERSION = "production_shared_v12_temporal_protection_signal_lifecycle"
+RULESET_VERSION = "production_shared_v13_temporal_protection_signal_lifecycle"
 
 
 def number(value, default=0.0):
@@ -28,6 +28,9 @@ def minute_evaluator(risk=None):
         min_auction_volume_ratio=risk.continuation_min_auction_volume_ratio,
         min_auction_amount=risk.continuation_min_auction_amount,
         confirmation_policy=policy_from_config(risk),
+        acceleration_opening_minutes=risk.acceleration_opening_minutes,
+        continuation_opening_minutes=risk.continuation_opening_minutes,
+        weak_opening_minutes=risk.weak_opening_minutes,
     )
     from core.signals.board_feedback import feedback_policy
     evaluator.board_feedback_policy = feedback_policy(risk)
@@ -38,7 +41,9 @@ def entry_parameters(evaluator):
     from dataclasses import asdict, is_dataclass
     values = {key: getattr(evaluator, key) for key in (
         'deadline', 'weak_min_gap', 'weak_max_gap', 'continuation_max_gap', 'min_amount_pace',
-        'max_amount_pace', 'min_auction_volume_ratio', 'min_auction_amount') if hasattr(evaluator, key)}
+        'max_amount_pace', 'min_auction_volume_ratio', 'min_auction_amount',
+        'acceleration_opening_minutes', 'continuation_opening_minutes',
+        'weak_opening_minutes') if hasattr(evaluator, key)}
     policy = getattr(evaluator, 'confirmation_policy', None)
     if is_dataclass(policy):
         values['confirmation_policy'] = asdict(policy)

@@ -76,6 +76,8 @@ class StrategyRuntime:
         self._last_rows = {}
         self._seen_versions = {}
         self._minute_boundary = ""
+        from core.realtime.debug_journal import IntradayDebugJournal
+        self.debug_journal = IntradayDebugJournal(clock=clock)
 
     def _load(self, date):
         from core.realtime.entry_signal_service import RealtimeEntrySignalService
@@ -93,20 +95,20 @@ class StrategyRuntime:
         if self._loaded_plan_id == plan["plan_id"]:
             return
         self.plan, self.bundle = plan, bundle
-        from core.data.providers.redis_quote_provider import RedisQuoteProvider
-        from core.realtime.quote_cache import RealtimeQuoteCache
-        from core.realtime.snapshot_repository import RealtimeSnapshotRepository
-        from core.realtime.minute_cache import RealtimeMinuteCache
-        reader = ReadOnlyMarketData(frozen=bundle, provider=RedisQuoteProvider(
-            cache=RealtimeQuoteCache(backend=self.backend, snapshot_repository=RealtimeSnapshotRepository(backend=self.backend)),
-            minute_cache=RealtimeMinuteCache(backend=self.backend)))
-        self.quotes = RealtimeQuoteService(data_manager=reader)
+        from core.realtime.persistent_market import PersistentQuoteProvider
+        reader = ReadOnlyMarketData(frozen=bundle, provider=PersistentQuoteProvider(backend=self.backend))
+        self.market_reader = reader
+        self.quotes = RealtimeQuoteService(data_manager=reader, ttl_seconds=0)
         profiles = MinuteAmountProfileRepository()
         profiles._payload = bundle["inputs"].get("minute_amount_profile") or {}
         evaluator = minute_evaluator(RiskConfig.from_dict(bundle["inputs"]["risk_config"]))
         self.signals = RealtimeEntrySignalService(data_manager=reader, quote_service=self.quotes,
             evaluator=evaluator, frozen_bundle=bundle, amount_profile_repository=profiles)
         self.signals.snapshot_signals.state_backend = self.backend
+        self.signals.debug_journal = self.debug_journal
+        self.signals.persistent_evaluation_enabled = True
+        self.signals.evaluation_clock = self.clock
+        self.signals.minute_ttl_seconds = 0
         self.rows = production_candidates(bundle["inputs"])
         allowed = {r["code"] for r in plan["rows"]}
         self.rows = [r for r in self.rows if r["code"] in allowed]
@@ -139,7 +141,14 @@ class StrategyRuntime:
             for row in payload.get("rows") or []:
                 if row.get("confirm_status") == "confirmed":
                     block_realtime_confirmation(row, reason)
-        return attach_evidence(payload, frozen_bundle=self.bundle)
+        payload = attach_evidence(payload, frozen_bundle=self.bundle)
+        for row in payload.get("rows") or []:
+            if not row.get("evaluation_reused"):
+                self.debug_journal.record("health_gate", payload["market_date"], row["code"],
+                    payload={**row, "execution_health": payload.get("execution_health"),
+                             "collection_plan_id": self.plan["plan_id"],
+                             "evidence_bundle_id": self.bundle["bundle_id"]})
+        return payload
 
     def _record(self, payload):
         from core.operations.ledger import stable_id
@@ -188,6 +197,8 @@ class StrategyRuntime:
         if not selected:
             self._version, self._seen_versions = version, versions
             return None
+        view = self.market_reader.provider.begin(date, asof=now)
+        self.signals.sector_breadth.market_view = view
         quotes = self.quotes.refresh_quotes([r["code"] for r in self.rows if peer_dependencies or r["code"] in selected])
         quote_map = {r["code"]: r for r in quotes.get("quotes") or []}
         projector = RealtimeOverlayService.__new__(RealtimeOverlayService)
@@ -234,6 +245,7 @@ class StrategyRuntime:
         evaluated["runtime_cycle"] = payload["runtime_cycle"]
         record_runtime_observations(self.ledger, evaluated)
         self.ledger.event(cycle["id"], "runtime_cycle", cycle)
+        self.debug_journal.record("cycle", date, payload=cycle)
         from core.realtime.signal_event_repository import RealtimeSignalEventRepository
         view = RealtimeSignalEventRepository().merge_history(deepcopy(payload))
         self.backend.set_json(RESULT_KEY + date, view, 172800)
@@ -265,6 +277,9 @@ class StrategyRuntime:
                 try:
                     self.run_once(force=once)
                 except Exception as exc:
+                    self.debug_journal.record("error", shanghai_now(self.clock()).strftime("%Y%m%d"),
+                        payload={"error_type": type(exc).__name__, "error": str(exc),
+                                 "reason": "strategy_cycle_failed"})
                     self.backend.set_json(HEALTH_KEY, {"ok": False, "reason": str(exc),
                         "updated_at": shanghai_now(self.clock()).isoformat()}, 60)
                     logger.exception("Read-only strategy cycle failed")

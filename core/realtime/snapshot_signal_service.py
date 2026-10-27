@@ -118,9 +118,14 @@ class SnapshotSignalService:
                 condition_checks={"latest": {"minute": latest_time, "checks": dict(checks)},
                                   "source_policy": "snapshot_first"}), ""
 
-        opening = minutes[minutes["time"].isin([f"09:{m}:00" for m in range(31, 36)])] if not minutes.empty else minutes
-        if len(opening) != 5:
-            return stop("等待完整开盘前5分钟结构，不以稀疏快照替代高低点", data_status="snapshot_structure_pending")
+        opening_count = evaluator.opening_window_minutes(mode)
+        opening_end = f"09:{30 + opening_count}:00"
+        opening = minutes[minutes["time"].isin([f"09:{m}:00" for m in range(31, 31 + opening_count)])] if not minutes.empty else minutes
+        checks.update(opening_minutes_required=opening_count, opening_minutes_available=len(opening),
+                      confirmation_deadline=confirmation_deadline or evaluator.deadline,
+                      max_snapshot_age_seconds=self.max_snapshot_age_seconds)
+        if len(opening) != opening_count:
+            return stop(f"等待完整开盘前{opening_count}分钟结构，不以稀疏快照替代高低点", data_status="snapshot_structure_pending")
         checks["opening_bar_kinds"] = sorted(set(opening["bar_kind"]))
         if not opening["ohlc_evidence"].all():
             return stop("开盘结构缺少真实分钟OHLC，分时价格点不能替代高低点", data_status="snapshot_structure_pending")
@@ -134,17 +139,18 @@ class SnapshotSignalService:
             ENTRY_ACCELERATION: open_gap > evaluator.continuation_max_gap and is_leader,
         }.get(mode, False)
         checks["opening_gap_allowed"] = bool(allowed)
-        checks["is_leader"] = bool(is_leader)
+        checks.update(open_gap=open_gap, is_leader=bool(is_leader), weak_min_gap=evaluator.weak_min_gap,
+                      weak_max_gap=evaluator.weak_max_gap, continuation_max_gap=evaluator.continuation_max_gap)
         if not allowed:
             return stop("开盘分层或龙头身份不满足当前入场模式", "rejected")
         opening_high, opening_low = float(opening["high"].max()), float(opening["low"].min())
         protection = opening_low * 0.999
         protection_ok, protection_detail = self._protection(
-            key, minutes, ticks, "09:35:00", protection)
+            key, minutes, ticks, opening_end, protection)
         checks.update(opening_high=opening_high, opening_low=opening_low, **protection_detail)
         checks["protection"] = protection_ok
         if not protection_ok and (mode == ENTRY_WEAK or evaluator.confirmation_policy.mode == "volume_price"):
-            decision, fallback = stop("已跌破开盘前5分钟保护低点", "cancelled")
+            decision, fallback = stop(f"已跌破开盘前{opening_count}分钟保护低点", "cancelled")
             return replace(decision, invalidated_at=protection_detail["first_break_at"] or latest_time), fallback
         auction_available = auction_amount > 0 and auction_volume > 0 and previous_volume > 0
         checks["auction_available"] = auction_available
@@ -171,6 +177,10 @@ class SnapshotSignalService:
         minimum = max(evaluator.min_amount_pace, 1.0) if mode == ENTRY_CONTINUATION and not auction_available else evaluator.min_amount_pace
         checks["amount_pace"] = pace
         checks["amount_pace_allowed"] = (minimum <= pace <= evaluator.max_amount_pace) if pace is not None and math.isfinite(pace) else None
+        checks.update(amount_pace_min=minimum, amount_pace_max=evaluator.max_amount_pace,
+                      min_local_volume_ratio=evaluator.confirmation_policy.min_volume_ratio,
+                      max_vwap_distance=evaluator.confirmation_policy.max_vwap_distance,
+                      max_breakout_extension=evaluator.confirmation_policy.max_breakout_extension)
         if mode != ENTRY_ACCELERATION and checks["amount_pace_allowed"] is None:
             return stop("缺少真实累计量能或历史同分钟进度模型", data_status="snapshot_missing_amount_profile")
 
@@ -216,7 +226,7 @@ class SnapshotSignalService:
             snapshots=ticks, prev_close=prev_close, open_gap=open_gap, sector_confirmed=sector,
             is_leader=is_leader, limit_price=limit_price, minute_decision=base,
             confirmation_deadline=deadline, confirmation_policy=evaluator.confirmation_policy,
-            snapshot_vwap=vwap, primary=True)
+            snapshot_vwap=vwap, primary=True, opening_minutes=opening_count)
         return result, ""
 
     def evaluate(
@@ -237,15 +247,17 @@ class SnapshotSignalService:
         confirmation_policy=None,
         snapshot_vwap=None,
         primary=False,
+        opening_minutes=5,
     ) -> Optional[EntryDecision]:
         ticks = self._normalize_ticks(snapshots, trade_date)
         if len(ticks) < self.consecutive_ticks:
             return None
         minutes = normalize_minute_bars(minute_bars)
-        first_five = minutes[minutes["time"].between("09:31:00", "09:35:00")].head(5) if primary else minutes[minutes["time"] <= "09:35:00"].head(5)
-        if len(first_five) < 5:
+        opening_end = f"09:{30 + opening_minutes}:00"
+        first_five = minutes[minutes["time"].between("09:31:00", opening_end)].head(opening_minutes) if primary else minutes[minutes["time"] <= opening_end].head(opening_minutes)
+        if len(first_five) < opening_minutes:
             return EntryDecision(
-                "observing", MODE_LABELS.get(mode, ""), "等待开盘前5分钟结构完成",
+                "observing", MODE_LABELS.get(mode, ""), f"等待开盘前{opening_minutes}分钟结构完成",
                 open_gap_pct=open_gap, data_status="minute_structure_pending",
                 data_completeness=0.7,
             )
@@ -323,7 +335,7 @@ class SnapshotSignalService:
                 str(first_five.iloc[-1]["time"]), opening_low * 0.999)
             if not protection_ok:
                 return EntryDecision(
-                    "cancelled", "弱转强", "3秒快照显示已跌破开盘前5分钟低点",
+                    "cancelled", "弱转强", f"3秒快照显示已跌破开盘前{opening_minutes}分钟低点",
                     invalidated_at=detail["first_break_at"] or latest_time, open_gap_pct=open_gap,
                 )
             triggered = (
@@ -333,7 +345,7 @@ class SnapshotSignalService:
                 and (sector_ok or not policy.require_sector)
                 and has_turnover
             )
-            reason = "连续快照收复昨收、站稳VWAP并突破前5分钟高点"
+            reason = f"连续快照收复昨收、站稳VWAP并突破前{opening_minutes}分钟高点"
         elif mode == ENTRY_CONTINUATION:
             triggered = (
                 above_vwap
@@ -341,7 +353,7 @@ class SnapshotSignalService:
                 and (sector_ok or not policy.require_sector)
                 and has_turnover
             )
-            reason = "连续快照站稳VWAP并突破前5分钟高点"
+            reason = f"连续快照站稳VWAP并突破前{opening_minutes}分钟高点"
         elif mode == ENTRY_ACCELERATION:
             triggered = (
                 is_leader
@@ -379,7 +391,7 @@ class SnapshotSignalService:
                 if not above_vwap:
                     missing.append("连续站稳VWAP")
                 if current <= key_level or (policy.mode == "volume_price" and not above_key):
-                    missing.append("站稳确认关键价" if policy.mode == "volume_price" else "突破前5分钟高点")
+                    missing.append("站稳确认关键价" if policy.mode == "volume_price" else f"突破前{opening_minutes}分钟高点")
                 if policy.require_sector and not sector_ok:
                     missing.append("板块同步走强")
                 if not has_turnover:

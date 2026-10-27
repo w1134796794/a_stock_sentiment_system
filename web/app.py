@@ -1873,6 +1873,10 @@ async def response_timing_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
+    from web.readonly_access import is_readonly_path
+
+    if is_readonly_path(request.url.path):
+        return await _READONLY_ACCESS(request, call_next)
     ensure_auth_db()
     path = request.url.path
     is_mobile_api = path.startswith("/api/v1/mobile")
@@ -4993,3 +4997,10 @@ from web.history_router import history_router
 app.include_router(history_router(lambda: HistoryWorkflows(Path(WEB_DATA_DIR) / 'history_workflows'), templates))
 from web.collection_router import collection_router
 app.include_router(collection_router(templates))
+
+
+from web.api.readonly.router import create_readonly_router
+from web.readonly_access import ReadonlyAccess
+
+_READONLY_ACCESS = ReadonlyAccess()
+app.include_router(create_readonly_router())

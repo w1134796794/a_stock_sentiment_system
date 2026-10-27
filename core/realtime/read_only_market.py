@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from core.data.providers.redis_quote_provider import RedisQuoteProvider
+from core.realtime.persistent_market import PersistentQuoteProvider
 from core.realtime.models import normalize_stock_code
 
 
 class ReadOnlyMarketData:
     def __init__(self, *, provider=None, cache_dir=None, frozen=None):
         from config.settings import CACHE_DIR
-        self.provider = provider or RedisQuoteProvider()
+        self.provider = provider or PersistentQuoteProvider()
         self.cache_dir = Path(cache_dir or CACHE_DIR)
         self.frozen = frozen
 
@@ -52,6 +52,9 @@ class ReadOnlyMarketData:
 
     def get_auction_data(self, code, date):
         code6 = normalize_stock_code(code, add_suffix=False)
+        if isinstance(self.provider, PersistentQuoteProvider):
+            rows = self.provider._view(date).events("auction", [code6], latest=True)
+            return rows[0] if rows else {}
         value = self.provider.cache.backend.get_json(f"realtime:auction:{date}:{code6}")
         if value:
             return value

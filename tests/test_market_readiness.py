@@ -85,8 +85,9 @@ def healthy_inputs(root, sector_mode="breadth_required"):
     atomic_write_json(root / "collection_plans" / f"{DATE}.json", values["plan"])
     atomic_write_json(root / "collection_plans" / f"{DATE}.inputs.json", values["bundle"])
     journal = MarketJournal(root / "market_archive")
-    for kind in ("snapshot", "minutes", "sector_minutes"):
-        journal.append(kind, DATE, [e["payload"] for e in values["events"] if e["kind"] == kind])
+    for event in values["events"]:
+        journal.clock = lambda e=event: datetime.fromisoformat(e["payload"]["received_at"])
+        journal.append(event["kind"], DATE, [event["payload"]])
     ledger = root / "ledger.sqlite3"
     with sqlite3.connect(ledger) as con:
         con.execute(

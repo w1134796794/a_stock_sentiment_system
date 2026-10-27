@@ -10,8 +10,6 @@
 import json
 from datetime import datetime
 from pathlib import Path
-import os
-import tempfile
 from typing import Dict, Iterable, List, Tuple
 
 import loguru
@@ -424,6 +422,7 @@ class StockDataManager(SuspensionDataManager):
         eltdx 不可用时，用 AshareProvider 公共接口兜底。
         """
         from core.data.minute_quality import SHANGHAI, inspect_minute_bars
+        from core.data.minute_cache_files import minute_cache_exists, read_minute_csv, write_minute_csv
 
         canonical = StockCodeUtils.standardize_code(ts_code, add_suffix=True)
         date = str(trade_date).replace("-", "")
@@ -442,10 +441,10 @@ class StockDataManager(SuspensionDataManager):
             return report
 
         for path in dict.fromkeys((cache_file, legacy)):
-            if force_refresh or not path.exists():
+            if force_refresh or not minute_cache_exists(path):
                 continue
             try:
-                cached = pd.read_csv(path)
+                cached = read_minute_csv(path)
                 report = inspect(cached, "cache")
                 if report["valid"]:
                     return cached
@@ -468,14 +467,7 @@ class StockDataManager(SuspensionDataManager):
                         attempts.append({"source": source, "reason": report["reason"]})
                         continue
                     # Never replace a useful cache with incomplete remote output.
-                    cache_file.parent.mkdir(parents=True, exist_ok=True)
-                    fd, temporary = tempfile.mkstemp(prefix=cache_file.stem, suffix=".tmp", dir=cache_file.parent)
-                    os.close(fd)
-                    try:
-                        frame.to_csv(temporary, index=False)
-                        Path(temporary).replace(cache_file)
-                    finally:
-                        Path(temporary).unlink(missing_ok=True)
+                    write_minute_csv(frame, cache_file)
                     inspect(frame, source)
                     return frame
                 except Exception as exc:
