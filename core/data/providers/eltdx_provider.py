@@ -146,6 +146,21 @@ class EltdxProvider(EltdxEvidenceMixin, EltdxResearchMixin):
         code6 = StockCodeUtils.standardize_code(ts_code, add_suffix=False)
         return self.get_quote_snapshots([ts_code]).get(code6, {})
 
+    def get_minute_ohlcv(self, ts_code: str, trade_date: str) -> pd.DataFrame:
+        """Collector-only real one-minute candles; never promote minute points."""
+        started = monotonic()
+        frame = self.get_kline(ts_code, period="1min", count=800)
+        if not frame.empty:
+            stamp = pd.to_datetime(frame["datetime"], errors="coerce")
+            frame = frame[stamp.dt.strftime("%Y%m%d").eq(str(trade_date))].copy()
+            frame["date"] = str(trade_date)
+            frame["time"] = stamp.loc[frame.index].dt.strftime("%H:%M:%S")
+            frame = frame.rename(columns={"vol": "volume"})
+        self.last_minute_diagnostics = {"code": self._to_tdx_code(ts_code), "ok": not frame.empty,
+            "category": "success" if not frame.empty else "missing_requested_day_ohlc",
+            "bar_kind": "minute_ohlcv", "duration_ms": round((monotonic() - started) * 1000, 3)}
+        return frame
+
     def get_quote_snapshots(self, ts_codes) -> dict:
         """**批量**取实时行情快照（一条连接、按 80 只分块）。
 
@@ -488,6 +503,7 @@ class EltdxProvider(EltdxEvidenceMixin, EltdxResearchMixin):
                 "volume_unit": "lots",
                 "amount_unit": "yuan",
                 "amount_is_estimated": True,
+                "bar_kind": "minute_price_point",
                 "amount": (float(price) * float(volume) * 100.0) if price is not None and volume is not None else 0,
                 "pre_close": prev_close,
                 "source": "eltdx",
@@ -511,6 +527,7 @@ class EltdxProvider(EltdxEvidenceMixin, EltdxResearchMixin):
                 "volume_unit": "lots",
                 "amount_unit": "yuan",
                 "amount_is_estimated": False,
+                "bar_kind": "minute_ohlcv",
                 "amount": getattr(b, "amount", None),
                 "source": "eltdx",
             })

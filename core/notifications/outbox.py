@@ -33,10 +33,14 @@ class RealtimeNotificationOutbox:
         # Keep the notifier's priority ordering even when jobs are independent.
         from core.notifications.notifier import NotificationService
         rows = sorted(payload.get("rows") or [], key=NotificationService._notification_priority, reverse=True)
+        if (payload.get("execution_health") or {}).get("ready") is False:
+            return 0
         for row in rows:
             if (row.get("confirm_status") or row.get("status")) != "confirmed":
                 continue
             if row.get("health_gate_reason") or row.get("entry_veto_reason"):
+                continue
+            if "formal_confirmed_at" in row and not row["formal_confirmed_at"]:
                 continue
             key = stable_id("notify", payload.get("market_date"), row.get("code"), row.get("entry_mode"))
             body = {k: payload.get(k) for k in ("market_date", "candidate_date", "profile", "strategy", "observation_source")}

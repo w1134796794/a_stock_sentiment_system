@@ -11,6 +11,8 @@ from backtest.trade_calendar import TradeCalendar
 SHANGHAI_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 MARKET_OPEN = clock_time(9, 30)
 MARKET_CLOSE = clock_time(15, 0)
+MORNING_CLOSE = clock_time(11, 30)
+AFTERNOON_OPEN = clock_time(13, 0)
 
 
 @lru_cache(maxsize=1)
@@ -46,7 +48,9 @@ def realtime_session_status(
     trade_date = current.strftime("%Y%m%d")
     is_trade_date = bool(cal.is_trade_date(trade_date))
     local_time = current.timetz().replace(tzinfo=None)
-    is_open = is_trade_date and MARKET_OPEN <= local_time <= MARKET_CLOSE
+    lunch_break = is_trade_date and MORNING_CLOSE < local_time < AFTERNOON_OPEN
+    is_open = is_trade_date and (MARKET_OPEN <= local_time <= MORNING_CLOSE
+                                or AFTERNOON_OPEN <= local_time <= MARKET_CLOSE)
 
     if not is_trade_date:
         reason = "非交易日"
@@ -54,6 +58,8 @@ def realtime_session_status(
         reason = "未开盘"
     elif local_time > MARKET_CLOSE:
         reason = "已收盘"
+    elif lunch_break:
+        reason = "午间休市"
     else:
         reason = "交易中"
 
@@ -64,6 +70,8 @@ def realtime_session_status(
     )
     if is_trade_date and local_time < MARKET_OPEN:
         next_open = market_open_at
+    elif lunch_break:
+        next_open = market_open_at.replace(hour=13, minute=0)
     else:
         next_date = cal.next(trade_date)
         if not next_date or next_date <= trade_date:
@@ -81,7 +89,8 @@ def realtime_session_status(
         "is_trade_date": is_trade_date,
         "is_open": is_open,
         "reason": reason,
-        "refresh_window": "交易日 09:30-15:00",
+        "session_break": lunch_break,
+        "refresh_window": "交易日 09:30-11:30 / 13:00-15:00",
         "market_close_at": market_close_at.isoformat(),
         "next_open_at": next_open.isoformat(),
         "seconds_until_next_open": max(0, int((next_open - current).total_seconds())),

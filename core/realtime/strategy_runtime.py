@@ -106,15 +106,27 @@ class StrategyRuntime:
         evaluator = minute_evaluator(RiskConfig.from_dict(bundle["inputs"]["risk_config"]))
         self.signals = RealtimeEntrySignalService(data_manager=reader, quote_service=self.quotes,
             evaluator=evaluator, frozen_bundle=bundle, amount_profile_repository=profiles)
+        self.signals.snapshot_signals.state_backend = self.backend
         self.rows = production_candidates(bundle["inputs"])
         allowed = {r["code"] for r in plan["rows"]}
         self.rows = [r for r in self.rows if r["code"] in allowed]
+        active = {row["code"] for row in self.rows}
+        self.execution_audit = {
+            "selection_policy": "decision_candidate_precedence_one_execution_per_stock",
+            "planned_count": len(allowed), "active_count": len(active),
+            "not_executed_codes": sorted(allowed - active),
+            "rows": [{"code": row["code"], "sources": row.get("execution_sources") or [],
+                      "execution_pool": row.get("execution_pool"), "strategy_id": row.get("strategy_id"),
+                      "allowed_entry_modes": (row.get("strategy_execution") or {}).get("allowed_entry_modes") or [],
+                      "acceleration_eligibility": row.get("acceleration_eligibility") or {}}
+                     for row in self.rows],
+        }
         self._last_rows, self._seen_versions = {}, {}
         self._loaded_plan_id = plan["plan_id"]
 
     def _prepare(self, payload):
         from core.operations.evidence import attach_evidence
-        from core.operations.health import gate_realtime_payload, realtime_readiness
+        from core.operations.health import block_realtime_confirmation, gate_realtime_payload, realtime_readiness
         from core.realtime.quote_cache import RealtimeQuoteCache
         health = self.quotes.dm.provider.cache.health()
         payload["execution_health"] = realtime_readiness(self.bundle["health"], health, payload["market_date"])
@@ -122,10 +134,11 @@ class StrategyRuntime:
         if (health.get("collector") or {}).get("collection_plan_id") != self.plan["plan_id"]:
             payload["execution_health"]["ready"] = False
             payload["execution_health"]["reasons"].append("采集器与策略的当日冻结名单版本未对齐")
+        if not payload["execution_health"]["ready"]:
+            reason = "；".join(payload["execution_health"]["reasons"])
             for row in payload.get("rows") or []:
                 if row.get("confirm_status") == "confirmed":
-                    row.update(status="observe", confirm_status="observe", status_text="数据待恢复",
-                               reason="采集名单版本未对齐", health_gate_reason="采集名单版本未对齐")
+                    block_realtime_confirmation(row, reason)
         return attach_evidence(payload, frozen_bundle=self.bundle)
 
     def _record(self, payload):
@@ -150,6 +163,11 @@ class StrategyRuntime:
         from core.operations.evidence import record_runtime_observations
         now = shanghai_now(self.clock())
         date = now.strftime("%Y%m%d")
+        session = realtime_session_status(now)
+        if not force and not session["is_open"]:
+            self.backend.set_json(HEALTH_KEY, {"ok": True, "session_break": session["session_break"],
+                "reason": session["reason"], "updated_at": now.isoformat(), "market_date": date}, 60)
+            return None
         revision = self.backend.get_json(REVISION_KEY) or {}
         version = revision.get("id") if revision.get("market_date") == date else ""
         if (not force and version == self._version and date == self._date
@@ -162,12 +180,15 @@ class StrategyRuntime:
         changed = {code for code in set(versions) | set(self._seen_versions)
                    if versions.get(code) != self._seen_versions.get(code)}
         boundary = now.strftime("%Y%m%d%H%M")
+        from core.realtime.sector_breadth import RealtimeSectorBreadthProvider
+        peer_dependencies = type(self.signals.sector_breadth) is not RealtimeSectorBreadthProvider
         selected = affected_codes(self.rows, self.plan, changed,
-            full=force or not self._last_rows or not revision.get("scoped") or boundary != self._minute_boundary)
+            full=force or not self._last_rows or not revision.get("scoped") or boundary != self._minute_boundary,
+            peer_dependencies=peer_dependencies)
         if not selected:
             self._version, self._seen_versions = version, versions
             return None
-        quotes = self.quotes.refresh_quotes([r["code"] for r in self.rows])
+        quotes = self.quotes.refresh_quotes([r["code"] for r in self.rows if peer_dependencies or r["code"] in selected])
         quote_map = {r["code"]: r for r in quotes.get("quotes") or []}
         projector = RealtimeOverlayService.__new__(RealtimeOverlayService)
         meta = {"candidate_date": self.plan["candidate_date"], "market_date": date,
@@ -192,6 +213,7 @@ class StrategyRuntime:
                      for row in self.rows if row["code"] in selected}
         raw_rows = {**self._last_rows, **projected}
         payload = {**meta, "ok": True, "generated_at": shanghai_now(self.clock()).isoformat(),
+                   "execution_audit": self.execution_audit,
                    "collection_plan_id": self.plan["plan_id"], "market_revision": version,
                    "rows": [{**deepcopy(raw_rows[row["code"]]), "evaluation_reused": row["code"] not in selected}
                             for row in self.rows]}
@@ -200,6 +222,10 @@ class StrategyRuntime:
         self._record(evaluated)
         self._completed += 1
         cycle = {"id": uuid4().hex, "market_date": date, "started_at": now.isoformat(),
+                 "execution_scope_counts": {scope: sum(scope in (r.get("execution_sources") or []) for r in self.rows)
+                                            for scope in ("leader_pool", "decision_pool")},
+                 "execution_strategy_counts": {strategy: sum(r.get("strategy_id") == strategy for r in self.rows)
+                                               for strategy in {r.get("strategy_id") for r in self.rows}},
                  "finished_at": shanghai_now(self.clock()).isoformat(), "duration_ms": round((monotonic() - started) * 1000, 3),
                  "changed_codes": sorted(changed), "reused_stocks": len(payload["rows"]) - len(selected),
                  "jobs": [{"profile": "production", "evaluated_stocks": len(selected),
@@ -237,8 +263,7 @@ class StrategyRuntime:
                 subscription.subscribe(self.backend._key(CHANNEL))
             while not self.stop_event.is_set() and lease.is_owner():
                 try:
-                    if once or realtime_session_status(self.clock())["is_open"]:
-                        self.run_once(force=once)
+                    self.run_once(force=once)
                 except Exception as exc:
                     self.backend.set_json(HEALTH_KEY, {"ok": False, "reason": str(exc),
                         "updated_at": shanghai_now(self.clock()).isoformat()}, 60)
@@ -266,12 +291,13 @@ class StrategyRuntime:
             self._lease = None
 
 
-def affected_codes(rows, plan, changed, *, full=False):
+def affected_codes(rows, plan, changed, *, full=False, peer_dependencies=True):
     from core.realtime.collection_plan import collection_sector_names
     priority = {row["code"] for row in rows}
     # Preserve cross-candidate relative-strength dependencies on priority quotes.
-    if full or priority.intersection(changed):
+    if full or (peer_dependencies and priority.intersection(changed)):
         return priority
-    members = {sector["name"]: set(sector["members"]) for sector in plan["sectors"]}
-    return {row["code"] for row in rows if any(
+    members = {sector["name"]: set(sector["members"]) | {str(sector.get("code") or "").split(".")[0]}
+               for sector in plan["sectors"]}
+    return priority.intersection(changed) | {row["code"] for row in rows if any(
         changed.intersection(members.get(name, set())) for name in collection_sector_names(row))}

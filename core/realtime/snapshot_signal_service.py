@@ -42,12 +42,15 @@ class SnapshotSignalService:
         consecutive_ticks: int = 2,
         max_snapshot_age_seconds: float = 8.0,
         clock: Any = None,
+        state_backend: Any = None,
     ) -> None:
         self.deadline = deadline
         self.consecutive_ticks = max(int(consecutive_ticks), 2)
         self.max_snapshot_age_seconds = max(float(max_snapshot_age_seconds), 3.0)
         self.clock = clock or shanghai_now
+        self.state_backend = state_backend
         self._pending: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        self._protection_lows = {}
         self._lock = RLock()
 
     def evaluate_primary(
@@ -102,7 +105,7 @@ class SnapshotSignalService:
         minutes = normalize_minute_bars(minute_bars)
         if not minutes.empty:
             minutes = minutes[minutes["time"] < latest_time[:5] + ":00"].copy()
-        checks = {"basis": "eltdx_snapshot_primary_v1", "snapshot_count": len(recent),
+        checks = {"basis": "eltdx_snapshot_primary_v2_temporal_protection", "snapshot_count": len(recent),
                   "snapshot_received_at": str(recent.iloc[-1]["received_at"]),
                   "minute": latest_time, "quote_fresh": True}
 
@@ -118,6 +121,9 @@ class SnapshotSignalService:
         opening = minutes[minutes["time"].isin([f"09:{m}:00" for m in range(31, 36)])] if not minutes.empty else minutes
         if len(opening) != 5:
             return stop("等待完整开盘前5分钟结构，不以稀疏快照替代高低点", data_status="snapshot_structure_pending")
+        checks["opening_bar_kinds"] = sorted(set(opening["bar_kind"]))
+        if not opening["ohlc_evidence"].all():
+            return stop("开盘结构缺少真实分钟OHLC，分时价格点不能替代高低点", data_status="snapshot_structure_pending")
         checks["opening_structure_complete"] = True
         deadline = confirmation_deadline or evaluator.deadline
         if latest_time > deadline:
@@ -128,18 +134,18 @@ class SnapshotSignalService:
             ENTRY_ACCELERATION: open_gap > evaluator.continuation_max_gap and is_leader,
         }.get(mode, False)
         checks["opening_gap_allowed"] = bool(allowed)
+        checks["is_leader"] = bool(is_leader)
         if not allowed:
             return stop("开盘分层或龙头身份不满足当前入场模式", "rejected")
         opening_high, opening_low = float(opening["high"].max()), float(opening["low"].min())
         protection = opening_low * 0.999
-        after_open = minutes[minutes["time"] > "09:35:00"]
-        observed_after = ticks[ticks["time"] > "09:35:00"]
-        protection_ok = ((after_open.empty or float(after_open["low"].min()) >= protection)
-                         and (observed_after.empty or float(observed_after["last_price"].min()) >= protection)
-                         and (_number(recent.iloc[-1].get("low_price")) or opening_low) >= protection)
+        protection_ok, protection_detail = self._protection(
+            key, minutes, ticks, "09:35:00", protection)
+        checks.update(opening_high=opening_high, opening_low=opening_low, **protection_detail)
         checks["protection"] = protection_ok
         if not protection_ok and (mode == ENTRY_WEAK or evaluator.confirmation_policy.mode == "volume_price"):
-            return stop("已跌破开盘前5分钟保护低点", "cancelled")
+            decision, fallback = stop("已跌破开盘前5分钟保护低点", "cancelled")
+            return replace(decision, invalidated_at=protection_detail["first_break_at"] or latest_time), fallback
         auction_available = auction_amount > 0 and auction_volume > 0 and previous_volume > 0
         checks["auction_available"] = auction_available
         if mode == ENTRY_CONTINUATION and auction_available:
@@ -243,6 +249,9 @@ class SnapshotSignalService:
                 open_gap_pct=open_gap, data_status="minute_structure_pending",
                 data_completeness=0.7,
             )
+        if not first_five["ohlc_evidence"].all():
+            return EntryDecision("data_insufficient", reason="开盘结构缺少真实分钟OHLC",
+                                 data_status="missing_opening_ohlc", data_completeness=0.0)
         # Snapshots refine execution, never override the common minute gates.
         if minute_decision.status not in {"confirmed", "filled"}:
             with self._lock:
@@ -309,11 +318,13 @@ class SnapshotSignalService:
                            entry_time="", data_status="snapshot_price_quality")
 
         if mode == ENTRY_WEAK:
-            after_opening = ticks[ticks["time"] > str(first_five.iloc[-1]["time"])]
-            if not after_opening.empty and float(after_opening["last_price"].min()) < opening_low * 0.999:
+            protection_ok, detail = self._protection(
+                (str(trade_date), str(code), str(mode)), minutes, ticks,
+                str(first_five.iloc[-1]["time"]), opening_low * 0.999)
+            if not protection_ok:
                 return EntryDecision(
                     "cancelled", "弱转强", "3秒快照显示已跌破开盘前5分钟低点",
-                    latest_time, open_gap_pct=open_gap,
+                    invalidated_at=detail["first_break_at"] or latest_time, open_gap_pct=open_gap,
                 )
             triggered = (
                 bool((prices >= prev_close).all())
@@ -414,6 +425,37 @@ class SnapshotSignalService:
             open_gap_pct=open_gap, sector_confirmed=sector_ok,
             data_status="snapshot_filled", data_completeness=1.0,
         )
+
+    def _protection(self, key, minutes, ticks, boundary, protection):
+        """Remember observed post-structure lows beyond the rolling hot window."""
+        bars = minutes[(minutes["time"] > boundary) & minutes["ohlc_evidence"]]
+        points = ticks[ticks["time"] > boundary]
+        observations = list(zip(bars["low"].astype(float), bars["time"].astype(str)))
+        observations.extend(zip(points["last_price"].astype(float), points["time"].astype(str)))
+        state_key = (*key, boundary)
+        storage_key = "realtime:protection:v2:" + ":".join(state_key)
+        with self._lock:
+            self._protection_lows = {k: v for k, v in self._protection_lows.items() if k[0] == key[0]}
+            prior = self._protection_lows.get(state_key)
+            if prior is None and self.state_backend is not None:
+                prior = self.state_backend.get_json(storage_key)
+            if prior is not None:
+                observations.append((prior["low"], prior.get("low_at") or boundary))
+            low, low_at = min(observations) if observations else (None, "")
+            breaks = [at for price, at in observations if price < protection]
+            if prior and prior.get("protection_price") == protection and prior.get("first_break_at"):
+                breaks.append(prior["first_break_at"])
+            first_break = min(breaks) if breaks else ""
+            if low is not None:
+                state = {"low": low, "low_at": low_at, "first_break_at": first_break, "protection_price": protection}
+                self._protection_lows[state_key] = state
+                if self.state_backend is not None and state != prior:
+                    self.state_backend.set_json(storage_key, state, 172800)
+        return low is None or low >= protection, {
+            "protection_price": protection, "protection_window_start": boundary,
+            "post_structure_low": low, "protection_evidence": "observed_post_structure_prices",
+            "session_low_used": False, "first_break_at": first_break,
+        }
 
     @staticmethod
     def _normalize_ticks(frame: pd.DataFrame, trade_date: str) -> pd.DataFrame:

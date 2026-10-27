@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 
-RULESET_VERSION = "production_shared_v11_stock_confirmation_board_trend_score"
+RULESET_VERSION = "production_shared_v12_temporal_protection_signal_lifecycle"
 
 
 def number(value, default=0.0):
@@ -66,6 +66,26 @@ def execution_defaults(execution, risk=None):
     return execution
 
 
+def acceleration_eligibility(row):
+    """Explain the existing high-open qualification without broadening it."""
+    def metric(name):
+        for source in (row.get('metrics') or {}, row.get('context') or {}, row):
+            if name in source:
+                return number(source[name])
+        return 0.0
+    quality = metric('stk_kpl_leader_quality')
+    mainline = metric('stk_sector_mainline_score')
+    board = metric('stk_board_position')
+    role = str(row.get('pool_type') or '')
+    reason = ('核心/板块龙头身份' if role in {'核心龙头', '板块龙头'} else
+              '龙头质量分达到65' if quality >= 65 else
+              '主线分达到75且地位分达到60' if mainline >= 75 and board >= 60 else
+              '未达到高开加速资格；进入龙头观察池不等于可执行')
+    return {'eligible': role in {'核心龙头', '板块龙头'} or quality >= 65 or (mainline >= 75 and board >= 60),
+            'reason': reason, 'pool_type': role, 'leader_quality': quality,
+            'mainline_score': mainline, 'board_position': board}
+
+
 def production_candidates(inputs):
     from core.realtime.models import normalize_stock_code
     from core.utils.stock_eligibility import new_entry_exclusion
@@ -77,7 +97,8 @@ def production_candidates(inputs):
     profiles = {p['id']: p for p in inputs.get('profiles', []) if p.get('id')}
     rows = {}
     excluded = set()
-    for source in [*leaders, *candidates]:
+    sources = [(row, 'leader_pool') for row in leaders] + [(row, 'decision_pool') for row in candidates]
+    for source, scope in sources:
         code = normalize_stock_code(source.get("code") or source.get("stock_code"), add_suffix=False)
         if not code:
             continue
@@ -90,8 +111,15 @@ def production_candidates(inputs):
         previous = rows.get(code, {})
         item = {**previous, **deepcopy(source), "code": code}
         item["metrics"] = {**(previous.get("metrics") or {}), **(source.get("metrics") or {})}
-        item.setdefault("strategy_id", "leader_pool")
-        item.setdefault("strategy_name", "近期龙头池")
+        item['strategy_id'] = source.get('strategy_id') or source.get('策略ID') or scope
+        item['strategy_name'] = source.get('strategy_name') or ('近期龙头池' if scope == 'leader_pool' else '生产决策池')
+        item['execution_sources'] = list(dict.fromkeys([*(previous.get('execution_sources') or []), scope]))
+        item['execution_pool'] = scope
+        item['execution_selection_policy'] = 'decision_candidate_precedence_one_execution_per_stock'
+        item['strategy_execution'] = deepcopy(source.get('strategy_execution') or {})
+        item['strategy_version'] = str(source.get('strategy_version') or '')
+        if scope == 'decision_pool' and 'allowed_entry_modes' not in source:
+            item.pop('allowed_entry_modes', None)
         item['is_leader_observation'] = code in leader_codes
         item.setdefault("strategy_execution", {})
         profile = profiles.get(item['strategy_id']) or {}
@@ -104,6 +132,7 @@ def production_candidates(inputs):
         item['strategy_execution'] = execution_defaults(item['strategy_execution'], risk)
         item['screening_score'] = (item.get('screening_score') or item.get('score')
                                   or item.get('策略组合评分') or item.get('leader_score') or 0)
+        item['acceleration_eligibility'] = acceleration_eligibility(item)
         rows[code] = item
     return list(rows.values())
 

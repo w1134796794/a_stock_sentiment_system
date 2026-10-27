@@ -247,6 +247,8 @@ def test_real_worker_reads_frozen_plan_and_publishes_missing_data_without_networ
     plans.freeze(bundle(), now=PREOPEN)
     monkeypatch.setattr(EltdxProvider, "get_quote_snapshots", lambda *a: pytest.fail("Strategy may not request quotes"))
     monkeypatch.setattr(EltdxProvider, "get_minute_bars", lambda *a: pytest.fail("Strategy may not request minutes"))
+    monkeypatch.setattr(EltdxProvider, "get_minute_ohlcv", lambda *a: pytest.fail("Strategy may not request OHLC"))
+    monkeypatch.setattr(EltdxProvider, "get_kline", lambda *a, **kw: pytest.fail("Strategy may not request candles"))
     monkeypatch.setattr(RealtimeSignalEventRepository, "record_payload", lambda *a: 0)
     monkeypatch.setattr(RealtimeSignalEventRepository, "merge_history", lambda self, value: value)
     now = datetime(2026, 10, 23, 9, 36)
@@ -255,6 +257,9 @@ def test_real_worker_reads_frozen_plan_and_publishes_missing_data_without_networ
     backend.set_json(REVISION_KEY, {"market_date": DAY, "id": "v1"})
     payload = worker.run_once()
     assert len(payload["rows"]) == 35
+    assert payload["execution_audit"]["planned_count"] == payload["execution_audit"]["active_count"] == 35
+    assert not payload["execution_audit"]["not_executed_codes"]
+    assert sum(row['strategy_id'] == 'decision_pool' for row in payload['execution_audit']['rows']) == 5
     assert all(row["confirm_status"] == "observe" for row in payload["rows"])
     assert worker.run_once() is None
     leader = runtime.stored_strategy_view(DAY, profile="leader_pool", backend=backend)

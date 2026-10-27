@@ -84,6 +84,23 @@ class EntryDecision:
     confirmation_policy: str = "legacy"
     confirmation_reason: str = ""
     condition_checks: dict = field(default_factory=dict)
+    trigger_at: str = ""
+    formal_confirmed_at: str = ""
+    invalidated_at: str = ""
+    simulated_entry_at: str = ""
+
+    def __post_init__(self):
+        formal = self.status in {"confirmed", "filled", "signal_unfilled"}
+        trigger = self.trigger_at or self.initial_confirm_time
+        if not trigger and self.status in {"quality_pending", "quality_rejected"}:
+            trigger = self.confirm_time
+        invalidated = self.invalidated_at or (self.confirm_time if self.status == "cancelled" else "")
+        object.__setattr__(self, "trigger_at", trigger or (self.confirm_time if formal else ""))
+        object.__setattr__(self, "formal_confirmed_at", self.confirm_time if formal else "")
+        object.__setattr__(self, "invalidated_at", invalidated)
+        object.__setattr__(self, "simulated_entry_at", self.entry_time if self.filled else "")
+        if not formal:
+            object.__setattr__(self, "confirm_time", "")
 
     @property
     def filled(self) -> bool:
@@ -95,6 +112,14 @@ def normalize_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
     if frame is None or frame.empty:
         return pd.DataFrame()
     data = frame.copy()
+    # Price points may be drawn as flat candles, but are not OHLC evidence.
+    explicit_ohlc = all(column in data for column in ("open", "high", "low", "close"))
+    if "bar_kind" not in data:
+        point = pd.Series(not explicit_ohlc, index=data.index)
+        if "source" in data:
+            estimated = data.get("amount_is_estimated", pd.Series(True, index=data.index))
+            point |= data["source"].eq("eltdx") & ~estimated.eq(False)
+        data["bar_kind"] = point.map({True: "minute_price_point", False: "minute_ohlcv"})
     if "time" not in data.columns and "datetime" in data.columns:
         data["time"] = pd.to_datetime(data["datetime"], errors="coerce").dt.strftime("%H:%M:%S")
     if "time" not in data.columns:
@@ -113,6 +138,13 @@ def normalize_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
         if column not in data.columns:
             data[column] = data.get("price", 0.0)
         data[column] = pd.to_numeric(data[column], errors="coerce")
+    data["ohlc_evidence"] = (
+        data["bar_kind"].eq("minute_ohlcv")
+        & data[["open", "high", "low", "close"]].lt(float("inf")).all(axis=1)
+        & data[["open", "high", "low", "close"]].gt(0).all(axis=1)
+        & data["high"].ge(data[["open", "close", "low"]].max(axis=1))
+        & data["low"].le(data[["open", "close"]].min(axis=1))
+    )
     data["volume"] = pd.to_numeric(
         data["volume"] if "volume" in data.columns else data.get("vol", 0.0),
         errors="coerce",
@@ -299,9 +331,13 @@ class MinuteEntryEvaluator:
             )
         opening_rows = data[data["time"] <= "09:35:00"]
         first_five = opening_rows.head(5)
+        if not first_five.empty and not first_five["ohlc_evidence"].all():
+            return EntryDecision("data_insufficient", reason="开盘结构缺少真实分钟OHLC，分时价格点不能替代高低点",
+                                 open_gap_pct=open_gap, data_status="missing_opening_ohlc", data_completeness=0.0)
         last_opening_index = int(first_five.index.max()) if not first_five.empty else -1
         scan = data[(data.index > last_opening_index) & (data["time"] <= self.deadline)]
-        if first_five.empty or scan.empty:
+        structure_complete = len(first_five) == 5 and pd.to_timedelta(first_five["time"]).diff().dropna().eq(pd.Timedelta(minutes=1)).all()
+        if not structure_complete or scan.empty:
             status = "observing" if live and str(data.iloc[-1]["time"]) <= self.deadline else "missing_minutes"
             return EntryDecision(status, reason="等待开盘前5分钟完成", open_gap_pct=open_gap)
 
@@ -524,7 +560,7 @@ class MinuteEntryEvaluator:
         if opened_locked:
             tradable = data[(data["low"] < limit_price * 0.998) & (data["volume"] > 0)]
             if tradable.empty:
-                return EntryDecision("signal_unfilled", "高开加速", "接近涨停开盘，暂无可成交证据", "09:30:00", open_gap_pct=gap)
+                return EntryDecision("observing", "高开加速", "接近涨停开盘，暂无可成交证据", open_gap_pct=gap)
         opening_high = float(first_five["high"].max())
         sector_observed = False
         quality_denial = None

@@ -186,7 +186,9 @@ def intraday_health(row: dict[str, Any], market_date: str, *,
     member_count = int(sector.get("member_count") or 0)
     observed_members = int(sector.get("observed_members") or 0)
     coverage = observed_members / min(member_count, 80) if member_count > 0 else 0.0
-    if (sector_age is None or not 0 <= sector_age <= sector_max_age
+    policy = (row.get("entry_parameters") or {}).get("confirmation_policy") or {}
+    sector_required = policy.get("require_sector", (row.get("condition_checks") or {}).get("sector_required", True)) is not False
+    if sector_required and (sector_age is None or not 0 <= sector_age <= sector_max_age
             or completeness < 1.0 or coverage < min_sector_coverage):
         reasons.append("板块观察过期或覆盖不足")
     return {
@@ -194,6 +196,7 @@ def intraday_health(row: dict[str, Any], market_date: str, *,
         "collector_age_seconds": collector_age, "quote_age_seconds": quote_age,
         "sector_age_seconds": sector_age, "sector_coverage": round(coverage, 4),
         "sector_data_completeness": completeness,
+        "sector_required": sector_required,
         "collector_protocol": health["protocol"],
     }
 
@@ -207,12 +210,7 @@ def gate_realtime_payload(payload: dict[str, Any], *, collector: dict[str, Any],
         health = intraday_health(row, market_date, collector=collector, now=now, require_shared=require_shared)
         row["health_gate"] = health
         if not health["ok"]:
-            row["confirm_status"] = "observe"
-            row["status"] = "observe"
-            row["status_text"] = "数据待恢复"
-            row["signal_status_text"] = "数据待恢复"
-            row["health_gate_reason"] = "；".join(health["reasons"])
-            row["reason"] = row["health_gate_reason"]
+            block_realtime_confirmation(row, "；".join(health["reasons"]))
     if isinstance(payload.get("counts"), dict):
         for key in ("confirmed", "observe", "cancelled", "unfilled"):
             payload["counts"][key] = sum(
@@ -220,3 +218,10 @@ def gate_realtime_payload(payload: dict[str, Any], *, collector: dict[str, Any],
                 for row in payload.get("rows") or []
             )
     return payload
+
+
+def block_realtime_confirmation(row, reason):
+    row["rule_confirmed_at"] = row.get("formal_confirmed_at") or row.get("confirm_time") or ""
+    row.update(confirm_status="observe", status="observe", status_text="数据待恢复",
+               signal_status_text="数据待恢复", health_gate_reason=reason, reason=reason,
+               formal_confirmed_at="", confirm_time="")

@@ -49,7 +49,7 @@ def test_snapshots_confirm_without_any_post_opening_minute_or_minute_confirmatio
     assert decision.confirm_time == "09:36:03"
     assert decision.entry_time == "" and decision.entry_price == 0
     checks = decision.condition_checks["confirmation"]["checks"]
-    assert checks["basis"] == "eltdx_snapshot_primary_v1"
+    assert checks["basis"] == "eltdx_snapshot_primary_v2_temporal_protection"
     assert checks["vwap_value"] == pytest.approx(20010200 / 2001000)
     assert checks["local_volume_ratio"] == pytest.approx(2)
     assert decision.amount_pace == pytest.approx(1.00051)

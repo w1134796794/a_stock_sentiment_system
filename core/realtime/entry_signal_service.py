@@ -219,6 +219,12 @@ class RealtimeEntrySignalService:
         started = monotonic()
         payload = self._evaluate_entry(row, quote, frame, frames, quotes, previous,
                                        market_date, all_rows, execution)
+        from core.signals.production_rules import acceleration_eligibility
+        payload["acceleration_eligibility"] = acceleration_eligibility(row)
+        payload["execution_strategy_id"] = str(row.get("strategy_id") or "")
+        payload["execution_sources"] = row.get("execution_sources") or []
+        payload["execution_pool"] = row.get("execution_pool") or ""
+        payload["execution_selection_policy"] = row.get("execution_selection_policy") or ""
         code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
         # Optional factor evidence must not replace the executable entry decision.
         payload["board_feedback"] = self._board_feedback_context(code, market_date)
@@ -648,6 +654,10 @@ class RealtimeEntrySignalService:
             "strategy_mode_allowed": bool(strategy_mode_allowed),
             "strength_detected": bool(strength_detected),
             "confirm_time": decision.confirm_time,
+            "trigger_at": decision.trigger_at,
+            "formal_confirmed_at": decision.formal_confirmed_at,
+            "invalidated_at": decision.invalidated_at,
+            "simulated_entry_at": decision.simulated_entry_at,
             "entry_time": decision.entry_time,
             "entry_price": decision.entry_price or None,
             "breakout_level": decision.breakout_level or None,
@@ -882,13 +892,8 @@ class RealtimeEntrySignalService:
         return _float(row.get(name), default)
 
     def _is_leader(self, row: Dict[str, Any]) -> bool:
-        pool_type = str(row.get("pool_type") or "")
-        if pool_type in {"核心龙头", "板块龙头"}:
-            return True
-        leader_quality = self._metric(row, "stk_kpl_leader_quality", 0.0)
-        mainline = self._metric(row, "stk_sector_mainline_score", 0.0)
-        board = self._metric(row, "stk_board_position", 0.0)
-        return leader_quality >= 65.0 or (mainline >= 75.0 and board >= 60.0)
+        from core.signals.production_rules import acceleration_eligibility
+        return acceleration_eligibility(row)["eligible"]
 
     @staticmethod
     def _previous_amount_yuan(row: Dict[str, Any]) -> float:

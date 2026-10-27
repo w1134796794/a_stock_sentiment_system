@@ -323,7 +323,7 @@ class EltdxQuoteCollector:
         for code in codes:
             stock_started = time.monotonic()
             try:
-                frame = self.provider.get_minute_bars(code, trade_date)
+                frame = self.provider.get_minute_ohlcv(code, trade_date)
                 if not frame.empty:
                     self.journal.append("minutes", trade_date, [{"code": code,
                         "received_at": self.clock().isoformat(), "bars": json.loads(frame.to_json(orient="records", date_format="iso"))}])

@@ -1196,6 +1196,11 @@ class IntradayStrengthService:
             "entry_mode": mode,
             "entry_mode_text": signal.get("entry_mode_text") or entry_mode_text(mode),
             "confirm_time": signal.get("confirm_time") or "",
+            **{key: signal.get(key) or "" for key in (
+                "trigger_at", "formal_confirmed_at", "invalidated_at", "simulated_entry_at")},
+            "acceleration_eligibility": signal.get("acceleration_eligibility") or {},
+            "execution_sources": signal.get("execution_sources") or [],
+            "execution_pool": signal.get("execution_pool") or "",
             "entry_time": signal.get("entry_time") or "",
             "entry_price": signal.get("entry_price"),
             "confirmation_policy": signal.get("confirmation_policy") or "legacy",

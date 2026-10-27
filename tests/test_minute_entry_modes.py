@@ -140,7 +140,7 @@ def test_continuation_requires_auction_volume_and_fills_next_minute():
     assert filled.entry_time == "09:36:00"
 
 
-def test_near_limit_open_is_signal_unfilled_not_a_buy():
+def test_near_limit_open_without_confirmation_remains_observation():
     frame = _bars([
         (10.99, 11.00, 10.99, 11.00),
         (11.00, 11.00, 11.00, 11.00),
@@ -160,7 +160,8 @@ def test_near_limit_open_is_signal_unfilled_not_a_buy():
         sector_sync=lambda _: True,
     )
 
-    assert decision.status == "signal_unfilled"
+    assert decision.status == "observing"
+    assert not decision.confirm_time and not decision.formal_confirmed_at
     assert decision.filled is False
     assert decision.signal == "高开加速"
 

@@ -2398,7 +2398,10 @@ class BacktestEngine:
     def _exit_rule_version(self, position: Dict[str, Any]) -> str:
         from core.operations.ledger import stable_id
         from core.signals.board_feedback import FEEDBACK_VERSION, feedback_policy
-        policy = getattr(self.minute_evaluator, 'board_feedback_policy', feedback_policy(self.config))
+        # Storage-only version hashing intentionally skips engine initialization.
+        policy = getattr(getattr(self, 'minute_evaluator', None), 'board_feedback_policy', None)
+        if policy is None:
+            policy = feedback_policy(self.config)
         if not policy['enabled']:
             return stable_id("engine_exit_v1", self._position_exit_config(position),
                              self.config.exit_policy_mode, self.config.daily_ohlc_path_policy)

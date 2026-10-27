@@ -66,6 +66,12 @@ def attach_evidence(payload: dict[str, Any], *, frozen_bundle=None) -> dict[str,
             "quote_received_at": row.get("received_at") or row.get("quote_time") or "",
             "minute_closed_at": minute_closed_at,
             "confirm_time": confirm_time,
+            **{key: row.get(key) or "" for key in (
+                "trigger_at", "formal_confirmed_at", "invalidated_at", "simulated_entry_at", "rule_confirmed_at")},
+            "acceleration_eligibility": row.get("acceleration_eligibility") or {},
+            "execution_sources": row.get("execution_sources") or [],
+            "execution_pool": row.get("execution_pool") or "",
+            "execution_selection_policy": row.get("execution_selection_policy") or "",
             "trigger_source": row.get("trigger_source") or "minute_fallback",
             "entry_time": row.get("entry_time") or "",
             "entry_price": row.get("entry_price"),
@@ -139,6 +145,8 @@ def record_runtime_observations(ledger, payload, *, now=None):
             "candidate_date", "market_date", "code", "profile", "signal_id", "status", "data_status",
             "entry_mode", "confirm_time", "trigger_source", "minute_closed_at", "entry_time", "entry_price", "opening_evidence", "board_feedback",
             "confirmation_policy", "confirmation_reason", "initial_confirm_time", "breakout_level", "entry_parameters",
+            "trigger_at", "formal_confirmed_at", "invalidated_at", "simulated_entry_at", "rule_confirmed_at",
+            "acceleration_eligibility", "execution_sources", "execution_pool", "execution_selection_policy", "strategy_id",
             "trigger_reason", "veto_reason", "quote_received_at", "quote_source_time", "quote_stale_seconds",
             "sector_detail", "sector_coverage", "sector_data_completeness", "evidence_bundle_id", "config_version")}
         observation["condition_checks"] = evidence.get("condition_checks") or {}
