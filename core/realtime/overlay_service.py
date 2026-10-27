@@ -474,6 +474,8 @@ class RealtimeOverlayService:
             "confirmation_policy": signal.get("confirmation_policy") or "legacy",
             "confirmation_reason": signal.get("confirmation_reason") or "",
             "condition_checks": signal.get("condition_checks") or {},
+            "market_data_reads": signal.get("market_data_reads") or [],
+            "market_data_view": signal.get("market_data_view") or {},
             "evaluation_timing": signal.get("evaluation_timing") or {},
             "trigger_source": signal.get("trigger_source") or "minute_fallback",
             "initial_confirm_time": signal.get("initial_confirm_time") or "",

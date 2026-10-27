@@ -85,7 +85,8 @@ class RealtimeSectorBreadthProvider:
         """Read collector evidence; never reconstruct history from Web polling."""
         from core.realtime.sector_quote_minutes import SectorQuoteMinuteRepository
         from core.operations.preopen_evidence import PreopenEvidenceStore
-        clock = shanghai_now()
+        view = getattr(self, "market_view", None)
+        clock = view.asof if view is not None else shanghai_now()
         boundary = clock.replace(second=0, microsecond=0)
         names = tuple(sorted(set(sectors)))
         context = self._batch_frozen_context
@@ -94,25 +95,40 @@ class RealtimeSectorBreadthProvider:
         members = (RealtimeSectorService.confirmation_members(frozen["inputs"]) if frozen else
                    {name: sorted(self._members(name, market_date)) for name in names})
         codes = sorted({c for name in names for c in members.get(name, [])})
-        key = (market_date, tuple(codes), boundary.isoformat(), history_minutes)
-        with self._lock:
-            cached = self._minute_context_cache.get(key)
-        if cached is None or monotonic() - cached[0] > self.ttl_seconds:
-            minutes = [(boundary - timedelta(minutes=i)).strftime("%H:%M:%S") for i in range(history_minutes)]
-            points = SectorQuoteMinuteRepository().read_points(
-                market_date, codes, until=boundary.strftime("%H:%M:%S"), minutes=minutes)
-            with self._lock:
-                self._minute_context_cache = {k: v for k, v in self._minute_context_cache.items()
-                                              if k[0] == market_date and k[2] == key[2]}
-                self._minute_context_cache[key] = (monotonic(), points)
-        else:
-            points = cached[1]
         previous = {}
         if frozen:
             previous = {str(r.get("code") or r.get("ts_code") or "").split(".")[0]: dict(r)
                         for r in frozen["inputs"].get("daily_rows") or []}
-        return closed_quote_checker(names=names, market_date=market_date, code=exclude_code,
-                                    members=members, previous=previous, points=points, clock=clock)
+        detail = {"assessed": False, "sector_names": list(names), "member_count": len(set(codes)-{exclude_code}),
+                  "data_completeness": 0.0, "sector_confirmation_source": "collector_closed_quote_minutes"}
+
+        def checker(at_time):
+            target = datetime.strptime(str(at_time)[:5], "%H:%M")
+            minute = target.strftime("%H:%M:00")
+            earlier = (target-timedelta(minutes=TREND_WINDOW_MINUTES)).strftime("%H:%M:00")
+            wanted_minutes = [earlier, minute]
+            key = (market_date, tuple(codes), view.watermark if view is not None else boundary.isoformat(), minute)
+            with self._lock:
+                cached = self._minute_context_cache.get(key)
+            if cached is None or monotonic()-cached[0] > self.ttl_seconds:
+                points = (view.sector_points(codes, minutes=wanted_minutes) if view is not None else
+                          SectorQuoteMinuteRepository().read_points(market_date, codes, until=minute, minutes=wanted_minutes))
+                with self._lock:
+                    if len(self._minute_context_cache) >= 256:
+                        self._minute_context_cache.clear()
+                    self._minute_context_cache[key] = monotonic(), points
+            else:
+                points = cached[1]
+            base, observed = closed_quote_checker(names=names, market_date=market_date, code=exclude_code,
+                members=members, previous=previous, points=points, clock=clock)
+            state = base(minute)
+            detail.update(observed)
+            detail["requested_minutes"] = wanted_minutes
+            if view is not None:
+                detail["persistent_view"] = {"asof": view.asof.isoformat(), "watermark": view.watermark}
+            return state
+
+        return checker, detail
 
     def evaluate(self, sectors: Iterable[str], market_date: str, *, exclude_code: str = '') -> Tuple[Optional[bool], Dict[str, Any]]:
         names = tuple(sorted({str(name or "").strip() for name in sectors if str(name or "").strip()}))

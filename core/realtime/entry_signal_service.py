@@ -177,6 +177,12 @@ class RealtimeEntrySignalService:
                 continue
             if evaluate_codes is not None and code not in evaluate_codes:
                 continue
+            if getattr(self, "persistent_evaluation_enabled", False):
+                # Capture per stock, not once for a potentially long serial batch.
+                # Each stock's quote/minutes/sector checks still share one cutoff.
+                provider = self._ensure_data_manager().provider
+                view = provider.begin(market_date, asof=self.evaluation_clock())
+                self.sector_breadth.market_view = view
             if code not in frames:
                 started = monotonic()
                 frames[code] = self._minute_frame(code, market_date)
@@ -217,9 +223,19 @@ class RealtimeEntrySignalService:
         self, row, quote, frame, frames, quotes, previous, market_date, all_rows, execution,
     ):
         started = monotonic()
-        payload = self._evaluate_entry(row, quote, frame, frames, quotes, previous,
-                                       market_date, all_rows, execution)
         code = normalize_stock_code(row.get("code") or row.get("stock_code") or "", add_suffix=False)
+        journal = getattr(self, "debug_journal", None)
+        provider = getattr(self._ensure_data_manager(), "provider", None)
+        view = getattr(provider, "current_view", None)
+        read_start = max(0, len(view.audit)-2) if view is not None else 0
+        try:
+            payload = self._evaluate_entry(row, quote, frame, frames, quotes, previous,
+                                           market_date, all_rows, execution)
+        except Exception as exc:
+            if journal is not None:
+                journal.record("error", market_date, code, payload={"error_type": type(exc).__name__,
+                    "error": str(exc), "reason": "stock_evaluation_failed"})
+            raise
         # Optional factor evidence must not replace the executable entry decision.
         payload["board_feedback"] = self._board_feedback_context(code, market_date)
         from core.realtime.trading_session import shanghai_now
@@ -238,10 +254,21 @@ class RealtimeEntrySignalService:
             "quote_fresh": not bool(quote.get("is_stale")),
             "quote_received_at": quote.get("received_at") or "",
             "last_available_minute": str(frame.iloc[-1]["time"]) if not frame.empty else ""})
+        if view is not None:
+            payload["market_data_reads"] = view.audit[read_start:]
+            payload["market_data_view"] = {"asof": view.asof.isoformat(), "watermark": view.watermark,
+                                           "storage": "durable_spool_and_archive"}
         if not getattr(self, "record_execution_timing", True):
             payload.pop("evaluation_timing", None)
             payload["condition_checks"]["quote_fresh"] = None
             payload["condition_checks"]["basis"] = "historical_prefix_not_live_receipt"
+        if journal is not None:
+            journal.record("evaluation", market_date, code, payload={**payload,
+                "name": row.get("name"), "strategy_id": row.get("strategy_id"),
+                "strategy_execution": row.get("strategy_execution") or execution,
+                "quote": {k: quote.get(k) for k in (
+                    "date", "time", "received_at", "last_price", "open_price", "pre_close",
+                    "bid1", "ask1", "vol_hand", "amount_yuan", "is_stale", "sample_interval_seconds")}})
         return payload
 
     def _evaluate_entry(
@@ -358,14 +385,22 @@ class RealtimeEntrySignalService:
                            "historical_minute_diagnostic_without_snapshots" if not primary_enabled else "")
         decision_ms = 0.0
         snapshot_started = monotonic()
+        snapshot_input = {}
         if not structural and primary_enabled:
             try:
+                snapshots = self._snapshot_frame(code, market_date)
+                fields = [k for k in ("code", "date", "time", "received_at", "last_price", "source", "quality_ok",
+                                     "vol_hand", "amount_yuan", "open_price", "pre_close", "ask1", "low_price")
+                          if k in snapshots.columns]
+                snapshot_input = {"count": len(snapshots), "recent": snapshots[fields].tail(3).to_dict("records"),
+                    "required_count": self.snapshot_signals.consecutive_ticks,
+                    "max_age_seconds": self.snapshot_signals.max_snapshot_age_seconds}
                 decision, fallback_reason = self.snapshot_signals.evaluate_primary(
                     code=code,
                     trade_date=market_date,
                     mode=mode,
                     minute_bars=frame,
-                    snapshots=self._snapshot_frame(code, market_date),
+                    snapshots=snapshots,
                     prev_close=pre_close,
                     open_gap=gap,
                     sector_sync=sector_checker,
@@ -398,7 +433,7 @@ class RealtimeEntrySignalService:
             decision_ms = round((monotonic() - decision_started) * 1000, 3)
         decision.condition_checks.update({"source_policy": "snapshot_first" if primary_enabled else "minute_diagnostic",
             "selected_source": "eltdx_snapshot" if str(decision.data_status).startswith("snapshot_") else "minute_fallback",
-            "fallback_reason": fallback_reason})
+            "fallback_reason": fallback_reason, "snapshot_input": snapshot_input})
         selection_checks = dict(decision.condition_checks)
         if not strategy_mode_allowed:
             decision, strength_detected = self._disallowed_mode_observation(
@@ -867,7 +902,9 @@ class RealtimeEntrySignalService:
         try:
             if not hasattr(self, "_board_trend_reader"):
                 self._board_trend_reader = BoardTrendReader()
-            return self._board_trend_reader.checker(sectors, market_date, weight)
+            provider = getattr(self._ensure_data_manager(), "provider", None)
+            view = getattr(provider, "current_view", None)
+            return self._board_trend_reader.checker(sectors, market_date, weight, view=view)
         except Exception:
             return make_trend_checker(sectors, {}, date=market_date, weight=weight)
 
