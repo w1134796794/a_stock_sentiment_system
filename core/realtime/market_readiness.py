@@ -209,6 +209,39 @@ class RedisAuditReader:
         self.client.close()
 
 
+class PersistentAuditReader(RedisAuditReader):
+    """Match production rule inputs; Redis is used only for process health."""
+    storage = "durable_spool_and_archive"
+
+    def __init__(self, url, prefix, *, root, date, now):
+        super().__init__(url, prefix)
+        from core.realtime.persistent_market import PersistentMarketReader
+        self.view = PersistentMarketReader(Path(root) / "market_archive").view(date, asof=now)
+
+    def many(self, keys):
+        quote_prefix, minute_prefix = "realtime:quotes:latest:", f"realtime:minutes:{self.view.date}:"
+        health = [k for k in keys if not k.startswith((quote_prefix, minute_prefix))]
+        values = super().many(health)
+        codes = [k.removeprefix(quote_prefix) for k in keys if k.startswith(quote_prefix)]
+        quotes = {r["code"]: r for r in self.view.snapshots(codes, latest=True)}
+        for key in keys:
+            if key.startswith(quote_prefix):
+                values[key] = quotes.get(key.removeprefix(quote_prefix))
+            elif key.startswith(minute_prefix):
+                values[key] = self.view.minutes(key.removeprefix(minute_prefix)).to_dict("records")
+        return values
+
+    def ticks(self, date, codes, start, end):
+        result = {code: [] for code in codes}
+        for row in self.view.snapshots(codes, start=start, end=end):
+            result[row["code"]].append(row)
+        return result
+
+    def sector_points(self, date, codes, minutes):
+        points = self.view.sector_points(codes, minutes=minutes)
+        return {(code, minute): row for code, values in points.items() for minute, row in values.items()}
+
+
 def audit_market(
     *,
     root,
@@ -256,6 +289,7 @@ def audit_market(
         "board_shadow_ready": None,
         "limits": limits.__dict__,
         "status": "not_ready",
+        "input_storage": getattr(live, "storage", "legacy_audit_reader"),
         "notes": [
             "Readiness checks evidence availability, not whether a stock should be bought.",
             "Intraday archive checks cover a recent window; only postclose checks cover the full session.",
@@ -448,8 +482,8 @@ def audit_market(
                         latest[code] = raw
                 except (ValueError, KeyError, TypeError):
                     invalid["snapshot"] += 1
-            for event in read(("minutes",), at(date, "09:15:00"), evidence_until, codes, latest=True):
-                minute_payloads[event["code"]] = event
+            for event in read(("minutes",), at(date, "09:15:00"), evidence_until, codes):
+                minute_payloads.setdefault(event["code"], []).append(event)
             for event in read(("auction",), at(date, "09:15:00"), evidence_until, codes, latest=True):
                 raw = json.loads(event["payload"])
                 if raw.get("code") == event["code"] and aware(raw["received_at"]) == aware(event["received_at"]):
@@ -508,11 +542,16 @@ def audit_market(
             scope="replay",
         )
         try:
-            event = minute_payloads[code]
-            payload = json.loads(event["payload"])
-            if payload.get("code") != code or aware(payload["received_at"]) != aware(event["received_at"]):
-                raise ValueError("Minute archive identity mismatch")
-            frame = pd.DataFrame(payload["bars"])
+            versions = {}
+            events = sorted(minute_payloads[code], key=lambda e: aware(e["received_at"]))
+            for event in events:
+                payload = json.loads(event["payload"])
+                if payload.get("code") != code or aware(payload["received_at"]) != aware(event["received_at"]):
+                    raise ValueError("Minute archive identity mismatch")
+                for bar in payload["bars"]:
+                    versions[str(bar.get("time") or bar.get("datetime"))] = bar
+            event = events[-1]
+            frame = pd.DataFrame(list(versions.values()))
             quality = inspect_minute_bars(
                 frame, date, expected_code=code, require_full_day=phase == "postclose", now=end
             )
@@ -669,7 +708,7 @@ def audit_market(
                 check(
                     f"hot_quote:{code}",
                     quote.code == code and quote.date == date and quote.last_price > 0 and not quote.is_stale,
-                    "热报价新鲜度与身份",
+                    "策略报价新鲜度与身份",
                     scope="live",
                     details={"age_seconds": quote.stale_seconds},
                 )
@@ -686,7 +725,7 @@ def audit_market(
                 check(
                     f"hot_ticks:{code}",
                     hot_sequence["ok"] and len(set(valid_times)) >= 2,
-                    "Redis热窗口连续新快照",
+                    "策略输入的连续新快照",
                     scope="live",
                     details=hot_sequence,
                 )
@@ -695,7 +734,7 @@ def audit_market(
                 check(
                     f"hot_minutes:{code}",
                     quality["valid"],
-                    "策略实际读取的分钟缓存完整性",
+                    "策略实际读取的分钟数据完整性",
                     scope="live",
                     details={"reason": quality["reason"]},
                 )

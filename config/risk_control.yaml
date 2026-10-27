@@ -32,6 +32,9 @@ entry_confirm_deadline: '10:00:00'
 weak_entry_min_gap: -0.03
 weak_entry_max_gap: 0.01
 continuation_max_gap: 0.05
+acceleration_opening_minutes: 1  # 高开加速：开盘结构所需完整分钟K线数
+continuation_opening_minutes: 3  # 强势延续
+weak_opening_minutes: 5          # 弱转强
 entry_min_amount_pace: 0.80
 entry_max_amount_pace: 3.00
 continuation_min_auction_volume_ratio: 0.008

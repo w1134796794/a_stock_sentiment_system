@@ -55,6 +55,36 @@ def test_snapshots_confirm_without_any_post_opening_minute_or_minute_confirmatio
     assert decision.amount_pace == pytest.approx(1.00051)
 
 
+def test_acceleration_can_confirm_before_0935_but_weak_still_needs_five_minutes():
+    now = datetime(2026, 10, 22, 9, 32, 3)
+    service = SnapshotSignalService(clock=lambda: now)
+    evaluator = MinuteEntryEvaluator(acceleration_opening_minutes=1,
+        confirmation_policy=ConfirmationPolicy(mode="volume_price"))
+    bars = pd.DataFrame([dict(time="09:31:00", open=10.6, high=10.65, low=10.5,
+                              close=10.6, volume=10000, amount=106000)])
+    snapshots = ticks()
+    for i in range(2):
+        snapshots.loc[i, "time"] = f"09:32:0{i * 3}"
+        snapshots.loc[i, "received_at"] = (now - timedelta(seconds=3-i*3)).isoformat()
+        snapshots.loc[i, "last_price"] = 10.7 + i * .01
+        snapshots.loc[i, "ask1"] = 10.71 + i * .01
+        snapshots.loc[i, "open_price"] = 10.6
+        snapshots.loc[i, "amount_yuan"] = 21300000 + i * 10700
+    args = dict(code="000001", trade_date="20261022", minute_bars=bars, snapshots=snapshots,
+                prev_close=10, sector_sync=lambda at: True, is_leader=True, limit_price=11,
+                evaluator=evaluator)
+    decision, fallback = service.evaluate_primary(mode=ENTRY_ACCELERATION, open_gap=.06, **args)
+    assert not fallback
+    assert decision.status == "confirmed"
+    assert decision.confirm_time == "09:32:03"
+    assert decision.condition_checks["latest"]["checks"]["opening_minutes_required"] == 1
+    # Same short minute history is insufficient for weak-to-strong.
+    snapshots["open_price"] = 9.9
+    decision, _ = service.evaluate_primary(mode=ENTRY_WEAK, open_gap=-.01, **args)
+    assert decision.data_status == "snapshot_structure_pending"
+    assert decision.condition_checks["latest"]["checks"]["opening_minutes_required"] == 5
+
+
 @pytest.mark.parametrize("change,reason", [
     ("missing", "snapshot_sequence_missing"), ("stale", "snapshot_stale"),
     ("gap", "snapshot_gap"), ("identity", "snapshot_identity_mismatch"),

@@ -28,7 +28,7 @@ def main(argv=None):
         WEB_DATA_DIR,
     )
     from core.infrastructure.atomic_json import atomic_write_json
-    from core.realtime.market_readiness import AuditLimits, RedisAuditReader, audit_market, calendar_day, phase_for
+    from core.realtime.market_readiness import AuditLimits, PersistentAuditReader, audit_market, calendar_day, phase_for
     from core.realtime.trading_session import shanghai_now
 
     parser = argparse.ArgumentParser(description="只读检查真实交易日的数据就绪度；不补数、不运行策略、不发送通知")
@@ -84,7 +84,7 @@ def main(argv=None):
         if trading and phase in {"preopen", "live"}:
             if REDIS_URL:
                 try:
-                    live = RedisAuditReader(REDIS_URL, REDIS_KEY_PREFIX)
+                    live = PersistentAuditReader(REDIS_URL, REDIS_KEY_PREFIX, root=args.data_root, date=date, now=now)
                 except Exception:
                     pass  # Report only availability; never expose connection credentials.
             if sys.platform == "linux" and not args.no_systemd:

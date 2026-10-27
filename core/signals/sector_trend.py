@@ -218,10 +218,28 @@ class BoardTrendReader:
 
         self.root, self.backend, self._cache = root, backend or get_shared_state_backend(), None
 
-    def checker(self, names, date, weight=5.0):
+    def checker(self, names, date, weight=5.0, *, view=None):
         from core.realtime.board_plan import BoardCollectionPlan
         from core.realtime.board_quote_store import BoardQuoteStore
         from core.realtime.collection_plan import DailyCollectionPlan
+
+        if view is not None:
+            root = self.root or view.reader.root.parent
+            parent = DailyCollectionPlan(root, self.backend).load(date)
+            plan = BoardCollectionPlan(root).load(date, parent_id=parent["plan_id"]) if parent else None
+            detail = {"assessed": False, "sector_required": False, "data_completeness": 0.0}
+
+            def persistent_check(at_time):
+                at = min(view.asof, shanghai_now(datetime.strptime(date+str(at_time), "%Y%m%d%H:%M:%S")))
+                points = view.events("board_snapshot", plan["codes"], start=at-timedelta(seconds=220), end=at) if plan else []
+                checker, observed = make_trend_checker(names, {"plan": plan, "points": points},
+                    date=date, weight=weight, clock=lambda: view.asof)
+                state = checker(at_time)
+                detail.update(observed)
+                detail["persistent_view"] = {"asof": view.asof.isoformat(), "watermark": view.watermark}
+                return state
+
+            return persistent_check, detail
 
         if self._cache is None or self._cache[0] != date or monotonic() - self._cache[1] > 1:
             parent = DailyCollectionPlan(self.root, self.backend).load(date)

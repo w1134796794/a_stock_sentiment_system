@@ -65,6 +65,9 @@ class RiskConfig:
     weak_entry_min_gap: float = -0.03
     weak_entry_max_gap: float = 0.01
     continuation_max_gap: float = 0.05
+    acceleration_opening_minutes: int = 1
+    continuation_opening_minutes: int = 3
+    weak_opening_minutes: int = 5
     entry_min_amount_pace: float = 0.80
     entry_max_amount_pace: float = 3.00
     continuation_min_auction_volume_ratio: float = 0.008
@@ -149,6 +152,9 @@ class RiskConfig:
         kwargs.setdefault("three_board_feedback_score_penalty", 0.0)
         kwargs.setdefault("entry_confirmation_mode", "legacy")
         kwargs.setdefault("entry_sector_mode", "breadth_required")
+        kwargs.setdefault("acceleration_opening_minutes", 5)
+        kwargs.setdefault("continuation_opening_minutes", 5)
+        kwargs.setdefault("weak_opening_minutes", 5)
         # Fixed take-profit was removed in favour of trailing exits. Old web
         # overrides can still contain this key, so treat it as a silent legacy
         # migration instead of logging the same warning on every config load.

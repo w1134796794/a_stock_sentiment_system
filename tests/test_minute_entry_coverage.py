@@ -43,8 +43,8 @@ def test_continuation_uses_strict_minute_confirmation_when_auction_is_missing():
 
     assert decision.filled
     assert decision.signal == "开盘强势确认"
-    assert decision.confirm_time == "09:36:00"
-    assert decision.entry_time == "09:37:00"
+    assert decision.confirm_time == "09:35:00"
+    assert decision.entry_time == "09:36:00"
 
 
 def test_real_but_weak_auction_is_still_rejected():

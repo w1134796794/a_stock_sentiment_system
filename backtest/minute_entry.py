@@ -182,7 +182,16 @@ class MinuteEntryEvaluator:
         min_auction_volume_ratio: float = 0.008,
         min_auction_amount: float = 5_000_000,
         confirmation_policy=None,
+        acceleration_opening_minutes: int = 1,
+        continuation_opening_minutes: int = 3,
+        weak_opening_minutes: int = 5,
     ) -> None:
+        for name, value in (("acceleration_opening_minutes", acceleration_opening_minutes),
+                            ("continuation_opening_minutes", continuation_opening_minutes),
+                            ("weak_opening_minutes", weak_opening_minutes)):
+            if type(value) is not int or not 1 <= value <= 5:
+                raise ValueError(f"{name} must be an integer in [1, 5]")
+            setattr(self, name, value)
         self.deadline = deadline
         self.weak_min_gap = weak_min_gap
         self.weak_max_gap = weak_max_gap
@@ -193,6 +202,11 @@ class MinuteEntryEvaluator:
         self.min_auction_amount = min_auction_amount
         from backtest.confirmation_quality import ConfirmationPolicy
         self.confirmation_policy = confirmation_policy or ConfirmationPolicy()
+
+    def opening_window_minutes(self, mode):
+        return {ENTRY_ACCELERATION: self.acceleration_opening_minutes,
+                ENTRY_CONTINUATION: self.continuation_opening_minutes,
+                ENTRY_WEAK: self.weak_opening_minutes}.get(mode, 5)
 
     def evaluate_strategy(self, *, execution: dict, mode: str, **kwargs):
         """Evaluate each allowed structure and the opening mode independently."""
@@ -297,13 +311,22 @@ class MinuteEntryEvaluator:
                 prev_close=prev_close, limit_price=limit_price, sector_sync=sector_sync, live=live,
                 previous_session_close=previous_session_close,
             )
-        opening_rows = data[data["time"] <= "09:35:00"]
-        first_five = opening_rows.head(5)
+        opening_mode = mode
+        if mode == ENTRY_HYBRID:
+            opening_mode = ENTRY_WEAK if open_gap <= self.weak_max_gap else ENTRY_CONTINUATION
+        opening_count = self.opening_window_minutes(opening_mode)
+        opening_rows = data[data["time"] <= f"09:{30 + opening_count}:00"]
+        first_five = opening_rows.head(opening_count)
+        if opening_count < 5:
+            expected = {f"09:{m}:00" for m in range(31, 31 + opening_count)}
+            first_five = data[data["time"].isin(expected)]
+            if len(first_five) != opening_count:
+                return EntryDecision("observing", reason=f"等待完整开盘前{opening_count}分钟结构", open_gap_pct=open_gap)
         last_opening_index = int(first_five.index.max()) if not first_five.empty else -1
         scan = data[(data.index > last_opening_index) & (data["time"] <= self.deadline)]
         if first_five.empty or scan.empty:
             status = "observing" if live and str(data.iloc[-1]["time"]) <= self.deadline else "missing_minutes"
-            return EntryDecision(status, reason="等待开盘前5分钟完成", open_gap_pct=open_gap)
+            return EntryDecision(status, reason=f"等待开盘前{opening_count}分钟完成", open_gap_pct=open_gap)
 
         if mode == ENTRY_WEAK:
             if not self.weak_min_gap <= open_gap <= self.weak_max_gap:
@@ -365,7 +388,7 @@ class MinuteEntryEvaluator:
                 self._record_checks(row, protection=False, previous_close=float(row["close"]) >= prev_close,
                     vwap=float(row["close"]) >= float(row["vwap"]), breakout=float(row["high"]) > opening_high,
                     amount_pace=None, amount_pace_allowed=None, sector=None)
-                return EntryDecision("cancelled", "弱转强", "跌破开盘前5分钟低点", str(row["time"]), open_gap_pct=gap)
+                return EntryDecision("cancelled", "弱转强", f"跌破开盘前{self.weak_opening_minutes}分钟低点", str(row["time"]), open_gap_pct=gap)
             pace = self._amount_pace(row, previous_amount, plan_amount_ratio, expected_amount_fraction)
             sector_state = sector_sync(str(row["time"])) if sector_sync else None
             sector_observed = sector_observed or sector_state is not None
@@ -388,7 +411,7 @@ class MinuteEntryEvaluator:
                 sector=sector_state, protection=float(row["low"]) >= opening_low * 0.999)
             if confirmed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2):
                 decision = self._next_minute_fill(
-                    data, index, "弱转强", "收复昨收、站上VWAP并突破前5分钟高点",
+                    data, index, "弱转强", f"收复昨收、站上VWAP并突破前{self.weak_opening_minutes}分钟高点",
                     gap, pace, sector_ok, limit_price, live=live,
                     profile_samples=amount_profile_samples, hold_minutes=hold_minutes,
                     false_break_count=false_breaks, pullback_quality=pullback_quality,
@@ -464,7 +487,7 @@ class MinuteEntryEvaluator:
                 if auction_available:
                     confirmed = trigger
                     signal = "强势延续"
-                    reason = "竞价放量后回踩VWAP承接或突破前5分钟高点"
+                    reason = f"竞价放量后回踩VWAP承接或突破前{self.continuation_opening_minutes}分钟高点"
                 else:
                     confirmed = (
                         float(row["close"]) >= vwap
@@ -473,7 +496,7 @@ class MinuteEntryEvaluator:
                         and pace >= max(self.min_amount_pace, 1.0)
                     )
                     signal = "开盘强势确认"
-                    reason = "竞价明细缺失，按突破前5分钟高点、站稳VWAP和分钟量能确认"
+                    reason = f"竞价明细缺失，按突破前{self.continuation_opening_minutes}分钟高点、站稳VWAP和分钟量能确认"
                 if confirmed and (not live or self.confirmation_policy.mode != "legacy" or index >= len(data) - 2):
                     if not sector_observed:
                         reason += "（缺少板块确认）" if self.confirmation_policy.require_sector else "（板块趋势未评估）"
@@ -613,7 +636,9 @@ class MinuteEntryEvaluator:
                 return EntryDecision("quality_rejected", signal, "最终确认时点成交进度不在允许范围",
                                      open_gap_pct=gap, amount_pace=pace, **quality_meta)
         if self.confirmation_policy.mode == "volume_price":
-            history = data[(data.index <= index) & (data["time"] > "09:35:00")]
+            opening_count = self.opening_window_minutes({"高开加速": ENTRY_ACCELERATION,
+                "弱转强": ENTRY_WEAK, "强势延续": ENTRY_CONTINUATION, "开盘强势确认": ENTRY_CONTINUATION}.get(signal))
+            history = data[(data.index <= index) & (data["time"] > f"09:{30 + opening_count}:00")]
             hold_minutes = int((history["close"] >= history["vwap"]).sum())
             false_break_count = int(((history["high"] > breakout_level) & (history["close"] < breakout_level)).sum())
             pullback_quality = float((history["close"] / history["vwap"]).clip(upper=1.02).mean())

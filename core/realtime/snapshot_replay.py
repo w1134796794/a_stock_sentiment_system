@@ -82,7 +82,9 @@ def load_snapshot_inputs(root, request, *, progress=None):
             with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as con:
                 con.row_factory = sqlite3.Row
                 pending = path.name == "ingestion.sqlite3"
-                sql = "SELECT event_id,kind,code,received_at,payload FROM market_events"
+                columns = {r[1] for r in con.execute("PRAGMA table_info(market_events)")}
+                persistence = "persisted_ts" if "persisted_ts" in columns else "NULL AS persisted_ts"
+                sql = "SELECT event_id,kind,code,received_at,payload," + persistence + " FROM market_events"
                 parameters = ()
                 if pending:
                     sql += " WHERE market_date=? AND archived=0"
@@ -94,13 +96,15 @@ def load_snapshot_inputs(root, request, *, progress=None):
                         continue
                     try:
                         stamp = aware(source["received_at"])
-                        if stamp.strftime("%Y%m%d") != date or stamp > end:
+                        visible = max(stamp, datetime.fromtimestamp(source["persisted_ts"], tz=stamp.tzinfo)) if source["persisted_ts"] is not None else stamp
+                        if stamp.strftime("%Y%m%d") != date or visible > end:
                             continue
                         payload = json.loads(source["payload"])
                         if not isinstance(payload, dict):
                             raise ValueError("Invalid event payload")
                         event = {key: source[key] for key in ("event_id", "kind", "code", "received_at")}
                         event["payload"] = payload
+                        event["visible_at"] = visible.isoformat()
                         identity = event["event_id"]
                         if identity in seen and seen[identity] != event:
                             conflicts.add(identity)
@@ -118,7 +122,7 @@ def load_snapshot_inputs(root, request, *, progress=None):
                                  if key not in conflicts and row["kind"] not in KINDS]
     result["events"] = sorted(
         (row for key, row in seen.items() if key not in conflicts and row["kind"] in KINDS),
-        key=lambda row: (aware(row["received_at"]), row["event_id"]),
+        key=lambda row: (aware(row.get("visible_at") or row["received_at"]), row["event_id"]),
     )
     return result
 
@@ -162,6 +166,7 @@ class ArchiveEntryService(RealtimeEntrySignalService):
         )
         self.clock = clock
         self.ticks, self.auctions, self.frames = {}, {}, {}
+        self.minute_versions = {}
         self.sector_points = sector_points
         self._feedback_inputs = bundle["inputs"].get("board_feedback_inputs") or {}
         self.board_trend_inputs = {}
@@ -189,14 +194,11 @@ class ArchiveEntryService(RealtimeEntrySignalService):
             return self._trend_checker(self._sectors(row), market_date)
         from core.realtime.sector_breadth import closed_quote_checker
 
-        policy = self.evaluator.confirmation_policy
-        window = 6 if policy.mode == "legacy" else max(policy.pullback_window, policy.sustain_minutes) + 5
         boundary = self.clock().replace(second=0, microsecond=0)
-        selected = {(boundary - timedelta(minutes=i)).strftime("%H:%M:%S") for i in range(window)}
         names = self._sectors(row)
         members = {member for name in names for member in self.members.get(name, [])}
         points = {
-            c: {minute: value for minute, value in values.items() if minute in selected}
+            c: {minute: value for minute, value in values.items() if minute <= boundary.strftime("%H:%M:%S")}
             for c, values in self.sector_points.items()
             if c in members
         }
@@ -361,7 +363,7 @@ def replay_snapshot_inputs(inputs, progress=None):
     member_codes = {c for values in service.members.values() for c in values}
     for event in inputs.get("events") or []:
         try:
-            stamp = aware(event["received_at"])
+            stamp = aware(event.get("visible_at") or event["received_at"])
             raw, kind, code = event["payload"], event["kind"], event["code"]
             if stamp > end:
                 continue
@@ -371,7 +373,8 @@ def replay_snapshot_inputs(inputs, progress=None):
                 or not isinstance(raw, dict)
                 or code != raw.get("code")
                 or code not in plan_codes | member_codes
-                or aware(raw["received_at"]) != stamp
+                or aware(raw["received_at"]) != aware(event["received_at"])
+                or stamp < aware(event["received_at"])
                 or raw.get("synthetic")
             ):
                 raise ValueError("Invalid archive identity")
@@ -498,7 +501,10 @@ def replay_snapshot_inputs(inputs, progress=None):
                     # Missing minutes remain missing; malformed identities/prices are rejected.
                     if any(not issue.startswith(("缺少 ", "有效交易分钟不足")) for issue in quality["issues"]):
                         raise ValueError("Invalid received minute evidence")
-                    frame = normalize_minute_bars(original)
+                    versions = service.minute_versions.setdefault(code, {})
+                    for bar in raw.get("bars") or []:
+                        versions[str(bar.get("time") or bar.get("datetime"))] = bar
+                    frame = normalize_minute_bars(pd.DataFrame(list(versions.values())))
                     if not frame.empty:
                         service.frames[code] = frame[frame["time"] < stamp.strftime("%H:%M") + ":00"].copy()
                 except (ValueError, TypeError, KeyError):

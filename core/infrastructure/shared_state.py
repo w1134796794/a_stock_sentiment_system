@@ -60,6 +60,13 @@ class MemoryStateBackend:
             self._values.pop(full, None)
             self._lists.pop(full, None)
 
+    def scan_keys(self, pattern: str):
+        import fnmatch
+        with self._mutex:
+            keys = set(self._values) | set(self._lists)
+        prefix = self._key("")
+        return [key[len(prefix):] for key in keys if fnmatch.fnmatchcase(key, self._key(pattern))]
+
     def append_list(self, key: str, value: str, max_items: int = 10000) -> int:
         full = self._key(key)
         with self._mutex:
@@ -171,6 +178,13 @@ class RedisStateBackend:
 
     def delete(self, key: str) -> None:
         self.client.delete(self._key(key))
+
+    def scan_keys(self, pattern: str):
+        prefix = self._key("")
+        for key in self.client.scan_iter(match=self._key(pattern), count=500):
+            if isinstance(key, bytes):
+                key = key.decode()
+            yield key[len(prefix):]
 
     def append_list(self, key: str, value: str, max_items: int = 10000) -> int:
         full = self._key(key)
