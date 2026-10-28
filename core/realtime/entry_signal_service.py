@@ -336,7 +336,8 @@ class RealtimeEntrySignalService:
         if not frame.empty:
             quote_time = str(quote.get("time") or quote.get("received_at") or "").replace("T", " ").split(" ")[-1]
             if len(quote_time) >= 5 and quote_time[2] == ":":
-                frame = frame[frame["time"] < quote_time[:5] + ":00"].copy()
+                from core.data.minute_clock import completed_minutes
+                frame = completed_minutes(frame, quote_time)
             else:
                 return self._payload(EntryDecision("observing", reason="缺少行情时间，无法验证完整分钟"), mode, market_date,
                                      opening_evidence=opening)

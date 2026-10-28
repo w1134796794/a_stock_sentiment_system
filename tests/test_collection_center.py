@@ -77,11 +77,30 @@ def test_strategy_schedule_waits_without_dispatching_collection(monkeypatch):
     from core.automation.internal_scheduler import InternalScheduler
     monkeypatch.setenv("AUTOMATION_DAILY_CATCH_UP", "false")
     scheduler = InternalScheduler()
-    monkeypatch.setattr(scheduler, "_now", lambda: datetime.fromisoformat("2026-10-23T20:16:00+08:00"))
+    monkeypatch.setattr(scheduler, "_now", lambda: datetime.fromisoformat("2026-10-23T21:46:00+08:00"))
     monkeypatch.setattr("core.etl.stage_status.fetch_status", lambda *a, **kw: {"ready": False})
     monkeypatch.setattr(scheduler, "_dispatch_job", lambda *a, **kw: pytest.fail("Missing data cannot dispatch any work"))
     assert scheduler._recover_due_daily_job("strategy") is False
     assert scheduler.strategy_state.load()["status"] == "waiting_data"
+
+
+@pytest.mark.parametrize('collected', [False, True])
+def test_scheduled_strategy_waits_for_same_day_collection_success(monkeypatch, collected):
+    import core.automation.internal_scheduler as module
+    monkeypatch.setenv('AUTOMATION_DAILY_CATCH_UP', 'false')
+    monkeypatch.setenv('AUTOMATION_DAILY_TIME', '21:30')
+    monkeypatch.setenv('AUTOMATION_STRATEGY_TIME', '21:30')
+    scheduler = module.InternalScheduler()
+    saved, dispatched = [], []
+    scheduler.strategy_state = SimpleNamespace(load=lambda: {}, save=saved.append)
+    scheduler.state = SimpleNamespace(load=lambda: {})
+    scheduler._now = lambda: datetime.fromisoformat('2026-10-28T21:31:00+08:00')
+    monkeypatch.setattr(module, 'TaskStateStore', lambda name: SimpleNamespace(load=lambda: (
+        {'status': 'done', 'pipeline_ok': True} if collected and name == 'automation_daily_20261028' else {})))
+    monkeypatch.setattr('core.etl.stage_status.fetch_status', lambda *a, **kw: {'ready': True})
+    scheduler._dispatch_job = lambda name, target: (dispatched.append(name) or True)
+    assert scheduler._recover_due_daily_job('strategy') is collected
+    assert dispatched == (['strategy'] if collected else [])
 
 
 def test_postclose_worker_only_calls_fetch(monkeypatch, tmp_path):

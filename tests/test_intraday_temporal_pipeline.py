@@ -101,7 +101,7 @@ def test_confirmed_signal_enqueues_before_simulated_fill_and_survives_worker_res
     assert queue.enqueue(payload()) == 0
     assert calls[0]["rows"][0]["entry_price"] == 0
     from core.portfolio.paper_trading_service import PaperTradingService
-    assert PaperTradingService._skip_reason(calls[0]["rows"][0], "20261022") == "下一分钟成交价缺失"
+    assert PaperTradingService._skip_reason(calls[0]["rows"][0], "20261022") == ""
     assert ledger.timeline("signal")["events"]
 
 

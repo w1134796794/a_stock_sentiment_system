@@ -134,6 +134,8 @@ def normalize_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
         return parsed.strftime("%H:%M:%S") if pd.notna(parsed) else ""
 
     data["time"] = data["time"].map(normalize_time)
+    from core.data.minute_clock import end_label_minutes
+    data = end_label_minutes(data)
     for column in ("open", "high", "low", "close"):
         if column not in data.columns:
             data[column] = data.get("price", 0.0)

@@ -25,7 +25,7 @@ def systemd_path(value: str) -> str:
 
 
 def render_units(project_root: str, user: str, *, python: str | None = None,
-                 env_file: str | None = None, notifications: bool = False) -> dict[str, str]:
+                 env_file: str | None = None, notifications: bool = False, paper_execution: bool = False) -> dict[str, str]:
     if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_.-]*[$]?", user):
         raise ValueError("Invalid Linux service user")
     root = str(PurePosixPath(project_root))
@@ -34,10 +34,15 @@ def render_units(project_root: str, user: str, *, python: str | None = None,
     environment_file = env_file or f"{root}/.env"
     systemd_path(environment_file)
     units = {}
-    for name, (description, script) in WORKERS.items():
+    workers = dict(WORKERS)
+    if paper_execution:
+        workers["a-stock-execution.service"] = ("Paper execution consumer", "run_realtime_execution.py")
+    for name, (description, script) in workers.items():
         command = f"{interpreter} -X utf8 {systemd_path(f'{root}/scripts/{script}')}"
         if name == "a-stock-strategy.service" and notifications:
             command += " --notifications"
+        if name == "a-stock-execution.service":
+            command += " --paper --monitor"
         units[name] = f"""[Unit]
 Description=A Stock {description}
 Wants=network-online.target
@@ -64,7 +69,7 @@ StandardError=journal
 """
     units[TARGET] = f"""[Unit]
 Description=A Stock independent market pipeline
-Wants={' '.join(WORKERS)}
+Wants={' '.join(workers)}
 After=network-online.target
 
 [Install]
@@ -80,12 +85,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python", help="Absolute path to the existing Linux virtualenv Python")
     parser.add_argument("--env-file", help="Shared systemd-compatible environment file; defaults to PROJECT/.env")
     parser.add_argument("--notifications", action="store_true", help="Explicitly enable real notification delivery")
+    parser.add_argument("--paper-execution", action="store_true", help="Install the separate paper execution consumer")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/systemd"))
     parser.add_argument("--install", action="store_true", help="Linux root only: install and enable, but do not start")
     args = parser.parse_args(argv)
     try:
         units = render_units(args.project_root, args.user, python=args.python,
-                             env_file=args.env_file, notifications=args.notifications)
+                             env_file=args.env_file, notifications=args.notifications, paper_execution=args.paper_execution)
     except ValueError as exc:
         parser.error(str(exc))
     if args.install:

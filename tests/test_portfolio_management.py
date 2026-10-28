@@ -323,6 +323,20 @@ def test_paper_buy_rejects_quote_before_entry_time(tmp_path):
     assert repository.list_trades("default") == []
 
 
+def test_formal_confirmation_without_simulated_price_waits_for_later_quote_then_buys(tmp_path):
+    repository = HoldingRepository(tmp_path / "portfolio.sqlite")
+    quote = _quote(last_price=10.0, time="09:36:00")
+    service = PaperTradingService(repository, quote_service=_FakeQuotes(quote))
+    payload = {"market_date": "20260803", "rows": [{"code": "000001", "confirm_status": "confirmed",
+        "formal_confirmed_at": "09:36:00", "confirm_time": "09:36:00", "entry_time": "", "entry_price": None}]}
+    waiting = service.process_realtime_payload(payload)
+    assert waiting["opened"] == 0 and "等待正式确认之后的新成交报价" in waiting["skipped"]
+    service.quote_service = _FakeQuotes(_quote(last_price=10.0, time="09:36:03"))
+    assert service.process_realtime_payload(payload)["opened"] == 1
+    assert service.process_realtime_payload(payload)["opened"] == 0
+    assert repository.list_trades("default")[0]["trade_time"] == "09:36:03"
+
+
 def test_manual_and_automatic_buys_share_one_million_account(tmp_path):
     from types import SimpleNamespace
 

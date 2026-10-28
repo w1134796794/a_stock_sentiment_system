@@ -55,6 +55,26 @@ def test_snapshots_confirm_without_any_post_opening_minute_or_minute_confirmatio
     assert decision.amount_pace == pytest.approx(1.00051)
 
 
+def test_end_labeled_opening_structure_is_ready_at_0935():
+    now = datetime(2026, 10, 22, 9, 35, 3)
+    snapshots = ticks()
+    for i in range(2):
+        snapshots.loc[i, "time"] = f"09:35:0{i * 3}"
+        snapshots.loc[i, "received_at"] = (now - timedelta(seconds=3 - i * 3)).isoformat()
+    service = SnapshotSignalService(clock=lambda: now)
+    _, evaluator = setup_service()
+    decision, fallback = service.evaluate_primary(
+        code="000001", trade_date="20261022", mode=ENTRY_WEAK,
+        minute_bars=minutes().assign(bar_label="end"), snapshots=snapshots,
+        prev_close=10, open_gap=-.01, sector_sync=lambda at: True,
+        is_leader=False, limit_price=11, evaluator=evaluator,
+        previous_amount=100000000, expected_amount_fraction=lambda at: .2,
+        profile_samples=200)
+    assert not fallback
+    assert decision.status == "confirmed"
+    assert decision.confirm_time == "09:35:03"
+
+
 def test_acceleration_can_confirm_before_0935_but_weak_still_needs_five_minutes():
     now = datetime(2026, 10, 22, 9, 32, 3)
     service = SnapshotSignalService(clock=lambda: now)

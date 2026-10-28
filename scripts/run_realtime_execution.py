@@ -46,11 +46,16 @@ def main():
                     payload = stored_strategy_view(date)
                     revision = payload.get("market_revision") or ""
                     if paper and payload.get("ok") and revision and revision != last and lease.is_owner():
-                        paper.process_realtime_payload(payload)
+                        result = paper.process_realtime_payload(payload)
+                        backend.set_json("realtime:execution:health", {
+                            "ok": True, "market_date": date, "updated_at": shanghai_now().isoformat(),
+                            "market_revision": revision, "result": result}, 120)
                         last = revision
                     if monitor and lease.is_owner():
                         monitor.run_once(account_key="default", signal_date=date, auto_execute=args.paper)
             except Exception:
+                backend.set_json("realtime:execution:health", {"ok": False,
+                    "updated_at": shanghai_now().isoformat(), "reason": "模拟执行失败，检查执行进程日志"}, 120)
                 from loguru import logger
                 logger.exception("Independent execution consumer failed; strategy continues independently")
             stop.wait(3)

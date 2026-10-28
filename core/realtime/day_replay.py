@@ -18,6 +18,7 @@ import pandas as pd
 from backtest.minute_entry import normalize_minute_bars
 from backtest.trade_calendar import TradeCalendar
 from core.data.minute_quality import inspect_minute_bars
+from core.data.minute_clock import completed_minutes
 from core.operations.preopen_evidence import PreopenEvidenceStore
 from core.realtime.entry_signal_service import RealtimeEntrySignalService
 from core.realtime.models import normalize_stock_code
@@ -155,7 +156,7 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
         end = datetime.strptime(date + until, "%Y%m%d%H:%M:%S")
         quality = inspect_minute_bars(frames.get(code), date, expected_code=code,
                                       require_full_day=False, now=end)
-        available = frame[frame["time"] < until[:5] + ":00"] if not frame.empty else frame
+        available = completed_minutes(frame, until)
         prior = previous.get(code, {})
         opening = finite_number((opening_prices or {}).get(code))
         evidence = (opening_evidence or {}).get(code) or {}
@@ -189,7 +190,8 @@ def replay_minutes(*, request, candidate_date, rows, frames, previous, auctions=
             for count in range(1, len(available) + 1):
                 prefix = available.iloc[:count]
                 source_time = str(prefix.iloc[-1]["time"])
-                evaluated_at = (datetime.strptime(source_time, "%H:%M:%S") + timedelta(minutes=1)).strftime("%H:%M:%S")
+                evaluated_at = (source_time if prefix.iloc[-1].get("bar_label") == "end" else
+                    (datetime.strptime(source_time, "%H:%M:%S") + timedelta(minutes=1)).strftime("%H:%M:%S"))
                 # Derived bar values are replay context, never quotes with invented receive timestamps.
                 quote = {"date": date, "time": evaluated_at, "pre_close": reference,
                          "open_price": opening,

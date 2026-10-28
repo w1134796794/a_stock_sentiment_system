@@ -87,6 +87,11 @@ class PaperTradingService:
             reason = self._skip_reason(row, market_date)
             if reason:
                 skipped[reason] = skipped.get(reason, 0) + 1
+                if (row.get("confirm_status") or row.get("status")) == "confirmed":
+                    signal_id = str(row.get("signal_id") or stable_id(market_date, row.get("code"), row.get("confirm_time")))
+                    ledger.event(stable_id(signal_id, "paper_skip", reason), "paper_order_rejected",
+                        {"code": row.get("code"), "market_date": market_date, "reason": reason},
+                        signal_id=signal_id, account_key=self.ACCOUNT_KEY)
                 continue
             code = normalize_stock_code(row.get("code"), add_suffix=False)
             signal_id = str(row.get("signal_id") or stable_id(
@@ -101,10 +106,19 @@ class PaperTradingService:
                              signal_id=signal_id, account_key=self.ACCOUNT_KEY)
 
             buy_quote = quotes.get(code) or {}
-            entry_time = str(row.get("entry_time") or "")
+            entry_time = str(row.get("entry_time") or row.get("formal_confirmed_at") or row.get("confirm_time") or "")
             error = quote_error(buy_quote, market_date, side="buy", reference_time=entry_time)
             if error or not entry_time:
                 reject(error or "缺少成交时间")
+                continue
+            if not row.get("entry_time") and str(buy_quote.get("time") or "")[:8] <= entry_time:
+                reject("等待正式确认之后的新成交报价")
+                continue
+            from backtest.minute_entry import resolve_entry_deadline
+            deadline = resolve_entry_deadline(row.get("strategy_execution") or {}, row.get("entry_mode") or "",
+                (row.get("entry_parameters") or {}).get("deadline") or "15:00:00")
+            if str(buy_quote.get("time") or "")[:8] > deadline:
+                reject("超过策略执行截止时间")
                 continue
             try:
                 price = execution_price(buy_quote, side="buy", reference_time=entry_time,
@@ -527,8 +541,9 @@ class PaperTradingService:
             return "尚未确认"
         if not market_date:
             return "行情日期缺失"
-        if _number(row.get("entry_price")) <= 0:
-            return "下一分钟成交价缺失"
+        if not (row.get("formal_confirmed_at") or row.get("confirm_time")
+                or (_number(row.get("entry_price")) > 0 and row.get("entry_time"))):
+            return "缺少正式确认时间"
         if bool(row.get("is_stale")):
             return "行情已过期"
         return ""

@@ -359,11 +359,15 @@ class EltdxProvider(EltdxEvidenceMixin, EltdxResearchMixin):
         period = self._normalize_period(period)
         try:
             with self._client() as client:
-                if hasattr(client, "get_kline"):
-                    series = client.get_kline(period, code, count=count)
+                end_labeled = hasattr(client, "bars")
+                if end_labeled:
+                    series = client.bars.get(code, period=period, count=count, bar_time="end")
                 else:
-                    series = client.bars.get(code, period=period, count=count)
-            return self._kline_series_to_frame(series, ts_code)
+                    series = client.get_kline(period, code, count=count)
+            frame = self._kline_series_to_frame(series, ts_code)
+            if not frame.empty:
+                frame["bar_label"] = "end" if end_labeled else "unknown"
+            return frame
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] kline unavailable {ts_code} {period}: {e}")
             return pd.DataFrame()

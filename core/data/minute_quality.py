@@ -95,12 +95,15 @@ def inspect_minute_bars(frame: pd.DataFrame | None, trade_date: str, *,
     if date > clock.strftime("%Y%m%d"):
         issues.append("请求日期尚未发生")
     grids = []
-    for offset in (0, 1):
+    labels = set(frame['bar_label'].dropna()) if 'bar_label' in frame else set()
+    offsets = (1,) if labels == {'end'} else (0,) if labels == {'start'} else (0, 1)
+    for offset in offsets:
         grid = set()
         for start in (9 * 60 + 30, 13 * 60):
             for minute in range(start + offset, start + 120 + offset):
                 time = f"{minute // 60:02d}:{minute % 60:02d}:00"
-                if require_full_day or time <= (clock - timedelta(minutes=1)).strftime("%H:%M:00"):
+                cutoff = clock if labels == {'end'} else clock - timedelta(minutes=1)
+                if require_full_day or time <= cutoff.strftime("%H:%M:00"):
                     grid.add(time)
         grids.append(grid)
     expected = min(grids, key=lambda grid: (len(grid - actual), -len(grid)))

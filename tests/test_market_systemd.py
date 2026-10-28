@@ -5,6 +5,14 @@ import pytest
 from scripts.install_market_systemd import TARGET, WORKERS, main, render_units
 
 
+def test_optional_paper_consumer_is_supervised_in_market_target():
+    units = render_units('/srv/a-stock', 'deploy', paper_execution=True, notifications=True)
+    assert 'a-stock-execution.service' in units[TARGET]
+    assert 'run_realtime_execution.py' in units['a-stock-execution.service']
+    assert '--paper --monitor' in units['a-stock-execution.service']
+    assert 'a-stock-execution.service' not in render_units('/srv/a-stock', 'deploy')
+
+
 def test_units_supervise_independent_workers():
     units = render_units("/opt/a-stock", "astock")
     assert set(units) == {TARGET, *WORKERS}

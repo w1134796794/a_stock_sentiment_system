@@ -30,11 +30,11 @@ def _env_bool(name: str, default: bool = True) -> bool:
 class InternalScheduler:
     def __init__(self) -> None:
         self.enabled = _env_bool("AUTOMATION_ENABLED", True)
-        self.daily_time = os.getenv("AUTOMATION_DAILY_TIME", "20:00").strip() or "20:00"
-        self.strategy_time = os.getenv("AUTOMATION_STRATEGY_TIME", "20:15").strip() or "20:15"
+        self.daily_time = os.getenv("AUTOMATION_DAILY_TIME", "21:30").strip() or "21:30"
+        self.strategy_time = os.getenv("AUTOMATION_STRATEGY_TIME", "21:45").strip() or "21:45"
         self.auction_time = os.getenv("AUTOMATION_AUCTION_TIME", "09:25:10").strip() or "09:25:10"
         self.auto_backtest = _env_bool("AUTOMATION_AUTO_BACKTEST", True)
-        self.capital = float(os.getenv("AUTOMATION_CAPITAL", "100000") or 100000)
+        self.capital = float(os.getenv("AUTOMATION_CAPITAL", "1000000") or 1000000)
         self.scheduler = schedule.Scheduler()
         self.calendar = TradeCalendar()
         self.state = TaskStateStore("automation")
@@ -246,7 +246,9 @@ class InternalScheduler:
         if phase == "strategy":
             from config.settings import FACTOR_DB_PATH, WEB_DATA_DIR
             from core.etl.stage_status import fetch_status
-            if not fetch_status(trade_date, db_path=FACTOR_DB_PATH, web_data_dir=WEB_DATA_DIR).get("ready"):
+            collected = TaskStateStore(f"automation_daily_{trade_date}").load()
+            if (collected.get("status") != "done" or not collected.get("pipeline_ok")
+                    or not fetch_status(trade_date, db_path=FACTOR_DB_PATH, web_data_dir=WEB_DATA_DIR).get("ready")):
                 self.strategy_state.save({"status": "waiting_data", "trade_date": trade_date,
                     "message": "等待独立盘后采集完成，策略不补取行情"})
                 return False

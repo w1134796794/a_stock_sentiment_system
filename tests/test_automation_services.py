@@ -336,12 +336,14 @@ def test_internal_scheduler_waits_until_daily_retry_is_due(monkeypatch):
 
 def test_internal_scheduler_defaults_allow_delayed_post_close_source(monkeypatch):
     monkeypatch.delenv("AUTOMATION_DAILY_TIME", raising=False)
+    monkeypatch.delenv("AUTOMATION_STRATEGY_TIME", raising=False)
     monkeypatch.delenv("AUTOMATION_DAILY_MAX_ATTEMPTS", raising=False)
     monkeypatch.delenv("AUTOMATION_DAILY_RETRY_MINUTES", raising=False)
 
     scheduler = InternalScheduler()
 
-    assert scheduler.daily_time == "20:00"
+    assert scheduler.daily_time == "21:30"
+    assert scheduler.strategy_time == "21:45"
     assert scheduler.max_daily_attempts == 6
     assert scheduler.daily_retry_minutes == 15
 

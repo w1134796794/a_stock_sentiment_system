@@ -104,7 +104,8 @@ class SnapshotSignalService:
         latest_time = str(recent.iloc[-1]["time"])
         minutes = normalize_minute_bars(minute_bars)
         if not minutes.empty:
-            minutes = minutes[minutes["time"] < latest_time[:5] + ":00"].copy()
+            from core.data.minute_clock import completed_minutes
+            minutes = completed_minutes(minutes, latest_time)
         checks = {"basis": "eltdx_snapshot_primary_v2_temporal_protection", "snapshot_count": len(recent),
                   "snapshot_received_at": str(recent.iloc[-1]["received_at"]),
                   "minute": latest_time, "quote_fresh": True}
