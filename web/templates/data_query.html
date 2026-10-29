@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}底层数据查询{% endblock %}
+{% block page_title %}底层数据查询{% endblock %}
+{% block content %}
+<p class="text-slate-400 mb-4">查询已落地的盘后原始缓存与 Silver 标准表。当前不包含盘中秒级快照归档。原始缓存按单日查询；原始字段单位以数据源为准。</p>
+<form id="dq-form" class="flex flex-wrap gap-3 mb-4">
+<label>数据层 <select id="dq-layer"><option value="silver">Silver 标准层</option><option value="raw">原始缓存</option></select></label>
+<label>数据集 <select id="dq-dataset"></select></label>
+<label>开始日期 <input id="dq-start" type="date" required value="{{ today }}"></label>
+<label>结束日期 <input id="dq-end" type="date" required value="{{ today }}"></label>
+<label>代码／板块代码 <input id="dq-code" maxlength="100" placeholder="如 000001"></label>
+<label>名称 <input id="dq-name" maxlength="100" placeholder="股票／板块名称"></label>
+<label>来源 <input id="dq-source" maxlength="100" placeholder="来源关键词"></label>
+<label>每页 <select id="dq-size"><option>20</option><option selected>50</option><option>100</option><option>200</option></select></label>
+<label>排序 <select id="dq-sort"><option value="">默认排序</option></select></label>
+<label><input id="dq-desc" type="checkbox"> 降序</label>
+<button class="border rounded px-4" type="submit">查询</button>
+</form>
+<p id="dq-status" role="status" class="mb-3 text-slate-400"></p>
+<div class="overflow-x-auto border border-slate-700 rounded"><table class="w-full text-sm whitespace-nowrap"><thead id="dq-head"></thead><tbody id="dq-body"></tbody></table></div>
+<div class="flex gap-4 my-4"><button id="dq-prev" disabled>上一页</button><span id="dq-page"></span><button id="dq-next" disabled>下一页</button></div>
+<dialog id="dq-detail" class="bg-slate-900 text-slate-200 rounded p-5 max-w-3xl"><button id="dq-close">关闭详情</button><pre id="dq-json" class="whitespace-pre-wrap break-all"></pre></dialog>
+<style>#dq-form input:not([type=checkbox]),#dq-form select {background:#0f172a;border:1px solid #475569;border-radius:4px;padding:6px;max-width:200px}#dq-form label{display:flex;gap:6px;align-items:center}#dq-head th,#dq-body td{padding:9px 12px;border-bottom:1px solid #334155;text-align:left}button:disabled{opacity:.4}#dq-detail::backdrop{background:#0009}</style>
+<script>
+(()=>{
+const el=id=>document.getElementById('dq-'+id); let catalog=[],page=1,total=0,active=null,serial=0;
+function options(){const layer=el('layer').value;el('dataset').replaceChildren();catalog.filter(x=>x.layer===layer).forEach(x=>el('dataset').add(new Option(x.label,x.id)));el('sort').replaceChildren(new Option('默认排序',''));if(layer==='raw')el('end').value=el('start').value;}
+function cell(tag,text){const n=document.createElement(tag);n.textContent=text==null?'—':String(text);return n;}
+function params(){return {layer:el('layer').value,dataset:el('dataset').value,start:el('start').value.replaceAll('-',''),end:el('end').value.replaceAll('-',''),code:el('code').value.trim(),name:el('name').value.trim(),source:el('source').value.trim(),page_size:el('size').value,sort:el('sort').value,descending:String(el('desc').checked)};}
+async function load(){const ticket=++serial;el('status').textContent='正在查询…';el('prev').disabled=el('next').disabled=true;el('body').replaceChildren();try{const response=await fetch('/api/admin/market-collection/query?'+new URLSearchParams({...active,page}));const value=await response.json();if(ticket!==serial)return;if(!response.ok||!value.ok)throw Error(value.message||'查询失败');const d=value.data;total=d.total;el('head').replaceChildren();const header=document.createElement('tr');for(const c of d.columns){const th=cell('th',c.label);th.title=c.key;header.append(th);}header.append(cell('th','详情'));el('head').append(header);for(const row of d.rows){const tr=document.createElement('tr');for(const c of d.columns){const td=cell('td',row[c.key]);td.style.maxWidth='320px';td.style.overflow='hidden';td.style.textOverflow='ellipsis';tr.append(td);}const td=document.createElement('td'),b=cell('button','查看');b.onclick=()=>{el('json').textContent=JSON.stringify(row,null,2);el('detail').showModal();};td.append(b);tr.append(td);el('body').append(tr);}const old=el('sort').value;el('sort').replaceChildren(new Option('默认排序',''));d.columns.forEach(c=>el('sort').add(new Option(c.label,c.key)));el('sort').value=old;el('page').textContent=`第 ${page} / ${Math.max(1,Math.ceil(total/Number(active.page_size)))} 页 · 共 ${total} 条`;el('status').textContent=d.message||(total?'悬停中文表头可查看原字段名；详情保留原始字段。':'当前条件下没有记录');el('prev').disabled=page<=1;el('next').disabled=page*Number(active.page_size)>=total;}catch(e){if(ticket===serial){el('status').textContent=e.message;el('page').textContent='';}}}
+el('form').onsubmit=e=>{e.preventDefault();page=1;active=params();load();};el('prev').onclick=()=>{page--;load();};el('next').onclick=()=>{page++;load();};el('layer').onchange=options;el('dataset').onchange=()=>el('sort').replaceChildren(new Option('默认排序',''));el('close').onclick=()=>el('detail').close();fetch('/api/admin/market-collection/datasets').then(r=>{if(!r.ok)throw Error('无查询权限');return r.json();}).then(d=>{catalog=d.datasets;options();active=params();load();}).catch(e=>el('status').textContent=e.message);
+})();
+</script>
+{% endblock %}

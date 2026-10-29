@@ -5004,3 +5004,6 @@ from web.readonly_access import ReadonlyAccess
 
 _READONLY_ACCESS = ReadonlyAccess()
 app.include_router(create_readonly_router())
+
+from web.data_query_router import data_query_router
+app.include_router(data_query_router(templates))

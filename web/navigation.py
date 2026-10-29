@@ -37,6 +37,7 @@ MODULES = (
     )),
     ("collection", "行情采集", "database", (
         ("collection", "行情采集中心", "/market-collection", "fetch", ""),
+        ("data_query", "底层数据查询", "/market-collection/query", "fetch", ""),
     )),
     ("settings", "系统设置", "settings-2", (
         ("configuration", "参数配置", "/config", "config", ""),
