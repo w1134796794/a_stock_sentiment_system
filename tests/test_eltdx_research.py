@@ -70,9 +70,24 @@ def test_bars_range_order_unit_and_adjustment_are_explicit():
     assert value["quality_status"] == "ok" and len(value["rows"]) == 2
     assert [r["date"] for r in value["rows"]] == ["20261022", "20261023"]
     assert value["rows"][0]["volume_hand"] == 20 and value["rows"][0]["amount_yuan"] == 20000
-    assert calls[0]["adjust"] == "none" and calls[0]["bar_time"] == "end" and calls[0]["all_pages"]
+    assert calls[0]["adjust"] == "none" and "bar_time" not in calls[0] and calls[0]["all_pages"]
     assert value["coverage"]["first_date"] == "20261022"
     assert not value["historical_eligible"]
+
+
+def test_research_minute_keeps_native_0931():
+    calls = []
+    candle = bar("2026-10-23")
+    candle.time = datetime(2026, 10, 23, 9, 31)
+    def get(*args, **kwargs):
+        calls.append(kwargs)
+        return NS(code="000001", bars=[candle])
+    value = provider(bars=NS(get=get)).get_research(
+        "bars_raw", "000001", "20261023", "20261023", period="1m")
+    assert value["quality_status"] == "ok"
+    assert "bar_time" not in calls[0]
+    assert "T09:31:00" in value["rows"][0]["event_time"]
+    assert value["rows"][0]["bar_label"] == "end"
 
 
 @pytest.mark.parametrize("kind,mode", [("bars_raw", "none"), ("bars_qfq", "qfq"), ("bars_hfq", "hfq")])

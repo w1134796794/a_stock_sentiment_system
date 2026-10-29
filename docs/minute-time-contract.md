@@ -2,8 +2,11 @@
 
 - Canonical candles use end labels: 09:31 through 11:30, then 13:01 through
   15:00 (240 candles). Neither 09:30 nor 13:00 is a required candle.
-- The eltdx bars API is explicitly requested with `bar_time="end"`. Known
-  start-labelled input is shifted once, preserving its original `source_time`.
+- Preserve eltdx native timestamps: its native one-minute first candle is
+  09:31. Do not request `bar_time="end"`, which adds another period. Native
+  one-minute candles are declared end-labelled for strategy availability;
+  other periods remain unknown until independently verified. Known start-labelled
+  input from other contracts is shifted once, preserving `source_time`.
   Legacy input without a declared label is not silently shifted.
 - An end-labelled candle can be used at its labelled minute once available.
   Unknown legacy labels retain conservative next-minute availability.

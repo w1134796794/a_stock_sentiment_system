@@ -122,7 +122,6 @@ class EltdxResearchMixin:
                             adjust=result["adjust"],
                             all_pages=True,
                             max_pages=max_pages,
-                            bar_time="end",
                         )
                         self._validate_evidence_identity(series, code, end)
                         rows = []
@@ -148,7 +147,8 @@ class EltdxResearchMixin:
                                     volume_hand=number(bar.volume_lots),
                                     amount_yuan=number(bar.amount),
                                     period=period,
-                                    bar_time="end",
+                                    bar_time="native",
+                                    bar_label="end" if period == "1m" else "unknown",
                                     adjust=result["adjust"],
                                 )
                             )
