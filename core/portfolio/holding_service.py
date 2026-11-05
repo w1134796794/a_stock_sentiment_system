@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import isfinite
+from pathlib import Path
 from typing import Any, Dict
 
 from config.settings import (
@@ -37,9 +39,12 @@ class HoldingService:
             position_id = int(signal.get("position_id") or 0)
             if position_id and position_id not in latest_protection:
                 latest_protection[position_id] = _number(signal.get("protect_price"))
+        stored_positions = self.repository.list_positions(account_key)
+        marks = self._valuation_marks(stored_positions) if account_key == "default" and stored_positions else {}
         positions = [
             self._decorate(row, latest_protection.get(int(row.get("id") or 0), 0.0))
-            for row in self.repository.list_positions(account_key)
+            for row in ({**position, **marks.get(position["code"], {"valuation_basis": "ledger"})}
+                        for position in stored_positions)
         ]
         market_value = sum(_number(row.get("market_value")) for row in positions)
         cost_amount = sum(_number(row.get("cost_amount")) for row in positions)
@@ -91,18 +96,65 @@ class HoldingService:
             "trades": trades,
             "policy": {
                 "initial_capital": PAPER_INITIAL_CAPITAL,
-                "max_positions": PAPER_MAX_POSITIONS,
+                "max_positions": None if account_key == "default" else PAPER_MAX_POSITIONS,
                 "position_pct": PAPER_POSITION_PCT,
+                "position_sizing": "adaptive" if account_key == "default" else "historical",
                 "rotation_min_edge": PAPER_ROTATION_MIN_EDGE,
                 "rotation_enabled": True,
             },
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }
 
+    @staticmethod
+    def _valuation_marks(positions: list[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        from config.settings import FACTOR_DB_PATH
+        from core.infrastructure.duckdb_access import connect
+        from core.realtime.quote_service import RealtimeQuoteService
+        from core.realtime.trading_session import shanghai_now
+        from loguru import logger
+
+        now = shanghai_now()
+        date = now.strftime("%Y%m%d")
+        by_code = {p["code"]: p for p in positions}
+        marks = {}
+        try:
+            for quote in RealtimeQuoteService().get_quotes(by_code).get("quotes", []):
+                code = quote.get("code")
+                time = str(quote.get("time") or "")[:8]
+                price = _number(quote.get("last_price"))
+                entry = by_code.get(code)
+                if (entry and str(quote.get("date") or "").replace("-", "") == date
+                        and "09:30:00" <= time <= now.strftime("%H:%M:%S")
+                        and isfinite(price) and price > 0 and date >= entry["entry_date"]
+                        and (date != entry["entry_date"] or time >= str(entry.get("entry_time") or ""))):
+                    marks[code] = {"last_price": price, "valuation_date": date, "valuation_time": time,
+                                   "valuation_basis": "snapshot" if quote.get("is_stale") is False else "snapshot_stale"}
+        except Exception as exc:
+            logger.debug("Portfolio snapshot valuation unavailable: {}", exc)
+
+        if now.strftime("%H:%M:%S") >= "15:00:00" and Path(FACTOR_DB_PATH).is_file():
+            placeholders = ",".join("?" for _ in by_code)
+            try:
+                with connect(FACTOR_DB_PATH, read_only=True, timeout=0.5) as con:
+                    rows = con.execute(
+                        "SELECT code, close FROM stock_daily_silver "
+                        f"WHERE CAST(trade_date AS VARCHAR)=? AND code IN ({placeholders})",
+                        [date, *by_code],
+                    ).fetchall()
+                for code, close in rows:
+                    price = _number(close)
+                    if date >= by_code[code]["entry_date"] and isfinite(price) and price > 0:
+                        marks[code] = {"last_price": price, "valuation_date": date, "valuation_time": "15:00:00",
+                                       "valuation_basis": "daily_close"}
+            except Exception as exc:
+                logger.debug("Portfolio daily close valuation unavailable: {}", exc)
+        return marks
+
     def add_buy(self, payload: Dict[str, Any], account_key: str = "default") -> Dict[str, Any]:
         code = str(payload.get("code") or "")
         if (
-            not self.repository.get_open_position(code, account_key)
+            account_key != "default"
+            and not self.repository.get_open_position(code, account_key)
             and len(self.repository.list_positions(account_key)) >= PAPER_MAX_POSITIONS
         ):
             raise ValueError(f"模拟交易最多同时持有{PAPER_MAX_POSITIONS}只股票")

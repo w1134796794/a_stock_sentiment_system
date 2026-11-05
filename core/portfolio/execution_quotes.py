@@ -21,6 +21,8 @@ def quote_error(quote, trade_date, *, side="sell", reference_time="", max_age=90
                 return "新旧行情不在同一时点"
     except (ValueError, TypeError):
         return "缺少可信行情时间"
+    if side == "mark":
+        return ""
     if quote.get("suspended") or quote.get("is_suspended"):
         return "停牌不能模拟成交"
     try:

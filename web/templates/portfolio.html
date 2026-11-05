@@ -2,7 +2,7 @@
 {% set historical_view = portfolio_mode == 'backtest' %}
 {% block title %}{{ '历史回测' if historical_view else '模拟交易' }} · 管理控制台{% endblock %}
 {% block page_title %}{{ '历史回测' if historical_view else '模拟交易' }}{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ '独立账户 · 分钟级成交估计' if historical_view else '分钟确认自动交易' }} · 最多{{ paper_max_positions }}只</div>{% endblock %}
+{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">{{ '独立账户 · 分钟级成交估计' if historical_view else '分钟确认自动交易' }}{% if historical_view %} · 最多{{ paper_max_positions }}只{% endif %}</div>{% endblock %}
 
 {% block header_extra %}
   {% if is_admin %}
@@ -13,7 +13,7 @@
 
 {% block content %}
 <section class="pf-account-bar" aria-label="模拟账户">
-  <div class="pf-auto-status"><span></span><strong>{{ '历史分钟估计' if historical_view else '激进交易已开启' }}</strong><small>每只约{{ '%.0f'|format(paper_position_pct) }}%，最多{{ paper_max_positions }}只；满仓时新信号强{{ '%.0f'|format(paper_rotation_min_edge) }}分以上自动换出弱持仓</small></div>
+  <div class="pf-auto-status"><span></span><strong>{{ '历史分钟估计' if historical_view else '自适应仓位' }}</strong><small>{% if historical_view %}历史固定仓位基准：单只约{{ '%.0f'|format(paper_position_pct) }}% · 最多{{ paper_max_positions }}只{% else %}按信号强度和风险预算分配{% endif %} · 换仓强度差至少{{ '%.0f'|format(paper_rotation_min_edge) }}分</small></div>
   {% if is_admin %}
   <div id="replay-controls" class="pf-replay">
     <label>账户<select id="portfolio-account"><option value="default">模拟交易账户</option></select></label>
@@ -59,7 +59,7 @@
   <div><strong id="kpi-cash" class="mono">0</strong><span>可用现金</span></div>
   <div><strong id="kpi-value" class="mono">0</strong><span>当前市值</span></div>
   <div><strong id="kpi-pnl" class="mono">0</strong><span>账户收益</span></div>
-  <div><strong id="kpi-count" class="mono">0 / {{ paper_max_positions }}</strong><span>持仓数量</span></div>
+  <div><strong id="kpi-count" class="mono">0{% if historical_view %} / {{ paper_max_positions }}{% endif %}</strong><span>持仓数量</span></div>
   <div><strong id="kpi-risk" class="mono text-amber-300">0</strong><span>减仓/卖出提醒</span></div>
 </section>
 
@@ -303,7 +303,8 @@
     const summary=state.summary||{}, positions=state.positions||[], signals=state.exit_signals||[], trades=state.trades||[];
     $('kpi-assets').textContent=money(summary.total_assets);
     $('kpi-cash').textContent=money(summary.cash);
-    $('kpi-count').textContent=`${summary.position_count||0} / ${(state.policy||{}).max_positions||{{ paper_max_positions }}}`;
+    const positionCount=summary.position_count||0, positionLimit=state.policy?.max_positions;
+    $('kpi-count').textContent=positionLimit?`${positionCount} / ${positionLimit}`:String(positionCount);
     $('kpi-value').textContent=money(summary.market_value);
     $('kpi-pnl').textContent=`${Number(summary.total_pnl||0)>=0?'+':''}${money(summary.total_pnl)} / ${pct(summary.total_pnl_pct)}`;
     $('kpi-pnl').className=`mono ${pnlClass(summary.total_pnl)}`;
@@ -316,8 +317,10 @@
   }
   function positionCard(p) {
     const action=String(p.latest_action||'hold'), cls=['sell','blocked'].includes(action)?'danger':['watch','reduce'].includes(action)?'risk':'';
+    const markLabels={snapshot:'实时快照',snapshot_stale:'快照已过期',daily_close:'归档收盘价',ledger:currentAccount==='default'?'无可用当日报价，沿用账本':'历史账户估值'};
+    const mark=markLabels[p.valuation_basis]||'账本估值';
     return `<article class="pf-position ${cls}"><header class="pf-position-head"><div><div class="pf-position-name">${esc(p.name||p.code)}</div><div class="pf-position-code mono">${esc(p.code)} · ${esc(p.strategy_name||strategyText[p.strategy_id]||'未指定策略')}</div></div><span class="pf-action ${esc(action)}">${esc(actionText[action]||action)}</span></header><div class="pf-position-body">
-      <div class="pf-metric"><span>成本 / 现价</span><strong class="mono">${price(p.entry_price)} / ${price(p.last_price)}</strong></div>
+      <div class="pf-metric"><span>成本 / 估值价</span><strong class="mono">${price(p.entry_price)} / ${price(p.last_price)}</strong><small>${esc([mark,p.valuation_date,p.valuation_time].filter(Boolean).join(' · '))}</small></div>
       <div class="pf-metric"><span>持仓收益</span><strong class="mono ${pnlClass(p.unrealized_pnl_pct)}">${pct(p.unrealized_pnl_pct)}</strong></div>
       <div class="pf-metric"><span>股数 / 市值</span><strong class="mono">${money(p.shares)} / ${money(p.market_value)}</strong></div>
       <div class="pf-metric"><span>结构保护价</span><strong class="mono">${price(p.protection_price||p.structural_stop)}</strong><small>${esc(p.protection_price_source||'自动风险底线')}</small></div>

@@ -89,8 +89,9 @@ class DailyCollectionPlan:
             listing = inputs.get("listing_evidence") or {}
             leaders = ((inputs.get("leader_pools") or {}).get("10", {}).get("rows") or [])[:30]
             decisions = inputs.get("candidates") or []
+            holdings = inputs.get("holdings") or []
             stocks = {}
-            for source, rows in (("leader_pool", leaders), ("decision_pool", decisions)):
+            for source, rows in (("leader_pool", leaders), ("decision_pool", decisions), ("holding", holdings)):
                 for row in rows:
                     code = normalize_stock_code(row.get("code") or row.get("stock_code"), add_suffix=False)
                     if len(code) != 6 or not code.isdigit():
@@ -101,12 +102,14 @@ class DailyCollectionPlan:
                                                      "sources": [], "sectors": []})
                     if source not in item["sources"]:
                         item["sources"].append(source)
-                    item["sectors"] = sorted(set(item["sectors"]) | collection_sector_names(row))
-            if sector_mode == "breadth_required" and any(not row["sectors"] for row in stocks.values()):
+                    if source != "holding":
+                        item["sectors"] = sorted(set(item["sectors"]) | collection_sector_names(row))
+            candidate_stocks = [row for row in stocks.values() if row["sources"] != ["holding"]]
+            if sector_mode == "breadth_required" and any(not row["sectors"] for row in candidate_stocks):
                 raise ValueError("Stock sector/concept metadata missing before open")
             names = sorted({name for row in stocks.values() for name in row["sectors"]})
             requested = {normalize_stock_code(r.get("code") or r.get("stock_code"), add_suffix=False)
-                         for r in [*leaders, *decisions]}
+                         for r in [*leaders, *decisions, *holdings]}
             requested.update(normalize_stock_code(c, add_suffix=False) for name in names
                              for c in (inputs.get("sector_members") or {}).get(name, []))
             from core.realtime.sector_service import RealtimeSectorService
@@ -116,7 +119,8 @@ class DailyCollectionPlan:
             unresolved = [r["name"] for r in sectors if not r["code"] or not r["members"]]
             if unresolved and sector_mode == "breadth_required":
                 raise ValueError("Preopen sector identities/members missing: " + ",".join(unresolved))
-            holding_codes = {normalize_stock_code(r.get("code"), add_suffix=False) for r in inputs.get("holdings") or []}
+            holding_codes = {normalize_stock_code(r.get("code") or r.get("stock_code"), add_suffix=False)
+                             for r in holdings}
             body = {"schema_version": 1, "market_date": date, "candidate_date": candidate,
                     "sector_confirmation_mode": sector_mode,
                     "frozen_at": clock.isoformat(), "bundle_id": bundle["bundle_id"],
@@ -126,6 +130,7 @@ class DailyCollectionPlan:
                     "stock_count": len(stocks),
                     "leader_count": sum("leader_pool" in r["sources"] for r in stocks.values()),
                     "decision_count": sum("decision_pool" in r["sources"] for r in stocks.values()),
+                    "holding_count": sum("holding" in r["sources"] for r in stocks.values()),
                     "sector_member_count": len({c for s in sectors for c in s["members"]}),
                     "uncollected_holdings": sorted(holding_codes - stocks.keys()),
                     "warnings": [] if (inputs.get("minute_amount_profile") or {}).get("profiles") else ["历史分钟量能模型缺失，相应买点将保持观察"],
