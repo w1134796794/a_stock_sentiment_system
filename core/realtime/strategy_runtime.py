@@ -110,7 +110,7 @@ class StrategyRuntime:
         self.signals.evaluation_clock = self.clock
         self.signals.minute_ttl_seconds = 0
         self.rows = production_candidates(bundle["inputs"])
-        allowed = {r["code"] for r in plan["rows"]}
+        allowed = {r["code"] for r in plan["rows"] if r["sources"] != ["holding"]}
         self.rows = [r for r in self.rows if r["code"] in allowed]
         active = {row["code"] for row in self.rows}
         self.execution_audit = {

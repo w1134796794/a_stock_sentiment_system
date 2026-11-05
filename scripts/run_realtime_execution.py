@@ -12,6 +12,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def consume_paper_payload(paper, payload):
+    # stored_strategy_view demotes expired confirmations individually. A stale
+    # unrelated stock must not suppress fresh, executable confirmations.
+    rows = [row for row in payload.get("rows") or []
+            if (row.get("confirm_status") or row.get("status")) == "confirmed"]
+    if not rows:
+        return {"opened": [], "skipped": {}, "confirmed_candidates": 0}
+    return paper.process_realtime_payload({**payload, "rows": rows})
+
+
 def main():
     from core.infrastructure.shared_state import TaskLease, get_shared_state_backend
     from core.realtime.strategy_runtime import stored_strategy_view
@@ -28,7 +38,7 @@ def main():
     lease = TaskLease.acquire("realtime_execution", 30)
     if lease is None:
         raise RuntimeError("已有执行消费者持有任务锁")
-    stop, last = Event(), ""
+    stop = Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     paper = monitor = None
@@ -45,12 +55,13 @@ def main():
                     date = shanghai_now().strftime("%Y%m%d")
                     payload = stored_strategy_view(date)
                     revision = payload.get("market_revision") or ""
-                    if paper and payload.get("ok") and revision and revision != last and lease.is_owner():
-                        result = paper.process_realtime_payload(payload)
+                    if paper and lease.is_owner():
+                        # Retry while the stored signal is fresh: the first
+                        # attempt may precede the next executable quote.
+                        result = consume_paper_payload(paper, payload)
                         backend.set_json("realtime:execution:health", {
                             "ok": True, "market_date": date, "updated_at": shanghai_now().isoformat(),
                             "market_revision": revision, "result": result}, 120)
-                        last = revision
                     if monitor and lease.is_owner():
                         monitor.run_once(account_key="default", signal_date=date, auto_execute=args.paper)
             except Exception:

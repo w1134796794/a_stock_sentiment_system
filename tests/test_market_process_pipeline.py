@@ -46,10 +46,12 @@ def make_plans(tmp_path):
 def test_preopen_plan_is_exact_deduplicated_union_and_contains_concepts(tmp_path):
     plans, backend = make_plans(tmp_path)
     plan = plans.freeze(bundle(), now=PREOPEN)
-    assert plan["stock_count"] == 35
+    assert plan["stock_count"] == 36
     assert plan["leader_count"] == 30 and plan["decision_count"] == 5
     assert plan["sector_member_count"] == 4
-    assert plan["uncollected_holdings"] == ["600000"]
+    assert plan["uncollected_holdings"] == []
+    assert plan["holding_count"] == 1
+    assert next(row for row in plan["rows"] if row["code"] == "600000")["sources"] == ["holding"]
     assert set(plan["rows"][0]["sectors"]) == {"board", "concept"}
     assert plans.bundle(DAY) == bundle()
     changed = bundle()
@@ -58,7 +60,7 @@ def test_preopen_plan_is_exact_deduplicated_union_and_contains_concepts(tmp_path
         plans.freeze(changed, now=PREOPEN)
     other = DailyCollectionPlan(tmp_path / "dedupe", MemoryStateBackend())
     deduped = other.freeze(changed, now=PREOPEN)
-    assert deduped["stock_count"] == 34
+    assert deduped["stock_count"] == 35
     assert deduped["rows"][0]["sources"] == ["leader_pool", "decision_pool"]
 
 
@@ -80,7 +82,7 @@ def test_plan_survives_process_restart_and_tamper_is_rejected(tmp_path):
     plans, _ = make_plans(tmp_path)
     plans.freeze(bundle(), now=PREOPEN)
     restarted = DailyCollectionPlan(tmp_path, MemoryStateBackend())
-    assert restarted.load(DAY)["stock_count"] == 35
+    assert restarted.load(DAY)["stock_count"] == 36
     path = plans.root / f"{DAY}.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     data["rows"] = []
@@ -96,20 +98,21 @@ def test_decision_collection_is_not_truncated_by_page_display_limit(tmp_path):
     sample = data["inputs"]["candidates"][0]
     data["inputs"]["candidates"] = [{**sample, "code": f"{i:06d}"} for i in range(31, 56)]
     plan = plans.freeze(data, now=PREOPEN)
-    assert plan["decision_count"] == 25 and plan["stock_count"] == 55
+    assert plan["decision_count"] == 25 and plan["stock_count"] == 56
     assert len(production_candidates(data["inputs"])) == 55
 
 
-def test_collector_only_downloads_dated_stock_plan_not_holdings_or_watchlists(tmp_path):
+def test_collector_downloads_dated_plan_with_holdings_but_not_watchlists(tmp_path):
     from core.realtime.eltdx_collector import EltdxQuoteCollector
     plans, _ = make_plans(tmp_path)
     plans.freeze(bundle(), now=PREOPEN)
     worker = EltdxQuoteCollector.__new__(EltdxQuoteCollector)
     worker.plans, worker.fixed_codes = plans, []
     worker.clock = lambda: PREOPEN
-    assert len(worker.targets(minutes_only=True)) == 35
+    assert len(worker.targets(minutes_only=True)) == 36
+    assert "600000" in worker.targets(minutes_only=True)
     assert set(worker.targets()) - set(worker.targets(minutes_only=True)) == {"600001", "600002"}
-    assert "600000" not in worker.targets()
+    assert "600000" in worker.targets()
     worker.clock = lambda: PREOPEN + timedelta(days=1)
     assert worker.targets() == []
 

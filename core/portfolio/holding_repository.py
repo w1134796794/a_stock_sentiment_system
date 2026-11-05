@@ -361,11 +361,12 @@ class HoldingRepository:
                 ).fetchone()
                 if existing or duplicate:
                     raise ValueError("自动买入已执行或已有持仓")
-                count = conn.execute(
-                    "SELECT COUNT(*) FROM portfolio_positions WHERE account_key=? AND status='open'", (account_key,),
-                ).fetchone()[0]
-                if count >= 3:
-                    raise ValueError("最多持仓3只")
+                if account_key != "default":
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM portfolio_positions WHERE account_key=? AND status='open'", (account_key,),
+                    ).fetchone()[0]
+                    if count >= 3:
+                        raise ValueError("历史账户最多持仓3只")
             account = conn.execute(
                 "SELECT initial_capital, cash FROM portfolio_accounts WHERE account_key=?",
                 (account_key,),

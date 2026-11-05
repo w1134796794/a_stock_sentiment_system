@@ -43,7 +43,7 @@ class PaperTradingService:
         self.repository = repository or HoldingRepository()
         self.quote_service = quote_service
         self.initial_capital = max(float(initial_capital), 10_000.0)
-        self.max_positions = min(max(int(max_positions), 1), 3)
+        self.replay_max_positions = min(max(int(max_positions), 1), 3)
         self.position_pct = min(max(float(position_pct), 1.0), 100.0)
         self.rotation_min_edge = min(max(float(rotation_min_edge), 0.0), 30.0)
         self.repository.ensure_account(
@@ -99,10 +99,10 @@ class PaperTradingService:
                 market_date, code, profile, row.get("entry_mode"), row.get("confirm_time"),
             ))
 
-            def reject(message: str) -> None:
+            def reject(message: str, **details: Any) -> None:
                 skipped[message] = skipped.get(message, 0) + 1
                 ledger.event(stable_id(signal_id, "not_executable", message), "paper_order_rejected",
-                             {"code": code, "reason": message, "market_date": market_date},
+                             {"code": code, "reason": message, "market_date": market_date, **details},
                              signal_id=signal_id, account_key=self.ACCOUNT_KEY)
 
             buy_quote = quotes.get(code) or {}
@@ -135,29 +135,34 @@ class PaperTradingService:
             positions = self.repository.list_positions(self.ACCOUNT_KEY)
             account = self.repository.account(self.ACCOUNT_KEY)
             cash = _number(account.get("cash"))
-            if any(quote_error(quotes.get(p["code"]), market_date,
-                               reference_time=buy_quote["time"]) for p in positions):
-                reject("持仓行情不足，暂停估值与买入")
+            holding_quote_errors = {p["code"]: reason for p in positions if (reason := quote_error(
+                quotes.get(p["code"]), market_date, side="mark", reference_time=buy_quote["time"]))}
+            if holding_quote_errors:
+                reject("持仓行情不足，暂停估值与买入", holding_quote_errors=holding_quote_errors)
                 continue
-            equity = cash + sum(
+            invested = sum(
                 _number((quotes.get(item["code"]) or {}).get("last_price"))
                 * int(item.get("shares") or 0)
                 for item in positions
             )
+            equity = cash + invested
             position_pct = self._position_pct(row)
-            per_position = min(equity * position_pct / 100.0, cash) / (1 + costs.commission_rate)
+            market_cap = self._budget_value(row.get("市场总仓位上限%"))
+            if market_cap is None:
+                market_cap = self._budget_value(row.get("market_total_position_cap_pct"))
+            if position_pct <= 0 or market_cap == 0:
+                reject("当前风险仓位预算为零")
+                continue
+            position_budget = equity * position_pct / 100.0
+            market_budget = equity * (market_cap if market_cap is not None else 100.0) / 100.0
+            per_position = min(position_budget, cash, market_budget - invested) / (1 + costs.commission_rate)
             shares = int(per_position / price / 100) * 100
             candidate_strength = self._candidate_strength(row)
             rotation = None
             rotation_order = None
-            if len(positions) >= self.max_positions or shares < 100:
-                if any(quote_error(quotes.get(p["code"]), market_date,
-                                   reference_time=buy_quote["time"]) for p in positions):
-                    reject("持仓行情不足，暂停换股")
-                    continue
+            if shares < 100:
                 positions = [{**p, "last_price": _number((quotes.get(p["code"]) or {}).get("last_price")),
                               "execution_quote": quotes.get(p["code"], {})} for p in positions]
-                equity = cash + sum(p["last_price"] * int(p["shares"]) for p in positions)
                 target = self._rotation_target(
                     positions,
                     market_date=market_date,
@@ -176,8 +181,9 @@ class PaperTradingService:
                 sell_fees = sell_price * int(target.get("shares") or 0) * (
                     costs.commission_rate + costs.stamp_duty_rate)
                 expected_cash = cash + sell_price * int(target.get("shares") or 0) - sell_fees
+                remaining_invested = invested - target["last_price"] * int(target["shares"])
                 expected_shares = int(
-                    min(equity * position_pct / 100.0, expected_cash)
+                    min(position_budget, expected_cash, market_budget - remaining_invested)
                     / (1 + costs.commission_rate) / price / 100
                 ) * 100
                 if sell_price <= 0 or expected_shares < 100:
@@ -261,6 +267,8 @@ class PaperTradingService:
                             "quote_source_time": buy_quote.get("time"),
                             "quote_received_at": buy_quote.get("received_at"),
                             "execution_price_basis": "observed_quote_plus_slippage",
+                            "position_budget_pct": position_pct,
+                            "market_total_position_cap_pct": market_cap,
                             "reference_signal_price": row.get("entry_price"),
                             "success_probability": _number(row.get("success_probability")),
                             "forecast_id": row.get("forecast_id") or "",
@@ -301,8 +309,17 @@ class PaperTradingService:
         }
 
     def _position_pct(self, row: Dict[str, Any]) -> float:
-        # 模拟交易账户采用固定三槽位资金规则，候选页的保守仓位提示只作展示。
-        return self.position_pct
+        caps = [value for key in ("执行仓位上限%", "position_budget_pct", "position_cap_pct", "策略单票仓位上限%")
+                if (value := self._budget_value(row.get(key))) is not None]
+        if caps:
+            return min(self.position_pct, *caps)
+        strength = self._candidate_strength(row)
+        return min(self.position_pct, 12.0 if strength >= 80 else 10.0 if strength >= 65 else 8.0)
+
+    @staticmethod
+    def _budget_value(value: Any) -> float | None:
+        number = _number(value, float("nan"))
+        return min(max(number, 0.0), 100.0) if math.isfinite(number) else None
 
     @staticmethod
     def _candidate_strength(row: Dict[str, Any]) -> float:
@@ -661,7 +678,7 @@ class PaperTradingService:
                 code = normalize_stock_code(row.get("stock_code"), add_suffix=False)
                 if not code or self.repository.get_open_position(code, account_key):
                     continue
-                if len(self.repository.list_positions(account_key)) >= self.max_positions:
+                if len(self.repository.list_positions(account_key)) >= self.replay_max_positions:
                     imported["skipped"] += 1
                     continue
                 try:
@@ -736,7 +753,7 @@ class PaperTradingService:
         if action == "buy":
             if (
                 not self.repository.get_open_position(code, account_key)
-                and len(self.repository.list_positions(account_key)) >= self.max_positions
+                and len(self.repository.list_positions(account_key)) >= self.replay_max_positions
             ):
                 imported["skipped"] += 1
                 return

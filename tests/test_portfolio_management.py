@@ -294,6 +294,7 @@ def test_confirmed_realtime_signal_opens_only_one_simulation_position(tmp_path):
                 "entry_mode": "weak_to_strong",
                 "entry_mode_text": "弱转强",
                 "resonance_sectors": "机器人",
+                "执行仓位上限%": 10,
             }
         ],
     }
@@ -321,6 +322,75 @@ def test_paper_buy_rejects_quote_before_entry_time(tmp_path):
     assert result["opened"] == 0
     assert "成交报价早于预定成交时间" in result["skipped"]
     assert repository.list_trades("default") == []
+
+
+def test_missing_holding_quote_is_audited_then_recovers(tmp_path):
+    import json
+    from types import SimpleNamespace
+    from core.operations.ledger import TradingLedger
+
+    repository = HoldingRepository(tmp_path / "portfolio.sqlite")
+    service = PaperTradingService(repository, initial_capital=100_000,
+                                  quote_service=_FakeQuotes(_quote()))
+    repository.open_position(_position(code="000002"))
+    payload = {"market_date": "20260803", "rows": [{"code": "000001", "confirm_status": "confirmed",
+               "entry_time": "09:36:00", "entry_price": 10.2, "执行仓位上限%": 8, "市场总仓位上限%": 15}]}
+    first = service.process_realtime_payload(payload)
+    assert first["opened"] == 0
+    with TradingLedger(repository.db_path)._connect() as conn:
+        record = conn.execute("SELECT payload_json FROM trading_events WHERE kind='paper_order_rejected'").fetchone()
+    assert set(json.loads(record[0])["holding_quote_errors"]) == {"000002"}
+    service.quote_service = SimpleNamespace(get_quotes=lambda codes: {"quotes": [
+        _quote(code=code, last_price=9.0 if code == "000002" else 10.2) for code in codes]})
+    assert service.process_realtime_payload(payload)["opened"] == 1
+    positions = repository.list_positions()
+    assert next(p for p in positions if p["code"] == "000001")["shares"] == 500
+    assert service._position_pct({"执行仓位上限%": 0, "position_budget_pct": 12}) == 0
+    assert service._position_pct({"screening_score": 85}) == 12
+
+
+def test_dashboard_uses_dated_snapshot_without_writing_ledger(tmp_path, monkeypatch):
+    from datetime import datetime
+    from core.realtime import trading_session
+    from core.realtime.quote_service import RealtimeQuoteService
+
+    repository = HoldingRepository(tmp_path / "portfolio.sqlite")
+    service = HoldingService(repository)
+    repository.open_position(_position(code="300006", entry_price=9.55))
+    fixed = trading_session.shanghai_now(datetime(2026, 8, 3, 10, 0))
+    monkeypatch.setattr(trading_session, "shanghai_now", lambda *_: fixed)
+    monkeypatch.setattr(RealtimeQuoteService, "get_quotes", lambda *_: {"quotes": [
+        _quote(code="300006", last_price=10.24, time="09:59:59")]})
+    mark = service.dashboard()["positions"][0]
+    assert (mark["last_price"], mark["valuation_basis"], mark["valuation_date"]) == (10.24, "snapshot", "20260803")
+    assert service.dashboard()["summary"]["market_value"] == 10_240
+    assert repository.list_positions()[0]["last_price"] == 9.55
+    monkeypatch.setattr(RealtimeQuoteService, "get_quotes", lambda *_: {"quotes": [
+        _quote(code="300006", date="20260731", last_price=10.24)]})
+    assert service.dashboard()["positions"][0]["valuation_basis"] == "ledger"
+
+
+def test_dashboard_uses_archived_close_only_after_close(tmp_path, monkeypatch):
+    from datetime import datetime
+    from config import settings
+    from core.infrastructure.duckdb_access import connect
+    from core.realtime import trading_session
+    from core.realtime.quote_service import RealtimeQuoteService
+
+    path = tmp_path / "factors.duckdb"
+    with connect(path) as con:
+        con.execute("CREATE TABLE stock_daily_silver AS SELECT '300006' AS code, '20260803' AS trade_date, 10.24 AS close")
+    monkeypatch.setattr(settings, "FACTOR_DB_PATH", path)
+    monkeypatch.setattr(RealtimeQuoteService, "get_quotes", lambda *_: {"quotes": []})
+    repository = HoldingRepository(tmp_path / "portfolio.sqlite")
+    service = HoldingService(repository)
+    repository.open_position(_position(code="300006", entry_price=9.55))
+    localize = trading_session.shanghai_now
+    for hour, expected in ((14, "ledger"), (15, "daily_close")):
+        fixed = localize(datetime(2026, 8, 3, hour))
+        monkeypatch.setattr(trading_session, "shanghai_now", lambda *_: fixed)
+        assert service.dashboard()["positions"][0]["valuation_basis"] == expected
+    assert service.dashboard()["positions"][0]["last_price"] == 10.24
 
 
 def test_formal_confirmation_without_simulated_price_waits_for_later_quote_then_buys(tmp_path):
@@ -381,19 +451,40 @@ def test_manual_and_automatic_buys_share_one_million_account(tmp_path):
 
     assert result["opened"] == 1
     assert dashboard["account"]["initial_capital"] == 1_000_000
-    assert 650_000 < dashboard["summary"]["cash"] < 660_000
+    assert 910_000 < dashboard["summary"]["cash"] < 915_000
     assert dashboard["summary"]["total_assets"] < 1_000_000
     assert len(dashboard["positions"]) == 2
 
 
-def test_stronger_confirmed_signal_rotates_out_weakest_t1_holding(tmp_path):
+def test_live_account_allows_more_than_three_manual_and_automatic_positions(tmp_path):
+    from types import SimpleNamespace
+
+    repository = HoldingRepository(tmp_path / "portfolio.sqlite")
+    quotes = SimpleNamespace(get_quotes=lambda codes: {"quotes": [_quote(code=code) for code in codes]})
+    service = PaperTradingService(repository, initial_capital=100_000, quote_service=quotes)
+    holdings = HoldingService(repository)
+    for index in range(1, 5):
+        holdings.add_buy(_position(code=f"{index:06d}", shares=100))
+
+    result = service.process_realtime_payload({"market_date": "20260803", "rows": [{
+        "code": "000006", "confirm_status": "confirmed", "entry_price": 10.2,
+        "entry_time": "09:36:00", "执行仓位上限%": 8, "市场总仓位上限%": 25,
+    }]})
+
+    assert result["opened"] == 1, result["skipped"]
+    assert result["rotated"] == 0
+    dashboard = holdings.dashboard()
+    assert dashboard["summary"]["position_count"] == 5
+    assert dashboard["policy"]["max_positions"] is None
+
+
+def test_stronger_confirmed_signal_rotates_out_weakest_t1_holding_when_budget_is_full(tmp_path):
     from types import SimpleNamespace
 
     repository = HoldingRepository(tmp_path / "portfolio.sqlite")
     service = PaperTradingService(
         repository,
         initial_capital=100_000,
-        max_positions=3,
         position_pct=34,
         rotation_min_edge=6,
         quote_service=SimpleNamespace(get_quotes=lambda codes: {"quotes": [
@@ -428,6 +519,7 @@ def test_stronger_confirmed_signal_rotates_out_weakest_t1_holding(tmp_path):
                     "entry_time": "09:36:00",
                     "entry_mode": "weak_to_strong",
                     "screening_score": 82,
+                    "市场总仓位上限%": 30,
                 }
             ],
         }
