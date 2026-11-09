@@ -359,14 +359,16 @@ class EltdxProvider(EltdxEvidenceMixin, EltdxResearchMixin):
         period = self._normalize_period(period)
         try:
             with self._client() as client:
-                end_labeled = hasattr(client, "bars")
-                if end_labeled:
-                    series = client.bars.get(code, period=period, count=count, bar_time="end")
+                native_bars = hasattr(client, "bars")
+                if native_bars:
+                    # Keep the wire label: eltdx end conversion shifts native 09:31 to 09:32.
+                    series = client.bars.get(code, period=period, count=count)
                 else:
                     series = client.get_kline(period, code, count=count)
             frame = self._kline_series_to_frame(series, ts_code)
             if not frame.empty:
-                frame["bar_label"] = "end" if end_labeled else "unknown"
+                frame["bar_label"] = "end" if native_bars and period == "1min" else "unknown"
+                frame["timestamp_policy"] = "eltdx_native_v1"
             return frame
         except Exception as e:  # noqa: BLE001
             logger.debug(f"[EltdxProvider] kline unavailable {ts_code} {period}: {e}")
