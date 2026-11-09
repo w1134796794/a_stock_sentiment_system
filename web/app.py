@@ -2065,6 +2065,12 @@ def workspace_page(request: Request, date: str = "") -> Any:
     return templates.TemplateResponse(request, "workspace.html", {"date": date})
 
 
+@app.get("/market-review", response_class=HTMLResponse)
+def market_review_page(request: Request, date: str = "") -> Any:
+    """Read-only market intelligence in the market review module."""
+    return templates.TemplateResponse(request, "workspace.html", {"date": date, "view": "intelligence"})
+
+
 @app.get("/report", response_class=HTMLResponse)
 def report_index() -> Any:
     latest = _latest_date()

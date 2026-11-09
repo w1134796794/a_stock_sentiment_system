@@ -292,7 +292,7 @@ FORCED_ADMIN_KEYS = frozenset({
 
 PATH_PERMISSION_PREFIXES: Dict[str, tuple[str, ...]] = {
     "overview": ("/", "/api/overview", "/api/v1/mobile/bootstrap", "/api/v1/mobile/dashboard"),
-    "workbench": ("/workspace", "/api/v1/workbench", "/api/signals"),
+    "workbench": ("/workspace", "/market-review", "/api/v1/workbench", "/api/signals"),
     "strategy": (
         "/data/strategy", "/report", "/assistant",
         "/api/etl/screening", "/api/etl/analysis", "/api/agent", "/api/assistant",

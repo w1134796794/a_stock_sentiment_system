@@ -31,7 +31,7 @@ const root = path.resolve(__dirname, '..'), output = path.join(root, 'outputs/pr
       assert.equal(await page.locator('#side-nav .nav-link.active').count(),1);
       assert.equal(await page.locator('#side-nav .active').getAttribute('data-module'),'market');
       assert.equal(await page.locator('.module-tabs .active').count(),1);
-      assert.equal(await page.locator('.module-tab').count(),3);
+      assert.equal(await page.locator('.module-tab').count(),4);
       assert.equal(await page.getByText('最新概览',{exact:true}).count(),0);
       assert.match(await page.textContent('.data-focus-summary'),/最高 7 板/);
       assert.match(await page.textContent('#section-panel'),/海洋王/);

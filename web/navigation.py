@@ -20,6 +20,7 @@ MODULES = (
         ("limitup", "涨停梯队", "/data/limitup", "limitup", "path"),
         ("sectors", "板块主线", "/data/sector", "sector", "path"),
         ("lhb", "龙虎榜", "/data/lhb", "lhb", "path"),
+        ("intelligence", "市场研判", "/market-review", "workbench", "query"),
     )),
     ("research", "策略研究", "sliders-horizontal", (
         ("screening", "选股任务", "/screening-run", "screening_run", ""),

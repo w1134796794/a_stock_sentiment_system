@@ -90,7 +90,20 @@ def test_sector_summary_keeps_snapshot_order_and_scope():
 
 def test_market_removes_latest_overview_tab():
     state = product_navigation({"role": "admin"}, "/data/sector/20261023")
-    assert [tab["key"] for tab in state["current"]["tabs"]] == ["limitup", "sectors", "lhb"]
+    assert [tab["key"] for tab in state["current"]["tabs"]] == ["limitup", "sectors", "lhb", "intelligence"]
+
+
+def test_market_intelligence_is_a_dated_review_tab_with_existing_read_permission():
+    from web.permissions import permission_key_for_path
+
+    state = product_navigation({"role": "admin"}, "/market-review", query={"date": "20261106"})
+    assert state["current"]["key"] == "market"
+    active = next(tab for tab in state["current"]["tabs"] if tab["active"])
+    assert active["key"] == "intelligence"
+    assert active["href"] == "/market-review?date=20261106"
+    assert permission_key_for_path("/market-review") == "workbench"
+    viewer = product_navigation({"role": "viewer"}, "/market-review")
+    assert viewer["current"]["key"] == "market"
 
 
 def test_v2_sector_summary_does_not_call_rotation_a_mainline():

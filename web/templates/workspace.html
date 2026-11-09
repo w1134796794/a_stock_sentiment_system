@@ -1,13 +1,14 @@
 {% extends "base.html" %}
-{% block title %}交易工作台 · A股短线系统{% endblock %}
-{% block page_title %}交易工作台{% endblock %}
-{% block page_subtitle %}<div class="text-xs text-slate-500 mt-0.5">市场状态 · 今日决策 · 市场研判 · 实时确认</div>{% endblock %}
+{% block title %}{{ '市场研判' if view == 'intelligence' else '交易总览' }} · A股短线系统{% endblock %}
+{% block page_title %}{{ '市场研判' if view == 'intelligence' else '交易总览' }}{% endblock %}
+{% block page_subtitle %}{% endblock %}
 {% block header_extra %}<div id="workspace-header-status" class="hidden md:block text-xs text-slate-500"></div>{% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="/static/workbench/workspace.css?v=reversal-strategies-20260913" />
-<div id="workbench-root" data-initial-date="{{ date or '' }}">
-  <div class="workspace-loading">正在读取今日决策池...</div>
+<link rel="stylesheet" href="/static/workbench/workspace.css?v=terminal-20261109-2" />
+<style>body:has(.terminal-shell) > .fixed.pointer-events-none { display: none; }</style>
+<div id="workbench-root" data-initial-date="{{ date or '' }}" data-view="{{ view or 'overview' }}">
+  <div class="workspace-loading">正在读取市场数据...</div>
 </div>
-<script type="module" src="/static/workbench/workspace.js?v=reversal-strategies-20260913"></script>
+<script type="module" src="/static/workbench/workspace.js?v=terminal-20261109-2"></script>
 {% endblock %}
