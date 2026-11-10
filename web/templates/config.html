@@ -69,14 +69,14 @@
   <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
     <div>
       <div class="flex items-center gap-2 flex-wrap">
-        <h2 class="text-base font-bold text-slate-100">微信买点提醒</h2>
+        <h2 class="text-base font-bold text-slate-100">消息推送</h2>
         {% if notification_status.enabled %}
         <span class="text-xs rounded border border-emerald-700/70 bg-emerald-950/40 px-2 py-0.5 text-emerald-300">已启用</span>
         {% else %}
         <span class="text-xs rounded border border-amber-700/70 bg-amber-950/40 px-2 py-0.5 text-amber-300">待配置</span>
         {% endif %}
       </div>
-      <p class="text-sm text-slate-400 mt-1">交易日09:30–15:00后台监控；只有分钟买点变为“确认”才推送，同一股票同一模式每日只发送一次。</p>
+      <p class="text-sm text-slate-400 mt-1">正式买点通过门禁后推送；各渠道独立去重与重试。推送不代表模拟账户已成交。</p>
       <div class="flex flex-wrap gap-2 mt-2">
         {% for name, configured in notification_status.channels.items() %}
         <span class="text-xs rounded border px-2 py-1 {{ 'border-emerald-800 text-emerald-300' if configured else 'border-slate-700 text-slate-500' }}">
@@ -87,6 +87,7 @@
       {% if not notification_status.enabled %}
       <p class="text-xs text-slate-500 mt-2">个人微信推荐在服务器 <span class="mono text-slate-400">.env</span> 配置 <span class="mono text-slate-400">SERVERCHAN_SENDKEY</span>；企业微信群配置 <span class="mono text-slate-400">WECOM_WEBHOOK_URL</span>，然后重启服务。</p>
       {% endif %}
+      <p class="text-xs text-slate-500 mt-2">飞书群在服务器 .env 配置 FEISHU_WEBHOOK_URL；开启签名校验时同时配置 FEISHU_SIGN_SECRET，然后重启发送通知的服务。密钥不在页面展示。</p>
     </div>
     <div class="flex items-center gap-3 shrink-0">
       <span id="notification-test-result" class="text-xs text-slate-500"></span>

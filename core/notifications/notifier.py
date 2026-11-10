@@ -1,7 +1,9 @@
-"""Send deduplicated alerts through WeCom, DingTalk or ServerChan."""
+"""Send deduplicated alerts through WeCom, DingTalk, Feishu or ServerChan."""
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -23,6 +25,8 @@ class NotificationService:
         self.retry_seconds = 30.0
         self.wecom_url = os.getenv("WECOM_WEBHOOK_URL", "").strip()
         self.dingtalk_url = os.getenv("DINGTALK_WEBHOOK_URL", "").strip()
+        self.feishu_url = os.getenv("FEISHU_WEBHOOK_URL", "").strip()
+        self.feishu_secret = os.getenv("FEISHU_SIGN_SECRET", "").strip()
         legacy_key = os.getenv("SERVERCHAN_SENDKEY", "").strip()
         configured_keys = os.getenv("SERVERCHAN_SENDKEYS", "").strip()
         self.serverchan_keys = self._parse_serverchan_keys(configured_keys, legacy_key)
@@ -32,7 +36,7 @@ class NotificationService:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.wecom_url or self.dingtalk_url or self._active_serverchan_keys())
+        return bool(self.wecom_url or self.dingtalk_url or self.feishu_url or self._active_serverchan_keys())
 
     def status(self) -> Dict[str, Any]:
         serverchan_keys = self._active_serverchan_keys()
@@ -40,6 +44,7 @@ class NotificationService:
             "企业微信机器人": bool(self.wecom_url),
             "Server酱个人微信": bool(serverchan_keys),
             "钉钉机器人": bool(self.dingtalk_url),
+            "飞书群机器人": bool(self.feishu_url),
         }
         return {
             "enabled": self.enabled,
@@ -47,7 +52,7 @@ class NotificationService:
             "configured_count": sum(channels.values()),
             "serverchan_recipient_count": len(serverchan_keys),
             "configured_endpoint_count": (
-                int(bool(self.wecom_url)) + int(bool(self.dingtalk_url)) + len(serverchan_keys)
+                int(bool(self.wecom_url)) + int(bool(self.dingtalk_url)) + int(bool(self.feishu_url)) + len(serverchan_keys)
             ),
             "public_url_configured": bool(self.public_url),
         }
@@ -62,6 +67,8 @@ class NotificationService:
                 endpoints.append((channel, url, False))
         endpoints.extend(("Server酱", f"https://sctapi.ftqq.com/{parse.quote(key)}.send", True)
                          for key in self._active_serverchan_keys())
+        if self.feishu_url:
+            endpoints.append(("飞书", self.feishu_url, False))
 
         lock_key = ""
         lock_token = None
@@ -87,8 +94,12 @@ class NotificationService:
                     from core.realtime.trading_session import shanghai_now
                     submitted_at = shanghai_now().isoformat(timespec="milliseconds")
                     started = time.monotonic()
-                    result = (self._post_form(url, {"title": title, "desp": content}) if form else
-                              self._post_json(url, {"msgtype": "text", "text": {"content": f"{title}\n{content}"}}))
+                    if channel == "飞书":
+                        result = self._post_feishu(url, title, content)
+                    elif form:
+                        result = self._post_form(url, {"title": title, "desp": content})
+                    else:
+                        result = self._post_json(url, {"msgtype": "text", "text": {"content": f"{title}\n{content}"}})
                 except Exception:
                     result = {"ok": False, "message": "通知渠道请求失败"}
                 result.update({"submitted_at": submitted_at,
@@ -419,6 +430,33 @@ class NotificationService:
             event_key=f"portfolio-exit:{signal_date}:{position.get('id')}:{action}",
             ttl_seconds=60 * 60 * 24,
         )
+
+    def _post_feishu(self, url: str, title: str, content: str) -> Dict[str, Any]:
+        payload = {"msg_type": "text", "content": {"text": f"{title}\n{content}"}}
+        if self.feishu_secret:
+            timestamp = str(int(time.time()))
+            # Feishu signs an empty message with timestamp + newline + secret as the key.
+            key = f"{timestamp}\n{self.feishu_secret}".encode("utf-8")
+            payload.update(timestamp=timestamp, sign=base64.b64encode(
+                hmac.new(key, b"", digestmod=hashlib.sha256).digest()).decode("ascii"))
+        req = request.Request(url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                              headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with request.urlopen(req, timeout=self.timeout) as response:
+                status = int(response.status)
+                body = json.loads(response.read())
+            code = body.get("code", body.get("StatusCode")) if isinstance(body, dict) else None
+            accepted = type(code) is int and code == 0
+            result = {"ok": 200 <= status < 300 and accepted, "status": status}
+            if type(code) is int:
+                result["provider_code"] = code
+            if not result["ok"]:
+                result["message"] = "飞书未确认接收，请检查安全配置、限流及机器人状态"
+            return result
+        except Exception as exc:  # noqa: BLE001
+            # Do not log URLs, signatures or provider text that may echo credentials/content.
+            logger.warning("[Notification] 飞书发送失败: {}", type(exc).__name__)
+            return {"ok": False, "message": "飞书请求失败或响应无效", "error_type": type(exc).__name__}
 
     def _post_json(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
