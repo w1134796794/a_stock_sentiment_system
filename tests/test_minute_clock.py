@@ -35,16 +35,36 @@ def test_delayed_morning_receipt_is_not_an_afternoon_bar_or_visible_before_recei
     assert completed_minutes(frame, '2026-09-01T13:00:00+08:00').iloc[0]['time'] == '11:30:00'
 
 
-def test_eltdx_requests_end_labeled_candles_explicitly():
+def test_eltdx_preserves_native_0931_and_five_completed_opening_candles():
     calls = []
     class Client:
-        bars = SimpleNamespace(get=lambda *a, **kw: (calls.append(kw) or SimpleNamespace(bars=[])))
+        def get(*args, **kwargs):
+            calls.append(kwargs)
+            bars = [SimpleNamespace(time=datetime(2026, 9, 1, 9, minute),
+                                    open=10, high=10, low=10, close=10,
+                                    volume_lots=100, amount=100000)
+                    for minute in range(31, 36)]
+            # Reproduce the SDK conversion that caused the regression.
+            if kwargs.get('bar_time') == 'end':
+                from datetime import timedelta
+                for bar in bars:
+                    bar.time += timedelta(minutes=1)
+            return SimpleNamespace(bars=bars)
+        bars = SimpleNamespace(get=get)
         def __enter__(self): return self
         def __exit__(self, *a): pass
     provider = EltdxProvider()
     provider._client = Client
-    provider.get_kline('000001', period='1min')
-    assert calls[0]['bar_time'] == 'end'
+    frame = provider.get_kline('000001', period='1min')
+    assert 'bar_time' not in calls[0]
+    from backtest.minute_entry import normalize_minute_bars
+    normalized = normalize_minute_bars(frame)
+    assert normalized['time'].tolist() == [f'09:{minute}:00' for minute in range(31, 36)]
+    assert len(completed_minutes(normalized, '09:35:00')) == 5
+    assert len(completed_minutes(normalized, '09:31:00')) == 1
+    report = inspect_minute_bars(normalized, '20260901', require_full_day=False,
+                                now=datetime(2026, 9, 1, 9, 35))
+    assert report['valid'], report
 
 
 def test_declared_end_grid_does_not_guess_start_grid_to_hide_missing_0931():
