@@ -12,7 +12,8 @@ def board_shadow_report(parent, plan, store, *, now=None, interval=10, member_st
     base = {"formal_signal": False, "notification_sent": False, "formal_eligible": False,
             "generated_at": clock.isoformat(), "mode": "tdx_board_shadow"}
     if not parent or not plan:
-        return {**base, "status": "missing_collection_plan" if not parent else "missing_board_plan", "rows": []}
+        return {**base, "status": "missing_collection_plan" if not parent else "missing_board_plan", "rows": [],
+                "reason": "缺少当日个股采集计划" if not parent else "缺少与当日个股计划匹配的板块对照计划"}
     if parent["plan_id"] != plan["collection_plan_id"] or parent["market_date"] != plan["market_date"]:
         raise ValueError("Board diagnostics require matching frozen collection plans")
     boards = store.read(plan, now=clock, expected_interval=interval)
@@ -36,7 +37,8 @@ def board_shadow_report(parent, plan, store, *, now=None, interval=10, member_st
                 continue
             observed.append((last / prev - 1) * 100)
             timestamps.append(stamp.isoformat())
-        rows.append({**mapping, "tdx_quotes": [{"code": candidate["code"], **boards[candidate["code"]]}
+        rows.append({**mapping, "tdx_quotes": [{"code": candidate["code"], **boards.get(candidate["code"],
+                                                  {"status": "not_in_collection_scope", "received_at": ""})}
                                               for candidate in mapping["candidates"]],
                      "ths_breadth": {"member_count": len(sector["members"]), "observed_count": len(observed),
                          "coverage": len(observed) / len(sector["members"]) if sector["members"] else 0,
@@ -47,4 +49,5 @@ def board_shadow_report(parent, plan, store, *, now=None, interval=10, member_st
                      "membership_version": plan["plan_id"],
                      "time_alignment": "independent_latest_observations_not_formal_resonance"})
     return {**base, "status": "shadow_only", "market_date": parent["market_date"], "rows": rows,
+            "reason": "" if rows else "当日板块对照计划没有板块条目",
             "board_plan_id": plan["plan_id"], "warnings": plan["warnings"]}

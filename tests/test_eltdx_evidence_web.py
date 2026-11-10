@@ -145,6 +145,9 @@ def test_page_has_admin_tools_only_for_admin(app_client):
     role[0] = "admin"
     admin = client.get("/market-evidence")
     assert "me-diagnostics-button" in admin.text and "me-experiments-button" in admin.text
+    assert 'id="me-board-status"' in admin.text
+    assert 'aria-label="原始证据数据表"' in admin.text
+    assert '<pre id="me-raw"' not in admin.text
 
 
 def test_empty_diagnostics_and_versions_do_not_initialize_market_db(tmp_path):

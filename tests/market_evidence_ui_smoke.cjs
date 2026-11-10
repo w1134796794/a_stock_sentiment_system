@@ -19,7 +19,7 @@ const folder=path.join(root,'outputs','market-evidence-ui');
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   let browser;
   try{
-    browser=await chromium.launch({headless:true,executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
+    browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_BROWSER_EXE || (process.platform==='win32'?'C:/Users/Administrator/AppData/Local/Google/Chrome/Application/chrome.exe':'/usr/bin/chromium'),args:['--no-sandbox']});
     for(const role of ['viewer','admin'])for(const width of [1440,390]){
       const page=await browser.newPage({viewport:{width,height:1000}}),errors=[];
       page.on('pageerror',e=>errors.push(e.message));
@@ -30,7 +30,7 @@ const folder=path.join(root,'outputs','market-evidence-ui');
           live:[{kind:'trade_batch',status:'partial',is_stale:true,received_at:'2026-10-23T09:36:00+08:00',summary:{count:2}}],
           research:[{kind:'company_profile',status:'ok',captured_at:'2026-10-23',row_count:1,preview:'<img src=x onerror=alert(1)>'}],
           auction_points:[{price:10},{price:10.1}]};
-        else if(url.pathname.endsWith('/boards'))body={ok:true,rows:[]};
+        else if(url.pathname.endsWith('/boards'))body={ok:true,status:'missing_board_plan',reason:'缺少当日板块对照计划',rows:[]};
         else if(url.pathname.endsWith('/diagnostics'))body={ok:true,scope_count:1,pending:{count:2},collector:{status:'partial'},jobs:[]};
         else if(url.pathname.includes('/research/') || url.pathname.includes('/raw/'))body={ok:true,total:41,rows:[{text:'<script>bad()</script>'}]};
         else if(url.pathname.endsWith('/experiments'))body={ok:true,rows:[{report_id:'sample',day_count:1,complete_days:0,A_count:1,C_count:0,unknown_count:1}]};
@@ -45,9 +45,13 @@ const folder=path.join(root,'outputs','market-evidence-ui');
       assert.equal(await page.locator('#me-research img').count(),0);
       assert.equal(await page.locator('#me-diagnostics-button').count(),role==='admin'?1:0);
       await page.click('#me-boards-button');
+      await page.waitForFunction(()=>document.querySelector('#me-board-status').textContent.includes('缺少当日板块对照计划'));
       if(role==='admin'){
         await page.click('#me-diagnostics-button');await page.waitForFunction(()=>document.querySelector('#me-diagnostics').textContent.includes('待归档 2'));
         await page.click('#me-raw-button');await page.waitForFunction(()=>document.querySelector('#me-raw').textContent.includes('<script>'));
+        assert.equal(await page.locator('#me-raw table').count(),1);
+        assert.equal(await page.locator('#me-raw script').count(),0);
+        assert.equal(await page.locator('#me-raw details').count(),1);
         await page.click('#me-next');await page.waitForFunction(()=>document.querySelector('#me-page').textContent.startsWith('21'));
         await page.click('#me-experiments-button');await page.waitForFunction(()=>document.querySelector('#me-experiments').textContent.includes('尚未测量收益'));
       }

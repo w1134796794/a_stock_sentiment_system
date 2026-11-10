@@ -250,6 +250,22 @@ def test_report_is_read_only_and_breadth_denominator_is_the_frozen_ths_cohort(tm
     assert "not_formal" in result["rows"][0]["time_alignment"]
 
 
+def test_report_handles_unverified_candidates_outside_trend_collection_scope(tmp_path):
+    _, plan = make_plan(tmp_path)
+    plan["codes"] = []
+    store, _ = make_store(tmp_path)
+    result = board_shadow_report(parent(), plan, store, now=OPEN)
+    assert result["rows"][0]["tdx_quotes"][0]["status"] == "not_in_collection_scope"
+    assert result["rows"][1]["tdx_quotes"] == []
+    assert not result["formal_signal"]
+
+
+@pytest.mark.parametrize("parent_value,status", [(None, "missing_collection_plan"), (parent(), "missing_board_plan")])
+def test_missing_plan_report_explains_absence_without_reading_store(parent_value, status):
+    result = board_shadow_report(parent_value, None, None, now=OPEN)
+    assert result["status"] == status and result["reason"] and result["rows"] == []
+
+
 def test_real_sdk_board_tables_keep_definitions_with_missing_quotes(monkeypatch):
     pytest.importorskip("eltdx")
     from eltdx.helpers.boards import BoardQuoteRow, BoardQuoteTable, BoardMemberQuoteTable
