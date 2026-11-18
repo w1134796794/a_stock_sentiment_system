@@ -133,6 +133,9 @@ def attach_evidence(payload: dict[str, Any], *, frozen_bundle=None) -> dict[str,
 
 def record_runtime_observations(ledger, payload, *, now=None):
     """Audit background observations without turning them into executable signals."""
+    from core.realtime.debug_journal import intraday_debug_enabled
+    if not intraday_debug_enabled():
+        return 0
     from core.realtime.trading_session import shanghai_now
     clock = shanghai_now(now)
     if str(payload.get("market_date") or "") != clock.strftime("%Y%m%d"):

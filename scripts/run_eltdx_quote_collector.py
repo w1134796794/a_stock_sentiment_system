@@ -15,6 +15,8 @@ from core.realtime.eltdx_collector import EltdxQuoteCollector  # noqa: E402
 
 
 def main() -> None:
+    from core.utils.logging_setup import setup_service_logging
+    setup_service_logging()
     parser = argparse.ArgumentParser(description="独立eltdx实时行情采集器")
     parser.add_argument("--codes", default="", help="额外固定代码，逗号分隔")
     parser.add_argument("--once", action="store_true")

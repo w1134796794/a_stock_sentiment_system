@@ -12,6 +12,8 @@ if str(ROOT) not in sys.path:
 
 
 def main():
+    from core.utils.logging_setup import setup_service_logging
+    setup_service_logging()
     from core.realtime.strategy_runtime import StrategyRuntime
     parser = argparse.ArgumentParser(description="独立只读策略进程")
     parser.add_argument("--once", action="store_true")

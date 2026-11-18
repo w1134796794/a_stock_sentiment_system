@@ -131,7 +131,8 @@ def test_notification_worker_drops_invalid_signals_without_network(tmp_path, cha
         assert con.execute("SELECT state FROM realtime_notification_jobs").fetchone()[0] == "expired"
 
 
-def test_cycle_metrics_are_independent_of_minute_evidence_dedup(tmp_path):
+def test_cycle_metrics_are_independent_of_minute_evidence_dedup(tmp_path, monkeypatch):
+    monkeypatch.setenv("INTRADAY_DEBUG_ENABLED", "true")
     from core.operations.evidence import record_runtime_observations
     ledger = TradingLedger(tmp_path / "ledger.sqlite3")
     value = payload()

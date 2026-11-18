@@ -23,6 +23,8 @@ def consume_paper_payload(paper, payload):
 
 
 def main():
+    from core.utils.logging_setup import setup_service_logging
+    setup_service_logging()
     from core.infrastructure.shared_state import TaskLease, get_shared_state_backend
     from core.realtime.strategy_runtime import stored_strategy_view
     from core.realtime.trading_session import realtime_session_status, shanghai_now

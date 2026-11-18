@@ -81,6 +81,8 @@ def main() -> None:
         parser.error("--reload cannot be combined with --workers > 1")
 
     _sanitize_stdio()
+    from core.utils.logging_setup import setup_service_logging
+    setup_service_logging()
     _enable_fault_diagnostics()
     uvicorn.run(
         "web.app:app", host=args.host, port=args.port, reload=args.reload, workers=workers

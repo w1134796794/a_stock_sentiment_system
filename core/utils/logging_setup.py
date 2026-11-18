@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,6 +20,11 @@ from typing import Optional
 import loguru
 
 logger = loguru.logger
+
+
+def setup_service_logging():
+    """Keep operational messages, suppress verbose debug output by default."""
+    setup_logging(level=os.getenv("LOG_LEVEL", "INFO").strip().upper(), log_dir=None)
 
 
 def setup_logging(

@@ -147,6 +147,10 @@ class TradingLedger:
 
     def event(self, event_id: str, kind: str, payload: Mapping[str, Any], *,
               signal_id: str = "", account_key: str = "") -> bool:
+        if kind == "runtime_cycle":
+            from core.realtime.debug_journal import intraday_debug_enabled
+            if not intraday_debug_enabled():
+                return False
         with self._connect() as conn:
             result = conn.execute("""
                 INSERT OR IGNORE INTO trading_events

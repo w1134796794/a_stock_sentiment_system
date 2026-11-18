@@ -15,13 +15,16 @@ from loguru import logger
 from core.realtime.trading_session import shanghai_now
 
 
+def intraday_debug_enabled():
+    return os.getenv("INTRADAY_DEBUG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+
+
 class IntradayDebugJournal:
     def __init__(self, root=None, *, enabled=None, clock=shanghai_now):
         from config.settings import WEB_DATA_DIR
 
         self.root = Path(root or Path(WEB_DATA_DIR) / "logs" / "intraday_debug")
-        self.enabled = (os.getenv("INTRADAY_DEBUG_ENABLED", "true").lower() in {"1", "true", "yes"}
-                        if enabled is None else enabled)
+        self.enabled = intraday_debug_enabled() if enabled is None else enabled
         self.clock = clock
         self._states = {}
         self._date = ""

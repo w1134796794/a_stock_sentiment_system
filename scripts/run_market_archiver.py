@@ -14,6 +14,8 @@ if str(ROOT) not in sys.path:
 
 
 def main():
+    from core.utils.logging_setup import setup_service_logging
+    setup_service_logging()
     from loguru import logger
     from core.realtime.market_journal import MarketJournal
     from core.realtime.trading_session import shanghai_now

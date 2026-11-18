@@ -144,6 +144,7 @@ class SentimentSystem:
 def setup_logging() -> Path:
     """配置日志输出。"""
     loguru.logger.remove()
+    level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 
     log_dir = Path(__file__).parent / "logs"
     log_dir.mkdir(exist_ok=True)
@@ -155,9 +156,9 @@ def setup_logging() -> Path:
             "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | "
             "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
         ),
-        level="DEBUG",
+        level=level,
         backtrace=True,
-        diagnose=True,
+        diagnose=False,
         enqueue=True,
     )
     loguru.logger.add(
@@ -165,9 +166,9 @@ def setup_logging() -> Path:
         rotation="1 day",
         retention="30 days",
         encoding="utf-8",
-        level="DEBUG",
+        level=level,
         backtrace=True,
-        diagnose=True,
+        diagnose=False,
     )
     return log_dir
 

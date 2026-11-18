@@ -1,6 +1,11 @@
 # 盘中debug留档与高开加速窗口
 
-独立 `run_realtime_strategy.py` 默认启用 `INTRADAY_DEBUG_ENABLED=true`。
+独立 `run_realtime_strategy.py` 默认关闭 `INTRADAY_DEBUG_ENABLED=false`。
+该开关也控制账户库中的逐次 `runtime_observations` 和 `runtime_cycle` 诊断流水。
+需要临时调试时显式设置为 `true` 并重启相关进程。关闭不会自动删除旧文件或缩小数据库。
+正式信号证据、通知队列、成交及账户流水不受影响；错误和告警继续输出。
+Web、采集、归档、策略、执行入口及主命令的文本日志默认使用 `LOG_LEVEL=INFO`，
+需要详细文本日志时可设置 `LOG_LEVEL=DEBUG`。文本级别与盘中留档开关独立。
 统一目录为 `WEB_DATA_DIR/logs/intraday_debug/YYYYMMDD.sqlite3`，不依赖网页打开。
 每条正文为 zlib 压缩的 JSON，使用项目查询工具解码，不能直接按文本打开。
 
